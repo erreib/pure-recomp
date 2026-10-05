@@ -48,8 +48,8 @@ Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
 
 ## Resume (written 2026-10-05 at the pause)
-- Branches: `main` d7467ec (scaffold). `batch/m2` = main + task 002 merged and reviewed; fast-forward main when Erik
-  says so. Both other workers committed PARTIAL results on their branches (worktrees under `.claude/worktrees/`):
+- Branches: `main` fast-forwarded to 32c4c7c on 2026-10-05 (Erik: "fast-forward main"): patches 0001-0004, tasks
+  001-009. `batch/m2` continues from there. Both other workers committed PARTIAL results on their branches (worktrees under `.claude/worktrees/`):
   - `task/001-tooling-port`: `tools/patches.sh` DONE (check/export tested), `tools/worktree_init.sh` written (a fresh
     worktree builds in 33 s, all 144 corpus units ccache hits, so R5 is resolved); run_boot flags, check_env PIN check,
     README rows NOT done. Merge the two scripts after rerunning `tools/patches.sh check`; re-brief the rest as task 004.
