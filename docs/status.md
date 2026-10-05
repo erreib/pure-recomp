@@ -38,7 +38,9 @@ Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below
 | Blocker | State |
 |---|---|
 | Profile screen after the title (windowed) | After Start on the title the game opens `Data/Movies/Profile_part1.PMF` and then sits on a static frontend page with the memory-stick icon (`out/shots4/m2300.png`), identical for 1000+ frames; no savedata trace, no stub hit. Suspect the second sceMpeg movie (first one plays) or the profile/savedata flow. Next: `PURE_TRACE_MPEG=1` windowed run to the title + Start (log `out/m2-stuck.log` has sync/io/atrac traces) |
-| Headless intro movie | With `PURE_NO_RENDER`/`PURE_NO_AUDIO` the game spins on `sceMpegRingbufferAvailableSize` (returns 0x1A8 forever) at the intro movie; the windowed run passes it. Headless verification needs either the movie path to work without a renderer or a skip switch (M4-T4, R8) |
+| Movie end condition (task 003, PARTIAL) | Windowed and headless are identical: the whole PMF goes into the ring, 52 pictures decode, then the game polls `sceMpegRingbufferAvailableSize` forever because `FUN_089488a8` ends a movie only when the ring reports empty (0x200) and the framework's demuxer (`hle_mpeg.cpp` `demux_until`, packets taken only inside `Get*Au`) leaves 88 packets counted as filled. 33k HLE calls per 100 frames. Candidate fix: count demultiplexed packets as free (vendor patch 0002, check against PPSSPP first) or `PURE_SKIP_FMV` returning 0x200 + `Get*Au` -> 0x80618001. Likely the same cause as the profile-screen stall below (`Profile_part1.PMF` is the second movie) |
+| Headless input | `PURE_INPUT_SCRIPT` is driven by the renderer's pad, so headless runs have no input at all and sit on Language Selection. Routes run windowed for now; a headless input path (profile-level pad injection into sceCtrl) is a new task |
+| Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
 
 ## Resume (written 2026-10-05 at the pause)
