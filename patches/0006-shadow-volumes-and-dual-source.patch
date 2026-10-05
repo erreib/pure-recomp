@@ -1,0 +1,484 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index c401885..2de9e7a 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -6,6 +6,12 @@ layout(location = 2) in vec3 frag_specular;
+ layout(location = 3) in float frag_fog;
+ layout(location = 4) flat in vec4 frag_uv_rect;
+ layout(location = 0) out vec4 out_color;
++// The fragment's own alpha, for dual-source blending: when the target's alpha
++// receives the stencil value instead, a colour blend that reads the source
++// alpha reads it here (SRC1_ALPHA). Pipelines that do not blend with it use a
++// copy of this shader with the output moved to location 1, where no
++// attachment takes it (without_dual_source in vulkan_renderer.cpp).
++layout(location = 0, index = 1) out vec4 out_source_alpha;
+ 
+ layout(set = 0, binding = 0) uniform sampler2D guest_texture;
+ 
+@@ -75,6 +81,7 @@ void main() {
+     // draw that enables the test with ALWAYS, which a game can do for most of
+     // its world.
+     if (!kAlphaTest) {
++        out_source_alpha = vec4(color.a);
+         out_color = stored(color);
+         return;
+     }
+@@ -91,5 +98,6 @@ void main() {
+     else if (alpha_function == 7) passed = alpha >= reference;
+     if (!passed) discard;
+ 
++    out_source_alpha = vec4(color.a);
+     out_color = stored(color);
+ }
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index db1d0a3..48ed951 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -280,6 +280,13 @@ struct PipelineKey {
+     bool raw{};
+     // How a blended draw's alpha, the PSP's stencil, is stored (kAlpha*).
+     std::uint32_t alpha_blend{};
++    // The stencil attachment's test and operations: 0 for none; otherwise
++    // bit 0 set, the GE's test function in bits 1..3 and its sfail, zfail and
++    // zpass operations in bits 4..6, 7..9 and 10..12 (stencil_key). The
++    // reference, compare mask and write mask are bits 0..7, 8..15 and 16..23
++    // of stencil_values.
++    std::uint32_t stencil{};
++    std::uint32_t stencil_values{};
+ 
+     auto operator<=>(const PipelineKey &) const = default;
+ };
+@@ -287,9 +294,34 @@ struct PipelineKey {
+ // The alpha blend factors: the fragment's alpha (ONE, ZERO), zero (ZERO,
+ // ZERO), or the blend constant's alpha where the fragment is opaque and the
+ // destination's where it is transparent (CONSTANT_ALPHA, ONE_MINUS_SRC_ALPHA).
++// kAlphaDual stores the fragment's alpha (ONE, ZERO), which is the stencil
++// value, while the colour blend reads the fragment's own alpha from the
++// shader's second output (SRC1_ALPHA). kAlphaAdd adds (ONE, ONE): the copy
++// of the stencil into the alpha (resolve_stencil_alpha).
+ constexpr std::uint32_t kAlphaFragment = 0u;
+ constexpr std::uint32_t kAlphaZero = 1u;
+ constexpr std::uint32_t kAlphaConstant = 2u;
++constexpr std::uint32_t kAlphaDual = 3u;
++constexpr std::uint32_t kAlphaAdd = 4u;
++
++// PipelineKey::stencil: the GE's stencil test function and its operations on
++// stencil fail, depth fail and pass, as the GE numbers them (0 KEEP, 1 ZERO,
++// 2 REPLACE, 3 INVERT, 4 INCR, 5 DECR).
++constexpr std::uint32_t stencil_key(std::uint32_t function, std::uint32_t fail, std::uint32_t depth_fail,
++                                    std::uint32_t pass) {
++    return 1u | (function & 7u) << 1u | (fail & 7u) << 4u | (depth_fail & 7u) << 7u | (pass & 7u) << 10u;
++}
++
++VkStencilOp to_stencil_op(std::uint32_t op) {
++    switch (op) {
++    case 1u: return VK_STENCIL_OP_ZERO;
++    case 2u: return VK_STENCIL_OP_REPLACE;
++    case 3u: return VK_STENCIL_OP_INVERT;
++    case 4u: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
++    case 5u: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
++    default: return VK_STENCIL_OP_KEEP;
++    }
++}
+ 
+ // Says once per value which stencil or write-mask state is not emulated.
+ void report_not_emulated(const char *what, std::uint32_t value) {
+@@ -298,32 +330,102 @@ void report_not_emulated(const char *what, std::uint32_t value) {
+     std::cout << "[render] " << what << " 0x" << std::hex << value << std::dec << " is not emulated\n" << std::flush;
+ }
+ 
++// The stencil reference as the target's alpha holds it: the top bit of a 5551
++// target, the top nibble of a 4444 one, all of 8888.
++std::uint32_t stored_reference(const DrawCall &call) {
++    const std::uint32_t reference = call.stencil.reference & 0xFFu;
++    if (call.target.color_format == 1u) return (reference & 0x80u) != 0u ? 0xFFu : 0u;
++    if (call.target.color_format == 2u) return (reference >> 4u) * 17u;
++    return reference;
++}
++
+ // The value a draw leaves in its target's alpha channel, which on the PSP is
+ // the stencil: the GE never stores a fragment's own alpha there. -1 keeps the
+ // destination's alpha: no stencil test (or a 5650 target, which has none),
+-// stencil bits masked off, or a zpass KEEP. Fragments failing the depth or
+-// alpha test are discarded, which is KEEP; the stencil test itself is taken
+-// as ALWAYS, the only function whose writes do not depend on the
+-// destination.
+-int stencil_alpha(const DrawCall &call) {
++// stencil bits masked off, or a zpass KEEP. Only fragments that pass every
++// test write it. Without the stencil attachment (`buffer` false) the stencil
++// test is taken as ALWAYS, the only function whose writes do not depend on
++// the destination, and the other operations are logged once; with it, the
++// attachment does them and alpha_follows_stencil says when the alpha must be
++// copied from it.
++int stencil_alpha(const DrawCall &call, bool buffer) {
+     const StencilState &stencil = call.stencil;
+     if (!stencil.enabled || call.target.color_format == 0u || call.alpha_write_mask != 0u) return -1;
+-    if (stencil.function != 1u) report_not_emulated("stencil test function", stencil.function);
+-    if (stencil.depth_fail_op != 0u && call.depth.test_enabled && !call.through)
++    if (!buffer && stencil.function != 1u) report_not_emulated("stencil test function", stencil.function);
++    if (!buffer && stencil.depth_fail_op != 0u && call.depth.test_enabled && !call.through)
+         report_not_emulated("stencil depth fail op", stencil.depth_fail_op);
+     switch (stencil.pass_op) {
+     case 0u: return -1;  // keep
+     case 1u: return 0;   // zero
+-    case 2u:             // replace, with the bits the format keeps
+-        if (call.target.color_format == 1u) return (stencil.reference & 0x80u) != 0u ? 0xFF : 0;
+-        if (call.target.color_format == 2u) return static_cast<int>((stencil.reference >> 4u) * 17u);
+-        return static_cast<int>(stencil.reference);
++    case 2u: return static_cast<int>(stored_reference(call));  // replace
+     default:             // invert, increment and decrement read the destination
+-        report_not_emulated("stencil pass op", stencil.pass_op);
++        if (!buffer) report_not_emulated("stencil pass op", stencil.pass_op);
+         return -1;
+     }
+ }
+ 
++// With the stencil attachment: whether the draw leaves its target's alpha
++// equal to the stencil. The alpha is written only by fragments that pass
++// every test, with stencil_alpha()'s zpass value, so it cannot follow an
++// sfail op where the test can fail, a zfail op where the depth test can fail,
++// INVERT, INCR or DECR, or a write mask that keeps some bits.
++bool alpha_follows_stencil(const DrawCall &call, const PipelineKey &key) {
++    const StencilState &stencil = call.stencil;
++    if (!stencil.enabled || call.target.color_format == 0u || call.alpha_write_mask == 0xFFu) return true;
++    const auto writes = [](std::uint32_t op) { return op >= 1u && op <= 5u; };
++    const bool fail = stencil.function != 1u && writes(stencil.fail_op);
++    const bool depth_fail = key.depth_test && key.depth_function != 1u && writes(stencil.depth_fail_op);
++    const bool pass = stencil.pass_op >= 3u && stencil.pass_op <= 5u;
++    const bool partial = call.alpha_write_mask != 0u &&
++                         (writes(stencil.fail_op) || writes(stencil.depth_fail_op) || writes(stencil.pass_op));
++    return !fail && !depth_fail && !pass && !partial;
++}
++
++// Whether the colour blend reads the destination's alpha (DA, 1-DA and the
++// doubled forms), which is the stencil.
++bool blend_reads_destination_alpha(const PipelineKey &key) {
++    const auto reads = [](std::uint32_t factor) {
++        return factor == 4u || factor == 5u || factor == 8u || factor == 9u;
++    };
++    const bool colour = (key.color_mask & (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
++                                           VK_COLOR_COMPONENT_B_BIT)) != 0u;
++    return key.blend && colour && key.equation != 3u && key.equation != 4u &&
++           (reads(key.source_factor) || reads(key.destination_factor));
++}
++
++// The fragment shader as compiled writes the fragment's alpha to a second
++// output, location 0 index 1, for dual-source blending, which a pipeline may
++// only use with the dualSrcBlend feature. Every other pipeline uses this
++// copy, whose second output is moved to location 1 index 0: no attachment
++// takes it there, so its writes are dropped. Decorations are edited in place
++// (OpDecorate <id> Index 1 and <id> Location 0); nothing is added.
++std::vector<std::uint32_t> without_dual_source(const std::uint32_t *code, std::size_t bytes) {
++    std::vector<std::uint32_t> words(code, code + bytes / 4u);
++    constexpr std::uint32_t kOpDecorate = 71u;
++    constexpr std::uint32_t kLocation = 30u;
++    constexpr std::uint32_t kIndex = 32u;
++    const auto each_decoration = [&](const auto &visit) {
++        for (std::size_t i = 5u; i < words.size();) {
++            const std::uint32_t count = words[i] >> 16u;
++            if (count == 0u || i + count > words.size()) break;
++            if ((words[i] & 0xFFFFu) == kOpDecorate && count == 4u) visit(&words[i]);
++            i += count;
++        }
++    };
++    std::uint32_t output = 0u;
++    each_decoration([&](std::uint32_t *op) {
++        if (op[2] == kIndex && op[3] == 1u) {
++            output = op[1];
++            op[3] = 0u;
++        }
++    });
++    if (output != 0u)
++        each_decoration([&](std::uint32_t *op) {
++            if (op[1] == output && op[2] == kLocation) op[3] = 1u;
++        });
++    return words;
++}
++
+ // Whether the colour blend reads the fragment's alpha (SA, 1-SA and the
+ // doubled forms), so the fragment cannot hand over the stencil value as its
+ // alpha instead.
+@@ -690,7 +792,35 @@ struct VulkanRenderer::Impl {
+                    ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                    : VK_IMAGE_ASPECT_DEPTH_BIT;
+     }
++    // The PSP's stencil is its target's alpha. A real stencil aspect in each
++    // target's depth image does the stencil test and operations, and the
++    // target's alpha, which textures and blends read, is kept equal to it
++    // (alpha_follows_stencil, resolve_stencil_alpha). Off without a
++    // depth+stencil format, with <prefix>_NO_STENCIL_BUFFER, and with
++    // <prefix>_NO_STENCIL_ALPHA.
++    bool stencil_buffer{};
++    // A draw in the current render pass left the target's alpha different
++    // from its stencil; resolve_stencil_alpha() copies the stencil over it
++    // before a draw reads the destination's alpha and before the pass ends.
++    bool alpha_stale{};
++    void resolve_stencil_alpha();
++    // Dual-source blending (the dualSrcBlend feature; <prefix>_NO_DUAL_SOURCE
++    // turns it off): the fragment shader as compiled, for kAlphaDual.
++    bool dual_source{};
++    VkShaderModule dual_fragment_shader{};
+     void choose_depth_format() {
++        if (portablekit::env("NO_STENCIL_BUFFER") == nullptr && portablekit::env("NO_STENCIL_ALPHA") == nullptr) {
++            for (const VkFormat format : {VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT}) {
++                VkFormatProperties properties{};
++                vkGetPhysicalDeviceFormatProperties(physical_device, format, &properties);
++                if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0u) {
++                    depth_format = format;
++                    stencil_buffer = true;
++                    return;
++                }
++            }
++            std::cout << "[render] no depth+stencil format; the stencil test is not emulated\n";
++        }
+         const VkFormat candidates[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT,
+                                        VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D16_UNORM,
+                                        VK_FORMAT_D32_SFLOAT_S8_UINT};
+@@ -2251,6 +2381,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     // fault or hang. <prefix>_NO_ROBUST_BUFFERS leaves it off, as before.
+     if (supported_features.robustBufferAccess == VK_TRUE && portablekit::env("NO_ROBUST_BUFFERS") == nullptr)
+         enabled_features.robustBufferAccess = VK_TRUE;
++    // A stencil value written as the target's alpha under a colour blend that
++    // reads the fragment's alpha (kAlphaDual).
++    if (supported_features.dualSrcBlend == VK_TRUE && portablekit::env("NO_DUAL_SOURCE") == nullptr) {
++        enabled_features.dualSrcBlend = VK_TRUE;
++        impl.dual_source = true;
++    }
+     std::cout << "[render] robust buffer access " << (enabled_features.robustBufferAccess ? "on" : "off") << "\n";
+     VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+     device_info.pEnabledFeatures = &enabled_features;
+@@ -2329,6 +2465,10 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     attachments[1] = attachments[0];
+     impl.choose_depth_format();
+     attachments[1].format = impl.depth_format;
++    if (impl.stencil_buffer) {
++        attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
++        attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
++    }
+     attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+     attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+     VkAttachmentReference color_reference{0u, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+@@ -2349,7 +2489,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     if (portablekit::env("NO_CLEAR_LOAD") == nullptr) {
+         for (std::uint32_t variant = 1u; variant < 4u; ++variant) {
+             std::array<VkAttachmentDescription, 2> skipped = attachments;
+-            if ((variant & 1u) != 0u) skipped[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
++            // The stencil is the alpha: a clear of colour and alpha writes it.
++            if ((variant & 1u) != 0u) skipped[0].loadOp = skipped[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+             if ((variant & 2u) != 0u) skipped[1].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+             VkRenderPassCreateInfo variant_info = render_pass_info;
+             variant_info.pAttachments = skipped.data();
+@@ -2371,7 +2512,11 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     } else if (!create_shader(kGeRawVertexShader, sizeof(kGeRawVertexShader), impl.raw_vertex_shader)) {
+         return false;
+     }
+-    if (!create_shader(kGeFragmentShader, sizeof(kGeFragmentShader), impl.fragment_shader)) return false;
++    const std::vector<std::uint32_t> plain_fragment = without_dual_source(kGeFragmentShader, sizeof(kGeFragmentShader));
++    if (!create_shader(plain_fragment.data(), plain_fragment.size() * 4u, impl.fragment_shader)) return false;
++    if (impl.dual_source &&
++        !create_shader(kGeFragmentShader, sizeof(kGeFragmentShader), impl.dual_fragment_shader))
++        return false;
+ 
+     VkDescriptorSetLayoutBinding binding{};
+     binding.binding = 0u;
+@@ -2673,7 +2818,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+                   << (kVertexBufferTotal >> 20u) << " MiB in memory type " << vertex_type << " ("
+                   << ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0u ? "device local, " : "")
+                   << ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0u ? "cached" : "uncached")
+-                  << "); depth format " << static_cast<int>(impl.depth_format) << "\n";
++                  << "); depth format " << static_cast<int>(impl.depth_format) << ", stencil buffer "
++                  << (impl.stencil_buffer ? "on" : "off") << ", dual-source blending "
++                  << (impl.dual_source ? "on" : "off") << "\n";
+     }
+     std::cout << "Renderer: Vulkan on " << properties.deviceName << ", target " << impl.target_extent.width << "x"
+               << impl.target_extent.height << "\n";
+@@ -3560,10 +3707,72 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
+ void VulkanRenderer::Impl::end_pass() {
+     flush_group();
+     if (!pass_active) return;
++    // Whatever reads the target next (a texture, the display, guest memory)
++    // reads its alpha.
++    if (alpha_stale) resolve_stencil_alpha();
+     vkCmdEndRenderPass(command_buffer);
+     pass_active = false;
+ }
+ 
++// Copies the stencil into the target's alpha, which the draws since the last
++// copy left different from it, inside the pass and without reading the
++// stencil in a shader: a quad over the whole target writes alpha 0, then one
++// quad per stencil bit passes the stencil test (EQUAL under a compare mask of
++// that bit) where the bit is set and adds the bit's value to the alpha
++// (ONE + ONE, alpha written alone). Sums of multiples of 1/255 stay exact in
++// an 8-bit target.
++void VulkanRenderer::Impl::resolve_stencil_alpha() {
++    alpha_stale = false;
++    if (!pass_active) return;
++    flush_group();
++    const VkDeviceSize start = (vertex_offset + 15u) & ~VkDeviceSize{15u};
++    std::array<GpuVertex, 6> quad{};
++    const float w = static_cast<float>(kPspWidth);
++    const float h = static_cast<float>(kPspHeight);
++    const std::array<std::array<float, 2>, 6> corners{{{0.0f, 0.0f}, {w, 0.0f}, {0.0f, h}, {0.0f, h}, {w, 0.0f}, {w, h}}};
++    for (std::size_t i = 0; i < quad.size(); ++i) {
++        quad[i].x = corners[i][0];
++        quad[i].y = corners[i][1];
++        quad[i].color = 0xFFFFFFFFu;
++    }
++    if (start + sizeof(quad) > vertex_limit) {
++        report_frame_space_full("vertex");
++        return;
++    }
++    std::memcpy(static_cast<std::uint8_t *>(vertex_mapped) + start, quad.data(), sizeof(quad));
++    vertex_offset = start + sizeof(quad);
++
++    DrawState state{};
++    state.texture = white_texture.descriptor;
++    state.lighting = state_known ? recorded.lighting
++                                 : std::array<std::uint32_t, 3>{environment_offset, object_offset, raw_offset};
++    state.viewport = {0.0f, 0.0f, static_cast<float>(target_extent.width), static_cast<float>(target_extent.height),
++                      0.0f, 1.0f};
++    state.scissor = {{0, 0}, target_extent};
++    state.push.viewport = {w, h, 1.0f, 0.0f};
++    state.push.texture_params = {0.0f, 0.0f, 0.0f, 1.0f};  // no texture, alpha test ALWAYS
++    PipelineKey key{};
++    key.alpha_test = false;
++    key.color_mask = VK_COLOR_COMPONENT_A_BIT;
++    for (std::uint32_t step = 0; step <= 8u; ++step) {
++        const std::uint32_t bit = step == 0u ? 0u : 1u << (step - 1u);
++        if (step != 0u) {
++            key.blend = true;
++            key.source_factor = kFactorOne;
++            key.destination_factor = kFactorOne;
++            key.alpha_blend = kAlphaAdd;
++            key.stencil = stencil_key(2u, 0u, 0u, 0u);  // EQUAL, keep
++            key.stencil_values = bit | bit << 8u;       // reference and compare mask; write mask 0
++        }
++        state.pipeline = pipeline_for(key);
++        if (state.pipeline == VK_NULL_HANDLE) return;
++        state.push.viewport[3] = kPushStencilAlpha + 8.0f * static_cast<float>(bit);
++        record_state(state);
++        vkCmdBindVertexBuffers(command_buffer, 0u, 1u, &vertex_buffer, &start);
++        vkCmdDraw(command_buffer, static_cast<std::uint32_t>(quad.size()), 1u, 0u, 0u);
++    }
++}
++
+ VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture(std::uint32_t width, std::uint32_t height,
+                                                                    const std::uint32_t *pixels) {
+     Texture texture = create_texture_image(width, height);
+@@ -4443,15 +4652,15 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+ namespace {
+ 
+ constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
+-constexpr std::uint32_t kPipelineKeysVersion = 2u;
+-constexpr std::uint32_t kPipelineKeyWords = 13u;
++constexpr std::uint32_t kPipelineKeysVersion = 3u;
++constexpr std::uint32_t kPipelineKeyWords = 15u;
+ constexpr std::uint32_t kMaxPipelineKeys = 4096u;
+ 
+ std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
+     return {key.blend ? 1u : 0u, key.source_factor,  key.destination_factor, key.equation,
+             key.depth_test ? 1u : 0u, key.depth_write ? 1u : 0u, key.depth_function, key.cull ? 1u : 0u,
+             key.cull_clockwise ? 1u : 0u, key.color_mask, key.alpha_test ? 1u : 0u, key.raw ? 1u : 0u,
+-            key.alpha_blend};
++            key.alpha_blend, key.stencil, key.stencil_values};
+ }
+ 
+ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
+@@ -4468,7 +4677,9 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+     key.color_mask = words[9] & 0xFu;
+     key.alpha_test = words[10] != 0u;
+     key.raw = words[11] != 0u;
+-    key.alpha_blend = words[12] <= kAlphaConstant ? words[12] : kAlphaFragment;
++    key.alpha_blend = words[12] <= kAlphaAdd ? words[12] : kAlphaFragment;
++    key.stencil = words[13] & 0x1FFFu;
++    key.stencil_values = words[14] & 0xFFFFFFu;
+     return key;
+ }
+ 
+@@ -4514,7 +4725,9 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
+         if (!in) return;
+         in.seekg(0, std::ios::end);
+         const std::streamoff size = in.tellg();
+-        if (size < 16 || size % 4 != 0 || size > 16 + static_cast<std::streamoff>(kMaxPipelineKeys) * 48) return;
++        if (size < 16 || size % 4 != 0 ||
++            size > 16 + static_cast<std::streamoff>(kMaxPipelineKeys) * kPipelineKeyWords * 4)
++            return;
+         in.seekg(0);
+         data.resize(static_cast<std::size_t>(size / 4));
+         in.read(reinterpret_cast<char *>(data.data()), size);
+@@ -4623,7 +4836,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     stages[0].pName = "main";
+     stages[1] = stages[0];
+     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+-    stages[1].module = fragment_shader;
++    stages[1].module = key.alpha_blend == kAlphaDual ? dual_fragment_shader : fragment_shader;
++    // A key saved by a run with dual-source blending (prewarm_pipelines).
++    if (stages[1].module == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+ 
+     VkVertexInputBindingDescription binding{0u, sizeof(GpuVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+     std::array<VkVertexInputAttributeDescription, 4> attributes{
+@@ -4667,17 +4882,41 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     depth.depthTestEnable = key.depth_test ? VK_TRUE : VK_FALSE;
+     depth.depthWriteEnable = key.depth_write ? VK_TRUE : VK_FALSE;
+     depth.depthCompareOp = to_compare_op(key.depth_function);
+-
++    // The GE compares the reference with the stencil as Vulkan does
++    // (reference OP stencil, both masked), with the same function numbers.
++    if ((key.stencil & 1u) != 0u) {
++        VkStencilOpState stencil{};
++        stencil.compareOp = to_compare_op((key.stencil >> 1u) & 7u);
++        stencil.failOp = to_stencil_op((key.stencil >> 4u) & 7u);
++        stencil.depthFailOp = to_stencil_op((key.stencil >> 7u) & 7u);
++        stencil.passOp = to_stencil_op((key.stencil >> 10u) & 7u);
++        stencil.reference = key.stencil_values & 0xFFu;
++        stencil.compareMask = (key.stencil_values >> 8u) & 0xFFu;
++        stencil.writeMask = (key.stencil_values >> 16u) & 0xFFu;
++        depth.stencilTestEnable = VK_TRUE;
++        depth.front = stencil;
++        depth.back = stencil;
++    }
++
++    // kAlphaDual: the colour blend's source alpha is the shader's second output.
++    const auto colour_factor = [&](std::uint32_t factor, bool source) {
++        const VkBlendFactor vk = to_blend_factor(factor, source);
++        if (key.alpha_blend != kAlphaDual) return vk;
++        if (vk == VK_BLEND_FACTOR_SRC_ALPHA) return VK_BLEND_FACTOR_SRC1_ALPHA;
++        if (vk == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA) return VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;
++        return vk;
++    };
+     VkPipelineColorBlendAttachmentState blend_attachment{};
+     blend_attachment.blendEnable = key.blend ? VK_TRUE : VK_FALSE;
+-    blend_attachment.srcColorBlendFactor = to_blend_factor(key.source_factor, true);
+-    blend_attachment.dstColorBlendFactor = to_blend_factor(key.destination_factor, false);
++    blend_attachment.srcColorBlendFactor = colour_factor(key.source_factor, true);
++    blend_attachment.dstColorBlendFactor = colour_factor(key.destination_factor, false);
+     blend_attachment.colorBlendOp = to_blend_op(key.equation);
+     blend_attachment.srcAlphaBlendFactor = key.alpha_blend == kAlphaConstant ? VK_BLEND_FACTOR_CONSTANT_ALPHA
+                                            : key.alpha_blend == kAlphaZero   ? VK_BLEND_FACTOR_ZERO
+                                                                              : VK_BLEND_FACTOR_ONE;
+-    blend_attachment.dstAlphaBlendFactor =
+-        key.alpha_blend == kAlphaConstant ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ZERO;
++    blend_attachment.dstAlphaBlendFactor = key.alpha_blend == kAlphaConstant ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
++                                           : key.alpha_blend == kAlphaAdd    ? VK_BLEND_FACTOR_ONE
++                                                                             : VK_BLEND_FACTOR_ZERO;
+     blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+     blend_attachment.colorWriteMask = key.color_mask;
+     VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+@@ -6976,7 +7215,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+     clears[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+     clears[0].colorAttachment = 0u;
+     clears[0].clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+-    clears[1].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
++    clears[1].aspectMask = depth_aspect();
+     clears[1].clearValue.depthStencil = {0.0f, 0u};
+     const VkClearRect whole{{{0, 0}, target_extent}, 0u, 1u};
+     vkCmdClearAttachments(commands, static_cast<std::uint32_t>(clears.size()), clears.data(), 1u, &whole);
+@@ -7782,6 +8021,8 @@ void VulkanRenderer::shutdown() {
+     vkDestroyBuffer(impl.device, impl.check_buffer, nullptr);
+     vkFreeMemory(impl.device, impl.check_memory, nullptr);
+     vkDestroyShaderModule(impl.device, impl.fragment_shader, nullptr);
++    if (impl.dual_fragment_shader != VK_NULL_HANDLE)
++        vkDestroyShaderModule(impl.device, impl.dual_fragment_shader, nullptr);
+     for (auto &[address, target] : impl.targets) impl.destroy_target(target);
+     impl.targets.clear();
+     impl.destroy_target(impl.held);
