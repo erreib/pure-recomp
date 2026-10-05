@@ -21,5 +21,5 @@ ls ~/opt/ghidra-ext/*ghidra-allegrex*.zip >/dev/null 2>&1 && ok "ghidra-allegrex
 { [ -d /Applications/PPSSPPSDL.app ] || [ -d /Applications/PPSSPP.app ]; } && ok "PPSSPP app ($(ls -d /Applications/PPSSPP*.app | head -1))" || bad "PPSSPP app missing"
 if [ -L disc.iso ]; then [ -e disc.iso ] && ok "disc.iso -> $(readlink disc.iso)" || bad "disc.iso symlink dangles: $(readlink disc.iso)"; else bad "disc.iso symlink missing"; fi
 [ -f disc/MANIFEST.txt ] && ok "disc/ extracted ($(wc -l < disc/MANIFEST.txt | tr -d ' ') files)" || bad "disc/ not extracted (tools/iso_extract.py disc.iso extract disc)"
-[ -d vendor/yakumo ] && ok "vendor/yakumo present" || printf '  note  vendor/yakumo not cloned yet (tools/vendor_setup.sh)\n'
+[ -d vendor/portablekit ] && [ "$(git -C vendor/portablekit rev-parse HEAD 2>/dev/null)" = "$(cat vendor/PIN 2>/dev/null)" ] && ok "vendor/portablekit at $(cut -c1-7 vendor/PIN)" || bad "vendor/portablekit missing or not at vendor/PIN (tools/vendor_setup.sh)"
 exit $fail

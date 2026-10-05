@@ -1,11 +1,11 @@
 # game data and anything derived from it
-disc/
+/disc
 disc.iso
 *.iso
-generated/
-generated-variants/
-game/
-overlays/
+/generated
+/generated-variants
+/game
+/overlays
 ref/*
 !ref/README.md
 ghidra_project/
