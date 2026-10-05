@@ -5,6 +5,7 @@
 #include "hle/hle_common.hpp"
 #include "kernel/kernel.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
@@ -61,6 +62,64 @@ void watch_movie(Runtime &rt, std::uint64_t frame) {
     std::cout << "[pure] movie frame " << frame << " t=" << kernel().now_us() << " " << last << "\n";
 }
 
+// PURE_WATCH_SHIP=1 (task 007): once per flip during a race, the player's ship as the game's per-ship race record holds
+// it, printed when it changes (`[pure] ship frame N t=... clock=... pos=... vel=... kmh=... dist=... lap=...`).
+// The race records are a .bss array of 0x1C0-byte entries, one per ship; relative to entry k's position vector at
+// 0x08B72010 + k * 0x1C0: -0x20 velocity (m/s; the HUD speed is |v| * 3.6), +0 position (x, y, z, 1; the same as
+// the ship object's matrix row at +0x70), +0x10 lap counter, +0x14 the entry's ship index, +0x18 distance along the
+// track, +0x1C race clock (s). The player's entry is found through its be::Ship object (vtable 0x08AC259C at +0x3c,
+// set by LinkObj_etc__089261ac): +0x480 ship index, +0x488 kind (0/1 player, 2/3 AI), +0xcc AI flag. The objects
+// are found by scanning user RAM every 30 flips until one is there, and again when the race is torn down.
+constexpr std::uint32_t kShipVtable = 0x08AC259Cu;
+constexpr std::uint32_t kRaceRecordPos = 0x08B72010u;
+constexpr std::uint32_t kRaceRecordStride = 0x1C0u;
+
+std::uint32_t find_player_ship(Runtime &rt) {
+    const auto &m = rt.memory();
+    constexpr std::uint32_t kBase = 0x08800000u, kSize = 0x01800000u;
+    const std::uint8_t *ram = m.raw_pointer(kBase, kSize);
+    if (ram == nullptr) return 0u;
+    for (std::uint32_t off = 0x3cu; off + 4u <= kSize; off += 4u) {
+        std::uint32_t v;
+        std::memcpy(&v, ram + off, 4);
+        if (v != kShipVtable) continue;
+        const std::uint32_t obj = kBase + off - 0x3cu;
+        if (m.load32(obj + 0x488u) <= 1u && m.load8(obj + 0xccu) == 0u && m.load32(obj + 0x480u) < 8u) return obj;
+    }
+    return 0u;
+}
+
+std::string item_f(float v) { char b[24]; std::snprintf(b, sizeof b, "%.3f", static_cast<double>(v)); return b; }
+
+void watch_ship(Runtime &rt, std::uint64_t frame) {
+    static const bool on = [] { const char *v = env("WATCH_SHIP"); return v != nullptr && *v != '\0' && *v != '0'; }();
+    if (!on) return;
+    static std::uint32_t ship = 0u;
+    static std::uint64_t last_scan = 0u;
+    static std::string last;
+    const auto &m = rt.memory();
+    if (ship != 0u && m.load32(ship + 0x3cu) != kShipVtable) ship = 0u;
+    if (ship == 0u) {
+        if (frame - last_scan < 30u) return;
+        last_scan = frame;
+        ship = find_player_ship(rt);
+        if (ship == 0u) return;
+        std::cout << "[pure] ship frame " << frame << " player object " << item_hex(ship) << " index "
+                  << m.load32(ship + 0x480u) << "\n";
+    }
+    const std::uint32_t rec = kRaceRecordPos + m.load32(ship + 0x480u) * kRaceRecordStride;
+    const auto f = [&m](std::uint32_t a) { const std::uint32_t u = m.load32(a); float x; std::memcpy(&x, &u, 4); return x; };
+    const float vx = f(rec - 0x20u), vy = f(rec - 0x1cu), vz = f(rec - 0x18u);
+    std::ostringstream o;
+    o << "clock=" << item_f(f(rec + 0x1cu)) << " pos=" << item_f(f(rec)) << "," << item_f(f(rec + 4u)) << ","
+      << item_f(f(rec + 8u)) << " vel=" << item_f(vx) << "," << item_f(vy) << "," << item_f(vz)
+      << " kmh=" << item_f(3.6f * std::sqrt(vx * vx + vy * vy + vz * vz)) << " dist=" << item_f(f(rec + 0x18u))
+      << " lap=" << m.load32(rec + 0x10u);
+    if (o.str() == last) return;
+    last = o.str();
+    std::cout << "[pure] ship frame " << frame << " t=" << kernel().now_us() << " " << last << "\n";
+}
+
 void wrap_flip_counter(HleRegistrar &hle) {
     static HleFunction original = hle.bound_function("sceDisplay", kNidSceDisplaySetFrameBuf);
     if (!original) return;
@@ -71,6 +130,7 @@ void wrap_flip_counter(HleRegistrar &hle) {
         ++frames;
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
         watch_movie(rt, frames);
+        watch_ship(rt, frames);
         original(rt, ctx);
         if (exit_at != 0u && frames >= exit_at) {
             std::cout << "[pure] exit at frame " << frames << "\n";
