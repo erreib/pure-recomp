@@ -62,7 +62,93 @@ The draws are not in our port's GE list at all (the game never issues them: a CP
 needs the renderer's vertex pipeline restructured beyond one decode path or one pipeline-state field.
 
 ## Result
-(worker fills)
+
+Status: DONE
+
+Changed:
+- `patches/0005-alpha-test-never-always.patch` (new; vendor `host/gpu/shaders/ge.frag`, `host/gpu/vulkan_renderer.cpp`)
+  and its row in `patches/README.md`. Written on top of 0001-0003; 0004 (task 009) did not exist in this branch.
+- `tools/ppsspp/ppdmp.py`: `cover` (coverage-only rasteriser: which draw is visible where, per-draw pixel counts,
+  false-colour PNG, `--highlight`), `--vt` on `draws` and `gelist` (decoded vertex type, cull/FFACE, depth clamp,
+  MINZ-MAXZ), world/view/projection matrices tracked from INIT and the register stream.
+- `docs/ge-effects.md`: section "The environment draws and the alpha test (task 010)", and the commands under
+  "Reproducing".
+- Captures in `out/010/` (not committed): `race-hud.png`, `title.png`, `cover_all.png`, `cover_always.png`,
+  `cover_hl1.png`, `nocull/`, `nodepth/`, `base/` (before), `fix/` (after), `hud*/`, `gelist.log`.
+
+Draws (PPSSPP dump `ref/vineta_k_start.ppdmp`, numbers from `ppdmp.py cover`, last opaque writer of each pixel):
+
+| Draws | What | Pixels | PRIM x vertices | Vertex type | Texture | Cull, depth |
+|---|---|---|---|---|---|---|
+| 175, 178 (174, 177 farther) | track surface | 20563, 13090 | tristrip x274, x272 | 0x00013d: uv s8, col 8888, nrm s8, pos s16; no weights, morph, index, through | 0x0417e380, 0x0417fb80 CLUT4 64x64 swz, 4 mips | cull 1, FFACE 0; z GT + write; clamp 1; MINZ-MAXZ 1001-64946 |
+| 176 | track edges and near barriers, both sides | 17890 | tristrip x270 | 0x00013d | 0x0417ef80 CLUT4 64x64 | same |
+| 165, 490 | barrier top, light band on the right barrier | 1627, 953 | tristrip x209, x43 | 0x00013f: uv f32, col 8888, nrm s8, pos s16 | 0x041f6680, 0x041a8900 CLUT4 64x64 | same |
+| 486, 496, 497, 499, 510, 511, 513 | stadium arches | 28033 together | tristrip x97-x337 | 0x00013d / 0x00013f | CLUT4 in VRAM | same |
+| 598-602 | sky cube (602 in view) | 23868 (602) | tristrip x81, x81, x81, x163, x81 | 0x00011d: uv s8, col 8888, pos s16 | RAM CLUT8 256x256 | cull 0; z GT; viewport z -473/+473; MINZ-MAXZ 0-946 |
+
+All of them have ALPHATESTENABLE 0x22 = 1 with ALPHATEST 0xDB = 0x000001: function 1 = ALWAYS, ref 0. In the dump
+268 of 871 draws (31651 of 72733 vertices) are set up that way and they own 113566 of 130560 pixels (87%,
+`out/010/cover_always.png`); the rest is what the port already drew (crowds with GREATER 0x7F, ships, shadow
+volumes, billboards).
+
+Our port, same draws: `PURE_TRACE_GE_LIST=470000:4000` traced frames 6361-6372; frame 6364 (`ppdmp.py gelist --all
+--vt`) has 866 draws, 301 with the test on and ALWAYS; the track run is its draws 270-274 (x177, x274, x270, x158,
+x272, vertex type 0x00013d, the dump's 174-178 in the same order), the sky cube 590-594 (x81 x81 x81 x163 x81,
+0x00011d, MINZ-MAXZ 0-946), all ALWAYS ref 0. The draws reach the renderer with the same GE state.
+
+What the renderer did, in the brief's order: vertex types are plain (ge_state.cpp:389 decodes them); viewport z
+-31973/32973 gives Vulkan depth 0.991..0.015 (vulkan_renderer.cpp:6180-6186), the same for the crowds that drew, and
+the track's z/w stays in [-1, 1] (draw 176: -0.97..0.99), so the ge.vert:291-297 remap clips nothing; MINZ/MAXZ are
+stored but never applied (draws more, not less); `PURE_NO_DEPTH=1` and `PURE_NO_CULL=1` runs still had no track
+(`out/010/nodepth/r6400.png`, `out/010/nocull/r6400.png`); no BEZIER/SPLINE in the frame. Cause: the alpha test.
+
+- `vendor/portablekit/host/gpu/shaders/ge.frag:72`: `if (alpha_function == 1) passed = false; // never`, and
+  function 0 passed. The GE numbers alpha-test functions like depth-test ones (0 NEVER, 1 ALWAYS; the renderer's own
+  depth mapping at vulkan_renderer.cpp:335-342 has them right).
+- `vendor/portablekit/host/gpu/vulkan_renderer.cpp:6057`: the discard variant was compiled in for any function but 0,
+  so ALWAYS draws got it; `:6082` pushed 0 for "no test", `:6090` 0 for clears.
+  (Line numbers of the pin plus 0001-0003.) Every fragment of every ALWAYS draw was discarded and the white clear
+  showed through.
+
+Fix (patch 0005): the shader tests by the GE numbering (0 discards, 1 passes), the push carries 1 (ALWAYS) for draws
+without the test and for clears, and the pipeline leaves the discard out for ALWAYS instead of NEVER. Four lines plus
+comments; one pipeline-state field and one shader comparison.
+
+Numbers (imgdiff against ref/vineta_k_start.png, tol 32, `PURE_NO_FB_TEXTURES=1`, route `out/race/route.txt`):
+
+| Capture | Before | After |
+|---|---|---|
+| r6250 (READY ring) | 0.698 | 0.362 |
+| r6400 | 0.685 | 0.348 |
+| first full-HUD frame, 6016 (`out/010/race-hud.png`) | - | 0.349 |
+| title vs ref/title.png (tol 24) | 0.0302 (task 006) | 0.0302 (3943 px, unchanged) |
+
+Every after-capture from 6016 to 6400 is between 0.343 and 0.425. The HUD fades in over 6011-6016 in the capture
+run (timer, POS and LAP reach full brightness at 6016); in another run it finished about 4 frames later. Track
+surface, barriers, arches, pillars and sky are visible in race-hud.png.
+
+Verify output:
+```
+ok: 4 patch(es) reproduce vendor/portablekit at 8b0c3fe
+PASS fraction 0.348974 (45562/130560 pixels differ by more than 32, limit 0.45) at 480x272 (resized from 960x544 and 480x272)
+PASS fraction 0.030201 (3943/130560 pixels differ by more than 24, limit 0.05) at 480x272 (resized from 960x544 and 480x272)
+```
+
+Open questions:
+- Ordering with 0004: 0005 was exported over 0001-0003. If task 009's 0004 lands first and touches the same
+  `submit()` lines (pipeline key, push constants), `tools/patches.sh check` will fail; re-export 0005 on top of 0004
+  (the change is the four lines above).
+- The brief names MINZ/MAXZ as 0xD8/0xD9; they are 0xD6/0xD7 (0xD8-0xDA are the colour test). The renderer ignores
+  them and the depth-clamp enable 0x1C (CPE=1 here: the PSP then does not clip at the far plane, Vulkan does). Neither
+  matters for this frame (all z/w within [-1, 1]); Vulkan `depthClamp` would be the one-field fix if far geometry ever
+  goes missing.
+- The ship shadows are solid dark-blue blocks: draws 339-356 are zfail INCR/DECR stencil volumes with MASKRGB
+  0xFFFFFF, and stencil and write masks are ignored (task 009's area).
+- VRAM texture addresses differ between our port and PPSSPP by 0x1DC0 (0x0417d5c0 vs 0x0417e380 for the track), so
+  the game's VRAM allocation differs somewhere upstream of the GE; harmless here, not investigated.
+- `tools/verify_task.sh` (named in CLAUDE.md) does not exist in `tools/`; I ran the Verify line by hand.
+- No off switch for the fix (the vendor AGENTS.md asks for one for new behaviour); the old behaviour is a numbering
+  bug, so none was added.
 
 ## Review
 (Fable fills)

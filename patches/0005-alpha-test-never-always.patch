@@ -1,0 +1,77 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index 9faf17f..c401885 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -9,9 +9,9 @@ layout(location = 0) out vec4 out_color;
+ 
+ layout(set = 0, binding = 0) uniform sampler2D guest_texture;
+ 
+-// False for pipelines of draws without an alpha test (texture_params.w 0):
+-// the discard below is then compiled out, so tiled GPUs keep their early
+-// depth test and hidden surface removal for them.
++// False for pipelines of draws without an alpha test, or with ALWAYS
++// (texture_params.w 1): the discard below is then compiled out, so tiled GPUs
++// keep their early depth test and hidden surface removal for them.
+ layout(constant_id = 0) const bool kAlphaTest = true;
+ 
+ layout(push_constant) uniform Push {
+@@ -69,7 +69,11 @@ void main() {
+     color.rgb = min(color.rgb + frag_specular, vec3(1.0));
+     if ((int(push.viewport.w + 0.5) & 1) != 0) color.rgb = mix(lighting.fog_color.rgb, color.rgb, clamp(frag_fog, 0.0, 1.0));
+ 
+-    // PSP alpha test, evaluated per fragment.
++    // PSP alpha test, evaluated per fragment. The function is the GE's own
++    // number, as for the depth test: 0 NEVER, 1 ALWAYS, then EQUAL, NOTEQUAL,
++    // LESS, LEQUAL, GREATER, GEQUAL. Reading 1 as "never" discarded every
++    // draw that enables the test with ALWAYS, which a game can do for most of
++    // its world.
+     if (!kAlphaTest) {
+         out_color = stored(color);
+         return;
+@@ -78,7 +82,7 @@ void main() {
+     float reference = push.texture_params.z / 255.0;
+     float alpha = color.a;
+     bool passed = true;
+-    if (alpha_function == 1) passed = false;                     // never
++    if (alpha_function == 0) passed = false;                     // never
+     else if (alpha_function == 2) passed = abs(alpha - reference) < 0.002;
+     else if (alpha_function == 3) passed = abs(alpha - reference) >= 0.002;
+     else if (alpha_function == 4) passed = alpha < reference;
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 7a077f5..db1d0a3 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -6138,12 +6138,12 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             stored_alpha = stencil;
+         }
+     }
+-    // Matches texture_params.w below: without an alpha test the pipeline's
+-    // shader has no discard. <prefix>_NO_ALPHA_VARIANTS keeps the one shader
++    // Matches texture_params.w below: without an alpha test, or with ALWAYS
++    // (GE function 1; 0 is NEVER), the pipeline's shader has no discard. <prefix>_NO_ALPHA_VARIANTS keeps the one shader
+     // that tests alpha for every draw, as before.
+     static const bool no_alpha_variants = portablekit::env("NO_ALPHA_VARIANTS") != nullptr;
+     key.alpha_test = no_alpha_variants || perf::alternate_off(perf::NewPath::Alpha) ||
+-                     (!call.clear_mode && call.alpha_test.enabled && call.alpha_test.function != 0u);
++                     (!call.clear_mode && call.alpha_test.enabled && call.alpha_test.function != 1u);
+     key.raw = raw;
+     // Escape hatch for bisecting "nothing is visible" reports.
+     static const bool no_cull = portablekit::env("NO_CULL") != nullptr;
+@@ -6169,7 +6169,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                                                     (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
+     push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
+-                           static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 0u)};
++                           static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
+     // Through-mode texture coordinates are in texels, transformed ones in [0,1].
+     push.uv_transform = call.through && call.texture.width != 0u
+                             ? std::array<float, 4>{1.0f / static_cast<float>(call.texture.width),
+@@ -6177,7 +6177,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                             : std::array<float, 4>{call.texture.scale_u, call.texture.scale_v, call.texture.offset_u,
+                                                    call.texture.offset_v};
+ 
+-    if (call.clear_mode) push.texture_params = {0.0f, 0.0f, 0.0f, 0.0f};
++    if (call.clear_mode) push.texture_params = {0.0f, 0.0f, 0.0f, 1.0f};  // no texture, alpha test ALWAYS
+ 
+     static const bool trace_fb = portablekit::env("TRACE_FB_TEXTURES") != nullptr;
+     if (trace_fb && call.texture.enabled && !call.clear_mode) impl.trace_framebuffer_texture(call);
