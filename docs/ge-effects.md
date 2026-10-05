@@ -204,6 +204,73 @@ makes 837 read the 0x04132000 image at (0,0), as on the PSP, and leaves the othe
   target into guest 0x04110000 (16-bit, stride 512) when the SIGNAL is raised, or answer the read some other way
   (PPSSPP's hardware backends use the compat flag `SoftwareRasterDepth` for this game).
 
+## The environment draws and the alpha test (task 010, 2026-10-05)
+
+Before patch 0005 the port drew crowds, billboards, the far skyline, ships and HUD on Vineta K and left the track,
+barriers, stadium arches, pillar bodies and the sky white (the clear colour, 0x04FFFFFF). The cause was one shader
+line: the GE alpha-test function numbers.
+
+### Which draws make those pixels (PPSSPP dump)
+
+`ppdmp.py cover` rasterises the dump's transform-mode draws for coverage only (the GE's clip and drop rules, depth
+clamp, MINZ/MAXZ, each draw's depth test and write; no texturing, blending, alpha test or culling) and reports which
+draw is the last opaque writer of each pixel. Its picture of draw 0-832 reproduces the reference frame's geometry
+(`out/010/cover_all.png`). The large environment meshes, all in the opaque world (step 3 above):
+
+| Draws | What | Pixels | PRIM, vertices | Vertex type | Texture | State |
+|---|---|---|---|---|---|---|
+| 175, 178 (and 174, 177 farther on) | track surface, alternating tiles | 20563 + 13090 | tristrip 274, 272 | 0x00013d: uv s8, colour 8888, normal s8, position s16 | 0x0417e380 / 0x0417fb80 CLUT4 64x64 swizzled, 4 mips | cull on, FFACE 0; z GT with write; MINZ-MAXZ 1001-64946; opaque |
+| 176 | the track's sloped edges and near barriers, both sides | 17890 | tristrip 270 | 0x00013d | 0x0417ef80 CLUT4 64x64 | as above |
+| 165, 490 | barrier tops and the light band along the right barrier | 1627, 953 | tristrip 209, 43 | 0x00013f: uv f32, colour 8888, normal s8, position s16 | 0x041f6680, 0x041a8900 CLUT4 64x64 | as above |
+| 486, 496, 497, 499 (right), 510, 511, 513 (left) | stadium arches | 7102, 2665, 11003, 625, 4313, 991, 1334 | tristrips of 97-337 | 0x00013d / 0x00013f | CLUT4 64x64, 128x64, 64x128 in VRAM | as above |
+| 598-602 | sky cube, five faces (602 is the one in view) | 23868 (602) | tristrip 81, 81, 81, 163, 81 | 0x00011d: uv s8, colour 8888, position s16 | RAM CLUT8 256x256 | cull off; z GT; viewport z -473/+473, MINZ-MAXZ 0-946 |
+
+None of them has weights, morph targets, an index buffer or through mode, and every one has the alpha test enabled
+(0x22 = 1) with ALPHATEST 0xDB = 0x000001: function 1, ALWAYS, reference 0. 268 of the frame's 871 draws (31651 of
+72733 vertices) are set up that way, and they are the last opaque writer of 113566 of the 130560 pixels (87%):
+`out/010/cover_always.png` shows them, the rest grey. What stays grey is what the port drew before the fix: the
+crowd stands (alpha test GREATER 0x7F), ships, shadow volumes, the billboard screens.
+
+### The same draws in our port
+
+`PURE_TRACE_GE_LIST=470000:4000` (with `PURE_FRAME_LOG=1`) covered frames 6361-6372 of a race run; frame 6364 replayed
+with `ppdmp.py gelist --vt` has 866 draws, 301 of them with the alpha test on and ALWAYS. The track run is draws
+270-274 (tristrip 177, 274, 270, 158, 272, vertex type 0x00013d, cull 1/0, depth clamp 1, MINZ-MAXZ 1001-64946,
+ALWAYS ref 0), the dump's 174-178 in the same order and pairing of textures, and the sky cube is 590-594 (81, 81, 81,
+163, 81 vertices, 0x00011d, MINZ-MAXZ 0-946, ALWAYS). So the game issues them and the GE state reaches the renderer
+unchanged; the texture VRAM addresses sit 0x1DC0 lower in our port (0x0417d5c0 for the dump's 0x0417e380), which
+does not matter for this.
+
+### What the renderer did with them
+
+Checked in the brief's order:
+
+1. Vertex type: 0x00011d, 0x00013d and 0x00013f are plain formats `decode_vertices` (ge_state.cpp:389) handles; no
+   weights, morph, index or through bits.
+2. Depth range and viewport: the world's viewport z is scale -31973, centre 32973, so the Vulkan viewport gets
+   minDepth 0.991 and maxDepth 0.015 (vulkan_renderer.cpp:6180-6186), a reversed range Vulkan accepts; the crowds that
+   did draw use the same one. The track's clip-space z/w stays inside [-1, 1] (draw 176: -0.97 to 0.99), so the
+   [0, w] remap in ge.vert (:291-297) clips nothing extra. MINZ/MAXZ are 0xD6/0xD7 (0xD8/0xD9 are the colour test);
+   the GE state stores them (`range_near`/`range_far`) and the renderer never applies them, which can only draw more.
+   `PURE_NO_DEPTH=1` did not bring the meshes back (`out/010/nodepth/r6400.png`).
+3. Culling: `PURE_NO_CULL=1` did not bring them back (`out/010/nocull/r6400.png`).
+4. Patches: the frame has no BEZIER or SPLINE; PSUB/PPRIM/PFACE are set and unused.
+5. The alpha test. ge.frag:72 tested `alpha_function == 1` as NEVER and let 0 pass, and vulkan_renderer.cpp:6057
+   compiled the discard into the pipeline whenever the function was not 0. The GE numbers alpha-test functions like
+   depth-test functions (the renderer's own depth mapping at :335-342 has them right): 0 NEVER, 1 ALWAYS, 2 EQUAL,
+   3 NOTEQUAL, 4 LESS, 5 LEQUAL, 6 GREATER, 7 GEQUAL. Every fragment of every ALWAYS draw was discarded.
+
+Patch 0005 makes the shader test by the GE numbering (0 discards), pushes ALWAYS (1) for draws without the test and
+for clear-mode draws (vulkan_renderer.cpp:6082, :6090), and leaves the discard out of the pipeline for ALWAYS
+instead of NEVER (:6057). The race frame then shows the track, barriers, arches, pillars and sky
+(`out/010/race-hud.png`); the title screen capture is unchanged (0.0302 against ref/title.png, as in task 006).
+
+What still differs on the grid view, all outside this fix: the ship shadows are solid dark-blue blocks (draws
+339-356 are stencil shadow volumes, STENCILOP 0x000400/0x000500 = zfail INCR/DECR with MASKRGB 0xFFFFFF, both
+faces in turn, and the GE state ignores both
+stencil and the write masks: task 009), the lens flare's haze over the upper left (the CPU depth read, section
+above), and no bloom with `PURE_NO_FB_TEXTURES=1`.
+
 ## Reproducing
 
 ```
@@ -218,4 +285,12 @@ $P tools/run_boot.py --script out/008/route.txt --frames 6500 --shots out/008/sh
   --env "PURE_TRACE_CALLS=sceGe_user:0xAB49E76A,sceGe_user:0xE0D68148,sceGe_user:0x03444EB4,sceGe_user:0xB287BD61" \
   out/008/runA.log
 # add --env PURE_TRACE_GE_LIST=FIRST:COUNT for list words, then: $P tools/ppsspp/ppdmp.py gelist <log excerpt> --all
+
+# task 010: vertex types and the coverage of each draw
+$P tools/ppsspp/ppdmp.py draws ref/vineta_k_start.ppdmp --all --vt
+$P tools/ppsspp/ppdmp.py cover ref/vineta_k_start.ppdmp out/010/cover_all.png
+$P tools/ppsspp/ppdmp.py cover ref/vineta_k_start.ppdmp out/010/cover_hl.png --highlight 165,174-178,490,598-602
+$P tools/run_boot.py --script out/010/route.txt --frames 6420 --shots out/010/gelist --max-lines 1500000 \
+  --env PURE_NO_FB_TEXTURES=1 --env PURE_FRAME_LOG=1 --env PURE_TRACE_GE_LIST=470000:4000 out/010/gelist.log
+# frames 6361-6372 traced in that run; slice between two "[pure] frame" lines, then gelist --all --vt
 ```
