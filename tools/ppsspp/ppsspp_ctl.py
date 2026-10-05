@@ -797,7 +797,8 @@ def cmd_run(a):
         if not a.until:
             die("--shots-every needs --until")
         d = Path(a.shots_dir or OUTDIR / "shots")
-        for f in range(a.shots_every, a.until + 1, a.shots_every):
+        start = a.shots_from or a.shots_every
+        for f in range(start, a.until + 1, a.shots_every):
             caps.setdefault(f, {}).setdefault("shot", str(d / f"f{f:05d}.png"))
     end = max([a.until or 0] + list(caps) + [s[0] + 1 for s in states])
     if end <= 0:
@@ -990,6 +991,7 @@ def main():
     r.add_argument("--shot", action="append", metavar="FRAME:PNG", help="screenshot of the capture at FRAME")
     r.add_argument("--gedump", action="append", metavar="FRAME:PPDMP", help="GE recording of the capture at FRAME")
     r.add_argument("--shots-every", type=int, metavar="N", help="also screenshot every N frames up to --until")
+    r.add_argument("--shots-from", type=int, metavar="F", help="first frame for --shots-every (default N)")
     r.add_argument("--shots-dir", help="directory for --shots-every (default out/ppsspp/shots)")
     r.add_argument("--until", type=int, metavar="FRAME", help="run at least until this frame")
     r.add_argument("--savestate", metavar="FILE", help="save a state at the end (needs keyboard-event permission)")

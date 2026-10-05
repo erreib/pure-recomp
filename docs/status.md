@@ -57,8 +57,13 @@ Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below
   prints only on a stub's first call. Merge per the
   checklist in CLAUDE.md / the plan: rerun each brief's Verify from this checkout, spot-read, `git merge --no-ff` into
   `batch/m2`, remove the worktree.
-- A PPSSPP driver agent was writing `tools/ppsspp/ppsspp_ctl.py`, `docs/ppsspp.md`, `ref/*` in this checkout
-  (uncommitted; `git status`). Its purpose: reference captures for frame comparison (spike S6). Check what it left.
+- PPSSPP driver (spike S6, committed): `tools/ppsspp/ppsspp_ctl.py run --pad "700:CROSS,708:,..." --shot F:out.png
+  --gedump F:out.ppdmp --log ...` drives PPSSPPSDL through its WebSocket debugger with frame-exact, deterministic input
+  (`docs/ppsspp.md`). Screenshots need `SoftwareRenderer = True` (read from VRAM), GE dumps work with any renderer,
+  save states are blocked (needs Accessibility for F2). PPSSPP timeline on a fresh memory stick: language ~480,
+  notice ~1560, START at 2400 skips the movie, title ~2520, **profile screen Load/New/Delete ~2880** (our port shows a
+  blank page there: the movie-end blocker). `ref/` is still empty; `out/ppsspp/title.{png,ppdmp}` and
+  `out/ppsspp/boot-hle.log` exist. `routes/frontend_draft.txt` mistimes the "save profile? No" answer.
 - Next milestone steps: fix the profile-screen stall above; route to the main menu and a race (task 004: route script
   + `route_check` using `tools/imgdiff.py --region --min-variance`); PPSSPP reference compare; then M3 (race).
 - The plan with every brief: `~/.claude/plans/in-the-bouncer-recomp-validated-babbage.md`.
