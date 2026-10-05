@@ -1,6 +1,6 @@
 # 002: png.py and imgdiff.py, the frame comparison tools
 
-Milestone: M2 | Branch: task/002-imgdiff | Status: OPEN
+Milestone: M2 | Branch: task/002-imgdiff | Status: MERGED
 
 ## Goal
 Every visual check in this project compares a captured frame with a reference frame (PPSSPP or an earlier run) with a
@@ -112,4 +112,9 @@ Open questions:
   `floor(x * w / 480)`, so a 960x544 capture keeps its even pixels.
 
 ## Review
-(Fable fills)
+Verify rerun: PASS (selftest 17 checks 0.15 s; frame_600 vs frame_1260 fraction 0.0), run by Fable from the main
+checkout on batch/m2 at 293cb48. Spot-read: tools/imgdiff.py CLI and region scaling (PSP pixels x2 on captures,
+sensible), png.py filter handling. Spot-checks on new captures: title vs memory-stick notice = 2.05% differing at
+tol 24 (so the default 2% limit separates different screens by a hair; routes will compare like with like),
+variance check on the title logo passes. Merged: 293cb48 (--no-ff into batch/m2). Notes: the Verify line's relative
+out/ paths mean verify_task.sh (task 001) runs from the main checkout.
