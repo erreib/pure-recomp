@@ -51,7 +51,65 @@ worktree and subagent without a venv.
 A capture in out/shots uses a PNG feature outside 8-bit non-interlaced (then report the IHDR fields and stop).
 
 ## Result
-(worker fills)
+Status: DONE
+
+Changed:
+- `tools/png.py` (new): `read_png` (8-bit non-interlaced grey, grey+alpha, RGB, RGBA; filter types 0-4; chunk CRCs
+  checked; anything else raises `ValueError` naming the IHDR fields), `write_png` (filter 0), `read_bmp` (24-bit
+  bottom-up like the framework's `write_bmp`, 32-bit BI_RGB, 32-bit BI_BITFIELDS with byte-aligned masks).
+- `tools/imgdiff.py` (new, executable): compare / mask / region / min-variance / out / json / selftest as briefed.
+  Exit 0 PASS, 1 FAIL, 2 bad input.
+- `docs/verification.md` (new): one page on both tools and the self-test.
+
+Acceptance:
+- `--selftest` passes (17 checks, 0.15 s warm, about 0.7 s cold): identical 0.0; top-left quadrant shifted 7 px
+  0.2485, FAIL; BMP round trips (24-bit padded rows, 32-bit top-down, 32-bit V5 bitfields with alpha); plus diff
+  image, mask, region, 960x544 BMP vs 480x272 PNG resize, PNG filters 0-4 at 1-4 channels, 16-bit rejection,
+  variance pass/fail, CLI `--json` keys and exit code.
+- frame_600.png vs frame_1260.png: PASS, fraction 0.0; `--json` has width, height, fraction, differing, total.
+- `read_bmp` vs the sips-converted PNG: fraction 0.0 at `--tol 0 --max-frac 0` for frames 60, 120, 600 and 1260
+  (byte-identical pixel buffers).
+- Escalation check: all 21 PNGs in out/shots are IHDR 960x544, bit depth 8, colour type 2, interlace 0 (chunks IHDR,
+  sRGB, eXIf, IDAT, IEND; rows use filters 0, 1, 2, 4). The BMPs are 24-bit, 40-byte header, bottom-up. No
+  unsupported feature.
+
+Verify output (last 20 lines). The worktree has no out/, so the Verify line was run with cwd ~/dev/pure-recomp and the
+worktree's script by absolute path:
+`cd ~/dev/pure-recomp && python3 $WT/tools/imgdiff.py --selftest && python3 $WT/tools/imgdiff.py out/shots/frame_600.png out/shots/frame_1260.png --max-frac 0.02 --tol 24`
+```
+  ok   png write/read round trip
+  ok   identical frames: fraction 0.0
+  ok   one quadrant shifted: fraction 0.2485
+  ok   diff image marks differing pixels red: 32449 red, 32449 differing
+  ok   mask hides the shifted quadrant
+  ok   region on an untouched quadrant
+  ok   960x544 BMP against 480x272 PNG
+  ok   bmp round trip 24-bit bottom-up, padded rows
+  ok   bmp round trip 32-bit top-down
+  ok   bmp round trip 32-bit bitfields with alpha
+  ok   bmp against png of the same pixels
+  ok   png filter types 0-4, 1 to 4 channels
+  ok   16-bit png rejected with IHDR fields
+  ok   variance on a flat region fails: max 0.0
+  ok   variance on a drawn region passes: max 5523.8
+  ok   cli --json and exit code
+  ok   under 2 s: 0.15 s
+PASS selftest (0.15 s)
+PASS fraction 0.000000 (0/522240 pixels differ by more than 24, limit 0.02) at 960x544
+exit=0
+```
+
+Open questions:
+- The Verify line uses relative `out/shots/...`, which does not exist in a worktree; `tools/verify_task.sh` (not in
+  this tree yet) will need to run it from the main checkout or link `out/`.
+- frame_600 and frame_1260 are byte-identical captures (the BMPs `cmp` equal), so this pair only proves the identical
+  case; tolerance behaviour is covered by the self-test.
+- Choices the brief left open, easy to flip: `--region` is in 480x272 PSP screen pixels and scaled to the frame
+  (x2 on a 960x544 capture), so one region works for captures and PPSSPP references alike; `--region` without
+  `--min-variance` limits the comparison to the rectangle; the variance check passes on the largest of the three
+  per-channel variances (a red-only element counts as drawn; use the smallest if every channel must vary); a mask
+  pixel counts as black when every channel is below 128, not only exactly 0; nearest neighbour samples
+  `floor(x * w / 480)`, so a 960x544 capture keeps its even pixels.
 
 ## Review
 (Fable fills)
