@@ -9,7 +9,7 @@ Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below
 | P0 | environment, spikes S1 to S10 | `tools/check_env.sh` and the ten deliverables | in progress: S1 S2 S5 done, S7 S8 analysed, S3 S4 S6 running, S9 S10 open | 2026-10-05 |
 | M1 | scaffold, codegen, link, game runs on the corpus | corpus run with `PSPRECOMP_NO_INTERPRETER=1` flips 60 s without an unlowered instruction | **done** (tooling tasks 001 still open) | 2026-10-05 |
 | M2 | frontend on screen (Vulkan via MoltenVK) | frame 900 of the frontend route matches `ref/frontend.png` | **main menu reached** by script (`config/pad_scripts/main_menu.txt`: language, notice, title, profile NEW, 9-slot name, tag, save question, warning, MAIN MENU at ~frame 4450; `out/milestones/04-main-menu.png`); PPSSPP compare pending | 2026-10-05 |
-| M3 | race start on Vineta K, faithful 3D | countdown frame matches `ref/vineta_k_start.png`; 7200-frame strict Autopilot run exits 0 | open | |
+| M3 | race start on Vineta K, faithful 3D | countdown frame matches `ref/vineta_k_start.png`; 7200-frame strict Autopilot run exits 0 | **race reached**: Single Player > Single Race > Vector > Alpha > Vineta K > Feisar loads, countdown passes, HUD and music run (`out/milestones/05-race-vineta-k-magenta.png`); the 3D scene has a magenta cast (bloom/framebuffer-texture suspect, being diagnosed) | 2026-10-05 |
 | M4 | audio and video | `wavstats.py` active 90% after countdown; sceMpeg trace matches `ref/boot-hle.log` | open | |
 | M5 | saves and the whole campaign | `tools/campaign_sweep.sh` and `tools/save_roundtrip.sh` pass | open | |
 | M6 | native Metal backend | `ge_replay --backend metal` passes on all recordings | open | |
@@ -38,6 +38,7 @@ Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below
 
 | Blocker | State |
 |---|---|
+| Magenta cast over the race scene | Whole 3D scene tinted magenta, HUD fine. Suspect the bloom chain (depth memory read as a colour texture, docs/research.md GE usage). A/B with `PURE_NO_FB_TEXTURES=1` in progress |
 | (resolved 2026-10-05) movies never ended, profile screen blank | Patch 0002: `sceMpegRingbufferAvailableSize` reported the ring empty while 16 pictures were still queued in the demuxer (the audio fetch runs ahead). The game ends a movie on an empty ring, so it dropped the end of every clip and never tore the instance down. With the patch all three movies (SCEA clip, `WoFMVNew_US.PMF`, `Profile_part1.PMF`) play and delete, the game autosaves `PPCD00001DLS001`, and the Profile screen (Load/New/Delete) appears (`out/milestones/03-profile-screen.png`). The 52-picture stop before the language confirm is by design (task 005) |
 | Headless input | `PURE_INPUT_SCRIPT` is driven by the renderer's pad, so headless runs have no input at all and sit on Language Selection. Routes run windowed for now; a headless input path (profile-level pad injection into sceCtrl) is a new task |
 | Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
