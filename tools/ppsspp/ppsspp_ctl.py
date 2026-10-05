@@ -5,7 +5,7 @@ Boots a PSP image in PPSSPPSDL, feeds a frame-indexed button script, saves displ
 given frames, optionally saves a state, and quits. Python 3 standard library only. Full notes: docs/ppsspp.md.
 
 Usage (paths are relative to the current directory):
-  ppsspp_ctl.py run [--pad SCRIPT | --pad-file FILE] [--shot F:PNG]... [--gedump F:PPDMP]...
+  ppsspp_ctl.py run [--pad SCRIPT | --pad-file FILE...] [--shot F:PNG]... [--gedump F:PPDMP]...
                     [--shots-every N [--shots-dir DIR]] [--until F] [--log FILE] [--savestate FILE] [--report JSON]
   ppsspp_ctl.py launch [--log FILE] [--run]   boot the ISO with the debugger on and leave PPSSPP running
   ppsspp_ctl.py status                        print game.status, cpu.status and the current frame
@@ -697,11 +697,14 @@ def wait_breakpoint(dbg, give_up_us, what):
                 raise TimeoutError(f"no {what} before usec {give_up_us}")
 
 
-def capture(dbg, setfb, frame_start_us, shot=None, gedump=None, renderer="software", patience_us=20_000_000):
+def capture(dbg, setfb, frame_start_us, shot=None, gedump=None, renderer="software", patience_us=20_000_000,
+            keep_stepping=False):
     """Capture the first frame the game draws after its first flip at or after frame_start_us.
     Flip k = first sceDisplaySetFrameBuf at/after the time; GE recording is armed there; flip k+1 hands over the
     finished frame k+1, whose pixels are read from VRAM at that call's address. Returns a report dict.
-    Leaves the CPU running."""
+    Leaves the CPU running, or stepping with keep_stepping on a screenshot-only capture: the next capture then arms
+    its breakpoint before the CPU runs again. Without that, a resume/pause round trip lets about 16 frames pass at
+    real-time speed, and a capture requested sooner lands late by a host-dependent amount ("late_frames")."""
     rep = {}
     dbg.pause()
     dbg.request("cpu.breakpoint.add", address=setfb, condition=f"usec >= 0x{int(frame_start_us):x}")
@@ -709,6 +712,8 @@ def capture(dbg, setfb, frame_start_us, shot=None, gedump=None, renderer="softwa
         wait_breakpoint(dbg, frame_start_us + patience_us, "sceDisplaySetFrameBuf call")
         rep["flip_k_usec"] = u_k = dbg.usec()
         rep["flip_k_frame"] = round(frame_at_us(u_k), 3)
+        if u_k - frame_start_us > 3 * FRAME_US:      # the CPU was already past the frame when the breakpoint went in
+            rep["late_frames"] = round((u_k - frame_start_us) / FRAME_US, 1)
         before = set(DUMPDIR.glob("*.ppdmp")) if DUMPDIR.exists() else set()
         if gedump:
             dbg.drop("gpu.record.dump")
@@ -731,7 +736,8 @@ def capture(dbg, setfb, frame_start_us, shot=None, gedump=None, renderer="softwa
         else:
             rep["shot"] = str(Path(shot).resolve())
             rep["shot_bytes"] = save_framebuffer(dbg, addr, stride, fmt, shot)
-    dbg.resume()
+    if gedump or not keep_stepping:
+        dbg.resume()
     if gedump:
         m = dbg.wait(lambda m: m.get("event") == "gpu.record.dump" and "uri" in m, 60, "gpu.record.dump")
         head, _, b64 = m["uri"].partition(",")
@@ -784,7 +790,7 @@ def parse_frame_path(spec):
 # ---------------------------------------------------------------- commands
 
 def cmd_run(a):
-    script = Path(a.pad_file).read_text() if a.pad_file else (a.pad or "")
+    script = "\n".join(Path(f).read_text() for f in a.pad_file) if a.pad_file else (a.pad or "")
     states = parse_pad_script(script)
     caps = {}
     for spec in a.shot or []:
@@ -832,12 +838,15 @@ def cmd_run(a):
             report["setfb_stub"] = f"0x{setfb:08x}"
             for frame in sorted(caps):
                 c = caps[frame]
-                rep = capture(dbg, setfb, vblank_us(frame), c.get("shot"), c.get("gedump"), a.renderer)
+                rep = capture(dbg, setfb, vblank_us(frame), c.get("shot"), c.get("gedump"), a.renderer,
+                              keep_stepping=True)
                 rep["requested_frame"] = frame
                 report["captures"].append(rep)
                 what = ", ".join(f"{k} {Path(v).name}" for k, v in c.items())
                 log(f"frame {frame}: captured frame {rep['frame']} (flip at usec {rep['flip_usec']}, "
                     f"fb {rep['framebuffer']['addr']}) -> {what}; wall {time.time() - t_wall:.0f}s")
+                if rep.get("late_frames"):
+                    log(f"  late: the first flip was {rep['late_frames']} frames after the requested frame")
                 if rep.get("shot_error"):
                     log(f"  screenshot skipped: {rep['shot_error']}")
                 if c.get("gedump"):
@@ -987,7 +996,8 @@ def main():
     r = sub.add_parser("run", help="boot, play a pad script, capture, quit")
     common(r)
     r.add_argument("--pad", help="inline pad script, e.g. '120:CROSS,130:'")
-    r.add_argument("--pad-file", help="pad script file (routes/*.txt)")
+    r.add_argument("--pad-file", action="append",
+                   help="pad script file (routes/*.txt); repeat to chain routes (frames stay absolute)")
     r.add_argument("--shot", action="append", metavar="FRAME:PNG", help="screenshot of the capture at FRAME")
     r.add_argument("--gedump", action="append", metavar="FRAME:PPDMP", help="GE recording of the capture at FRAME")
     r.add_argument("--shots-every", type=int, metavar="N", help="also screenshot every N frames up to --until")
