@@ -20,6 +20,8 @@ See [docs/status.md](docs/status.md). Decisions: [docs/decisions.md](docs/decisi
 | `src/` | our profile: `profile/` glue, `hle/` overrides and stubs, `gpu/` backend seam and backends, `host/` SDL window, input, dumps |
 | `patches/` | changes to the vendored framework, applied in numeric order (`tools/patches.sh`) |
 | `tools/` | extraction, build, run, measurement, Ghidra and PPSSPP drivers |
+| `tools/patches.sh` | `check`: the vendor tree is `vendor/PIN` plus `patches/` exactly; `export NNNN-slug`: the vendor change beyond the series as a new patch |
+| `tools/worktree_init.sh` | first thing in a git worktree: vendor tree, links to the main checkout's `disc/`, `generated/`, `disc.iso`, its own `game/`, build from the shared ccache (about 35 s) |
 | `docs/` | setup, vendor map, decisions, status, spike results, task briefs under `docs/tasks/` |
 | `ref/` | PPSSPP reference captures (ignored except the README) |
 | `disc/`, `disc.iso`, `gen/`, `vendor/`, `build/`, `out/`, `ghidra_project/` | ignored: game data, generated code, third party, build output |
@@ -37,22 +39,36 @@ Details and machine traps: [docs/setup.md](docs/setup.md). Ghidra: `tools/ghidra
 ## Running
 `tools/setup_game.sh` lays out `game/` (EBOOT.ELF = the disc's plain BOOT.BIN, `disc.iso`, `ms0/`). `tools/regen.sh`
 generates the corpus into `generated/` (85 s) and `tools/build.sh profile` compiles it (8 min cold, seconds after).
-`build/arm64/bin/PureNative` runs the game; `tools/run_boot.py` wraps it with a deadline and a folded log.
+`build/arm64/bin/PureNative` runs the game; `tools/run_boot.py` wraps it with a deadline and a folded log. The game
+runs under a pty, so a deadline kill loses no output, and the log always ends with the `[run_boot] exit` line.
+
+| `tools/run_boot.py` flag | Meaning |
+|---|---|
+| `--seconds N` | wall-clock deadline, default 60; exit code 124 when it kills the game |
+| `--window` | renderer and audio on (headless otherwise) |
+| `--strict` | `PURE_STRICT_HLE=1` |
+| `--frames N` | `PURE_EXIT_AT_FRAME=N`, deadline at least N/15 s, exit code 0 when the run ends at that frame |
+| `--script FILE` | `PURE_INPUT_SCRIPT` from the file's non-empty, non-`#` lines joined with `;`; implies `--window` |
+| `--shots DIR` | `PURE_SCREENSHOT_DIR`; implies `--window`; after the run each new BMP there gets a PNG beside it (`tools/png.py`) |
+| `--every N` | `PURE_SCREENSHOT_EVERY` (default 0 with `--shots`: only the script's `shot` steps write) |
+| `--stubs` | `<log>.stubs.txt`: the start-up "Unimplemented imports" list and each `[hle-stub]` call with its `ra` |
+| `--max-lines N`, `--env K=V` | log cap (default 20000); any extra environment variable, applied last |
 
 | Switch | Meaning |
 |---|---|
 | `PURE_NO_RENDER=1 PURE_NO_AUDIO=1` | headless (what `tools/run_boot.py` sets unless `--window`) |
 | `PSPRECOMP_NO_INTERPRETER=1` | stop at the first address with no recompiled code instead of interpreting it |
 | `PURE_EXIT_AT_FRAME=N`, `PURE_FRAME_LOG=N` | stop at the Nth flip; log every Nth flip (`[pure] frame N`) |
-| `PURE_SCREENSHOT_DIR=dir PURE_SCREENSHOT_EVERY=N` | windowed only: BMP of every Nth frame (`sips -s format png` converts) |
+| `PURE_SCREENSHOT_DIR=dir PURE_SCREENSHOT_EVERY=N` | windowed only: BMP of every Nth frame (`tools/run_boot.py --shots` converts them to PNG) |
 | `PURE_INPUT_SCRIPT="700:pad a;1350:pad start;1500:shot name"` | scripted input, frame-indexed; actions `pad a/b/x/y/start/select/dpup/...` (a = Cross), `key NAME`, `shot NAME`, `quit` |
 | `PURE_LIST_STUBS=1`, `PURE_STRICT_HLE=1` | list unimplemented imports at start; stop at the first one called |
 | `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | framework traces, one subsystem each |
 | `PURE_SKIP_FMV=1` | (task 003) skip the intro movie |
 | `PURE_WATCH_MOVIE=1` | once per flip, while they change: the game's movie object (`DAT_08ab45bc`) and its fields `active`, `ended`, `paused`, reader state, picture-queue capacity, `queued`, `shown` (pictures handed to the renderer), slots (`[pure] movie frame N ...`) |
 
-Routes that reach known screens, as input scripts: language confirm `700:pad a`, memory-stick notice `900:pad a`,
-title `1350:pad start` (frames from a cold start at the default pacing; see `config/pad_scripts/`).
+Routes that reach known screens, as input scripts in `config/pad_scripts/` (frames from a cold start at the default
+pacing): `frontend.txt` confirms the language at 700, skips the loading page at 1600, clears the memory-stick notice
+at 1650 and skips the intro movie with Start at 1800; the title is up from 1810 (shots `lang`, `notice`, `title`).
 
 ## Working with Claude
 This repo is worked on by a Fable session that plans, maps the hard parts and reviews, and by Opus subagents that

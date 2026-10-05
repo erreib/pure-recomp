@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.." && . tools/env.sh
 fail=0
 ok()   { printf '  ok    %s\n' "$1"; }
 bad()  { printf '  FAIL  %s\n' "$1"; fail=1; }
+warn() { printf '  warn  %s\n' "$1"; }
 arch_is_arm64() { file -b "$(command -v "$1" 2>/dev/null || echo /nonexistent)" 2>/dev/null | grep -q arm64; }
 
 echo "pure-recomp environment"
@@ -22,4 +23,15 @@ ls ~/opt/ghidra-ext/*ghidra-allegrex*.zip >/dev/null 2>&1 && ok "ghidra-allegrex
 if [ -L disc.iso ]; then [ -e disc.iso ] && ok "disc.iso -> $(readlink disc.iso)" || bad "disc.iso symlink dangles: $(readlink disc.iso)"; else bad "disc.iso symlink missing"; fi
 [ -f disc/MANIFEST.txt ] && ok "disc/ extracted ($(wc -l < disc/MANIFEST.txt | tr -d ' ') files)" || bad "disc/ not extracted (tools/iso_extract.py disc.iso extract disc)"
 [ -d vendor/portablekit ] && [ "$(git -C vendor/portablekit rev-parse HEAD 2>/dev/null)" = "$(cat vendor/PIN 2>/dev/null)" ] && ok "vendor/portablekit at $(cut -c1-7 vendor/PIN)" || bad "vendor/portablekit missing or not at vendor/PIN (tools/vendor_setup.sh)"
+# The corpus from tools/regen.sh (a link into the main checkout in a worktree); absent until the first regen.
+if [ -d generated ]; then
+  units=$(find -L generated -maxdepth 1 -name 'generated_unit_*.cpp' | wc -l | tr -d ' ')
+  [ "$units" = 144 ] && ok "generated/: $units units" || bad "generated/: $units units, expected 144"
+else
+  warn "generated/ missing (tools/regen.sh in the main checkout, tools/worktree_init.sh in a worktree)"
+fi
+exe=build/arm64/bin/PureNative
+if [ ! -x "$exe" ]; then warn "$exe not built yet (tools/build.sh profile)"
+elif [ "$exe" -ot src/profile/pure_profile.cpp ]; then warn "$exe is older than src/profile/pure_profile.cpp (tools/build.sh profile)"
+else ok "$exe is newer than src/profile/pure_profile.cpp"; fi
 exit $fail
