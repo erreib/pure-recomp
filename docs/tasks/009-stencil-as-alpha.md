@@ -1,6 +1,6 @@
 # 009: Stencil operations as alpha writes in the Vulkan renderer (the bloom mask)
 
-Milestone: M3 (faithful race frame) | Branch: task/009-stencil-as-alpha | Status: OPEN
+Milestone: M3 (faithful race frame) | Branch: task/009-stencil-as-alpha | Status: MERGED
 
 ## Goal
 The PSP has no separate stencil buffer: stencil bits live in the framebuffer's alpha channel. Wipeout Pure writes
@@ -146,4 +146,9 @@ Open questions:
   FB textures off too, so it is not the bloom. docs/ge-effects.md points at the lens-flare depth read for part of it.
 
 ## Review
-(Fable fills)
+Verify rerun by Fable after the merge on batch/m2: series check ok (4 patches), race frame 6016 with the bloom path
+on scores 0.631 against ref/vineta_k_start.png (the worker measured 0.628; the no-bloom frame 0.663). Spot-read:
+patch 0004's ge_state parsing and the alpha-source push constant. Decisions: keeping destination alpha when the
+stencil test is off stays in 0004 (it is the hardware's behaviour and the translucent world needs it). Follow-ups
+recorded: shadow volumes (zfail INCR/DECR + GREATER test) and dual-source blending for exact REPLACE under
+source-alpha blends. Merged into batch/m2. Notes: pipeline key file version bumped to 2.
