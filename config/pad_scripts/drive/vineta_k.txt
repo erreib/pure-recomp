@@ -1,0 +1,6 @@
+# Vineta K steering table (Single Race, Vector, Feisar): `frame:axis leftx V` steps, frames of the same run as the
+# menu route (GO at about flip 6252). NOT TUNED YET (task 012 stopped before tuning): with no steps the ship goes
+# straight and stops against the barrier of the first corner at about 6.2 s (task 007).
+# Finding from out/explore/e1 (2026-10-05): the first corner is a RIGHT-hander. `6540:axis leftx -0.6` held to
+# 6700 turned the ship left (towards +z; it was heading -x) into the left barrier at 6.1 s, at dist 1424 m, lap 1.
+# The next attempt should steer right (+lx) from about 6540.
