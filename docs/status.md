@@ -49,8 +49,9 @@ Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
 
 ## Resume (updated at the end of session 2, 2026-10-05)
 - `main` = 2971eff (Erik's second fast-forward). `batch/m2` is two commits past it (resume notes, `tools/pad_record.py`).
-- Workers told to stop and commit PARTIAL results when the session ended: `task/011-shadow-volumes-and-dual-source`
-  (patch 0006 if exported) and `task/012-campaign-sweep` (sweep tool, driving tables). Merge per the checklist;
+- `task/011-shadow-volumes-and-dual-source` (29ec191): PARTIAL, patch 0006 exported but never built; the Result section
+  holds the stencil-versus-alpha design rule and the exact remaining steps (wire `submit()`, build, capture, Verify).
+  Finish it from that branch; do not merge the unbuilt patch. `task/012-campaign-sweep`: told to commit PARTIAL. Merge per the checklist;
   re-export 0006 over the series if `tools/patches.sh check` complains.
 - Next steps in order: merge 011/012; Erik's recorded lap (`tools/pad_record.py` turns a run log with
   `PURE_TRACE_PAD=1 PURE_FRAME_LOG=1` into a script; the command and keys are in the chat recap and README) to replace
