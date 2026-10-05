@@ -1,6 +1,6 @@
 # 010: Why the track surface, barriers, arches, pillars and sky are not drawn
 
-Milestone: M3 | Branch: task/010-missing-environment-meshes | Status: OPEN
+Milestone: M3 | Branch: task/010-missing-environment-meshes | Status: MERGED
 
 ## Goal
 Task 007 showed the port's physics match PPSSPP, but on Vineta K the port draws crowds, billboards, the far skyline,
@@ -151,4 +151,8 @@ Open questions:
   bug, so none was added.
 
 ## Review
-(Fable fills)
+Verify rerun by Fable after re-exporting 0005 over 0004 (the worker's branch predated 0004): series check ok with
+5 patches; race frame 6016 with bloom on scores 0.303 against ref/vineta_k_start.png (worker: 0.349 with the bloom
+path off; 0.685 before the fix). Spot-read: the four-line change (ge.frag numbering, pipeline discard variant, push
+constant default, clear push). Merged: fc36b40 into batch/m2. Notes: MINZ/MAXZ are 0xD6/0xD7 (the brief was wrong);
+depth clamp 0x1C and MINZ/MAXZ remain ignored, harmless here. Shadow volumes stay a follow-up with task 009's.
