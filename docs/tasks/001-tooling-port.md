@@ -64,7 +64,74 @@ produce a stub summary and support frame-count exits. Model the scripts on the B
 the measured build time and stop rather than changing build flags.
 
 ## Result
-(worker fills)
+Status: PARTIAL (stopped early at the coordinator's request; Verify fails because deliverable 3 is not done)
+
+Deliverables:
+- 1 `tools/patches.sh`: DONE. `check` verifies HEAD == vendor/PIN, applies the series to a temporary `git worktree`
+  of the pin, compares every path either tree changed (bytes, presence, executable bit), prints `ok: ...` or
+  `differs: <first file>` (exit 1). `export NNNN-slug` writes only the delta beyond the series, refuses an NNNN that
+  exists or is not above the last patch, and reminds to add the README row. Tested: ok on the current tree; a
+  one-line edit to cmake/PortableKit.cmake (a file 0001 already patches) is reported by `check`, and
+  `export 0002-test` wrote exactly that one added line (not 0001's VERBATIM); with 0002-test present `check` is ok
+  again; an added and a deleted file export as new/deleted; duplicate and lower numbers are refused; a wrong PIN is
+  reported. Test patches deleted and the vendor tree restored (`check` ok).
+- 2 `tools/worktree_init.sh`: written, tested only on this already-initialised worktree (3 s; not yet run in a
+  fresh `git worktree add /tmp/pure-wt`). Steps: vendor_setup.sh (skipped when `patches.sh check` passes, refused
+  when the vendor tree has uncovered changes), links disc/ generated/ disc.iso into the main checkout,
+  tools/setup_game.sh, clones the main checkout's FFmpeg archive into build/arm64/_deps/downloads, then times
+  `tools/build.sh profile` (log in out/worktree_init.log) and prints the ccache hit/miss delta, warning above 20
+  misses.
+- 3 `tools/run_boot.py` (--script, --shots, --every, --stubs, --frames N/15 and exit 0 on frame exit): NOT DONE.
+- 4 `tools/check_env.sh` (PIN check, 144 units): NOT DONE.
+- README Layout/Setup rows and config/pad_scripts/frontend.txt: NOT DONE.
+
+Measured worktree build time: the hand bootstrap of this fresh worktree took 33.3 s wall for `tools/build.sh profile`.
+That covers the configure, which downloaded and built FFmpeg 7.1.5, and 250 ninja steps. The shared ccache went
+from 243 to 487 direct hits (+244) and from 497 to 498 misses (+1), so all 144 corpus units were cache hits.
+`tools/vendor_setup.sh` took 1.1 s. Re-running `tools/worktree_init.sh` afterwards gave a 2 s build and +0/+0.
+
+Changed: tools/patches.sh (new), tools/worktree_init.sh (new), docs/tasks/001-tooling-port.md (this Result)
+
+Verify output (last 20 lines; exit 1: run_boot.py does not know --stubs yet, so out/001.log.stubs.txt is absent):
+```
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/Adverts/advert_006.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/Adverts/eddie_coffeeshop.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/3DVexWindow/Assegai/logo01.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/Adverts/eddie_staten.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/3DVexWindow/Agsystems2/mankind.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/Adverts/eddie_ubermall.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/MusicLicensed/landscape02.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Billboards/MusicLicensed/colour_landscape01.vex/stringtable.xml flags=0x000F0001 -> 0x80010002
+    ... (x2)
+[io] open disc0:/PSP_GAME/USRDIR/Data/Movies/IntroMovieP1_US.PMF flags=0x000F0001 -> 0x80010002
+[run_boot] deadline 20s reached, killed
+[run_boot] exit 124 after 20.0s, 253 lines
+```
+(`tools/patches.sh check` printed `ok: 1 patch(es) reproduce vendor/portablekit at 8b0c3fe` and `tools/check_env.sh` passed.)
+
+Open questions:
+1. game/: the brief says to symlink game/ to the main checkout. The dispatch steps said to run `tools/setup_game.sh`,
+   and the script follows them, so each worktree gets its own game/ and its own ms0/ saves. Parallel runs then do
+   not share save state, and the copy is 3.8 MB. Fable to confirm.
+2. `.gitignore` lists `disc/`, `generated/` and `game/` with a trailing slash. Those patterns do not match symlinks,
+   so in a worktree the `disc` and `generated` links show as untracked, and a `git add -A` would commit them. The
+   fix is `/disc` and `/generated` without the slash, but `.gitignore` is outside May touch.
+3. For whoever finishes deliverable 3: the framework prints `[hle-stub]` only on a stub's first call
+   (vendor/portablekit/host/system.cpp:52), so the per-name count in the summary will almost always be 1. Also,
+   run_boot.py reads the runner through a pipe, which leaves std::cout block-buffered. Lines still in the buffer
+   are lost when the deadline kill fires. Bouncer's run_boot.py gives the runner a pty for this reason.
+4. check_env.sh still checks for `vendor/yakumo`, a stale name. Deliverable 4 should replace that line with the
+   PIN check.
+5. The FFmpeg archive copy in worktree_init.sh goes slightly beyond the brief. It avoids an 11 MB download from
+   ffmpeg.org per worktree and changes no build flag.
 
 ## Review
 (Fable fills)
