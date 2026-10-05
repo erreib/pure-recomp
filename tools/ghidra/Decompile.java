@@ -15,7 +15,13 @@ public class Decompile extends GhidraScript {
         for (int i = 1; i < a.length; i++) {
             Address ad = toAddr(Long.parseLong(a[i].replace("0x", ""), 16));
             Function fn = currentProgram.getFunctionManager().getFunctionContaining(ad);
-            if (fn == null) { out.append("no function at ").append(ad).append('\n'); continue; }
+            if (fn == null) {
+                // Not analysed as a function yet (reached only through a vtable or a tail call): make one here.
+                disassemble(ad);
+                fn = createFunction(ad, null);
+                if (fn == null) { out.append("no function at ").append(ad).append('\n'); continue; }
+                out.append("(created) ");
+            }
             out.append("==== ").append(fn.getName()).append(" ").append(fn.getEntryPoint()).append("-").append(fn.getBody().getMaxAddress()).append('\n');
             InstructionIterator it = currentProgram.getListing().getInstructions(fn.getBody(), true);
             while (it.hasNext()) {

@@ -7,6 +7,10 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <sstream>
+#include <vector>
 #include <iostream>
 #include <string>
 
@@ -28,6 +32,8 @@ void return_zero(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 0u); }
 // every N frames). It wraps the framework's sceDisplaySetFrameBuf handler, the game's flip, so it counts headless too.
 constexpr std::uint32_t kNidSceDisplaySetFrameBuf = 0x289D82FEu;
 
+std::string item_hex(std::uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return b; }
+
 void wrap_flip_counter(HleRegistrar &hle) {
     static HleFunction original = hle.bound_function("sceDisplay", kNidSceDisplaySetFrameBuf);
     if (!original) return;
@@ -45,11 +51,37 @@ void wrap_flip_counter(HleRegistrar &hle) {
     });
 }
 
+// PURE_TRACE_CALLS=lib:0xNID,lib:0xNID,...: wraps the named HLE calls and prints their arguments and the virtual time
+// (NIDs from config/imports.csv; the registrar resolves names only for its own table). A probe for whatever is chased.
+void wrap_call_traces(HleRegistrar &hle) {
+    const char *spec = env("TRACE_CALLS");
+    if (spec == nullptr || *spec == '\0') return;
+    std::stringstream ss(spec);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        const auto colon = item.find(':');
+        if (colon == std::string::npos) continue;
+        const std::string lib = item.substr(0, colon);
+        const std::uint32_t nid = static_cast<std::uint32_t>(std::strtoul(item.substr(colon + 1).c_str(), nullptr, 16));
+        HleFunction original = hle.bound_function(lib, nid);
+        if (!original) { std::cout << "[pure] TRACE_CALLS: nothing bound for " << item << "\n"; continue; }
+        const std::string label = lib + ":" + item.substr(colon + 1);
+        hle.bind(lib, nid, [original, label](Runtime &r, AllegrexContext &ctx) {
+            const std::uint32_t a[4] = {arg(ctx, 0), arg(ctx, 1), arg(ctx, 2), arg(ctx, 3)};
+            const std::uint64_t t = kernel().now_us();
+            original(r, ctx);
+            std::cout << "[call] " << label << std::hex << " a0=" << a[0] << " a1=" << a[1] << " a2=" << a[2] << " a3=" << a[3]
+                      << " v0=" << ctx.gpr[2] << std::dec << " t=" << t << "\n";
+        });
+    }
+}
+
 // Calls the framework does not implement, or that this game needs answered differently. Each one is here because
 // the interpreter run of spike S3 hit it before the frontend. Keep this list short; a call any game makes belongs in
 // the framework or in an HLE extension module (docs/HLE_EXTENSIONS.md), not here.
 void register_pure_hle(HleRegistrar &hle) {
     wrap_flip_counter(hle);
+    wrap_call_traces(hle);
 
     // The dev-kit switch block. Retail reads 0, which selects display mode 0 and the normal pacing path
     // (docs/timing.md).
