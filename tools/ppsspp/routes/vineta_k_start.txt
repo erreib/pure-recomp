@@ -1,0 +1,10 @@
+# PPSSPP route: MAIN MENU to the Vineta K race start (2026-10-05). Chain it after frontend.txt; frames are absolute
+# vblank counts since boot:
+#   ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.txt --pad-file tools/ppsspp/routes/vineta_k_start.txt
+# Every choice is the first entry of its menu, so CROSS only. Presses sit ~150 frames after each screen appears.
+5700:CROSS, 5708:                 # MAIN MENU: SINGLE PLAYER
+5900:CROSS, 5908:                 # SINGLE PLAYER: SINGLE RACE
+6100:CROSS, 6108:                 # CLASS SELECTION: VECTOR
+6300:CROSS, 6308:                 # LEAGUE SELECTION: ALPHA
+6500:CROSS, 6508:                 # TRACK SELECTION: VINETA K
+6700:CROSS, 6708:                 # TEAM SELECTION: FEISAR -> LOADING, camera fly-by, HUD, READY, rings, GO
