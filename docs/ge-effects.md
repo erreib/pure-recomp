@@ -204,6 +204,56 @@ makes 837 read the 0x04132000 image at (0,0), as on the PSP, and leaves the othe
   target into guest 0x04110000 (16-bit, stride 512) when the SIGNAL is raised, or answer the read some other way
   (PPSSPP's hardware backends use the compat flag `SoftwareRasterDepth` for this game).
 
+## Stencil as alpha: what the renderer does since patch 0004 (task 009, 2026-10-05)
+
+The stencil state of the dump's frame (every draw, `0x24`/`0xDC`/`0xDD`/`0xE8`/`0xE9`):
+
+| Draws | Stencil | Write masks | What they are |
+|---|---|---|---|
+| 0 | clear mode, alpha 0x04 | | the clear sets the mask to 4 |
+| 77-602 (most) | ALWAYS, ref 0x04 (0xFF lights; 0x78, 0x3A on two draws), ops KEEP/KEEP/REPLACE | none, or alpha 0xFF on FIX-blended passes | opaque world and sky; several are z-equal decal passes blended add(FIXA ffffff, SA) |
+| 83-92 | off | | track base pass, opaque, no depth write |
+| 93-102 | ALWAYS, ref 0x80, REPLACE | | the same strips again, add(SA, 1-SA) |
+| 103-112 | ALWAYS, ref 0xFF, REPLACE | colour 0xFFFFFF | stencil-only pass: the light strips' mask from texture alpha (alpha test > 0x80) |
+| 339-356 | ALWAYS, mask 0, ops KEEP/INCR/KEEP and KEEP/DECR/KEEP | colour 0xFFFFFF | shadow volumes (depth-fail) |
+| 357 | **GREATER** ref 0x04, ops REPLACE/REPLACE/REPLACE | | full-screen shadow darkening, add(FIXA 606060, FIXB 9f9f9f), depth test off |
+| 603-831 | off, or ALWAYS ref 0x00 REPLACE (621-629 and every 27th run), ref 0xFF on 820 and 828 | | translucent world; 820/828 are add(SA, FIXB) with alpha test > 0 |
+| 832-870 | off | alpha 0xFF on 832, 838, 839-866 | lens flare, bloom chain, HUD |
+
+So the bloom mask is written with STENCILTEST ALWAYS throughout; the one other function is the shadow quad 357.
+
+What the renderer does now (`stencil_alpha` and `blend_reads_source_alpha` in vulkan_renderer.cpp, ge.frag
+`stored`): the PSP stores a draw's stencil result, never its fragment alpha, in a 5551/4444/8888 target's alpha, so
+outside clear mode a draw writes alpha only when the stencil test is on, no alpha bit is masked (0xE9 == 0) and the
+zpass op is REPLACE (the reference; its top bit on 5551, top nibble on 4444) or ZERO. KEEP, a stencil test that is
+off, any masked alpha bit and 5650 targets leave the destination alpha (no A in the colour write mask). INVERT, INCR
+and DECR need the destination and are logged once and kept. Fragments that fail the depth or alpha test are
+discarded, which is KEEP: right for every zfail op in this frame except the shadow volumes' INCR/DECR (logged once).
+A stencil function other than ALWAYS is logged once and drawn as ALWAYS; for 357 that gives the right alpha (all three
+ops REPLACE) and the colour it had before (the darkening covers the screen instead of the stencil < 4 pixels). The
+value reaches the target in one of two ways: the fragment shader writes it as alpha (push constant `viewport.w` bit
+2, value in bits 3..10) when the colour blend does not read the source alpha; when it does (SA or 1-SA on either side
+with RGB written), the alpha blend factors do it: (ZERO, ZERO) for ZERO, which is exact, and (CONSTANT_ALPHA,
+ONE_MINUS_SRC_ALPHA) with the blend constant's alpha set to the reference for REPLACE, which is exact for opaque
+fragments and for the z-equal decal passes (destination already the reference) and a blend towards the reference
+elsewhere (93-102, 820, 828). Colour write mask 0xE8: a channel whose 8 bits are all set is not written (the shadow
+volumes and 103-112 no longer draw colour); partial masks are logged once. `PURE_NO_STENCIL_ALPHA=1` restores the
+old behaviour.
+
+Result at our port's first full-HUD frame (6016: the HUD fades in over 6010-6016 in both runs, READY follows at
+about 6080), route `~/dev/pure-recomp/out/race/route.txt`:
+
+| Frame | Sky (100,20,280,60) mean | vs fb-off at tol 24 | vs ref/vineta_k_start.png at tol 32 |
+|---|---|---|---|
+| FB textures on (`out/009/fb-on.png`) | 210.3 | 6.3% differ | 62.8% differ |
+| `PURE_NO_FB_TEXTURES=1` (`out/009/fb-off.png`) | 195.1 | | 66.3% differ |
+| FB textures on, `PURE_NO_STENCIL_ALPHA=1` | 254.5 | 94.0% differ | |
+| PPSSPP reference | 170.1 | | |
+
+The bloom now lights the ceiling strips, the screens and the engines instead of the whole frame. Both frames still
+differ from the reference mostly through the haze over the scene and the pale track, which the bloom does not
+cause (the fb-off frame has them too).
+
 ## Reproducing
 
 ```
