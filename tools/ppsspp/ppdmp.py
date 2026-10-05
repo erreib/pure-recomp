@@ -18,13 +18,18 @@ DISPLAY (sceDisplaySetFrameBuf: {u32 addr, s32 stride, s32 format}), EDRAMTRANS.
 
 Usage:
   ppdmp.py summary DUMP            header and command counts
-  ppdmp.py draws DUMP [--all]      one line per draw (only render-target changes and VRAM binds unless --all)
+  ppdmp.py draws DUMP [--all] [--vt]   one line per draw (only render-target changes and VRAM binds unless --all;
+                                   --vt adds the decoded vertex type, cull, depth clamp and MINZ-MAXZ)
   ppdmp.py passes DUMP             draws grouped by render target, with every VRAM texture bind and what it aliases
   ppdmp.py verts DUMP N            draw N in full: state words and every vertex
-  ppdmp.py gelist LOG [--all]      the same draw lines from our port's PURE_TRACE_GE_LIST output (no vertices)
+  ppdmp.py gelist LOG [--all] [--vt]   the same draw lines from our port's PURE_TRACE_GE_LIST output (no vertices)
   ppdmp.py tex DUMP N OUT.png      writes the VRAM texture bound at draw N as a PNG (RGBA, linear, unswizzled)
+  ppdmp.py cover DUMP [OUT.png] [--highlight A-B,C,...]
+                                   which draw is visible where: a coverage-only rasteriser of the frame's 3D draws,
+                                   pixels per draw (last opaque writer, last writer), decoded vertex types; OUT.png
+                                   colours each pixel by its last opaque writer (only the highlighted draws)
 """
-import struct, subprocess, sys
+import math, struct, subprocess, sys
 
 TYPES = {0: "INIT", 1: "REGISTERS", 2: "VERTICES", 3: "INDICES", 4: "CLUT", 5: "TRANSFERSRC", 6: "MEMSET",
          7: "MEMCPYDEST", 8: "MEMCPYDATA", 9: "DISPLAY", 10: "CLUTADDR", 11: "EDRAMTRANS"}
@@ -46,6 +51,12 @@ DST_FACTORS = ["SRC", "1-SRC", "SA", "1-SA", "DA", "1-DA", "2SA", "1-2SA", "2DA"
 BLEND_EQ = ["add", "sub", "rsub", "min", "max", "abs"]
 TEXFUNC = ["modulate", "decal", "blend", "replace", "add"]
 ZFUNC = ["never", "always", "eq", "ne", "lt", "le", "gt", "ge"]
+SHOW_VT = False   # main() sets it for --vt
+
+
+def f24(w):
+    """A GE 24-bit float: the top 24 bits of an IEEE single."""
+    return struct.unpack("<f", struct.pack("<I", (w & 0xFFFFFF) << 8))[0]
 
 
 def zstd_decompress(data):
@@ -76,6 +87,8 @@ class State:
 
     def __init__(self):
         self.r = [op << 24 for op in range(256)]
+        self.world, self.view, self.proj = [0.0] * 12, [0.0] * 12, [0.0] * 16
+        self.mtx_at = {0x3A: 0, 0x3C: 0, 0x3E: 0}
 
     def init(self, buf, ptr):
         words = struct.unpack_from("<512I", buf, ptr)
@@ -84,6 +97,25 @@ class State:
             for op in range(lo, hi + 1):
                 self.r[op] = words[i]
                 i += 1
+        # Then the matrices, saved as the commands that load them (bone, world, view, projection, texgen), up to an
+        # END (GPUgstate::Save with a saved-context version above 0, which version 6 dumps carry).
+        if words[i] >> 24 == 0x2A:
+            for w in words[i:]:
+                if w >> 24 == 0x0C:
+                    break
+                self.matrix(w)
+
+    def matrix(self, w):
+        """The world (0x3A/0x3B), view (0x3C/0x3D) and projection (0x3E/0x3F) matrix loads."""
+        op = w >> 24
+        if op in self.mtx_at:
+            self.mtx_at[op] = w & 0xF
+        elif op - 1 in self.mtx_at:
+            m = {0x3B: self.world, 0x3D: self.view, 0x3F: self.proj}[op]
+            k = self.mtx_at[op - 1]
+            if k < len(m):
+                m[k] = f24(w)
+            self.mtx_at[op - 1] = k + 1
 
     def v(self, op):
         return self.r[op] & 0xFFFFFF
@@ -262,6 +294,7 @@ def walk(dump):
                     yield "transfer", make_transfer(s, w, draw_no)
                 else:
                     s.r[op] = w
+                    s.matrix(w)
         # CLUT, CLUTADDR, TRANSFERSRC, EDRAMTRANS carry data only.
 
 
@@ -306,6 +339,8 @@ def make_draw(n, s, w, count, pending, buf):
     verts = decode_vertices(s, pending["verts"], pending["indices"], count)
     d["verts"] = verts
     d["regs"] = list(s.r)
+    d["mtx"] = (list(s.world), list(s.view), list(s.proj))
+    d["vbytes"], d["ibytes"] = pending["verts"], pending["indices"]
     d["xy"] = (bounds([v[0] for v in verts]), bounds([v[1] for v in verts]))
     d["uv"] = (bounds([v[2] for v in verts]), bounds([v[3] for v in verts]))
     cols = {v[4] for v in verts if v[4] is not None}
@@ -386,6 +421,10 @@ def draw_line(d, targets):
         line += " col " + ",".join(f"{c:08x}" for c in d["colours"])
     elif d["matcolor"]:
         line += f" mat {d['matcolor'][0]:06x}/{d['matcolor'][1]:02x}"
+    if SHOW_VT:
+        r = d["regs"]
+        line += (f" | vt 0x{d['vtype']:06x} {vtype_desc(d['vtype'])} cull {r[0x1D] & 1}/{r[0x9B] & 1}"
+                 f" clamp {r[0x1C] & 1} zrange {r[0xD6] & 0xFFFF}-{r[0xD7] & 0xFFFF}")
     return line
 
 
@@ -505,6 +544,230 @@ def cmd_verts(dump, n):
     sys.exit(f"no draw {n}")
 
 
+def vtype_desc(vt):
+    """The vertex type word in words: texcoord, colour, normal and position formats, weights, index, morph, through."""
+    k = ["-", "s8", "s16", "f32"]
+    c = ["-", "?1", "?2", "?3", "565", "5551", "4444", "8888"]
+    out = f"uv {k[vt & 3]} col {c[(vt >> 2) & 7]} nrm {k[(vt >> 5) & 3]} pos {k[(vt >> 7) & 3]}"
+    if (vt >> 9) & 3:
+        out += f" weights {k[(vt >> 9) & 3]} x{((vt >> 14) & 7) + 1}"
+    if (vt >> 11) & 3:
+        out += f" index {['-', 'u8', 'u16', 'u32'][(vt >> 11) & 3]}"
+    if (vt >> 18) & 7:
+        out += f" morph x{((vt >> 18) & 7) + 1}"
+    if (vt >> 23) & 1:
+        out += " through"
+    return out
+
+
+def positions(vt, verts, indices, count):
+    """(x, y, z) of each vertex of a PRIM: normalised as the GE reads them in transform mode, raw in through mode
+    (where a 16-bit z is unsigned)."""
+    through, pos, idx = (vt >> 23) & 1, (vt >> 7) & 3, (vt >> 11) & 3
+    _, _, o_pos, size = vertex_layout(vt)
+    if verts is None or o_pos is None or not size:
+        return []
+    k = comp_size(pos)
+    fmt = {1: "<b", 2: "<h", 3: "<f"}[pos]
+    scale = 1.0 if through else {1: 1 / 128, 2: 1 / 32768, 3: 1.0}[pos]
+    out = []
+    for i in range(count):
+        n = i
+        if idx and indices is not None:
+            n = struct.unpack_from({1: "<B", 2: "<H", 3: "<I"}[idx], indices, i * comp_size(idx))[0]
+        at = n * size + o_pos
+        if at + 3 * k > len(verts):
+            break
+        x, y, z = (struct.unpack_from(fmt, verts, at + a * k)[0] * scale for a in range(3))
+        if through and pos == 2:
+            z = struct.unpack_from("<H", verts, at + 2 * k)[0]
+        out.append((x, y, z))
+    return out
+
+
+def to_clip(p, mtx):
+    """Model position to clip space: p x world x view x projection, the PSP's row-vector order."""
+    world, view, proj = mtx
+    x, y, z = p
+    for m in (world, view):
+        x, y, z = (x * m[0] + y * m[3] + z * m[6] + m[9], x * m[1] + y * m[4] + z * m[7] + m[10],
+                   x * m[2] + y * m[5] + z * m[8] + m[11])
+    return tuple(x * proj[i] + y * proj[4 + i] + z * proj[8 + i] + proj[12 + i] for i in range(4))
+
+
+def clip_near(poly):
+    """Clips a polygon of clip-space vertices against z = -w, the only plane the GE clips on."""
+    out = []
+    for i, a in enumerate(poly):
+        b = poly[(i + 1) % len(poly)]
+        da, db = a[2] + a[3], b[2] + b[3]
+        if da >= 0:
+            out.append(a)
+        if (da >= 0) != (db >= 0):
+            t = da / (da - db)
+            out.append(tuple(a[j] + (b[j] - a[j]) * t for j in range(4)))
+    return out
+
+
+def raster(tri, scissor, plot):
+    """Calls plot(x, y, z) for every pixel centre inside the screen-space triangle (either winding)."""
+    (ax, ay, az), (bx, by, bz), (cx, cy, cz) = tri
+    area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+    if area == 0:
+        return
+    s = 1.0 if area > 0 else -1.0
+    # Edge functions e = alpha x + beta y + gamma, each the weight of the opposite vertex times the area.
+    edges = [(by - cy, cx - bx, bx * cy - by * cx), (cy - ay, ax - cx, cx * ay - cy * ax),
+             (ay - by, bx - ax, ax * by - ay * bx)]
+    y0 = max(scissor[1], int(math.floor(min(ay, by, cy))))
+    y1 = min(scissor[3], int(math.ceil(max(ay, by, cy))))
+    for py in range(y0, y1 + 1):
+        fy = py + 0.5
+        lo, hi = scissor[0] - 0.5, scissor[2] + 0.5
+        for alpha, beta, gamma in edges:
+            k = (beta * fy + gamma) * s
+            a = alpha * s
+            if a > 0:
+                lo = max(lo, -k / a)
+            elif a < 0:
+                hi = min(hi, -k / a)
+            elif k < 0:
+                hi = lo - 1
+        px0, px1 = int(math.ceil(lo - 0.5)), int(math.floor(hi - 0.5))
+        if px0 > px1:
+            continue
+        # z is linear in screen space: the vertices' z weighted by the edge functions.
+        za = sum(e[0] * z for e, z in zip(edges, (az, bz, cz))) / area
+        zb = sum((e[1] * fy + e[2]) * z for e, z in zip(edges, (az, bz, cz))) / area
+        for px in range(px0, px1 + 1):
+            plot(px, py, za * (px + 0.5) + zb)
+
+
+def cmd_cover(dump, out, highlight):
+    """Which draw's pixels are visible in the frame: a coverage-only software rasteriser over the colour target of
+    the first clear (the GE's rules where they decide coverage: clip on z = -w only, a triangle with a vertex outside
+    the 4096-pixel drawing space is dropped, depth clamp, depth range MINZ/MAXZ, the draw's depth test and write).
+    No texturing, blending or alpha test, and no culling (both faces drawn; the depth test settles the order).
+    Prints, for every transform-mode draw on that target, the pixels it is the last opaque writer of and the pixels
+    it is the last writer of at all; writes OUT.png with each pixel coloured by its last opaque writer (only the
+    draws in `highlight`, others grey, when given)."""
+    sys.path.insert(0, __file__.rsplit("/", 2)[0])
+    from png import write_png
+    W, H = 480, 272
+    depth = [0] * (W * H)
+    opaque = [-1] * (W * H)
+    last = [-1] * (W * H)
+    target, info = None, {}
+    zcmp = [lambda a, b: False, lambda a, b: True, lambda a, b: a == b, lambda a, b: a != b, lambda a, b: a < b,
+            lambda a, b: a <= b, lambda a, b: a > b, lambda a, b: a >= b]
+    for kind, d in walk(dump):
+        if kind != "draw":
+            continue
+        r = d["regs"]
+        if target is None and d["clear"]:
+            target = d["fb"]
+        if d["fb"] != target:
+            continue
+        vt = d["vtype"]
+        sc = d["scissor"]
+        sc = (max(sc[0], 0), max(sc[1], 0), min(sc[2], W - 1), min(sc[3], H - 1))
+        if d["clear"]:
+            if d["clear_bits"] & 4:
+                pts = positions(vt, d["vbytes"], d["ibytes"], d["count"])
+                for a, b in zip(pts[0::2], pts[1::2]):
+                    for y in range(max(sc[1], int(min(a[1], b[1]))), min(sc[3] + 1, int(max(a[1], b[1])))):
+                        for x in range(max(sc[0], int(min(a[0], b[0]))), min(sc[2] + 1, int(max(a[0], b[0])))):
+                            depth[y * W + x] = int(b[2])
+            continue
+        if d["through"] or d["prim"] not in ("tris", "tristrip", "trifan"):
+            continue
+        n = d["n"]
+        pts = [to_clip(p, d["mtx"]) for p in positions(vt, d["vbytes"], d["ibytes"], d["count"])]
+        c = len(pts)
+        tris = ([(i, i + 1, i + 2) for i in range(0, c - 2, 3)] if d["prim"] == "tris" else
+                [(i, i + 1, i + 2) for i in range(c - 2)] if d["prim"] == "tristrip" else
+                [(0, i, i + 1) for i in range(1, c - 1)])
+        xs, ys, zs = f24(r[0x42]), f24(r[0x43]), f24(r[0x44])
+        xc, yc, zc = f24(r[0x45]), f24(r[0x46]), f24(r[0x47])
+        ox, oy = (r[0x4C] & 0xFFFF) / 16, (r[0x4D] & 0xFFFF) / 16
+        minz, maxz = r[0xD6] & 0xFFFF, r[0xD7] & 0xFFFF
+        clamp = r[0x1C] & 1
+        test = zcmp[r[0xDE] & 7] if d["ztest"] != "off" else zcmp[1]
+        write = d["zwrite"] and d["ztest"] != "off"
+        is_opaque = d["blend"] == "opaque"
+        stats = info.setdefault(n, {"d": d, "tris": 0, "dropped": 0})
+
+        def plot(x, y, z):
+            z = int(min(max(z, 0.0), 65535.0))
+            if z < minz or z > maxz:
+                return
+            i = y * W + x
+            if not test(z, depth[i]):
+                return
+            if write:
+                depth[i] = z
+            last[i] = n
+            if is_opaque:
+                opaque[i] = n
+
+        def screen(v):
+            return (v[0] / v[3] * xs + xc, v[1] / v[3] * ys + yc, v[2] / v[3] * zs + zc)
+
+        for t in tris:
+            vs = [pts[i] for i in t]
+            stats["tris"] += 1
+            if all(v[3] < 0 for v in vs):
+                stats["dropped"] += 1
+                continue
+            # A vertex outside the 4096x4096 drawing space drops the whole triangle (with depth clamp on, only a
+            # vertex in front of z = -w counts).
+            if any((not clamp or v[2] > -v[3]) and v[3] != 0 and not (0 <= screen(v)[0] < 4096 and
+                                                                       0 <= screen(v)[1] < 4096) for v in vs):
+                stats["dropped"] += 1
+                continue
+            if not clamp and any(abs(v[2] / v[3]) > 1.0000305 for v in vs if v[3] > 0):
+                stats["dropped"] += 1
+                continue
+            poly = clip_near(vs)
+            if len(poly) < 3:
+                continue
+            sp = [screen(v) for v in poly]
+            sp = [(x - ox, y - oy, z) for x, y, z in sp]
+            for i in range(1, len(sp) - 1):
+                raster((sp[0], sp[i], sp[i + 1]), sc, plot)
+    seen_opaque, seen_last, box = {}, {}, {}
+    for i in range(W * H):
+        seen_opaque[opaque[i]] = seen_opaque.get(opaque[i], 0) + 1
+        seen_last[last[i]] = seen_last.get(last[i], 0) + 1
+        x, y = i % W, i // W
+        b = box.setdefault(opaque[i], [x, y, x, y])
+        b[0], b[1], b[2], b[3] = min(b[0], x), min(b[1], y), max(b[2], x), max(b[3], y)
+    print(f"target 0x{target:08x}: {W * H} pixels; {seen_opaque.get(-1, 0)} with no opaque 3D writer, "
+          f"{seen_last.get(-1, 0)} with no 3D writer at all")
+    print("draw   prim      verts tris drop opaque  last  opaque box        vertex type / state")
+    for n, st in sorted(info.items()):
+        d = st["d"]
+        r = d["regs"]
+        tex = fmt_tex(d["tex"], {}) if d["tex_on"] else "untextured"
+        b = "{},{}-{},{}".format(*box[n]) if n in box else "-"
+        print(f"#{n:4d} {d['prim']:9s} {d['count']:5d} {st['tris']:4d} {st['dropped']:4d} {seen_opaque.get(n, 0):6d} "
+              f"{seen_last.get(n, 0):6d}  {b:16s} {vtype_desc(d['vtype'])} | cull {r[0x1D] & 1}/{r[0x9B] & 1} "
+              f"z {d['ztest']}{'' if d['zwrite'] else ' nowrite'} at {d['atest']} {d['blend']} | {tex}")
+    if out:
+        px = bytearray()
+        for i in range(W * H):
+            n = opaque[i]
+            if n < 0:
+                px += b"\0\0\0"
+            elif highlight and not any(a <= n <= b for a, b in highlight):
+                px += b"\x50\x50\x50"
+            else:
+                h = (n * 2654435761) & 0xFFFFFF
+                px += bytes((64 + (h & 0xBF), 64 + ((h >> 8) & 0xBF), 64 + ((h >> 16) & 0xBF)))
+        write_png(out, W, H, 3, bytes(px))
+        print(f"wrote {out}")
+
+
 def cmd_gelist(path, show_all):
     """Our port's PURE_TRACE_GE_LIST output (`[ge-list] run N from PC`, `[ge-list] PC WORD`) replayed through the
     same register model. `[pure] frame`, `[call]`, `[vram]` and `[fbtex]` lines are kept as markers. There is no
@@ -540,8 +803,10 @@ def cmd_gelist(path, show_all):
 
 
 def main(argv):
+    global SHOW_VT
     if len(argv) < 3:
         sys.exit(__doc__)
+    SHOW_VT = "--vt" in argv
     if argv[1] == "gelist":
         cmd_gelist(argv[2], "--all" in argv)
         return
@@ -556,6 +821,17 @@ def main(argv):
         cmd_verts(dump, int(argv[3]))
     elif argv[1] == "tex":
         cmd_tex(dump, int(argv[3]), argv[4])
+    elif argv[1] == "cover":
+        rest = [a for a in argv[3:]]
+        highlight = []
+        if "--highlight" in rest:
+            spec = rest[rest.index("--highlight") + 1]
+            rest.remove(spec)
+            rest.remove("--highlight")
+            for part in spec.split(","):
+                a, _, b = part.partition("-")
+                highlight.append((int(a), int(b or a)))
+        cmd_cover(dump, rest[0] if rest else None, highlight)
     else:
         sys.exit(__doc__)
 
