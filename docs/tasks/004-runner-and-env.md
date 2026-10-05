@@ -1,6 +1,6 @@
 # 004: Runner flags, pty, stub summary, env check, README rows (the rest of task 001)
 
-Milestone: M2 | Branch: task/004-runner-and-env | Status: OPEN
+Milestone: M2 | Branch: task/004-runner-and-env | Status: MERGED
 
 ## Goal
 Finish the tooling that task 001 left undone so routes, captures and stub summaries come from one command. Task
@@ -147,4 +147,10 @@ Open questions:
 4. CLAUDE.md lists `tools/verify_task.sh`, but it is not in the tree. I ran the Verify line directly with bash.
 
 ## Review
-(Fable fills)
+Verify rerun by Fable on batch/m2 after the merge: headless `--stubs` and `check_env.sh` pass; the title capture
+failed at first (variance 4) because the worker measured its route before patch 0002, which lets the SCEA clip play
+to its end after the language confirm and moves every later frame: the title is up from ~1700 and the Start at 1800
+had opened the profile movie before the 1840 shot. Route re-timed: title shot at 1750, Start at 1800, profile shot at
+2100 (variance 8295 on the title, profile page matches `out/shots6/q3000.png` within 0.02%). Spot-read: the pty
+handling and the stubs parser in tools/run_boot.py. Merged: 5c2b5e6 area (batch/m2). Notes: `--shots` implies
+`--window` (fine); `tools/verify_task.sh` is still unwritten.

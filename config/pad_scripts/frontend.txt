@@ -1,17 +1,9 @@
-# Windowed route from a cold start to the title screen, with a shot of each screen on the way.
-# Frames are window-event pumps (one per game flip, about 30 a second here), measured 2026-10-05 with
-# tools/run_boot.py --script on this build; the same script gives the same picture at the same frame.
-#   tools/run_boot.py --script config/pad_scripts/frontend.txt --shots out/shots --seconds 80 out/frontend.log
-#
-# Language Selection is up from about frame 500 until the confirm.
+# Boot to the title and into the profile screen. Frames are vblank flips from a cold start (measured 2026-10-05 after patch 0002).
 690:shot lang
 700:pad a
-# Frame 1600 is still on the "A Studio Liverpool Game" loading page, which stays until about 1730 on its own;
-# Cross skips it and the memory-stick notice comes up at 1605.
 1600:pad a
 1640:shot notice
-# Cross clears the notice; the intro movie (WoFMVNew_US.PMF) starts at about 1690 and does not end by itself.
 1650:pad a
-# Start skips the movie; the title screen (logo, PRESS START BUTTON) is up from 1810.
+1750:shot title
 1800:pad start
-1840:shot title
+2100:shot profile
