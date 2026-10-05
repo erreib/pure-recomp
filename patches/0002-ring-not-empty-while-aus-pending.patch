@@ -1,0 +1,36 @@
+diff --git a/host/hle/hle_mpeg.cpp b/host/hle/hle_mpeg.cpp
+index b4813f5..1b93c2b 100644
+--- a/host/hle/hle_mpeg.cpp
++++ b/host/hle/hle_mpeg.cpp
+@@ -260,13 +260,29 @@ void register_ringbuffer(HleRegistrar &hle) {
+     hle.add("sceMpeg", "sceMpegRingbufferDestruct", [](Runtime &, AllegrexContext &ctx) {
+         finish_traced(ctx, "sceMpegRingbufferDestruct", 0u, {}, 1u);
+     });
+-    // Free packets.
++    // Free packets. A pack is handed back to the ring as soon as it is
++    // demultiplexed (demux_until), but its access units may still be waiting
++    // in the demultiplexer's queues: the audio fetch runs ahead of the video
++    // fetch and pulls the last packs out before their pictures are taken. A
++    // game that ends its movie when the ring reads empty (Wipeout Pure tests
++    // for exactly `packets`) would then drop the queued pictures and never
++    // reach its own frame count, so the ring is reported one packet short of
++    // empty while anything is still queued or taken but not yet decoded.
+     hle.add("sceMpeg", "sceMpegRingbufferAvailableSize", [](Runtime &rt, AllegrexContext &ctx) {
+         auto &memory = rt.memory();
+         const std::uint32_t buffer = arg(ctx, 0);
+         const std::uint32_t packets = memory.load32(buffer + ring::kPackets);
+         const std::uint32_t filled = memory.load32(buffer + ring::kFilled);
+-        finish_traced(ctx, "sceMpegRingbufferAvailableSize", packets > filled ? packets - filled : 0u, {}, 1u);
++        std::uint32_t free = packets > filled ? packets - filled : 0u;
++        if (free == packets && packets != 0u) {
++            for (const auto &[address, state] : module().instances) {
++                if (state->ringbuffer != buffer) continue;
++                if (state->demuxer.video_ready() || state->demuxer.audio_ready() || state->video_unit || state->audio_unit)
++                    free = packets - 1u;
++                break;
++            }
++        }
++        finish_traced(ctx, "sceMpegRingbufferAvailableSize", free, {}, 1u);
+     });
+     // sceMpegRingbufferPut(ring, packets, available)
+     hle.add("sceMpeg", "sceMpegRingbufferPut", [](Runtime &, AllegrexContext &ctx) {
