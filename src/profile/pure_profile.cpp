@@ -34,6 +34,33 @@ constexpr std::uint32_t kNidSceDisplaySetFrameBuf = 0x289D82FEu;
 
 std::string item_hex(std::uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return b; }
 
+// PURE_WATCH_MOVIE=1: once per flip, the fields of the game's MovieManager object (docs/tasks/005), printed when
+// they change. The object is the one the per-frame update FUN_089488a8 last stored at DAT_08ab45bc (0 when no movie
+// runs). Fields: +0 active, +1 ended, +0x124 paused (u8); +0xd0 reader state (0 reading, 1 whole file in the ring,
+// 2 stopping); +0x118 picture-queue capacity, +0x120 pictures queued, +0x128 pictures handed to the renderer,
+// +0x10c/+0x110 write/read slots, +0x11c the picture array.
+constexpr std::uint32_t kMovieObjectPtr = 0x08AB45BCu;
+
+void watch_movie(Runtime &rt, std::uint64_t frame) {
+    static const bool on = [] { const char *v = env("WATCH_MOVIE"); return v != nullptr && *v != '\0' && *v != '0'; }();
+    if (!on) return;
+    static std::string last;
+    const std::uint32_t s = rt.memory().load32(kMovieObjectPtr);
+    std::ostringstream o;
+    o << "s=" << item_hex(s);
+    if (s != 0u) {
+        const auto &m = rt.memory();
+        o << " active=" << unsigned(m.load8(s)) << " ended=" << unsigned(m.load8(s + 1u))
+          << " paused=" << unsigned(m.load8(s + 0x124u)) << " reader=" << m.load32(s + 0xd0u)
+          << " cap=" << m.load32(s + 0x118u) << " queued=" << static_cast<std::int32_t>(m.load32(s + 0x120u))
+          << " shown=" << m.load32(s + 0x128u) << " wr=" << m.load32(s + 0x10cu) << " rd=" << m.load32(s + 0x110u)
+          << " pics=" << item_hex(m.load32(s + 0x11cu));
+    }
+    if (o.str() == last) return;
+    last = o.str();
+    std::cout << "[pure] movie frame " << frame << " t=" << kernel().now_us() << " " << last << "\n";
+}
+
 void wrap_flip_counter(HleRegistrar &hle) {
     static HleFunction original = hle.bound_function("sceDisplay", kNidSceDisplaySetFrameBuf);
     if (!original) return;
@@ -43,6 +70,7 @@ void wrap_flip_counter(HleRegistrar &hle) {
         static const std::uint64_t log_every = [] { const char *v = env("FRAME_LOG"); return v ? std::strtoull(v, nullptr, 10) : 0ull; }();
         ++frames;
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
+        watch_movie(rt, frames);
         original(rt, ctx);
         if (exit_at != 0u && frames >= exit_at) {
             std::cout << "[pure] exit at frame " << frames << "\n";
