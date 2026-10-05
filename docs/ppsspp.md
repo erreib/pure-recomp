@@ -1,8 +1,13 @@
 # PPSSPP driver (tools/ppsspp/ppsspp_ctl.py)
 
-## Status at pause (2026-10-05)
+## Status (2026-10-05, after task 006)
 
 Works:
+- Reference captures exist: `ref/` holds frontend (Language Selection), title, profile, main_menu and
+  vineta_k_start, each as a PNG and a `.ppdmp` of the same frame, plus `ref/boot-hle.log`; frames and hashes are in
+  `ref/README.md`. The routes are `routes/frontend.txt` (cold boot to MAIN MENU, profile NAME0000 / AAA, SAVE
+  PROFILE answered NO) and `routes/vineta_k_start.txt` (MAIN MENU to the Vineta K race start, chained after the
+  frontend with a second `--pad-file`). Three runs gave byte-identical PNGs, and two runs byte-identical `.ppdmp`s.
 - `tools/ppsspp/ppsspp_ctl.py` (Python 3 stdlib only, no venv) launches `/Applications/PPSSPPSDL.app` 1.20.4 on
   `disc.iso` in a window at 1x with the WebSocket debugger on, connects to it, plays a frame-indexed pad script,
   saves PNG screenshots and GE dumps (`.ppdmp`) at given frames, and quits PPSSPP cleanly (SIGTERM). `status`,
@@ -16,12 +21,13 @@ Works:
   `~/.config/ppsspp/PSP/SYSTEM/ppsspp.ini.orig` (and `controls.ini.orig`). The live ini is currently restored to the
   `.orig` content and no PPSSPP instance is running.
 
+- Captures can be one flip apart: a screenshot-only capture leaves the CPU stepping, so the next capture arms its
+  breakpoint before the game runs on. Before task 006 every capture resumed and paused again, which let about 16
+  frames pass at real-time speed; `--shots-every 15` then drifted 3 frames per capture and named files after the
+  requested frame. A capture that still starts late (after a GE dump, which has to resume) is flagged `late_frames`
+  in the report and in the log.
+
 Does not work yet / blocked:
-- No reference captures exist yet in `ref/` (frontend.png, frontend.ppdmp, boot-hle.log, vineta_k_start.*). The
-  scripted frontend route is unfinished: it reaches the PROFILE screen and the name/tag entry deterministically, but
-  the SAVE PROFILE answer is mistimed in `routes/frontend_draft.txt` (DOWN lost, CROSS picks YES, Save dialog opens).
-  By hand (`press` on a running game) I did reach MAIN MENU and then Single Race > Vector > Alpha > Vineta K >
-  Feisar, up to READY / countdown / GO; only the frame numbers of a scripted run are missing.
 - Screenshots need PPSSPP's software renderer. The debugger's `gpu.buffer.screenshot` (and every `gpu.buffer.*`)
   fails in 1.20.4 while the CPU is stepping ("Could not download output": the request is only serviced in GE
   stepping, which the WebSocket API cannot enter) and returns the window backbuffer anyway. The driver reads the
@@ -30,29 +36,24 @@ Does not work yet / blocked:
 - Save states (`--savestate`) are blocked: the debugger has no save-state event, and the fallback (posting the
   F2 Save State hotkey with CoreGraphics) needs the Accessibility / post-event permission, which this terminal does
   not have (`CGPreflightPostEventAccess` = false). Granting it to the terminal app makes `--savestate` work.
-- `ref/boot-hle.log` not captured yet: the verified run below wrote a boot-to-title HLE log to `out/ppsspp/`; rerun
-  with `--log ref/boot-hle.log` on the finished frontend route.
+- The `zone` reference scene is not routed yet (SINGLE PLAYER, DOWN x3 to ZONE, CROSS).
 
-Exact command to reproduce a capture (title screen at frame 2650, screenshot and GE dump of the same frame):
-```
-cd ~/dev/pure-recomp
-/opt/homebrew/bin/python3 tools/ppsspp/ppsspp_ctl.py run \
-  --pad "700:CROSS,708:,1700:CROSS,1708:,2400:START,2408:" \
-  --shot 2650:out/ppsspp/title.png --gedump 2650:out/ppsspp/title.ppdmp \
-  --log out/ppsspp/boot-hle.log --report out/ppsspp/title.json
-```
-Verified 2026-10-05 13:08: 46 s wall, captured frame 2653 (title screen, framebuffer 0x04000000), 26388-byte
-`.ppdmp` (PPSSPP's own copy `~/.config/ppsspp/PSP/SYSTEM/DUMP/UCUS98612_0002.ppdmp`), 1.16 MB HLE log, PPSSPP quit
-cleanly, ini restored. These are title-screen captures in `out/`, not the `ref/` frontend scene.
-Trial screenshots every N frames (how the route was found): add `--until F --shots-every N [--shots-from F]
---shots-dir DIR`. Scene timeline on a fresh memstick (software renderer): SCEA logo ~120, LANGUAGE SELECTION from
-~480 (CROSS at 700), Studio Liverpool ~1200, memory-stick notice ~1560 (CROSS at 1700), FX300 intro then movie
-~1800 (START at 2400 skips it), title "PRESS START BUTTON" stable from ~2520 (blinking cursor), PROFILE
-(LOAD/NEW/DELETE) stable from ~2880 after START at 2700.
+The exact commands that made `ref/` are in `ref/README.md` ("Regenerate"); each run takes about 2 minutes (the
+emulator runs at real-time speed) and quits PPSSPP and restores the ini at the end. Verified 2026-10-05: the
+capture run took 122 s wall, the logged run to the main menu 96 s.
+Trial screenshots every N frames (how the routes were found): add `--until F --shots-every N [--shots-from F]
+--shots-dir DIR`. Scene timeline (software renderer): SCEA logo ~120, LANGUAGE SELECTION from ~480 (CROSS at 700),
+Studio Liverpool ~1200, memory-stick notice ~1560 (CROSS at 1700), FX300 intro then movie ~1800 (START at 2400 skips
+it), title "PRESS START BUTTON" stable from ~2520 (blinking cursor), PROFILE (LOAD/NEW/DELETE) stable from ~2850
+after START at 2700; the rest of the frontend is annotated in `routes/frontend.txt`. Race route (presses at
+5700-6700): LOADING at 6753, camera fly-by from ~6810, HUD fades in 7151-7155, READY from 7213, blue ring from ~7220,
+GO! at about 7391-7411.
 
 Memstick state matters: the game wrote `PSP/SAVEDATA/PPCD00001DLS001` ("Online system info") the first time it
-passed the title (trial 6); all later trials ran with it present. A profile save `UCUS98612P0000` created by an
-accidental YES in trial 10 was moved to `out/ppsspp/savedata-moved/`; routes assume no profile save exists.
+passed the title (trial 6); all later runs, including every task 006 run, ran with it present and left it unchanged
+(mtime still 12:45). A profile save `UCUS98612P0000` created by an accidental YES in trial 10 was moved to
+`~/dev/pure-recomp/out/ppsspp/savedata-moved/`; the routes assume no profile save exists, and answering NO on SAVE
+PROFILE keeps it that way (no task 006 run wrote one).
 
 ## How it works
 
@@ -132,13 +133,16 @@ Note the key is `SoftwareRenderer`, not `SoftwareRendering`.
 - The game's menus drop presses that land during transitions; routes need wide spacing (90+ frames inside the name
   entry worked; screen changes take 100-300 frames).
 
-## Reaching the reference scenes (by hand, frames still to be pinned)
+## Reaching the reference scenes
 
-- frontend: language CROSS, memory-stick notice CROSS, START (movie), START (title), PROFILE: DOWN to NEW, CROSS;
-  SET NAME: CROSS x4 (N,A,M,E), then DOWN+CROSS x4 (four '0'), CROSS on the blank 9th slot ends the name, CROSS to
-  SET TAG; CROSS x3 (AAA), CROSS; SAVE PROFILE: DOWN to NO, CROSS; WARNING (autosave disabled): CROSS; MAIN MENU
-  (SINGLE PLAYER / MULTIPLAYER / PROFILE / DOWNLOAD). Answering NO keeps the memstick free of profile saves.
-- vineta_k_start: from MAIN MENU, CROSS on SINGLE PLAYER, SINGLE RACE, VECTOR, ALPHA league, VINETA K, FEISAR (each
-  the first entry, so CROSS only); the race loads, flies the camera, shows READY, then the blue countdown rings
-  (about 60-90 frames after READY) and GO.
+- frontend (`routes/frontend.txt`, frames in the file): language CROSS, memory-stick notice CROSS, START (movie),
+  START (title), PROFILE: DOWN to NEW, CROSS; SET NAME: CROSS x4 (N,A,M,E), then DOWN+CROSS x4 (four '0'), CROSS on
+  the blank 9th slot ends the name, CROSS to SET TAG; SET TAG: CROSS x4 (the tag reads AAA, its cursor goes away),
+  then one more CROSS: SET TAG does not advance by itself, and this missing press was the draft route's SAVE
+  PROFILE "mistiming"; SAVE PROFILE: DOWN to NO, CROSS; WARNING (autosave disabled): CROSS; MAIN MENU (SINGLE
+  PLAYER / MULTIPLAYER / PROFILE / DOWNLOAD). Answering NO keeps the memstick free of profile saves.
+- vineta_k_start (`routes/vineta_k_start.txt`): from MAIN MENU, CROSS on SINGLE PLAYER, SINGLE RACE, VECTOR, ALPHA
+  league, VINETA K, FEISAR (each the first entry, so CROSS only); the race loads, flies the camera, fades the HUD
+  in, shows READY with a spinning blue ring, then GO!. There are no countdown digits; `ref/vineta_k_start.png` is
+  the first frame with the HUD fully in (CURRENT 0.00.0, ship on the grid).
 - zone: SINGLE PLAYER menu, DOWN x3 to ZONE, CROSS; not explored yet.

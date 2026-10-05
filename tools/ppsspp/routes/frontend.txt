@@ -1,0 +1,32 @@
+# PPSSPP route: cold boot to MAIN MENU (2026-10-05). Frames are vblank counts since boot (ppsspp_ctl.py run).
+# Memstick: PSP/SAVEDATA/PPCD00001DLS001 present, no profile save (UCUS98612P0000) present.
+# Replays deterministically: two runs give byte-identical captures (docs/ppsspp.md, ref/README.md).
+# Screen timeline in a run of this route (software renderer):
+#   ~480 LANGUAGE SELECTION, ~1560 memory-stick notice, ~1800 intro movie, ~2490 title "PRESS START BUTTON",
+#   ~2850 PROFILE (LOAD/NEW/DELETE), 3000 SET NAME, ~4320 SET TAG, ~4880 SAVE PROFILE (YES/NO),
+#   ~5110 WARNING (autosave disabled), ~5340 MAIN MENU (its help text finishes typing at ~5543).
+700:CROSS, 708:                   # LANGUAGE SELECTION: ENGLISH
+1700:CROSS, 1708:                 # memory-stick notice
+2400:START, 2408:                 # skip the intro movie
+2700:START, 2708:                 # title: PRESS START BUTTON -> PROFILE
+2900:DOWN, 2908:                  # PROFILE: LOAD -> NEW
+3000:CROSS, 3008:                 # NEW -> SET NAME
+3150:CROSS, 3158:                 # name slots 1-4: N, A, M, E
+3240:CROSS, 3248:
+3330:CROSS, 3338:
+3420:CROSS, 3428:
+3510:DOWN, 3518:, 3600:CROSS, 3608:   # name slots 5-8: DOWN then CROSS enters 0; the name reads NAME0000
+3690:DOWN, 3698:, 3780:CROSS, 3788:
+3870:DOWN, 3878:, 3960:CROSS, 3968:
+4050:DOWN, 4058:, 4140:CROSS, 4148:
+4230:CROSS, 4238:                 # blank 9th slot ends the name
+4320:CROSS, 4328:                 # -> SET TAG
+4500:CROSS, 4508:                 # tag: CROSS x4; the tag reads AAA and its cursor is gone from ~4800
+4590:CROSS, 4598:
+4680:CROSS, 4688:
+4770:CROSS, 4778:
+4860:CROSS, 4868:                 # one more CROSS confirms the tag -> SAVE PROFILE at ~4880 (YES selected);
+                                  # without it SET TAG stays up (checked to frame 5430; DOWN does not advance it)
+5000:DOWN, 5008:                  # SAVE PROFILE: YES -> NO (NO selected from ~5006)
+5100:CROSS, 5108:                 # answer NO (no profile save is written) -> WARNING at ~5114
+5250:CROSS, 5258:                 # WARNING: CROSS -> MAIN MENU at ~5340
