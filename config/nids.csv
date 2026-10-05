@@ -1,0 +1,27 @@
+# library,nid,name  (NIDs Wipeout Pure imports that the framework table does not name; from psplibdoc)
+LoadExecForUser,0xBD2F1094,sceKernelLoadExec
+ModuleMgrForUser,0xD675EBB8,sceKernelSelfStopUnloadModule
+ThreadManForUser,0x110DEC9A,sceKernelUSec2SysClock
+ThreadManForUser,0x18260574,sceKernelReceiveMbx
+ThreadManForUser,0x6652B8CA,sceKernelSetAlarm
+ThreadManForUser,0x7E65B999,sceKernelCancelAlarm
+ThreadManForUser,0x912354A7,sceKernelRotateThreadReadyQueue
+ThreadManForUser,0x94416130,sceKernelGetThreadmanIdList
+ThreadManForUser,0xBC6FEBC5,sceKernelReferSemaStatus
+ThreadManForUser,0xD8B299AE,sceKernelSetVTimerHandler
+UtilsForUser,0x37FB5C42,sceKernelGetGPI
+sceHttp,0x15540184,sceHttpDeleteHeader
+sceHttp,0x1A0EBB69,sceHttpDisableRedirect
+sceHttp,0x2A6C3296,sceHttpSetAuthInfoCB
+sceHttp,0x47940436,sceHttpSetResolveTimeOut
+sceHttp,0x68AB0F86,sceHttpsInitWithPath
+sceHttp,0x78A0D3EC,sceHttpEnableKeepAlive
+sceHttp,0x78B54C09,sceHttpEndCache
+sceHttp,0xA6800C34,sceHttpInitCache
+sceHttp,0xB3FAF831,sceHttpsDisableOption
+sceHttp,0xD081EC8F,sceHttpGetNetworkErrno
+sceNetAdhoc,0xC7C1FC57,sceNetAdhocGetPdpStat
+sceParseHttp,0x8077A433,sceParseHttpStatusLine
+sceParseUri,0x568518C9,sceUriParse
+sceRtc,0x27C4594C,sceRtcGetTime_t
+sceRtc,0x3A807CC8,sceRtcSetTime_t

@@ -1,0 +1,23 @@
+# game data and anything derived from it
+disc/
+disc.iso
+*.iso
+generated/
+generated-variants/
+game/
+overlays/
+ref/*
+!ref/README.md
+ghidra_project/
+# build, logs, caches
+build/
+out/
+.ccache/
+.venv/
+# third party
+vendor/
+# agent worktrees
+.claude/worktrees/
+# os / python
+.DS_Store
+__pycache__/

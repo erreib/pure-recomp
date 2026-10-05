@@ -1,0 +1,49 @@
+# Decisions
+
+| ID | Date | Title | Status |
+|---|---|---|---|
+| D-001 | 2026-10-05 | Vendor base: TeamGDB/PortableKit pinned at 8b0c3fe | accepted |
+| D-002 | 2026-10-05 | Renderer path: Vulkan/MoltenVK bootstrap, then native Metal behind a seam | accepted |
+| D-003 | pending | GE backend seam | open (M2) |
+| D-004 | pending | Determinism: virtual clock, fixed RTC, frame-indexed input | open (M3) |
+| D-005 | pending | Savedata directory layout, DLC-ready | open (M5) |
+| D-006 | 2026-10-05 | Licence of our code: GPL-2.0-or-later | accepted |
+
+## D-001  2026-10-05  Vendor base
+Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
+first. Spike S3 (`docs/vendor-map.md`) found PortableKit is the framework and the whole host layer moved out of
+Yakumo into a generic `portablekit` namespace, built as a CMake subproject with `portablekit_add_game()` and a
+`portablekit::game()` profile that lives in the game's own repo. Spike S4 ran both recompilers on BOOT.BIN.
+Decision: vendor PortableKit at commit 8b0c3fe (2026-09-27) under `vendor/portablekit`, our profile in `src/`
+out of tree, our HLE additions as an HLE extension module (`PORTABLEKIT_HLE_EXTENSION_DIRS`) so they need no
+vendor patch. Yakumo stays a read-only reference under `~/dev/scratch/Yakumo` for renderer fixes newer than the
+split.
+Why: out-of-tree profile (Yakumo hard-codes `profiles/<name>`); PortableKit lowers every instruction of BOOT.BIN
+(Yakumo leaves 76 sites unlowered); HLE name coverage 246/278 vs 165/278; the interpreter runs the game with no
+corpus (Yakumo refuses), so bring-up starts before the 15 to 20 minute corpus compile; Bezier/spline patches are
+tessellated; macOS CI; 20/20 tests pass here.
+Consequences: PortableKit warns its interfaces change without notice, so updates happen only by decision; only
+Yakumo has shipped a full-speed recompiled game, so renderer and kernel behaviour get conformance tests before we
+rely on them (R10); the VulkanRenderer still owns SDL and ImGui in both repos, so the D-002 split is our patch.
+Alternatives: Yakumo with a symlinked profile or an out-of-tree patch; PSPRecomp (Windows only).
+Status: accepted.
+
+## D-002  2026-10-05  Renderer path
+Context: Yakumo ships a working Vulkan GE renderer that runs on macOS through MoltenVK. Erik wants a native
+Metal renderer and a portable design.
+Decision: Milestone 2 boots the game on Yakumo's Vulkan renderer so the CPU/kernel layer is debugged with a
+known-good renderer. Fable then defines a backend-neutral seam fed by Yakumo's DrawCall/BlockTransfer stream;
+the Metal backend is written against it (M6) with Vulkan as a second oracle. Vulkan stays as the portable
+backend for other platforms.
+Consequences: a MoltenVK/glslang dependency and a patch that splits VulkanRenderer from SDL/ImGui; two
+backends to keep at parity, checked by ge_replay and fuzzing.
+Alternatives: Metal from day one (renderer and CPU bugs arrive together, no A/B); Vulkan only (no native Metal).
+Status: accepted (Erik, 2026-10-05).
+
+## D-006  2026-10-05  Licence
+Context: the framework is MIT, FFmpeg is LGPL and linked dynamically, PPSSPP is GPL-2.0-or-later and may one
+day be the source of a ported piece. Erik may publish the repo and is fine with GPL.
+Decision: our code is GPL-2.0-or-later. No PPSSPP code is copied until a decision records it; game assets,
+generated code and DLC keys never enter git.
+Consequences: compatible with every dependency; porting from PPSSPP later needs only a decision entry.
+Status: accepted.

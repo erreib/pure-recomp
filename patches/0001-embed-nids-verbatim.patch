@@ -1,0 +1,12 @@
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 4f87ea4..caed1c4 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -476,6 +476,7 @@ inline constexpr const char *kBuildLabel = \"${PORTABLEKIT_BUILD_LABEL}\";
+         COMMAND ${CMAKE_COMMAND} "-DINPUT=${nids_input}" -DOUTPUT=${nids_inc}
+                 -P "${PORTABLEKIT_ROOT}/tools/embed_nids.cmake"
+         DEPENDS ${nids_csv} "${PORTABLEKIT_ROOT}/tools/embed_nids.cmake"
++        VERBATIM
+         COMMENT "Embedding the NID table")
+     target_sources(${target} PRIVATE "${nids_inc}")
+     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
