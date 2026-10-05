@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-05
+Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below)
 
 ## Milestones
 
@@ -37,5 +37,18 @@ Last updated: 2026-10-05
 
 | Blocker | State |
 |---|---|
+| Profile screen after the title (windowed) | After Start on the title the game opens `Data/Movies/Profile_part1.PMF` and then sits on a static frontend page with the memory-stick icon (`out/shots4/m2300.png`), identical for 1000+ frames; no savedata trace, no stub hit. Suspect the second sceMpeg movie (first one plays) or the profile/savedata flow. Next: `PURE_TRACE_MPEG=1` windowed run to the title + Start (log `out/m2-stuck.log` has sync/io/atrac traces) |
 | Headless intro movie | With `PURE_NO_RENDER`/`PURE_NO_AUDIO` the game spins on `sceMpegRingbufferAvailableSize` (returns 0x1A8 forever) at the intro movie; the windowed run passes it. Headless verification needs either the movie path to work without a renderer or a skip switch (M4-T4, R8) |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
+
+## Resume (written 2026-10-05 at the pause)
+- Branches: `main` d7467ec (scaffold). `batch/m2` = main + task 002 merged and reviewed (ecb40cf); fast-forward main
+  when Erik says so. Opus workers were still running on `task/001-tooling-port` and `task/003-headless-intro-movie` in
+  `.claude/worktrees/agent-*`; their Result sections land in `docs/tasks/00N-*.md` on those branches. Merge per the
+  checklist in CLAUDE.md / the plan: rerun each brief's Verify from this checkout, spot-read, `git merge --no-ff` into
+  `batch/m2`, remove the worktree.
+- A PPSSPP driver agent was writing `tools/ppsspp/ppsspp_ctl.py`, `docs/ppsspp.md`, `ref/*` in this checkout
+  (uncommitted; `git status`). Its purpose: reference captures for frame comparison (spike S6). Check what it left.
+- Next milestone steps: fix the profile-screen stall above; route to the main menu and a race (task 004: route script
+  + `route_check` using `tools/imgdiff.py --region --min-variance`); PPSSPP reference compare; then M3 (race).
+- The plan with every brief: `~/.claude/plans/in-the-bouncer-recomp-validated-babbage.md`.
