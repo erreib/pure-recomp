@@ -44,9 +44,17 @@ Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
 
 ## Resume (written 2026-10-05 at the pause)
-- Branches: `main` d7467ec (scaffold). `batch/m2` = main + task 002 merged and reviewed (ecb40cf); fast-forward main
-  when Erik says so. Opus workers were still running on `task/001-tooling-port` and `task/003-headless-intro-movie` in
-  `.claude/worktrees/agent-*`; their Result sections land in `docs/tasks/00N-*.md` on those branches. Merge per the
+- Branches: `main` d7467ec (scaffold). `batch/m2` = main + task 002 merged and reviewed; fast-forward main when Erik
+  says so. Both other workers committed PARTIAL results on their branches (worktrees under `.claude/worktrees/`):
+  - `task/001-tooling-port`: `tools/patches.sh` DONE (check/export tested), `tools/worktree_init.sh` written (a fresh
+    worktree builds in 33 s, all 144 corpus units ccache hits, so R5 is resolved); run_boot flags, check_env PIN check,
+    README rows NOT done. Merge the two scripts after rerunning `tools/patches.sh check`; re-brief the rest as task 004.
+  - `task/003-headless-intro-movie`: diagnosis only (see Blockers). Re-brief as "movie end condition": validate
+    against PPSSPP, then patch 0002 or `PURE_SKIP_FMV`.
+- Fixes the workers asked for, outside their May-touch: `.gitignore` must use `/disc`, `/generated`, `/game` (the
+  trailing-slash forms do not match the symlinks worktrees use); `tools/check_env.sh` still names `vendor/yakumo`;
+  `run_boot.py` should give the game a pty (block-buffered stdout loses the tail at the deadline kill); `[hle-stub]`
+  prints only on a stub's first call. Merge per the
   checklist in CLAUDE.md / the plan: rerun each brief's Verify from this checkout, spot-read, `git merge --no-ff` into
   `batch/m2`, remove the worktree.
 - A PPSSPP driver agent was writing `tools/ppsspp/ppsspp_ctl.py`, `docs/ppsspp.md`, `ref/*` in this checkout
