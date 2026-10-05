@@ -1,0 +1,7 @@
+# PPSSPP route: thrust held through the Vineta K countdown and the race (task 007, 2026-10-05). Chain it after
+# frontend.txt and vineta_k_start.txt; frames are absolute vblank counts since boot:
+#   ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.txt --pad-file tools/ppsspp/routes/vineta_k_start.txt \
+#                     --pad-file tools/ppsspp/routes/vineta_k_hold_cross.txt
+# The port's route (out/race2/route.txt, `6100:pad a 3000`) holds Cross from the countdown too.
+7213:CROSS                        # first READY frame (the countdown has no digits): hold CROSS for 3000 frames
+10213:                            # release
