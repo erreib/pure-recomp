@@ -49,6 +49,7 @@ generates the corpus into `generated/` (85 s) and `tools/build.sh profile` compi
 | `PURE_LIST_STUBS=1`, `PURE_STRICT_HLE=1` | list unimplemented imports at start; stop at the first one called |
 | `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | framework traces, one subsystem each |
 | `PURE_SKIP_FMV=1` | (task 003) skip the intro movie |
+| `PURE_WATCH_MOVIE=1` | once per flip, while they change: the game's movie object (`DAT_08ab45bc`) and its fields `active`, `ended`, `paused`, reader state, picture-queue capacity, `queued`, `shown` (pictures handed to the renderer), slots (`[pure] movie frame N ...`) |
 
 Routes that reach known screens, as input scripts: language confirm `700:pad a`, memory-stick notice `900:pad a`,
 title `1350:pad start` (frames from a cold start at the default pacing; see `config/pad_scripts/`).
