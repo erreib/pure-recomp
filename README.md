@@ -65,6 +65,7 @@ runs under a pty, so a deadline kill loses no output, and the log always ends wi
 | `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | framework traces, one subsystem each |
 | `PURE_SKIP_FMV=1` | (task 003) skip the intro movie |
 | `PURE_WATCH_MOVIE=1` | once per flip, while they change: the game's movie object (`DAT_08ab45bc`) and its fields `active`, `ended`, `paused`, reader state, picture-queue capacity, `queued`, `shown` (pictures handed to the renderer), slots (`[pure] movie frame N ...`) |
+| `PURE_WATCH_SHIP=1` | (task 007) once per flip during a race, while it changes: the player's race record (`.bss` array of 0x1C0-byte entries, position of entry k at `0x08B72010 + k*0x1C0`): race clock, position, velocity, km/h, track distance, lap (`[pure] ship frame N t=... clock=... pos=... vel=... kmh=... dist=... lap=...`). PPSSPP reads the same addresses |
 
 Routes that reach known screens, as input scripts in `config/pad_scripts/` (frames from a cold start at the default
 pacing): `frontend.txt` confirms the language at 700, skips the loading page at 1600, clears the memory-stick notice
