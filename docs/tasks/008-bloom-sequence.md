@@ -52,7 +52,60 @@ The .ppdmp format cannot be parsed with a reasonable effort (then use PPSSPP's G
 describe what you saw, with screenshots in out/).
 
 ## Result
-(worker fills)
+Status: DONE
+
+Changed: `docs/ge-effects.md` (new), `tools/ppsspp/ppdmp.py` (new: .ppdmp parser, stdlib plus the `zstd` CLI; also
+replays our port's `PURE_TRACE_GE_LIST` output). Traces, screenshots and texture PNGs are in `out/008/` (ignored).
+No renderer, vendor, src or config change. The .ppdmp format parsed without trouble, so the escalation fallback was
+not used.
+
+The sequence, in brief (PPSSPP frame 7155; our frame 6485 has the same structure and registers):
+- Draw 0 clears 0x04088000 (8888, stride 512) with depth 0x04110000 (stride 512) and stencil/alpha 4. Four billboard
+  render-to-texture rounds go into 0x04154000 (565, stride 128) and are sampled back as 565 128x128 bufw 128 (draws
+  26, 45, 69, 82). The opaque world and the sky cube (to 602) write the bloom mask into alpha with stencil REPLACE:
+  ref 4 for most materials, 0xFF for lights.
+- A GE SIGNAL 0x0200 follows the sky. Its handler reads the depth buffer with the CPU for the lens flare. The
+  translucent world comes next, then the flare (draw 832: 10 additive quads, depth test off, alphas 0x3F-0x79).
+- The bloom is 833-838. 833: 0x04088000 downsampled 2:1 into 0x04110000 (8888, stride 256: the depth buffer's
+  bytes) with blend add(SA, 0), so the scene is weighted by the stencil mask. 834/835: 0x04132000 (= 0x04110000 +
+  256x136x4) is blacked, then gets an 11-tap horizontal blur of 0x04110000 (ONE+ONE). 836/837: 0x04110000 is
+  blacked, then gets the vertical blur of 0x04132000. 838: 0x04110000 is upscaled 1:2 and added onto 0x04088000 at
+  0xAF/0xFF, with alpha writes masked. Then the HUD and DISPLAY 0x04088000.
+- Our port does the same thing. `PURE_TRACE_FB_TEXTURES` at frame 5707 and the `PURE_TRACE_GE_LIST` replay of frame
+  6485 show the same addresses, strides, formats, vertex bounds, blends and masks.
+- Lens flare: our port does the read. `PSPRECOMP_TRACE_VRAM_READS` shows 16 + 1 loads per frame in
+  0x04120000-0x0413FFFF, each right after the stall update that runs the SIGNAL. But the read hits guest memory that
+  holds no depth. The renderer keeps depth in per-target Vulkan images and never writes it back, so the read most
+  likely returns zero ("sky"). The actual values were not measured.
+- Diagnosis: `find_framebuffer_texture` (vendor/portablekit/host/gpu/vulkan_renderer.cpp:4199-4235) resolves three
+  of the four bloom binds correctly. The v-blur source 0x04132000 lies inside two targets with stride 256. The lookup
+  picks the one with the highest `draw_serial` (:4215), which is 0x04110000, because draw 836 bumped its serial
+  (:6146). So the v-blur samples rows 136-271 of the 0x04110000 image, at offset (0,136). No draw ever writes those
+  rows. The target starts undefined (:3412, :3475), and on this machine those rows read back with R and B high and
+  G = 0. FB-on minus FB-off at r6400: +72.8 R, +0.4 G, +77.0 B, uniform. Blurred and added at 0.686, that gives the
+  magenta wash.
+- Fix proposal: in `find_framebuffer_texture`, prefer a target that starts exactly at the texture's address (or one
+  whose drawn rows cover the texture) over the most recently drawn target that only contains it.
+
+Verify output (the Verify line prints nothing; its exit status):
+```
+$ test -s docs/ge-effects.md && grep -q 0x04110000 docs/ge-effects.md && grep -qi 'magenta' docs/ge-effects.md; echo "exit $?"
+exit 0
+```
+
+Open questions:
+- Even with the bind fixed, the bloom will not match until stencil-as-alpha is emulated. The GE state ignores
+  0x24/0xDC/0xDD (and the write masks 0xE8/0xE9), so the mask would come from texture alpha and the whole scene
+  would bloom. That is a renderer task (R3/M6), as is storing depth into guest 0x04110000 when the flare SIGNAL is
+  raised.
+- What MoltenVK leaves in never-written target rows (here R/B high, G 0) is unexplained. Should new targets be
+  cleared on creation, so that any other undrawn-row read is deterministic?
+- The flare's read values, and our flare's vertex alphas, are untested. Confirming them needs a value-level VRAM
+  read trace (address and value), which the framework does not have.
+- GE list run indices are not reproducible between runs: the same index landed 34 frames later in run B. A
+  frame-anchored `PURE_TRACE_GE_LIST` would make list dumps practical.
+- Some texture and heap addresses differ slightly between PPSSPP and our port: the flare atlas is 0x0968A2B0 vs
+  0x0968A4B0, and a VRAM trail texture is 0x041D0700 vs 0x041CEDC0. Compare dumps by role, not by address.
 
 ## Review
 (Fable fills)
