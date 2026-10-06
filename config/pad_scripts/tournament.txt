@@ -1,0 +1,17 @@
+# MAIN MENU -> SINGLE PLAYER -> TOURNAMENT (1 DOWN) -> VECTOR -> ALPHA -> FEISAR -> the league's four races, Cross
+# held from 5850. Follows main_menu.txt (MAIN MENU at ~4450); measured 2026-10-06 (out/018/e-tour). Screens: CLASS
+# SELECTION by 5000, TOURNAMENT SELECTION by 5200 (ALPHA only on a new profile; the panel lists Vineta K, Modesto
+# Heights, Chenghou Project and Blue Ridge), TEAM SELECTION by 5400; there is no track screen. The first race
+# (Vineta K, eight ships, the player 8th on the grid at 1079 m) loads from 5500, the probe finds the player at 5520
+# and the clock starts at about 5975 to 6055, at 60 flips a second.
+# The league: tools/campaign_sweep.py adds N `pad dpdown` steps at 5180, 5210, ... for the Nth league and stretches
+# the Cross hold at 5850 to the cell's budget; between races it answers the screens itself (Cross every 2 s: ENTER
+# TAG, the race standings, TOURNAMENT STANDING, PROFILE AUTOSAVED, NEXT RACE) and holds Cross again from the next
+# grid (docs/tracks.md).
+4700:pad a
+4800:pad dpdown
+4900:pad a
+5100:pad a
+5300:pad a
+5500:pad a
+5850:pad a 3000

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Campaign sweep: each (mode, track) cell from a cold boot to the race's results screen under scripted driving.
+"""Campaign sweep: each (mode, track) cell from a cold boot to the mode's end screen under scripted driving.
 
   tools/campaign_sweep.py [MODE [TRACK ...]] [--frames N] [--stall S] [--drive FILE] [--shots-every N] [--list]
                           [--set KEY=VALUE ...] [--out DIR] [--no-damage]
@@ -49,9 +49,10 @@ time, lap and distance. The summary's detail counts them a lap. A `ref` shot 600
 HUD's shield bar (SHIELD_BAR, full) to check the reading.
 
 --frames N is the race budget: the run stops at flip THROTTLE + N, THROTTLE being the race route's Cross-hold step
-(6100), since the menu route alone takes that long (a three-lap race at Vector is 150 s, 9000 flips, more). Without
---frames each track gets its budget from MODES (`frames`): the follower's laps take about 60 s on Vineta K and 75 to
-95 s on the other Alpha tracks.
+(6100 in Single Race; MODES `throttle`), since the menu route alone takes that long (a three-lap race at Vector is
+150 s, 9000 flips, more). Without --frames each track gets its budget from MODES (`frames`): the follower's laps take
+about 60 s on Vineta K and 75 to 95 s on the other Alpha tracks; Time Trial, Free Play and Zone run at 30 flips a
+second, and Tournament's budget covers its four races.
 
 --no-damage sets PURE_TEST_NO_DAMAGE=1, the port's test switch that refills the player's shield every flip, so
 contacts cannot destroy the ship: the sweep's job is to reach every results screen and find halts, not to race
@@ -72,6 +73,14 @@ While the run goes the tool reads the `[pure] ship` lines (race clock, distance 
     out/sweep/<mode>-<track>.stall.csv holds those 5 s in full.
   - halted: a `[hle-stub]`, `unsupported` or `Runtime stopped` line other than the frame exit and our own quit.
   - no race: no race clock 1800 flips after the Cross-hold step means the menu route broke; the sweep stops there.
+  - stuck (Tournament): no next race on its grid, or no final standings, ADVANCE_LIMIT flips after a race's
+    results panel.
+The other modes end on their own screens (MODES `end`): Time Trial on TIME TRIAL COMPLETED and Free Play, paused
+after its laps and ended with END SESSION, on FREE PLAY SESSION RESULTS, both by the TOTAL label rule above (Free
+Play's label is TOTAL LAPS, in the same place); Zone, run without the stall rule, on the SHIP DESTROYED panel (two
+shots in a row), whose TOTAL ZONES CLEAR goes into the detail; Tournament, after each race's results panel, presses
+Cross every ADVANCE_EVERY flips through the screens between races and ends on the TOURNAMENT STANDING screen after
+the last race (STANDING_TITLE).
 Outputs: out/sweep/<mode>-<track>.log (the game's output, repeated lines folded), out/sweep/<mode>-<track>.png (the
 results screen, the stall shot, or the last frame captured), out/sweep/<mode>-<track>/ (the live shots), and
 out/sweep/summary.txt, a table with one row per cell ever run (the latest outcome replaces the cell's earlier row;
@@ -99,17 +108,50 @@ OUT = "out/sweep"
 # `frames` is each track's race budget (flips from the Cross hold): three laps at the follower's pace, the results
 # panel and some slack (task 016: laps of 57 to 70 s on Vineta K, 75 to 95 s on the other three; the race clock runs
 # at about 58 flips a second).
+# The other keys (task 018; docs/tracks.md has each mode's screens):
+#   fps     flips a second in the race: Time Trial, Free Play and Zone are locked at 30 (docs/research.md), so their
+#           budgets are flips at 30 a second, and the flip-counted waits (the `ref` shot, the live shots after the
+#           finish) are scaled to keep their times
+#   end     how a cell ends: `results` (the results panel's TOTAL label, as in Single Race), `session` (Free Play has
+#           no last lap: after `laps` laps the sweep pauses and picks END SESSION; FREE PLAY SESSION RESULTS, whose
+#           TOTAL LAPS label is where TOTAL is, is the end, or with no lap done the "RETURN TO MAIN MENU" banner),
+#           `destroyed` (Zone ends when the shield runs out: the "SHIP DESTROYED" panel with TOTAL ZONES
+#           CLEAR is the end, the zones are read from it, and the stall rule and --no-damage do not apply),
+#           `standings` (Tournament: the races of `races` in a row; after each results panel the sweep presses Cross
+#           every ADVANCE_EVERY flips through ENTER TAG and the standings until the next race's ship is on its
+#           grid; after the last race the TOURNAMENT STANDING screen, by its title, is the end)
+#   races   Tournament: the tracks of each league in race order (each race steers with its track's table)
 ALPHA = ["vineta_k", "modesto_heights", "chenghou_project", "blue_ridge"]
 DEFAULT_FRAMES = 13000
 MODES = {
     "single_race": {"route": "config/pad_scripts/single_race.txt", "laps": 3, "throttle": 6100,
                     "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
-                    "frames": {"vineta_k": 13000, "modesto_heights": 17000, "chenghou_project": 17000,
-                               "blue_ridge": 17000}},
+                    "frames": {"vineta_k": 13000, "modesto_heights": 18000, "chenghou_project": 18000,
+                               "blue_ridge": 18000}},
+    # Three laps alone against the clock, at 30 flips a second. The live file is read every 10 flips, a third of
+    # a second here, and the follower's laps are slower than in Single Race: 81.8, 67.5 and 73.6 s on Vineta K
+    # (2026-10-06), 6800 flips with the results panel. The other tracks' 75 to 95 s laps would be up to 9000.
+    "time_trial": {"route": "config/pad_scripts/time_trial.txt", "laps": 3, "throttle": 5900, "fps": 30,
+                   "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
+                   "frames": {"vineta_k": 9000, "modesto_heights": 11000, "chenghou_project": 11000,
+                              "blue_ridge": 11000}},
+    "free_play": {"route": "config/pad_scripts/free_play.txt", "laps": 3, "throttle": 5900, "fps": 30,
+                  "end": "session", "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
+                  "frames": {"vineta_k": 9000, "modesto_heights": 11000, "chenghou_project": 11000,
+                             "blue_ridge": 11000}},
+    # Zone tracks: zone_1 is PRO TOZO, the only one open on a new profile.
+    "zone": {"route": "config/pad_scripts/zone.txt", "laps": 0, "throttle": 5250, "fps": 30, "end": "destroyed",
+             "downs_at": 4980, "downs_gap": 30, "tracks": ["zone_1"], "frames": {"zone_1": 9000}},
+    # Leagues: ALPHA only on a new profile. The budget covers all four races (Single Race's budgets, 13000 +
+    # 3 * 18000, and about 3000 flips for the screens after each race).
+    "tournament": {"route": "config/pad_scripts/tournament.txt", "laps": 3, "throttle": 5850, "end": "standings",
+                   "downs_at": 5180, "downs_gap": 30, "tracks": ["alpha"], "races": {"alpha": ALPHA},
+                   "frames": {"alpha": 80000}},
 }
 
 SHIP_RE = re.compile(r"\[pure\] ship frame (\d+) t=\d+ clock=(\S+) pos=(\S+),(\S+),(\S+) vel=(\S+),(\S+),(\S+) "
                      r"kmh=(\S+) dist=(\S+) lap=(\d+)(?: shield=(\S+))?")
+PLAYER_RE = re.compile(r"\[pure\] ship frame (\d+) player object (\S+) index (\d+)")   # a new race's ship
 FRAME_RE = re.compile(r"\[pure\] frame (\d+)")
 SCRIPT_RE = re.compile(r"\[script\] frame (\d+): shot (\S+)")
 HALT_RE = re.compile(r"\[hle-stub\]|unsupported|Runtime stopped")
@@ -147,6 +189,31 @@ TITLE_REGION = (16, 22, 170, 14)
 DESTROYED_TITLE = (-4, 11, -1, 11, -1, 2, -1, 11, -7, 12, -1, 11, -1, 11, -2, 10, -1, 11, -1, 11, -1, 11, -2, 11, -1,
                    12, -11)
 TITLE_MAX_MISMATCH = 8          # columns
+# Zone (task 018, out/018/e-zone2): the same "SHIP DESTROYED" title heads Zone's end panel, about 6 s after the
+# shield runs out, with TOTAL ZONES CLEAR, TOTAL LAPS CLEAR, PERFECT ZONES, PERFECT LAPS, TOP SPEED, SCORE and ENTER
+# TAG. ZONES_VALUE is where TOTAL ZONES CLEAR's number is drawn (left-aligned at x 240, 8 pixels high; room for
+# three digits), read by read_digits.
+ZONES_VALUE = (236, 52, 40, 14)
+# Free Play (task 018, out/018/e-fp3): END SESSION in the pause menu (CONTINUE, RESTART, END SESSION) leads to
+# FREE PLAY SESSION RESULTS (the laps best first, TOTAL LAPS, ENTER TAG; free_play-vineta_k, 2026-10-06) when a lap
+# was done, and with none to a fly-by with a "RETURN TO MAIN MENU" banner and PRESS X TO CONFIRM; MENU_BANNER is the
+# banner's lit columns in BANNER_REGION, as DESTROYED_TITLE is the title's (shots of the banner differ from it by 0
+# to 2 columns).
+BANNER_REGION = (52, 80, 220, 20)
+MENU_BANNER = (-5, 11, -1, 11, -1, 11, -1, 11, -1, 11, -1, 11, -7, 11, -1, 11, -7, 13, -2, 11, -1, 2, -1, 11, -7, 13,
+               -2, 11, -1, 11, -1, 11, -9)
+# Tournament (tournament-alpha, 2026-10-06): after a race's results panel ("BAD LUCK... 6TH", the laps, TOTAL, ENTER
+# TAG) Cross answers ENTER TAG one letter at a time (three presses for AAA), then PRESS X TO CONTINUE leads to the
+# race's standings ("ALPHA / RACE 1 OF 4": team, time, points), TOURNAMENT STANDING (team, points), PROFILE
+# AUTOSAVED and NEXT RACE / QUIT TOURNAMENT (Cross on NEXT RACE), all over a moving fly-by. STANDING_TITLE is the
+# lit columns of TOURNAMENT STANDING's title in STANDING_REGION, as DESTROYED_TITLE is the SHIP DESTROYED title's
+# (shots of it differ by 0 to 3 columns, the results panel's title by 104).
+STANDING_REGION = (16, 18, 236, 16)
+STANDING_TITLE = (-4, 11, -1, 11, -1, 11, -1, 11, -1, 11, -1, 11, -1, 13, -2, 11, -1, 11, -1, 11, -7, 11, -1, 11, -1,
+                  11, -1, 11, -1, 12, -1, 2, -1, 11, -1, 11, -16)
+PAUSE_GAP = 40                  # flips between the steps of the pause-menu answer (Start, DOWN, DOWN, Cross)
+ADVANCE_EVERY = 120             # Tournament: flips between the Cross presses that answer the screens between races
+ADVANCE_LIMIT = 4800            # Tournament: flips from a race's results to the next grid (or the final standings)
 
 
 def parse_drive(path, drop_shots=True):
@@ -247,8 +314,8 @@ class Race:
         if self.started and (self.laps_done > self.best[0] or dist > self.best[1] + PROGRESS_M
                              or dist < self.best[1] - WRAP_M):
             self.best, self.best_total = (self.laps_done, dist), self.total
-        if self.finished_frame is None and self.started and self.laps_done >= self.laps:
-            self.finished_frame = self.frame
+        if self.finished_frame is None and self.started and self.laps and self.laps_done >= self.laps:
+            self.finished_frame = self.frame      # (laps 0: Zone, which ends when the ship is destroyed)
         if self.started and self.finished_frame is None:
             self.hist.append((self.total, self.kmh))
             while self.hist[0][0] < self.total - CONTACT_WINDOW:
@@ -637,31 +704,94 @@ def shield_text(path):
     return "unreadable" if f is None else f"{f:.0%}"
 
 
-def title_columns(path):
-    """The lit columns of a shot's title row (TITLE_REGION) as a string of '#' and '.', one per PSP pixel column;
-    None when the shot cannot be read."""
+def title_columns(path, region=TITLE_REGION):
+    """The lit columns of a shot's title row (TITLE_REGION, or region) as a string of '#' and '.', one per PSP
+    pixel column; None when the shot cannot be read."""
     try:
         w, h, c, data = png.read_bmp(path)
     except (OSError, ValueError):
         return None
-    _x0, y0, _x1, y1 = imgdiff.scale_region(TITLE_REGION, w, h)
+    _x0, y0, _x1, y1 = imgdiff.scale_region(region, w, h)
     sx = w / 480.0
     cols = []
-    for px in range(TITLE_REGION[0], TITLE_REGION[0] + TITLE_REGION[2]):
+    for px in range(region[0], region[0] + region[2]):
         lit = any(all(data[(y * w + x) * c + k] >= 0xc0 for k in range(3))
                   for x in range(int(px * sx), max(int(px * sx) + 1, int((px + 1) * sx))) for y in range(y0, y1))
         cols.append("#" if lit else ".")
     return "".join(cols)
 
 
+def title_match(path, region, runs):
+    """True when a shot's lit columns in region are within TITLE_MAX_MISMATCH of runs (positive lit, negative
+    dark), None when the shot cannot be read."""
+    cols = title_columns(path, region)
+    if cols is None:
+        return None
+    want = "".join(("#" if n > 0 else ".") * abs(n) for n in runs)
+    return sum(a != b for a, b in zip(cols, want)) <= TITLE_MAX_MISMATCH
+
+
 def destroyed_title(path):
     """True when a shot shows the "SHIP DESTROYED" title (within TITLE_MAX_MISMATCH columns of DESTROYED_TITLE),
     None when the shot cannot be read."""
-    cols = title_columns(path)
-    if cols is None:
+    return title_match(path, TITLE_REGION, DESTROYED_TITLE)
+
+
+# The end panels' digits are drawn like a seven-segment display: the segments each digit lights (a top, b top
+# right, c bottom right, d bottom, e bottom left, f top left, g middle, h a centre stroke in the upper half). This
+# font's middle bar sits below the centre, its 6 has no top bar, its 9 no bottom bar, and its 1 is a centre stroke
+# with a flag at the top left, a foot and a tick at the right.
+DIGIT_SEGMENTS = {"0": "abcdef", "1": "acdgh", "2": "abdeg", "3": "abcdg", "4": "bcfg", "5": "acdfg", "6": "cdefg",
+                  "7": "abc", "8": "abcdefg", "9": "abcfg"}
+SEGMENT_BOXES = {"a": (0.35, 0.65, 0.0, 0.1), "b": (0.62, 1.0, 0.2, 0.4), "c": (0.75, 1.0, 0.72, 0.85),
+                 "d": (0.35, 0.65, 0.9, 1.0), "e": (0.0, 0.25, 0.72, 0.85), "f": (0.0, 0.38, 0.2, 0.4),
+                 "g": (0.35, 0.65, 0.45, 0.62), "h": (0.4, 0.6, 0.2, 0.4)}
+
+
+def read_digits(path, region):
+    """The number drawn in region of a shot (light digits on a darker panel), '?' for a glyph that matches no digit
+    within one segment; None when the shot cannot be read or the region holds no glyph."""
+    try:
+        w, h, c, data = png.read_bmp(path)
+    except (OSError, ValueError):
         return None
-    want = "".join(("#" if n > 0 else ".") * abs(n) for n in DESTROYED_TITLE)
-    return sum(a != b for a, b in zip(cols, want)) <= TITLE_MAX_MISMATCH
+    x0, y0, x1, y1 = imgdiff.scale_region(region, w, h)
+
+    def lit(x, y):
+        i = (y * w + x) * c
+        return min(data[i], data[i + 1], data[i + 2]) >= 0x98
+
+    cols = [x for x in range(x0, x1) if any(lit(x, y) for y in range(y0, y1))]
+    glyphs, run = [], []
+    for x in cols:
+        if run and x != run[-1] + 1:
+            glyphs.append(run)
+            run = []
+        run.append(x)
+    if run:
+        glyphs.append(run)
+    boxes = []
+    for g in glyphs:
+        ys = [y for y in range(y0, y1) if any(lit(x, y) for x in g)]
+        boxes.append((g[0], g[-1], ys[0], ys[-1]))
+    if not boxes:
+        return None
+    tall = max(b[3] - b[2] for b in boxes)
+    out = ""
+    for gx0, gx1, gy0, gy1 in boxes:
+        if gy1 - gy0 < 0.6 * tall:
+            continue                  # a decimal point
+        gw, gh = gx1 - gx0 + 1, gy1 - gy0 + 1
+        segs = ""
+        for s, (u0, u1, v0, v1) in SEGMENT_BOXES.items():
+            xs = range(gx0 + int(u0 * gw), gx0 + max(int(u0 * gw) + 1, int(u1 * gw)))
+            ys = range(gy0 + int(v0 * gh), gy0 + max(int(v0 * gh) + 1, int(v1 * gh)))
+            if any(lit(x, y) for x in xs for y in ys):
+                segs += s
+        dist = {d: len(set(segs) ^ set(want)) for d, want in DIGIT_SEGMENTS.items()}
+        best = min(dist, key=dist.get)
+        out += best if dist[best] <= 1 and list(dist.values()).count(dist[best]) == 1 else "?"
+    return out or None
 
 
 def classify_stall(race, tail, shield, destroyed=None):
@@ -740,29 +870,49 @@ def write_tuned(path, cell, sent, laps_done, opts):
     return lap, len(rows)
 
 
+class Leg:
+    """What steers one race on a track: the steering table's frame steps, its DistTable or Tuner, the AI line."""
+
+    def __init__(self, track, opts, single):
+        self.track = track
+        drive = (opts.drive if single else None) or os.path.join(DRIVE_DIR, f"{track}.txt")
+        if not os.path.exists(os.path.join(ROOT, drive)):
+            sys.exit(f"campaign_sweep: no steering table {drive}")
+        drive_steps, dist_steps, follow = parse_drive(drive, drop_shots=False)
+        line_path = (opts.line if single else None) or (follow[0] if follow else
+                                                          os.path.join(LINES_DIR, f"{track}.csv"))
+        self.line_path = line_path
+        self.ai_line = (AiLine(os.path.join(ROOT, line_path)) if os.path.exists(os.path.join(ROOT, line_path))
+                        else None)
+        self.tuner = None
+        if opts.tune or follow:
+            if self.ai_line is None:
+                sys.exit(f"campaign_sweep: no racing line {line_path} (tools/pp_lines.py {track})")
+            wn, preview, params = (opts.wn, opts.preview, {}) if opts.tune or not follow else follow[1:]
+            params = dict(params, **dict(kv.split("=", 1) for kv in opts.set))
+            wn, preview = float(params.pop("wn", wn)), float(params.pop("preview", preview))
+            unknown = set(params) - set(Tuner.PARAMS)
+            if unknown:
+                sys.exit(f"campaign_sweep: unknown follow option {', '.join(sorted(unknown))} "
+                         f"({', '.join(Tuner.PARAMS)})")
+            self.tuner = Tuner(self.ai_line, wn, preview, **params)
+            drive_steps, dist_steps = [s for s in drive_steps if not s[1].startswith("axis")], []
+        self.drive_steps = drive_steps
+        self.table = DistTable(dist_steps) if dist_steps else None
+        self.how = (f"{'tune' if opts.tune else 'follow'} {line_path} (coverage {self.ai_line.covered:.0%}, "
+                    f"{self.ai_line.length:.0f} m, {self.tuner.describe()})" if self.tuner else
+                    f"drive {drive} ({len(drive_steps)} frame steps, {len(dist_steps)} distance steps)")
+
+
 def run_cell(mode, track, opts):
     m = MODES[mode]
     cell = f"{mode}-{track}"
     out = os.path.join(ROOT, OUT)
-    drive = opts.drive or os.path.join(DRIVE_DIR, f"{track}.txt")
-    if not os.path.exists(os.path.join(ROOT, drive)):
-        sys.exit(f"campaign_sweep: no steering table {drive}")
-    drive_steps, dist_steps, follow = parse_drive(drive, drop_shots=False)
-    line_path = opts.line or (follow[0] if follow else os.path.join(LINES_DIR, f"{track}.csv"))
-    ai_line = AiLine(os.path.join(ROOT, line_path)) if os.path.exists(os.path.join(ROOT, line_path)) else None
-    tuner = None
-    if opts.tune or follow:
-        if ai_line is None:
-            sys.exit(f"campaign_sweep: no racing line {line_path} (tools/pp_lines.py {track})")
-        wn, preview, params = (opts.wn, opts.preview, {}) if opts.tune or not follow else follow[1:]
-        params = dict(params, **dict(kv.split("=", 1) for kv in opts.set))
-        wn, preview = float(params.pop("wn", wn)), float(params.pop("preview", preview))
-        unknown = set(params) - set(Tuner.PARAMS)
-        if unknown:
-            sys.exit(f"campaign_sweep: unknown follow option {', '.join(sorted(unknown))} ({', '.join(Tuner.PARAMS)})")
-        tuner = Tuner(ai_line, wn, preview, **params)
-        drive_steps, dist_steps = [s for s in drive_steps if not s[1].startswith("axis")], []
-    table = DistTable(dist_steps) if dist_steps else None
+    end = m.get("end", "results")
+    fps = m.get("fps", 60)
+    no_damage = opts.no_damage and end != "destroyed"     # Zone ends by the ship's destruction
+    names = m.get("races", {}).get(track, [track])
+    legs = [Leg(t, opts, len(names) == 1) for t in names]
     script = os.path.join(out, f"{cell}.script.txt")
     log = os.path.join(out, f"{cell}.log")
     live = os.path.join(out, f"{cell}.live")
@@ -770,7 +920,7 @@ def run_cell(mode, track, opts):
     shutil.rmtree(shots, ignore_errors=True)
     os.makedirs(shots)
     frames = opts.frames or m["frames"].get(track, DEFAULT_FRAMES)
-    steps = build_script(mode, track, drive_steps, frames)
+    steps = build_script(mode, track, legs[0].drive_steps, frames)
     with open(script, "w") as f:
         f.write("".join(f"{fr}:{a}\n" for fr, a in steps))
     open(live, "w").close()
@@ -782,25 +932,35 @@ def run_cell(mode, track, opts):
                 "PURE_SCREENSHOT_DIR": shots, "PURE_SCREENSHOT_EVERY": "0", "PURE_WATCH_SHIP": "1",
                 "PSPRECOMP_NO_INTERPRETER": "1", "PURE_INPUT_LIVE": live, "PURE_FRAME_LOG": "60"})
     env.pop("PURE_TEST_NO_DAMAGE", None)
-    if opts.no_damage:
+    if no_damage:
         env["PURE_TEST_NO_DAMAGE"] = "1"      # a test switch: the player's shield refilled every flip
-    how = (f"{'tune' if opts.tune else 'follow'} {line_path} (coverage {ai_line.covered:.0%}, "
-           f"{ai_line.length:.0f} m, {tuner.describe()})" if tuner else
-           f"drive {drive} ({len(drive_steps)} frame steps, {len(dist_steps)} distance steps)")
-    print(f"[sweep] {cell}: {how}, exit at flip {exit_frame}{', no damage (test switch)' if opts.no_damage else ''}",
-          flush=True)
+    if opts.no_damage and not no_damage:
+        print(f"[sweep] {cell}: --no-damage ignored: {mode} ends when the ship is destroyed", flush=True)
+    for k, leg in enumerate(legs):
+        print(f"[sweep] {cell}: {f'race {k + 1} {leg.track}: ' if len(legs) > 1 else ''}{leg.how}", flush=True)
+    print(f"[sweep] {cell}: exit at flip {exit_frame}{', no damage (test switch)' if no_damage else ''}", flush=True)
     port = Port(env, log, max(60.0, exit_frame / 15.0), opts.max_lines)
     trace = open(os.path.join(out, f"{cell}.trace.csv"), "w", buffering=1)
-    trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake,shield\n")
+    trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake,shield,race\n")
+    # Flip-counted waits keep their times in the 30-flip modes.
+    shot_every = max(15, SHOT_EVERY * fps // 60)
+    ref_flips = REF_SHOT_FLIPS * fps // 60
+    slow_gap = 600 * fps // 60
 
-    race = Race(m["laps"], refilled=opts.no_damage)
+    leg = 0
+    tuner, table, ai_line = legs[0].tuner, legs[0].table, legs[0].ai_line
+    race = Race(m["laps"], refilled=no_damage)
+    done = []                         # Tournament: (track, Race) of each race whose results panel came up
+    standings = {}                    # Tournament: race number -> flip of its TOURNAMENT STANDING shot
     state = {"outcome": None, "detail": "", "quit": False, "quit_at": None, "halt": None, "lx": 0.0,
              "steering": True, "thrust": 1, "airbrake": 0, "frame": 0, "steady": 0, "prev_shot": None,
-             "results": None, "last_shot": None, "ref": False, "slow_shots": 0, "slow_at": -10**9}
+             "results": None, "last_shot": None, "ref": False, "slow_shots": 0, "slow_at": -10**9,
+             "advance": None, "paused": 0, "zones": None, "destroyed": 0.0}
     shots_seen = {}                   # name -> frame
     analysed = set()
     sent = []                         # --tune: (lap, dist, lx) of every lx step sent
     tail = []                         # the trace rows of the last TAIL_S s of race time
+    contacts = []                     # (race number, contact) of the races before this one
     stall_shot = os.path.join(shots, "stall.bmp")
     triggers = {-1: ["lefttrigger"], 1: ["righttrigger"], 2: ["lefttrigger", "righttrigger"]}
     geo = tuner or (Tuner(ai_line, 1.0, 0.0) if ai_line else None)     # the line's heading for the trace
@@ -839,16 +999,77 @@ def run_cell(mode, track, opts):
             send("0:pad a 1" if not thrust else f"2:pad a {frames + 1000}")
             state["thrust"] = thrust
 
+    def race_text(r):
+        return (f"{r.laps_done} laps: " + ", ".join(f"{t:.1f}" for t in r.lap_times) + " s")
+
+    def on_results(path, name):
+        """The results panel of the race is up (two steady shots of its TOTAL label)."""
+        state["results"] = path
+        if end != "standings":
+            stop("PASS", f"results screen at flip {shots_seen[name]} ({race_text(race)}; {race.total:.1f} s at "
+                         f"the shot)")
+            return
+        # Tournament: answer ENTER TAG and the standings with Cross until the next race (or, after the last, the
+        # final standings) is up.
+        done.append((legs[leg].track, race, race.total))
+        print(f"[sweep] {cell}: race {leg + 1} ({legs[leg].track}) results at flip {shots_seen[name]} "
+              f"({race_text(race)}; {race.contact_text()}{race.damage_text()})", flush=True)
+        set_controls(0, 0)
+        state["advance"] = {"last": race.frame, "shot": race.frame, "presses": 0, "final": leg == len(legs) - 1,
+                            "candidate": False, "since": race.frame}
+
+    def next_race(frame):
+        """A new player object after a race's results: the next race of the tournament is loading."""
+        nonlocal leg, tuner, table, ai_line, geo, race
+        contacts.extend((leg + 1, c) for c in race.contacts)
+        leg += 1
+        tuner, table, ai_line = legs[leg].tuner, legs[leg].table, legs[leg].ai_line
+        geo = tuner or (Tuner(ai_line, 1.0, 0.0) if ai_line else None)
+        race = Race(m["laps"], refilled=no_damage)
+        tail.clear()
+        state.update({"advance": None, "steering": True, "lx": 0.0, "ref": False, "slow_shots": 0,
+                      "slow_at": -10**9, "steady": 0, "prev_shot": None, "results": None})
+        for k in ("_last_req", "ref"):
+            shots_seen.pop(k, None)
+        analysed.discard("ref")
+        state.pop("absorbed", None)   # the absorb and use timers count race time, which starts again
+        state.pop("used", None)
+        send("0:axis leftx 0")
+        set_controls(0, 1)            # Cross held through the countdown and the race
+        print(f"[sweep] {cell}: race {leg + 1} ({legs[leg].track}) player object at flip {frame}", flush=True)
+
     def on_ship(s, text):
+        adv = state["advance"]
+        if adv and adv["candidate"] and int(s[11]) == 0 and float(s[2]) == 0.0:
+            # After a new player object: the next race once the ship is on its grid (lap 0, clock 0); the replay
+            # behind the results panel runs with lap 65537, and a record not yet reset would show the race just done.
+            adv["candidate"] = False
+            next_race(int(s[1]))
+        if state["advance"]:
+            # Between races: the replay's lines would add laps to the race just done.
+            state["frame"] = max(state["frame"], int(s[1]))
+            return
         race.feed(s, text)
         state["frame"] = race.frame
-        if not race.started or state["quit"]:
+        if not race.started or state["quit"] or state["advance"]:
             return
+        if (end == "destroyed" and race.finished_frame is None and race.shield is not None
+                and race.shield <= 0.0):
+            race.finished_frame = race.frame          # Zone: the shield has run out, the end panel follows
+            state["destroyed"] = race.total
         if race.finished_frame is not None:
             if state["steering"]:
                 send("0:axis leftx 0")
                 set_controls(0, 1)
                 state["steering"], state["lx"] = False, 0.0
+            if end == "session" and not state["paused"]:
+                # Free Play has no last lap: pause, END SESSION (two DOWN), Cross.
+                set_controls(0, 0)
+                send("0:pad start")
+                send(f"{PAUSE_GAP}:pad dpdown")
+                send(f"{2 * PAUSE_GAP}:pad dpdown")
+                send(f"{3 * PAUSE_GAP}:pad a")
+                state["paused"] = race.frame
         elif tuner is not None:
             raw = tuner.demand(race)
             lx = round(tuner.stick(raw), 2)
@@ -884,7 +1105,7 @@ def run_cell(mode, track, opts):
                 and race.total - state.get("used", 0.0) >= tuner.use):
             send("0:pad b 4")                     # Circle: "Use pickup" in the default controls
             state["used"] = race.total
-        if not state["ref"] and race.frame - race.start_frame >= REF_SHOT_FLIPS:
+        if not state["ref"] and race.frame - race.start_frame >= ref_flips:
             send("0:shot ref")
             state["ref"] = True
         off = ai_line.offset(race.x, race.z, race.dist) if ai_line else float("nan")
@@ -894,8 +1115,10 @@ def run_cell(mode, track, opts):
             else:
                 race.contacts[-1][4] = off
         if (race.finished_frame is None and race.total > 5.0 and race.kmh < 30.0 and state["slow_shots"] < 3
-                and race.frame - state["slow_at"] >= 600):
-            send(f"0:shot slow{race.frame}")         # what slowed the ship down (for the stall diagnosis)
+                and race.frame - state["slow_at"] >= slow_gap):
+            # What slowed the ship down (for the stall diagnosis); 3 flips on, since a second shot in the flip of
+            # the `ref` shot is lost (time_trial-vineta_k, 2026-10-06: both at flip 6320, no ref.bmp).
+            send(f"3:shot slow{race.frame}")
             state["slow_shots"] += 1
             state["slow_at"] = race.frame
         psi = (wrap_angle(geo.line_heading(race.dist) - math.atan2(race.vz, race.vx))
@@ -908,12 +1131,17 @@ def run_cell(mode, track, opts):
             tail.pop(0)
         trace.write(f"{race.frame},{race.total:.3f},{race.laps_done},{race.dist:.2f},{race.x:.2f},{race.z:.2f},"
                     f"{race.kmh:.1f},{state['lx']:.2f},{off:.2f},{psi:.3f},{state['thrust']},{state['airbrake']},"
-                    f"{shield:.1f}\n")
+                    f"{shield:.1f},{leg + 1}\n")
 
     def handle(text):
         s = SHIP_RE.search(text)
         if s:
             on_ship(s, text)
+            return
+        p = PLAYER_RE.search(text)
+        if p:
+            if state["advance"] and not state["advance"]["final"] and state["outcome"] is None:
+                state["advance"]["candidate"] = True
             return
         fr = FRAME_RE.match(text)
         if fr:
@@ -928,15 +1156,69 @@ def run_cell(mode, track, opts):
                 return
             state["halt"] = text.strip()
 
+    def analyse(name, path):
+        """A live shot taken after the finish (`f...`) or between races (`a...`)."""
+        if name.startswith("a"):
+            # Between races (the race number is in the name): the TOURNAMENT STANDING screen, by its title. Every
+            # screen there is drawn over a moving fly-by, so none is ever still. After the last race it is the
+            # final standings, the cell's end.
+            k = int(name[1:].split("-")[0])
+            if k in standings or not title_match(path, STANDING_REGION, STANDING_TITLE):
+                return
+            standings[k] = shots_seen[name]
+            print(f"[sweep] {cell}: shot {name}: TOURNAMENT STANDING after race {k}", flush=True)
+            if k == len(legs) and state["outcome"] is None:
+                state["results"] = path
+                stop("PASS", f"final standings (TOURNAMENT STANDING after race {k}) at flip {shots_seen[name]}")
+            return
+        if race.finished_frame is None or not name.startswith("f"):
+            return
+        if end == "destroyed":
+            title = destroyed_title(path)
+            state["steady"] = state["steady"] + 1 if title else 0
+            print(f"[sweep] {cell}: shot {name}: SHIP DESTROYED title {title} ({state['steady']} in a row)",
+                  flush=True)
+            if state["steady"] >= 2 and state["outcome"] is None:
+                state["results"] = path
+                state["zones"] = read_digits(path, ZONES_VALUE)
+                stop("PASS", f"zone end panel at flip {shots_seen[name]}: TOTAL ZONES CLEAR {state['zones']}; "
+                             f"destroyed at flip {race.finished_frame} ({state['destroyed']:.1f} s of race clock, "
+                             f"{race.dist:.0f} m), {race.laps_done} laps")
+            return
+        if end == "session":
+            # Only shots from after END SESSION's Cross count (the pause menu is still, and the TOTAL label rule
+            # must not take it for a panel). With laps done the session ends on FREE PLAY SESSION RESULTS (the laps
+            # newest first, TOTAL LAPS, ENTER TAG): the TOTAL label rule below. With none it goes straight to the
+            # RETURN TO MAIN MENU banner.
+            if shots_seen[name] < state["paused"] + 3 * PAUSE_GAP + 10:
+                return
+            if title_match(path, BANNER_REGION, MENU_BANNER):
+                print(f"[sweep] {cell}: shot {name}: RETURN TO MAIN MENU banner", flush=True)
+                if state["outcome"] is None:
+                    state["results"] = path
+                    stop("PASS", f"END SESSION's RETURN TO MAIN MENU banner at flip {shots_seen[name]} "
+                                 f"({race_text(race)}; {race.total:.1f} s of race clock)")
+                return
+        var = region_variance(path, RESULTS_TOTAL)
+        prev = state["prev_shot"]
+        steady = prev is not None and same_region(path, prev, RESULTS_TOTAL)
+        state["prev_shot"] = path
+        state["steady"] = state["steady"] + 1 if steady and var >= RESULTS_MIN_VARIANCE else 0
+        print(f"[sweep] {cell}: shot {name}: TOTAL label variance {var:.0f}, steady {steady} "
+              f"({state['steady']} in a row)", flush=True)
+        if state["steady"] >= 1 and state["outcome"] is None and not state["advance"]:
+            on_results(path, name)
+
     while True:
         for text in port.read(0.05):
             handle(text)
         outcome = state["outcome"]
         if state["halt"] and outcome is None:
             stop("HALT", state["halt"])
-        if state["outcome"] is None and not race.started and state["frame"] > m["throttle"] + NO_RACE_FLIPS:
+        if state["outcome"] is None and not race.started and not state["advance"] and not done \
+                and state["frame"] > m["throttle"] + NO_RACE_FLIPS:
             stop("NO RACE", f"no race clock by flip {state['frame']}: the menu route did not reach the race")
-        if state["outcome"] is None and race.started:
+        if state["outcome"] is None and race.started and end != "destroyed":
             if race.finished_frame is None and race.stalled_for() >= opts.stall:
                 stop("STALL", f"no progress for {race.stalled_for():.1f} s of race clock")
         if state["quit_at"] and not state["quit"]:
@@ -945,38 +1227,49 @@ def run_cell(mode, track, opts):
             if time.time() >= state["quit_at"]:
                 send("0:quit")
                 state["quit"] = True
+        # Between races: a shot every shot_every flips, Cross every ADVANCE_EVERY (10 flips after a shot).
+        adv = state["advance"]
+        if adv and state["outcome"] is None and state["frame"] - adv["since"] > ADVANCE_LIMIT:
+            stop("STUCK", f"{'no final standings' if adv['final'] else f'race {leg + 2} not on its grid'} "
+                          f"{state['frame'] - adv['since']} flips after race {leg + 1}'s results "
+                          f"({adv['presses']} Cross presses)")
+        if adv and state["outcome"] is None and not state["quit"]:
+            if state["frame"] - adv["shot"] >= shot_every:
+                adv["shot"] = state["frame"]
+                name = f"a{leg + 1}-{state['frame']}"
+                send(f"0:shot {name}")
+                if state["frame"] - adv["last"] >= ADVANCE_EVERY:
+                    adv["last"] = state["frame"]
+                    send("10:pad a")
+                    adv["presses"] += 1
         # Live shots once the race is finished (and for tuning, every --shots-every flips).
-        if state["outcome"] is None and not state["quit"] and race.started:
-            every = SHOT_EVERY if race.finished_frame is not None else opts.shots_every
+        if state["outcome"] is None and not state["quit"] and race.started and not adv:
+            every = shot_every if race.finished_frame is not None else opts.shots_every
             prefix = "f" if race.finished_frame is not None else "t"
-            if every and race.frame - shots_seen.get("_last_req", -10**9) >= every:
-                send(f"0:shot {prefix}{race.frame}")
-                shots_seen["_last_req"] = race.frame
+            # After the finish the flip count goes on from the frame log too: the probe prints only while the
+            # record changes, and Free Play's pause menu and Zone's destroyed ship stop it.
+            now = state["frame"] if race.finished_frame is not None else race.frame
+            if every and now - shots_seen.get("_last_req", -10**9) >= every:
+                send(f"0:shot {prefix}{now}")
+                shots_seen["_last_req"] = now
         # Analyse the shots that are written.
-        for name in sorted(n for n in shots_seen if not n.startswith("_")):
+        for name in sorted((n for n in shots_seen if not n.startswith("_")), key=lambda n: shots_seen[n]):
             path = os.path.join(shots, name + ".bmp")
             if name in analysed or not os.path.exists(path):
                 continue
             try:
-                var = region_variance(path, RESULTS_TOTAL)
-                prev = state["prev_shot"]
-                steady = prev is not None and same_region(path, prev, RESULTS_TOTAL)
+                imgdiff.load_rgb(path)
             except (OSError, ValueError):
                 continue            # still being written
             analysed.add(name)
             state["last_shot"] = path
             if name == "ref":
                 print(f"[sweep] {cell}: shot ref: shield bar {shield_text(path)}", flush=True)
-            if race.finished_frame is None or not name.startswith("f"):
                 continue
-            state["steady"] = state["steady"] + 1 if steady and var >= RESULTS_MIN_VARIANCE else 0
-            print(f"[sweep] {cell}: shot {name}: TOTAL label variance {var:.0f}, steady {steady} "
-                  f"({state['steady']} in a row)", flush=True)
-            if state["steady"] >= 1 and state["outcome"] is None:
-                state["results"] = path
-                stop("PASS", f"results screen at flip {shots_seen[name]} ({race.laps_done} laps: "
-                     + ", ".join(f"{t:.1f}" for t in race.lap_times) + f" s; {race.total:.1f} s at the shot)")
-            state["prev_shot"] = path
+            try:
+                analyse(name, path)
+            except (OSError, ValueError):
+                pass
         if not port.alive():
             break
 
@@ -989,7 +1282,7 @@ def run_cell(mode, track, opts):
     if state["halt"] and outcome != "PASS":
         outcome, detail = "HALT", state["halt"]
     if outcome is None:
-        if not race.started:
+        if not race.started and not done:
             outcome, detail = "NO RACE", "no race clock in the probe: the menu route did not reach the race"
         elif port.timed_out:
             outcome, detail = "TIMEOUT", f"wall-clock deadline reached (exit {code})"
@@ -1011,7 +1304,18 @@ def run_cell(mode, track, opts):
         tuned = os.path.join(out, f"{cell}.tuned.txt")
         lap, n = write_tuned(tuned, cell, sent, race.laps_done, opts)
         print(f"[sweep] {cell}: {n} steps of lap {lap + 1} -> {tuned}", flush=True)
-    if race.started:
+    current = not done or done[-1][1] is not race      # the race the cell stopped in has no results panel
+    if len(legs) > 1:
+        # Tournament: each race's laps and contacts, and where the cell stopped.
+        races = [f"race {k + 1} {t}: {race_text(r)}, {r.contact_text()}{r.damage_text()}"
+                 + (f", TOURNAMENT STANDING at flip {standings[k + 1]}" if k + 1 in standings else "")
+                 for k, (t, r, _total) in enumerate(done)]
+        if current:
+            races.append(f"race {leg + 1} {legs[leg].track} (stopped here): {race_text(race)}, "
+                         f"{race.contact_text()}{race.damage_text()}" if race.started else
+                         f"race {leg + 1} {legs[leg].track} (stopped here): not started")
+        detail += "; " + "; ".join(races)
+    elif race.started:
         detail += f"; {race.contact_text()}{race.damage_text()}"
     if outcome == "STALL":
         shield = shield_fraction(stall_shot) if os.path.exists(stall_shot) else None
@@ -1021,16 +1325,18 @@ def run_cell(mode, track, opts):
             f.write("frame,clock,lap,dist,kmh,lx,offset,psi,thrust,airbrake,shield\n")
             for r in tail:
                 f.write(",".join(f"{v:.3f}" if isinstance(v, float) else str(v) for v in r) + "\n")
+    contacts.extend((leg + 1, c) for c in race.contacts)
     with open(os.path.join(out, f"{cell}.contacts.csv"), "w") as f:
-        f.write("clock,lap,dist,kmh_lost,offset\n")
-        for t, lp, d, k, o in race.contacts:
-            f.write(f"{t:.2f},{lp},{d:.1f},{k:.0f},{o:.1f}\n")
-    row = {"mode": mode, "track": track, "outcome": outcome, "frame": race.frame, "laps": race.laps_done,
-           "clock": race.total, "detail": detail if outcome == "PASS" else f"{detail}; last: {race.line.strip()}",
-           "seconds": elapsed, "tune": opts.tune, "no_damage": opts.no_damage}
-    print(f"[sweep] {cell}: {outcome}{' (no damage)' if opts.no_damage else ''} at flip {race.frame}, "
-          f"{race.laps_done} laps, race time {race.total:.1f} s, "
-          f"{elapsed:.0f} s: {row['detail']}", flush=True)
+        f.write("clock,lap,dist,kmh_lost,offset,race\n")
+        for k, (t, lp, d, kmh, o) in contacts:
+            f.write(f"{t:.2f},{lp},{d:.1f},{kmh:.0f},{o:.1f},{k}\n")
+    laps = sum(r.laps_done for _t, r, _total in done) + (race.laps_done if current else 0)
+    clock = sum(total for _t, _r, total in done) + (race.total if current else 0.0)
+    row = {"mode": mode, "track": track, "outcome": outcome, "frame": state["frame"], "laps": laps,
+           "clock": clock, "detail": detail if outcome == "PASS" else f"{detail}; last: {race.line.strip()}",
+           "seconds": elapsed, "tune": opts.tune, "no_damage": no_damage}
+    print(f"[sweep] {cell}: {outcome}{' (no damage)' if no_damage else ''} at flip {state['frame']}, "
+          f"{laps} laps, race time {clock:.1f} s, {elapsed:.0f} s: {row['detail']}", flush=True)
     return row
 
 
@@ -1101,6 +1407,8 @@ def parse(argv):
             p.error(f"unknown track {t!r} for {opts.mode} (tracks: {', '.join(known)})")
     if (opts.drive or opts.tune or opts.line or opts.export_line) and len(opts.tracks) != 1:
         p.error("--drive, --tune, --line and --export-line take one track")
+    if (opts.drive or opts.tune or opts.line) and MODES[opts.mode].get("races"):
+        p.error(f"--drive, --tune and --line take a one-race cell, not {opts.mode}")
     return opts
 
 

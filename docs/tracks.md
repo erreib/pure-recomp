@@ -142,7 +142,8 @@ The follower takes about 20 contacts a lap on Modesto Heights, Chenghou Project 
 shield out in lap 2 or 3. The sweep's job there is to reach the results screen and see whether anything halts, so
 `tools/campaign_sweep.py ... --no-damage` sets `PURE_TEST_NO_DAMAGE=1` and the summary marks the row
 `(no damage)`. Vineta K passes without it (task 016). Each track has its own budget in `MODES` (`frames`): 13000
-flips for Vineta K, 17000 for the other three, whose laps take the follower 75 to 95 s.
+flips for Vineta K, 17000 for the other three in these runs (18000 since task 017's review), whose laps take the
+follower 75 to 95 s. Since that review `--no-damage` is the normal way to run a coverage cell (except Zone, below).
 
 The runs of 2026-10-05/06 (the committed steering tables; the summary's damage figure is the shield the frames
 took, which the switch put back):
@@ -160,3 +161,74 @@ contact costs about 2 shield (1.7 to 2.1 a contact over these runs; one frame of
 so a race of more than about 50 contacts ends in "SHIP DESTROYED"; Vineta K's pass leaves only 13. On Chenghou
 Project the game put the ship back twice, at 46.5 s (3965 m to 3755 m) and at 154.2 s (128 m to 4663 m), each
 time while it was going backwards along the track, and two frames before each took 8 and then 13 at once.
+
+## The other single-player modes (task 018)
+
+SINGLE PLAYER lists SINGLE RACE, TOURNAMENT, TIME TRIAL, ZONE and FREE PLAY. Each mode has its own route after
+`config/pad_scripts/main_menu.txt`, measured on a new profile (2026-10-06); the sweep proves each with its
+`<cell>-menu` shot (the track or league list) and holds Cross from the route's last step for the cell's budget.
+
+| Mode | Route | DOWN on SINGLE PLAYER | Screens | Pick (N DOWN at) | Cross held from | Race flips a second | Budget (`MODES`) |
+|---|---|---|---|---|---|---|---|
+| Single Race | `single_race.txt` | 0 | CLASS, LEAGUE, TRACK, TEAM | track, 5380 | 6100 | 60 | 13000 Vineta K, 18000 the others |
+| Tournament | `tournament.txt` | 1 | CLASS, TOURNAMENT SELECTION, TEAM (no track screen) | league, 5180 | 5850 | 60 | 80000 for the four races |
+| Time Trial | `time_trial.txt` | 2 | CLASS, LEAGUE, TRACK, TEAM (no ghost question on a new profile) | track, 5380 | 5900 | 30 | 9000 Vineta K, 11000 the others |
+| Zone | `zone.txt` | 3 | TRACK SELECTION only (no class, league or team) | Zone track, 4980 | 5250 | 30 | 9000 |
+| Free Play | `free_play.txt` | 4 | CLASS, LEAGUE, TRACK, TEAM | track, 5380 | 5900 | 30 | 9000 Vineta K, 11000 the others |
+
+The menu shots:
+- Time Trial's TRACK SELECTION lists the four Alpha tracks with RACE RECORD and LAP RECORD and the gold, silver and
+  bronze times (2:04.00, 2:07.00, 2:10.00 on Vineta K); Free Play's has the records with LENGTH (4446 M) and HEIGHT
+  (222 M).
+- Zone's TRACK SELECTION has PRO TOZO alone (`zone_1`), with BEST ZONE, BEST SCORE and the targets 25, 20, 15.
+- Tournament's TOURNAMENT SELECTION has ALPHA alone, its panel listing Vineta K, Modesto Heights, Chenghou Project
+  and Blue Ridge.
+
+In Time Trial and Free Play the player is alone, found at flip 5730 at 1216.9 m on Vineta K (just behind the line
+at about 1233 m), and the clock starts at about 6010. The lap clock behaves as in Single Race: it runs through the
+first crossing and restarts at each later one, so the sweep counts laps the same way. In Zone the probe finds the
+player at 5130 with a shield of 75 and the clock starts at about 5380. Tournament's first race is Single Race's
+grid (the player 8th at 1079 m), clock from about 5975 to 6055.
+
+### 30 flips a second
+
+Time Trial, Free Play and Zone run at 30 flips a second (docs/research.md), so their budgets are counted at 30, and
+the sweep scales its flip-counted waits (`fps` in `MODES`: the `ref` shot, the live shots after the finish, the
+slow shots). The live file is still read every 10 flips, a third of a second here, and the follower does worse:
+on Vineta K it took 60 to 68 contacts in Time Trial and in Free Play against 37 to 47 in Single Race, with laps of
+62 to 82 s. The shield those contacts took (57 to 65 a run) leaves the ship alive: the Verify run, without the
+switch, ended with 42.9.
+
+### End screens and how the sweep finds them
+
+| Mode | End screen | Detection (`tools/campaign_sweep.py`) |
+|---|---|---|
+| Time Trial | TIME TRIAL COMPLETED: LAP 1 to 3 (the best in yellow, LR and RR marks), TOTAL, ENTER TAG, over the track; about 3.5 s after the line | the TOTAL label rule of Single Race (`RESULTS_TOTAL` drawn and unchanged in two shots in a row) |
+| Free Play | no last lap: the HUD's LAP goes on (LAP 4). The sweep pauses after three laps (Start), picks END SESSION (DOWN, DOWN; the menu is CONTINUE, RESTART, END SESSION, PRESS X TO CONFIRM) and presses Cross; FREE PLAY SESSION RESULTS comes up about 4 s later: the laps best first, TOTAL LAPS 3, ENTER TAG | the TOTAL label rule: the TOTAL LAPS label is where TOTAL is. Shots before END SESSION's Cross are skipped. With no lap done the session ends on a fly-by with RETURN TO MAIN MENU (`MENU_BANNER`) |
+| Zone | the ship is destroyed when the shield runs out, which is Zone's normal end; about 7 s later a SHIP DESTROYED panel: TOTAL ZONES CLEAR, TOTAL LAPS CLEAR, PERFECT ZONES, PERFECT LAPS, TOP SPEED, SCORE, ENTER TAG | from the probe's shield at 0 or below, shots every 15 flips; the SHIP DESTROYED title (`DESTROYED_TITLE`, the same as Single Race's) in two shots in a row is PASS, and TOTAL ZONES CLEAR is read from the panel (`ZONES_VALUE`, `read_digits`). No stall rule, and `--no-damage` is ignored |
+| Tournament | after each race the results panel ("BAD LUCK... 6TH", the laps, TOTAL, ENTER TAG); Cross enters the tag one letter at a time (three presses for AAA), then PRESS X TO CONTINUE: the race's standings (ALPHA, RACE n OF 4: team, time, points), TOURNAMENT STANDING (team, points), PROFILE AUTOSAVED, NEXT RACE / QUIT TOURNAMENT. After race 4: RACE 4 OF 4, TOURNAMENT STANDING (the final standings), END TOURNAMENT ("8TH - COMMISERATIONS. HAVE ANOTHER GO!"), PROFILE AUTOSAVED, MAIN MENU | each race's panel by the TOTAL label rule; then Cross every 120 flips (`ADVANCE_EVERY`) and a shot every 30; the next race starts when a new player object stands on its grid (lap 0, clock 0), and Cross is held again. The TOURNAMENT STANDING title (`STANDING_TITLE`) after the last race is PASS. Every screen between races is drawn over a moving fly-by, so none is ever still: a first rule that waited for a still screen passed on the SINGLE PLAYER menu after the tournament. No grid or final standings 4800 flips after a race's results is STUCK |
+
+### Zone without steering
+
+Zone has no AI ships, so `tools/pp_lines.py` cannot record a racing line, and `config/pad_scripts/drive/zone_1.txt`
+does not steer. With Cross held and the stick centred the ship starts at 3796 m, meets the barrier of the first
+corner at 227 m (3.5 s in, 191 km/h lost) and stays against it at about 279 m. The shield falls about 1.3 a second
+there and runs out at 59.2 s; the HUD read ZONE 6 and SCORE 4281 then, and the panel TOTAL ZONES CLEAR 6, TOP SPEED
+405.14, SCORE 4293. A racing line for PRO TOZO would let the cell reach later zones.
+
+### Runs (2026-10-06)
+
+| Cell | Switch | Outcome | Laps (s) or zones | Contacts (a lap) | Shield taken | Flip (budget ends at) | Real s |
+|---|---|---|---|---|---|---|---|
+| zone/zone_1 | off | PASS: TOTAL ZONES CLEAR 6, destroyed at 59.2 s | 0 laps | 1 | 75 (all) | 7390 (14250) | 248 |
+| time_trial/vineta_k | no damage | PASS | 81.8, 67.5, 73.6 | 68 (26, 20, 22) | 65 | 12830 (13900, budget 8000 then) | 428 |
+| free_play/vineta_k | no damage | PASS | 73.6, 68.5, 75.9 | 68 (23, 23, 22) | 65 | 12810 (14900) | 428 |
+| tournament/alpha, first run | no damage | the four races to their panels; the old still rule then passed on the SINGLE PLAYER menu (replaced) | 63.9, 58.5, 57.2; 93.1, 91.6, 94.8; 76.7, 88.5, 84.2; 80.1, 91.4, 94.3 | 47, 78, 69, 62 | 92, 141, 134, 135 | 70620 (85850) | 1298 |
+| tournament/alpha | no damage | PASS: TOURNAMENT STANDING after race 4 at flip 70790 (and after races 1 to 3 at 17730, 35930, 52900) | 58.5, 63.5, 54.6; 94.1, 88.8, 94.2; 80.8, 86.8, 93.4; 94.4, 93.6, 86.7 | 42, 80, 69, 70 | 72, 166, 162, 137 | 70800 (85850) | 1297 |
+| time_trial/vineta_k (Verify) | off | PASS | 68.1, 62.0, 68.2 | 60 (19, 17, 24) | 57 (42.9 left) | 12090 (14900) | 404 |
+| zone/zone_1 (Verify) | off | PASS: TOTAL ZONES CLEAR 6, destroyed at 59.2 s | 0 laps | 1 | 75 (all) | 7390 (14250) | 247 |
+
+No cell halted: no `[hle-stub]`, unsupported instruction or runtime stop other than the sweep's own quit. Between
+Tournament races the next player object appeared about 1010 flips (17 s, eight Cross presses) after the results
+panel, and the final TOURNAMENT STANDING about 670 flips after race 4's panel. The Feisar finished the first
+run's tournament 8th ("8TH - COMMISERATIONS. HAVE ANOTHER GO!").

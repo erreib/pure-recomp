@@ -1,0 +1,20 @@
+# MAIN MENU -> SINGLE PLAYER -> FREE PLAY (4 DOWN) -> VECTOR -> ALPHA -> track -> FEISAR -> race, Cross held from
+# 5900. Follows main_menu.txt (MAIN MENU at ~4450); measured 2026-10-06 (out/018/e-fp). The screens are Time Trial's
+# at the same flips (TRACK SELECTION shows the race and lap records with the track's length and height). The player
+# is alone, found at 5730, and the clock starts at about 6010, at 30 flips a second; the HUD has CURRENT, BEST,
+# TOTAL and LAP with no lap count: Free Play has no last lap. tools/campaign_sweep.py ends the session after the
+# mode's laps itself: Start, DOWN, DOWN (CONTINUE, RESTART, END SESSION), Cross; FREE PLAY SESSION RESULTS follows
+# about 4 s later (the laps best first, TOTAL LAPS, ENTER TAG).
+# The track: tools/campaign_sweep.py adds N `pad dpdown` steps at 5380, 5410, 5440 for the Nth track (docs/tracks.md)
+# and stretches the Cross hold at 5900 to its flip budget.
+4700:pad a
+4780:pad dpdown
+4810:pad dpdown
+4840:pad dpdown
+4870:pad dpdown
+4900:pad a
+5100:pad a
+5300:pad a
+5500:pad a
+5700:pad a
+5900:pad a 3000
