@@ -103,7 +103,110 @@ it). Do not change the record backend or the format (vendor); if the recording l
 report what and stop with PARTIAL.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: PARTIAL. All four deliverables are done, the Verify line passes, and acceptance criteria 1, 3 and 4 hold as
+written. Criterion 2 holds only on a recording with warm-up frames. The race recording the brief names (AT=6014
+FRAMES=3) misses criterion 2 on its first frame, even at the fallback `--tol 4 --max-frac 0.001`. The reason is that
+the recording lacks something the replay needs: the pixels the bloom targets held before frame 6014. Those pixels
+exist only on the GPU, and the format cannot carry them. The brief says to report this and stop with PARTIAL, so I did
+not change the format or the record backend. Instead, `replay_check.sh` makes a second race recording,
+`race_warm.gerec` (AT=6008 FRAMES=9). On it, frames 6014-6016 pass at tol 4, and also at tol 1.
+
+Changed:
+- `src/host/pure_main.cpp` (new): our `main()`. `--replay` goes to the replay; everything else goes to
+  `portablekit_main`.
+- `src/tools/ge_replay.hpp`, `src/tools/ge_replay.cpp` (new, about 1000 lines): the replay, the BMP reader and the
+  comparison (imgdiff.py's rule), `--a`/`--b`, `--first-diff`, `--frames`, `--quiet`.
+- `CMakeLists.txt`: `HOST_MAIN_NAME portablekit_main`, and the two new sources in `SOURCES`. Only the
+  `portablekit_add_game` call changed.
+- `tools/gerec/replay_check.sh` (new).
+- `docs/ge-backend.md`: new section 7.
+- `README.md`: Layout rows for `src/host/pure_main.cpp`, `src/tools/ge_replay.cpp` and `tools/gerec/replay_check.sh`.
+- This file.
+- Commits: `c59a6de`, then the Result commit.
+
+Results:
+- Criterion 1, boot: `tools/run_boot.py --frames 300 out/022/boot.log` gives exit 0 after 15.9 s, `[pure] exit at
+  frame 300`, 588993 functions. `PureNative --help` prints the framework's usage, as before.
+- Criterion 3, null: `--backend null --out out/gerec/null` writes `frame_6014.bmp` to `frame_6016.bmp`. All three are
+  black at 480x272, and the exit code is 0.
+- Criterion 4, `--a vulkan --b null --first-diff --frames 6014`:
+  - Frame 6014 fails with diff 1.000000.
+  - The search takes 10 steps of about 50 ms each and names `draw 1 of 906 (record 8 in gerec_dump.py's listing)`.
+  - That draw is a sprite with 2 vertices, through mode, into target 0x04088000 (8888, stride 512).
+  - Its state: clear mode, flags 7 (colour, alpha/stencil and depth all on); texture 0x08E5DAA0 clut4, swizzled;
+    blend on, 2/3; alpha test off; stencil off. It clears the back buffer to white (vertex colour 0x04FFFFFF).
+  - The exit code is 1.
+- Criterion 2, Vulkan against the recorded images. Which pixels differ, and why:
+  - On `race.gerec`, at tol 0:
+    - frame 6014: 19058 px (0.036493), up to 16 levels;
+    - frame 6015: 13297 px (0.025461), up to 3 levels;
+    - frame 6016: 1021 px (0.001955), up to 1 level.
+  - At tol 4, frame 6014 still has 1.97% of its pixels over (FAIL), while 6015 and 6016 have 0 (PASS).
+  - Every differing pixel lies in 960x544 rows 521-540 (PSP rows 260-270), across the whole width.
+  - The cause is the bloom chain. Draws #868-#873 blur additively into the bloom targets 0x04110000 and 0x04132000.
+    The blurs reach beyond what the frame clears: the clears (#869, #871) cover 240x136, and the blurs draw to x 245
+    and y 141. So the bottom rows of the bloom carry pixels from frame to frame.
+  - In the game those rows hold thousands of frames of history. A replay starts with no targets, and a new Vulkan
+    target is undefined until it is drawn.
+  - The evidence:
+    - `--a vulkan --b vulkan` gives identical pictures, and they are identical to a single replay.
+    - A recording that starts at 6008 shows the same decay from its own first frame: 19160, 13627, 1186, 32 px. After
+      that, 14 to 23 px stay 1 level off: rounding fixed points that depend on where the accumulation started.
+    - `frontend.gerec` and `title.gerec` replay exactly at tol 0 from a cold start.
+    - My C++ numbers equal imgdiff.py's on the same files (0.036493, 0.025461, 0.001955).
+  - So no draw is replayed wrong, and `--first-diff` against a second Vulkan replay has no difference to bisect.
+
+Verify output (`tools/verify_task.sh 022`, exit 0, from an empty `out/gerec`, so all four recordings were made; last
+20 lines):
+```
+  blend on: source 2 destination 3 equation 0, fixed 0x000000/0x000000
+  alpha test off: function 1 reference 0x00 mask 0xFF
+  stencil off: function 1 reference 0xFF mask 0xFF, ops fail 0 depth fail 0 pass 0
+  clear mode on: flags 7 (colour on, alpha/stencil on, depth on)
+  depth test on function 6, write on, write masks colour 0x000000 alpha 0x00
+
+== 5. frontend.gerec into vulkan, against the recorded images
+[replay] out/gerec/frontend.gerec: frames 690-691 recorded from vulkan (format 1, 98 records), replayed into vulkan at 2x
+[replay] frame 690: 11 draws, 51 records, 27.2 ms, diff 0.000000 (tol 0, 0/522240 px at 960x544) PASS
+[replay] frame 691: 11 draws, 43 records, 5.1 ms, diff 0.000000 (tol 0, 0/522240 px at 960x544) PASS
+[replay] summary: 2 frames replayed into vulkan (16.1 ms a frame), 2 compared, 2 passed, worst diff 0.000000 (frame 690); exit 0
+
+== 5. title.gerec into vulkan, against the recorded images
+[replay] out/gerec/title.gerec: frames 1750-1751 recorded from vulkan (format 1, 175 records), replayed into vulkan at 2x
+[replay] frame 1750: 28 draws, 94 records, 26.1 ms, diff 0.000000 (tol 0, 0/522240 px at 960x544) PASS
+[replay] frame 1751: 28 draws, 77 records, 5.0 ms, diff 0.000000 (tol 0, 0/522240 px at 960x544) PASS
+[replay] summary: 2 frames replayed into vulkan (15.5 ms a frame), 2 compared, 2 passed, worst diff 0.000000 (frame 1750); exit 0
+
+replay_check: PASS (480 s)
+verify 022: PASS
+```
+Earlier in the same run:
+- Recording times: race 197 s, race_warm 197 s, frontend 24 s, title 59 s.
+- Every recording passed `gerec_dump --summary`. The race draw counts are 906/905/906, as in task 021.
+- Cold race replay: as in criterion 2 above.
+- `race_warm` frames 6014-6016 at tol 4: 0 px, PASS.
+- null: three black frames.
+- Time a frame: Vulkan 47 ms for the first frame (it makes the targets and pipelines), then 5.5 to 13 ms; null 0.6 to
+  2.2 ms.
+
+Open questions:
+1. Exact replays from a recording's first frame would need the format to carry target contents. One way is a record,
+   at Begin, of each live target's colour, depth and stencil at the internal scale, read back by the inner backend.
+   Each backend would then need a way to seed a target from those pixels. That is a vendor change (format version 2
+   and a `GeBackend` method), so I left it for a decision. Until then:
+   - Compare a backend with its own recording only after warm-up frames (`race_warm.gerec`).
+   - Or compare two backends with each other through `--a`/`--b`, which start equally empty. That covers 024's Metal
+     against Vulkan.
+2. `race_warm.gerec` is 63.6 MB, with six warm-up frames. By the measured decay, three would do (AT=6011: 32 px at 1
+   level by its fourth frame) and would save about 40 MB. I did not record that variant, so the script keeps the one I
+   measured.
+3. The brief says to resize both pictures to 480x272 "as imgdiff.py does". imgdiff.py actually resizes only when the
+   sizes differ. I followed imgdiff.py, so the numbers agree with it. Vulkan against its own 960x544 images is
+   therefore compared at 960x544, and Vulkan against null at 480x272.
+4. A Vulkan replay saves the shell's pipeline cache to the user data directory, as the game does, because it is the
+   same renderer. If replays should leave the player's files alone, `PURE_DATA_DIR` could point them elsewhere.
+5. `replay_check.sh` makes all four recordings first, then runs the replays. The brief listed the frontend and title
+   recordings last; only the order differs.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
