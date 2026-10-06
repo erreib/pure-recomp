@@ -23,6 +23,7 @@ See [docs/status.md](docs/status.md). Decisions: [docs/decisions.md](docs/decisi
 | `tools/patches.sh` | `check`: the vendor tree is `vendor/PIN` plus `patches/` exactly; `export NNNN-slug`: the vendor change beyond the series as a new patch |
 | `tools/worktree_init.sh` | first thing in a git worktree: vendor tree, links to the main checkout's `disc/`, `generated/`, `disc.iso`, its own `game/`, build from the shared ccache (about 35 s) |
 | `tools/save_roundtrip.sh` | M5 save round trip on its own stick (`out/014/game/ms0`): profile NEW (`main_menu.txt`), LOAD (`profile_load.txt`), LOAD beside an empty DLC folder; exit 0 when all three hold (about 7 min, windowed; `docs/savedata.md`) |
+| `tools/frame_regress.sh` | frame regression suite: boots the frontend, main-menu and race routes on an empty stick, captures `lang`, `title`, `profile`, `main_menu` and `race_hud` (race frame 6016), compares each with its `ref/` capture at the limits in the script's table, prints PASS/FAIL per scene to `out/regress/summary.txt`; exit 0 when all pass. Run before merging a renderer change (about 7 min, windowed; `docs/verification.md`) |
 | `docs/` | setup, vendor map, decisions, status, spike results, task briefs under `docs/tasks/` |
 | `ref/` | PPSSPP reference captures (ignored except the README) |
 | `disc/`, `disc.iso`, `gen/`, `vendor/`, `build/`, `out/`, `ghidra_project/` | ignored: game data, generated code, third party, build output |
