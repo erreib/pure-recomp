@@ -9,4 +9,4 @@ add_subdirectory(vendor/portablekit portablekit)
 # (both git-ignored), as docs/PROFILE_GUIDE.md in the framework lays out.
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
-    SOURCES src/profile/pure_profile.cpp)
+    SOURCES src/profile/pure_profile.cpp src/hle/audio_capture.cpp)

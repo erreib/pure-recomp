@@ -16,6 +16,10 @@
 #include <string>
 
 namespace portablekit {
+
+// PURE_AUDIO_WAV (src/hle/audio_capture.cpp).
+void register_audio_capture(HleRegistrar &hle);
+
 namespace {
 
 // Save folders the executable itself names: profiles are "UCUS98612P%04d" (PROFILE.BIN + PARAM.SFO + ICON0.PNG),
@@ -170,6 +174,7 @@ void wrap_call_traces(HleRegistrar &hle) {
 void register_pure_hle(HleRegistrar &hle) {
     wrap_flip_counter(hle);
     wrap_call_traces(hle);
+    register_audio_capture(hle);
 
     // The dev-kit switch block. Retail reads 0, which selects display mode 0 and the normal pacing path
     // (docs/timing.md).
