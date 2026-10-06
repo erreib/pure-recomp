@@ -1,6 +1,6 @@
 # 028: Metal by default; per-backend measured values in the suite; headless runs in the tools
 
-Milestone: M7 | Branch: task/028-metal-by-default | Status: OPEN (after task 025)
+Milestone: M7 | Branch: task/028-metal-by-default | Status: MERGED 2026-10-06 (aae7f41)
 
 ## Goal
 With tasks 023 to 027 the native path is `PURE_SHELL=metal PURE_GE_BACKEND=metal`, and it draws closer to PPSSPP than
@@ -262,4 +262,19 @@ Open questions:
    brief asks). README says so.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 028`): the suite on
+its new defaults (Metal shell and backend) 5/5 at 0.0002, 0.0002, 0.0000, 0.0106, 0.0372 (race_hud -0.0007 against
+the Metal column; the run spread), 7m 16s; the Vulkan `lang` scene 0.0544; the headless frontend route to frame 2200
+in 0.9 s with the four shots. Then `tools/frame_regress.sh --shell vulkan --backend vulkan` 5/5 at 0.0544, 0.0302,
+0.0543, 0.0331, 0.0661 (7m 15s).
+Spot-read: `pure_main.cpp` (the two `setenv(..., 0)` calls on macOS after the `--replay` branch), the suite's two
+measured columns and its summary lines, run_boot's `--shell`/`--backend`, the recording scripts' explicit Vulkan path,
+the sweep's pin and its reason.
+Merged: aae7f41 into batch/m2 (README: 030's input-script row kept beside 028's screenshot row; the seam doc's
+"vulkan (default)" relabelled as the framework's default under D-008).
+Notes: PARTIAL accepted; the two escalations have one cause outside the brief, the Metal window dropping the race HUD,
+which task 031 fixes (one command queue for the backend and the shell; the sweep's pin goes with it, and
+`tools/hud_check.sh` guards it). Open question 2: run_boot's no-flag default stays headless, so a plain run now draws
+headless with Metal (1.4 s to frame 300 instead of 0.7 s); acceptable, and `--backend null` gives the old cost. The
+Metal race_hud column stays 0.0379 (runs spread by about 0.001 with the AI grid). The suite's deliberate-regression
+example (`PURE_NO_STENCIL_BUFFER`) is a Vulkan switch, as docs/verification.md now says.

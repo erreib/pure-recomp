@@ -90,7 +90,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   lighting, fog, screen-space sprites, culling; the race frame at internal scale 1 matches Vulkan to its first
   stencil draw), 025 (Metal effects: stencil as alpha, bloom chain, read-backs and write-backs, ge_replay `--cut`).
   **M6 complete.** D-008: Metal by default on macOS. Merged: 028 (the default in our entry point, per-backend
-  measured columns in the suite, `run_boot.py --shell/--backend`; Verify rerun on the main checkout pending), 030
+  measured columns in the suite, `run_boot.py --shell/--backend`; Verify rerun PASS on both paths), 030
   (controls doc + checker). Running: 031 (the Metal window's missing race HUD: one command queue for the backend
   and the shell, `tools/hud_check.sh`). Briefed, waiting for 031: 029 (the app bundle through the framework's
   release packer, the first-run installer, `tools/bundle.sh`). Next: M7's remainder
