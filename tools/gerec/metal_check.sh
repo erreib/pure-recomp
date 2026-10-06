@@ -3,7 +3,8 @@
 # check" and "The race check").
 #   tools/gerec/metal_check.sh [TEAM_FRAME]        TEAM_FRAME defaults to 5650
 # Recordings are made only when missing, each by one windowed run of main_menu.txt + single_race.txt (`shot` steps
-# dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend, as
+# dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend in the Vulkan shell
+# (PURE_SHELL=vulkan PURE_GE_RECORD_INNER=vulkan, set explicitly: the macOS default is the Metal path, D-008), as
 # tools/gerec/replay_check.sh makes them, and must pass gerec_dump.py --summary:
 #   out/gerec/team.gerec       frames TEAM_FRAME and TEAM_FRAME+1 at internal scale 1 (PURE_INTERNAL_SCALE=1), the
 #                              TEAM SELECTION screen (frames 5503-5701 of the route: 5650 is in its middle, so a run
@@ -94,8 +95,10 @@ record() {
   [ -n "$scale" ] && scale_env=(--env "PURE_INTERNAL_SCALE=$scale")
   echo "recording $name: $ROUTE, frames $at-$((at + frames - 1))${scale:+ at internal scale $scale}, run to frame $last ..."
   local t0=$SECONDS
-  python3 tools/run_boot.py --script "$script" --frames "$last" \
-    --env PURE_GAME_DIR="$ROOT/$game" --env PURE_GE_BACKEND=record --env PURE_GE_RECORD="$ROOT/$file" \
+  # The Vulkan shell and an explicit Vulkan inner backend: the Metal default (D-008) has no Vulkan renderer to record.
+  python3 tools/run_boot.py --script "$script" --frames "$last" --shell vulkan \
+    --env PURE_GAME_DIR="$ROOT/$game" --env PURE_GE_BACKEND=record --env PURE_GE_RECORD_INNER=vulkan \
+    --env PURE_GE_RECORD="$ROOT/$file" \
     --env PURE_GE_RECORD_AT="$at" --env PURE_GE_RECORD_FRAMES="$frames" ${scale_env[@]+"${scale_env[@]}"} \
     "$OUT/$name.record.log" > "$OUT/$name.record.stdout" 2>&1
   local rc=$?

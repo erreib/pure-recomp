@@ -121,7 +121,7 @@ backend `<prefix>_GE_BACKEND` names, and the window shell unless `<prefix>_NO_RE
 
 | `GE_BACKEND` | `NO_RENDER` unset | `NO_RENDER` set (any value, also empty) |
 |---|---|---|
-| vulkan (default) | window, Vulkan draws (as before) | no rendering at all, no draw sink (as before) |
+| vulkan (the framework's default; on macOS our entry point selects metal unless set, D-008) | window, Vulkan draws (as before) | no rendering at all, no draw sink (as before) |
 | null | window; the shell's present shows its own, empty targets (black); scripted input works | headless, no window, no GPU, every draw reaches the backend |
 | record | as its inner backend | as its inner backend |
 
@@ -424,7 +424,7 @@ backend is initialised with `BackendConfig::vulkan_shell` set when the shell is 
 
 | `GE_BACKEND` | `SHELL` unset or `vulkan`, `NO_RENDER` unset | `NO_RENDER` set (any value, also empty), or `SHELL=headless` |
 |---|---|---|
-| vulkan (default) | Vulkan shell, Vulkan draws (as before) | no rendering at all, no draw sink, no shell (as before) |
+| vulkan (the framework's default; on macOS our entry point selects metal unless set, D-008) | Vulkan shell, Vulkan draws (as before) | no rendering at all, no draw sink, no shell (as before) |
 | null | Vulkan shell; the null backend's black Cpu image is uploaded into the display target and shown; scripted input through the virtual gamepad | headless shell: no window, no GPU, every draw reaches the backend, the pad from the script |
 | record | as its inner backend | as its inner backend |
 
