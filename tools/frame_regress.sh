@@ -1,0 +1,157 @@
+#!/bin/bash
+# The frame regression suite (task 020): boots the game through the known routes, captures five scenes, compares each
+# with its PPSSPP reference in ref/ (tools/imgdiff.py) and prints a PASS/FAIL table, also written to <out>/summary.txt.
+# Exit 0 only when every scene passes. Every renderer change runs this before merging. About 7 minutes: three bounded
+# windowed runs (input scripts need the renderer's pad), one per route, each on an empty memory stick of its own
+# (<out>/game, EBOOT.ELF and disc.iso linked to game/), because main_menu.txt creates and saves a profile.
+#   tools/frame_regress.sh [--backend vulkan|metal] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]
+#   --backend  sets PURE_GE_BACKEND for the runs and records it in the summary (default vulkan). Only the Vulkan
+#              backend exists today: the value is passed on, not enforced.
+#   --out      captures (<out>/shots/<scene>.png), run logs, diff images of failing scenes (<out>/<scene>.diff.png:
+#              the capture dimmed, differing pixels red) and summary.txt; default out/regress. The suite's files
+#              from an earlier run there are removed first.
+#   --only     these scenes only, and only the runs they need (--only race_hud takes about 3.5 minutes).
+#   --env      extra environment for every run (tools/run_boot.py --env), e.g. a deliberate regression:
+#              tools/frame_regress.sh --only race_hud --env PURE_NO_STENCIL_BUFFER=1   (race_hud FAILs)
+# A scene's fraction is the share of pixels that differ by more than `tol` in any channel, with the 960x544 capture
+# and the 480x272 reference both at 480x272 (nearest neighbour). It passes at or below `limit`. `measured` is what the
+# scene scored when its limit was set; the table prints the difference, and a move of more than 0.03 means something
+# changed even when the scene still passes. Re-baselining: docs/verification.md, "Frame regression suite".
+set -u
+cd "$(dirname "$0")/.."
+export PURE_ROOT="$PWD"
+. tools/env.sh
+ROOT=$PWD
+
+# The scenes. Route: input scripts in config/pad_scripts/, joined in order with their own `shot` steps dropped; the
+# suite adds `FRAME:shot SCENE` for each scene of the route and runs to the route's last shot + EXTRA_FLIPS. Scenes on
+# the same route share one run. The measured values (and where they come from) stay beside the limits.
+#  scene      route                          frame  reference               tol  limit  measured
+SCENES='
+   lang       frontend.txt                   690    ref/frontend.png        24   0.07   0.054   # task 006: one-pixel edges of lines and glyphs from the 2x-to-1x downscale
+   title      frontend.txt                   1750   ref/title.png           24   0.05   0.030   # tasks 006, 009, 010, 011: 0.0302 each time
+   profile    frontend.txt                   2100   ref/profile.png         24   0.07   0.054   # task 006: downscale edges, as lang
+   main_menu  main_menu.txt                  4700   ref/main_menu.png       24   0.05   0.033   # task 006: help text caught mid-typing
+   race_hud   main_menu.txt+single_race.txt  6016   ref/vineta_k_start.png  32   0.10   0.067   # task 011 review: first full-HUD frame, bloom and shadows on; runs 0.063-0.086 (the AI grid varies)
+'
+EXTRA_FLIPS=30
+
+OUT=out/regress
+BACKEND=vulkan
+ONLY=
+ENVS=()
+usage() {
+  echo "usage: tools/frame_regress.sh [--backend vulkan|metal] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]"
+  exit 2
+}
+while [ $# -gt 0 ]; do
+  case $1 in
+    --backend) [ $# -ge 2 ] || usage; BACKEND=$2; shift 2 ;;
+    --out) [ $# -ge 2 ] || usage; OUT=$2; shift 2 ;;
+    --only) [ $# -ge 2 ] || usage; ONLY=$2; shift 2 ;;
+    --env) [ $# -ge 2 ] || usage; case $2 in *=*) ;; *) usage ;; esac; ENVS+=(--env "$2"); shift 2 ;;
+    -h|--help) usage ;;
+    *) echo "frame_regress: unknown argument $1"; usage ;;
+  esac
+done
+case $BACKEND in vulkan|metal) ;; *) echo "frame_regress: --backend is vulkan or metal, not $BACKEND"; exit 2 ;; esac
+
+[ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
+[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
+[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+
+# The table without comments and blank lines, filtered by --only.
+TABLE=$(printf '%s\n' "$SCENES" | sed 's/#.*//' | awk 'NF >= 7')
+if [ -n "$ONLY" ]; then
+  for s in $(echo "$ONLY" | tr ',' ' '); do
+    printf '%s\n' "$TABLE" | awk -v s="$s" '$1 == s { found = 1 } END { exit !found }' ||
+      { echo "frame_regress: no scene $s (scenes: $(printf '%s\n' "$TABLE" | awk '{ printf "%s ", $1 }'))"; exit 2; }
+  done
+  TABLE=$(printf '%s\n' "$TABLE" | awk -v only=",$ONLY," 'index(only, "," $1 ",") > 0')
+fi
+while read -r scene route frame ref tol limit measured; do
+  [ -f "$ref" ] || { echo "$ref missing (PPSSPP captures are git-ignored: copy them from the main checkout's ref/)"; exit 2; }
+done <<< "$TABLE"
+
+mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
+rm -rf "$OUT/shots" "$OUT/game"
+rm -f "$OUT"/*.log "$OUT"/*.stdout "$OUT"/*.route.txt "$OUT"/*.diff.png "$OUT/summary.txt"
+mkdir -p "$OUT/shots" "$OUT/game"
+ln -s "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
+ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
+
+START=$SECONDS
+SUMMARY=()
+note() { echo "$*"; SUMMARY+=("$*"); }
+commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+git diff --quiet HEAD 2>/dev/null || commit="$commit+changes"
+note "frame regression $(date '+%Y-%m-%d %H:%M'), commit $commit, backend $BACKEND (PURE_GE_BACKEND: recorded, not enforced)"
+extra=$(printf '%s ' ${ENVS[@]+"${ENVS[@]}"} | sed 's/--env //g; s/ *$//')
+note "extra environment: ${extra:-none}"
+
+# One run per route, in table order, on an empty memory stick.
+ROUTES=$(printf '%s\n' "$TABLE" | awk '!seen[$2]++ { print $2 }')
+for route in $ROUTES; do
+  name=$(echo "$route" | sed 's/\.txt//g')
+  script="$OUT/$name.route.txt"
+  last=$(printf '%s\n' "$TABLE" | awk -v r="$route" '$2 == r { print $3 }' | sort -n | tail -1)
+  frames=$((last + EXTRA_FLIPS))
+  # The shots go first, so at a frame shared with a press (the input script sorts stably) they capture before it.
+  printf '%s\n' "$TABLE" | awk -v r="$route" '$2 == r { print $3 ":shot " $1 }' > "$script"
+  for part in $(echo "$route" | tr '+' ' '); do
+    grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' "config/pad_scripts/$part" >> "$script"
+  done
+  rm -rf "$OUT/game/ms0"
+  mkdir -p "$OUT/game/ms0/PSP/SAVEDATA"
+  echo "run $name: $frames flips ..."
+  t0=$SECONDS
+  python3 tools/run_boot.py --script "$script" --shots "$OUT/shots" --frames "$frames" \
+    --env PURE_GAME_DIR="$OUT/game" --env PURE_GE_BACKEND="$BACKEND" ${ENVS[@]+"${ENVS[@]}"} \
+    "$OUT/$name.log" > "$OUT/$name.stdout" 2>&1
+  rc=$?
+  reached=no
+  grep -q "^\[pure\] exit at frame $frames" "$OUT/$name.log" && reached=yes
+  note "run $name: run_boot exit $rc, frame $frames reached: $reached, $((SECONDS - t0)) s, log $OUT/$name.log"
+done
+
+# Compare each capture with its reference.
+row() { printf '%-10s %6s %9s %6s %4s %9s %7s  %s' "$@"; }
+note ""
+note "$(row scene frame fraction limit tol measured delta result)"
+PASSED=0
+TOTAL=0
+DRIFT=
+while read -r scene route frame ref tol limit measured; do
+  TOTAL=$((TOTAL + 1))
+  cap="$OUT/shots/$scene.png"
+  diff="$OUT/$scene.diff.png"
+  fraction=-
+  delta=-
+  if [ ! -f "$cap" ]; then
+    result="FAIL (no capture)"
+  else
+    line=$(python3 tools/imgdiff.py "$cap" "$ref" --tol "$tol" --max-frac "$limit" --out "$diff" 2>&1)
+    rc=$?
+    if [ $rc -eq 0 ]; then
+      result=PASS; PASSED=$((PASSED + 1)); rm -f "$diff"
+    elif [ $rc -eq 1 ]; then
+      result="FAIL (diff $diff)"
+    else
+      result="ERROR ($line)"; rm -f "$diff"
+    fi
+    if [ $rc -le 1 ]; then
+      fraction=$(echo "$line" | awk '$2 == "fraction" { printf "%.4f", $3 }')
+      delta=$(awk -v f="$fraction" -v m="$measured" 'BEGIN { printf "%+.3f", f - m }')
+      awk -v d="$delta" 'BEGIN { exit !(d > 0.03 || d < -0.03) }' && DRIFT="$DRIFT $scene"
+    fi
+  fi
+  note "$(row "$scene" "$frame" "$fraction" "$limit" "$tol" "$measured" "$delta" "$result")"
+done <<< "$TABLE"
+note ""
+[ -n "$DRIFT" ] && note "moved more than 0.03 from the measured value:$DRIFT (something changed; docs/verification.md)"
+verdict=FAIL
+[ $PASSED -eq $TOTAL ] && verdict=PASS
+note "frame regression: $verdict, $PASSED/$TOTAL scenes pass ($(( (SECONDS - START) / 60 ))m $(( (SECONDS - START) % 60 ))s)"
+printf '%s\n' "${SUMMARY[@]}" > "$OUT/summary.txt"
+[ "$verdict" = PASS ]

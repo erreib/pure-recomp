@@ -54,6 +54,83 @@ bitfields with alpha); PNG rows written with each of the filter types 0-4 at 1 t
 rejected with its IHDR fields; the variance check fails on a flat region and passes on a drawn one; the CLI's
 `--json` keys and exit code. It prints PASS and exits 0 in under 2 s (0.15 s on this Mac, about 0.7 s on a first run while Python compiles the modules).
 
+# Frame regression suite (task 020, 2026-10-06)
+
+```
+tools/frame_regress.sh [--backend vulkan|metal] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]
+```
+
+One command that checks the port still renders the known screens like PPSSPP. Every renderer change (and the Metal
+backend later) runs it before merging. It boots the game three times, once per route, captures five scenes, and
+compares each capture with its reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL per
+scene and writes the same text to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one fails, and
+2 on a usage error or a missing build, game or reference. The full suite takes about 7 minutes, and `--only race_hud`
+about 3.5.
+
+| Scene | Route (`config/pad_scripts/`) | Frame | Reference | Tol | Limit | Measured | 2026-10-06 |
+|---|---|---|---|---|---|---|---|
+| `lang` | `frontend.txt` | 690 | `ref/frontend.png` | 24 | 0.07 | 0.054 (task 006) | 0.0544 |
+| `title` | `frontend.txt` | 1750 | `ref/title.png` | 24 | 0.05 | 0.030 (tasks 006, 009-011) | 0.0302 |
+| `profile` | `frontend.txt` | 2100 | `ref/profile.png` | 24 | 0.07 | 0.054 (task 006) | 0.0543 |
+| `main_menu` | `main_menu.txt` | 4700 | `ref/main_menu.png` | 24 | 0.05 | 0.033 (task 006) | 0.0331 |
+| `race_hud` | `main_menu.txt` + `single_race.txt` | 6016 | `ref/vineta_k_start.png` | 32 | 0.10 | 0.067 (task 011) | 0.0672 |
+
+The table lives at the top of the script (`SCENES`), with the source of each measured value as a comment. A scene's
+fraction is the share of pixels that differ by more than Tol in any channel, with both frames at 480x272 (the
+960x544 capture is reduced by nearest neighbour). The scene passes at or below Limit.
+
+- lang and profile score 0.054 because of one-pixel edges of lines and glyphs, which the 2x-to-1x reduction moves.
+  The main menu capture catches the help text partway through typing.
+- `race_hud` is frame 6016 of the race route, with bloom and shadows on (the defaults). It is the first frame where
+  the HUD has fully faded in, and the same game moment as the PPSSPP frame 7155. The AI ships on the grid change from
+  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086.
+
+How the runs are made:
+- Each route's input script is written to `<out>/<route>.route.txt`. The route files are joined in order with their
+  own `shot` steps dropped. One `FRAME:shot SCENE` step is put first for each scene on that route, so a shot at the
+  same frame as a press captures before the press.
+- `race_hud` uses the same presses as `~/dev/pure-recomp/out/race/route.txt`, the route that measured it. Those are
+  `main_menu.txt` followed by `single_race.txt`. Its Cross hold at 6100 comes after the run ends.
+- Each run goes to its last shot plus 30 flips (`--frames`), so 2130, 4730 and 6046.
+- Every run starts from an empty memory stick in `<out>/game`, where `EBOOT.ELF` and `disc.iso` are links to
+  `game/`. `main_menu.txt` creates and saves a profile, and a profile left on the stick would change the next boot.
+  The checkout's `game/ms0` is never touched.
+- Outputs go to `<out>`, by default `out/regress`. The suite's files from an earlier run there are removed first.
+  - captures: `<out>/shots/<scene>.png` (with the BMP)
+  - run logs: `<out>/<route>.log`
+  - the runner's stdout: `<out>/<route>.stdout`
+  - diff images for failing scenes only: `<out>/<scene>.diff.png`, the capture dimmed with differing pixels in red
+- `--backend` sets `PURE_GE_BACKEND` for the runs and records it in the summary. Only the Vulkan backend exists
+  today, so the value is passed on but has no effect yet.
+- `--env KEY=VAL` passes extra environment to every run, through `tools/run_boot.py --env`. The summary records it.
+- The summary's first lines give the date, the commit (`+changes` when tracked files differ from it), the backend, the
+  extra environment, and each run's exit code, whether it reached its last frame, and how long it took.
+- Next to each fraction, the table prints `delta`, the difference from the measured value. If a scene moved by more
+  than 0.03, a line names it. That means something changed, even if the scene still passes.
+
+The deliberate regression (2026-10-06): `tools/frame_regress.sh --only race_hud --env PURE_NO_STENCIL_BUFFER=1 --out
+out/regress-nostencil` turns off the stencil attachment of patch 0006. That removes the ship shadows, and the 0004
+alpha path darkens the whole track. race_hud then scores 0.3053 (delta +0.238), so it fails with
+`out/regress-nostencil/race_hud.diff.png` written, and the suite exits 1.
+
+## Re-baselining the limits
+
+Change a limit only for a reason that is understood and written down. A renderer fix that brings a scene closer to
+PPSSPP is one. New references are another. Never raise a limit to get a regression through.
+
+1. Run the suite three times on the change, each with its own output: `--out out/regress-1`, `-2`, `-3`. Use `--only`
+   for the scenes concerned. Three runs show the spread, which matters for `race_hud` because of the AI grid.
+2. Look at each capture and its diff (`tools/imgdiff.py CAPTURE REF --tol T --out diff.png`). Confirm the scene
+   shows the same moment as the reference. If a route's timing moved, fix the frame column first.
+3. In the script's `SCENES` table, set `measured` to the typical value of the runs, to three decimals. Set `limit`
+   about 0.015 to 0.02 above the largest run, rounded to a hundredth. Today's limits follow that rule: lang and
+   profile 0.054 to 0.07, title 0.030 and main_menu 0.033 to 0.05, and race_hud's largest run 0.086 to 0.10.
+4. Update the comment beside the row with the task and the date, and update the table above. The commit says why
+   the number moved.
+
+If the references themselves are regenerated (`ref/README.md`, "Regenerate"), check the new SHA-256 values against
+that README. New references mean a new baseline for every scene, following the steps above.
+
 # Audio (task 013, 2026-10-05)
 
 ## PURE_AUDIO_WAV
