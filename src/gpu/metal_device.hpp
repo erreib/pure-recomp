@@ -14,9 +14,35 @@
 
 #import <Metal/Metal.h>
 
+#include <cstdint>
+
 namespace pure::metal {
 
 id<MTLDevice> device();
 id<MTLCommandQueue> queue();
+
+// The frame trace (PURE_METAL_TRACE, task 033; docs/metal-backend.md, "Frame times"). The backend writes a row per
+// flip; the Metal shell, which presents the backend's picture right after present_image(), hands it its own part
+// of each flip through these calls (the hook the brief offered, rather than a second file). The shell calls them
+// only when trace_on(), which reads PURE_METAL_TRACE once.
+bool trace_on();
+// The backend, in present_image(): the flip whose picture the shell presents next.
+void trace_flip(std::uint64_t flip);
+std::uint64_t trace_current_flip();
+// The shell, after its commit of a game picture: the CPU time of present() and, of it, the wait in nextDrawable.
+void trace_shell_present(double cpu_ms, double drawable_ms);
+// The shell's presented handler (any thread): when the drawable of `flip` reached the screen (CACurrentMediaTime's
+// seconds; 0 when it never did) and how long after the start of present() that was.
+void trace_presented(std::uint64_t flip, double presented_s, double latency_ms);
+
+// The backend's side: the shell's present times since the last call, summed, and their count.
+struct ShellPresents {
+    double cpu_ms{};
+    double drawable_ms{};
+    std::uint32_t count{};
+};
+ShellPresents take_shell_presents();
+// The presented time and latency of `flip`'s drawable, once the shell's handler has reported it (then forgotten).
+bool take_presented(std::uint64_t flip, double &presented_s, double &latency_ms);
 
 } // namespace pure::metal

@@ -19,6 +19,9 @@
 //              Vsync is the layer's displaySyncEnabled. No frame interpolation: present_due and present_until do
 //              nothing.
 //   captures   capture_window: the next presented drawable, interface included, read back as a BMP.
+//   trace      with PURE_METAL_TRACE (task 033), each present of a game picture tells the backend's frame trace its
+//              CPU time, the wait in nextDrawable, and (from the drawable's presented handler) when the picture
+//              reached the screen, through the hook in metal_device.hpp.
 //   interface  ImGui's SDL3 platform backend (InitForMetal) and its Metal renderer backend (third_party/imgui_metal,
 //              Dear ImGui 1.92.9b), drawn into the drawable after the game's picture.
 //
@@ -44,6 +47,7 @@
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <QuartzCore/CABase.h>
 #import <QuartzCore/CAMetalLayer.h>
 
 #include <algorithm>
@@ -324,6 +328,14 @@ public:
                  std::optional<Clock::time_point>) override {
         if (!ready_) return false;
         @autoreleasepool {
+            // The frame trace (task 033): this present's part of the flip the backend just handed over.
+            Trace trace{};
+            trace.on = pure::metal::trace_on();
+            if (trace.on) {
+                trace.flip = pure::metal::trace_current_flip();
+                trace.entered = Clock::now();
+                trace.entered_media = CACurrentMediaTime();
+            }
             id<MTLTexture> game = nil;
             if (image.api == pk::gpu::ImageApi::Metal && image.image != 0u)
                 game = (__bridge id<MTLTexture>)reinterpret_cast<void *>(image.image);
@@ -335,11 +347,13 @@ public:
             if (fast_forward_ && capture_path_.empty()) {
                 if (now - fast_forward_shown_ < kFastForwardInterval) {
                     ui_draw_data_ = nullptr;
+                    report(trace, false);
                     return false;
                 }
                 fast_forward_shown_ = now;
             }
-            const bool shown = draw(holding_ ? held_ : game, kBlack);
+            const bool shown = draw(holding_ ? held_ : game, kBlack, trace.on ? &trace : nullptr);
+            report(trace, shown);
             if (shown) {
                 presents_.push_back(now);
                 while (!presents_.empty() && now - presents_.front() > std::chrono::seconds(1)) presents_.pop_front();
@@ -477,6 +491,25 @@ public:
 private:
     static constexpr double kBlack[3] = {0.0, 0.0, 0.0};
 
+    // A present's part in the frame trace (PURE_METAL_TRACE): the flip it shows, when present() began (both clocks),
+    // and the time draw() waited for a drawable.
+    struct Trace {
+        bool on{};
+        std::uint64_t flip{};
+        Clock::time_point entered{};
+        double entered_media{};
+        double drawable_ms{};
+    };
+
+    // Hands the trace this present's CPU time, and, for a flip not shown (a skipped fast-forward flip, no drawable),
+    // that its picture never reached the screen.
+    static void report(const Trace &trace, bool shown) {
+        if (!trace.on) return;
+        pure::metal::trace_shell_present(std::chrono::duration<double, std::milli>(Clock::now() - trace.entered).count(),
+                                         trace.drawable_ms);
+        if (!shown) pure::metal::trace_presented(trace.flip, 0.0, 0.0);
+    }
+
     void sample(bool focused) {
         input_.sample(focused, mouse_captured_, mouse_buttons_, nullptr, flips_);
     }
@@ -570,10 +603,24 @@ private:
 
     // One present: `picture` letterboxed over `clear` (or `clear` alone without one), the interface over it, a
     // window capture when one is pending, then presentDrawable and commit. False when there was no drawable.
-    bool draw(id<MTLTexture> picture, const double (&clear)[3]) {
+    // With `trace`, the wait for the drawable is timed and the drawable's presented handler reports when it reached
+    // the screen.
+    bool draw(id<MTLTexture> picture, const double (&clear)[3], Trace *trace = nullptr) {
         ImDrawData *ui = ui_ready_ ? ui_draw_data_ : nullptr;
         ui_draw_data_ = nullptr;
+        const Clock::time_point asked = trace != nullptr ? Clock::now() : Clock::time_point{};
         id<CAMetalDrawable> drawable = [layer_ nextDrawable];
+        if (trace != nullptr) {
+            trace->drawable_ms = std::chrono::duration<double, std::milli>(Clock::now() - asked).count();
+            if (drawable != nil) {
+                const std::uint64_t flip = trace->flip;
+                const double entered = trace->entered_media;
+                [drawable addPresentedHandler:^(id<MTLDrawable> shown) {
+                    const double at = shown.presentedTime;
+                    pure::metal::trace_presented(flip, at, at > 0.0 ? (at - entered) * 1000.0 : 0.0);
+                }];
+            }
+        }
         if (drawable == nil) return false;
         id<MTLTexture> target = drawable.texture;
         id<MTLCommandBuffer> commands = [queue_ commandBuffer];
