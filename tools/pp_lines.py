@@ -3,7 +3,7 @@
 tracks nobody has driven.
 
   tools/pp_lines.py TRACK_NAME [--downs N] [--race-seconds S] [--out CSV] [--pad ITEMS] [--dump BIN] [--debug-port P]
-  tools/pp_lines.py --port LOG [--out LINE_CSV] [--samples CSV] [--ships leader|ai] [--compare LINE_CSV]
+  tools/pp_lines.py --port LOG [--out LINE_CSV] [--samples CSV] [--ships leader|ai] [--near M] [--compare LINE_CSV]
 
 Boots disc.iso in PPSSPPSDL through tools/ppsspp/ppsspp_ctl.py (used as a library; hardware renderer, sound off,
 the ini put back afterwards), plays tools/ppsspp/routes/frontend.txt and vineta_k_start.txt with N DOWN presses
@@ -24,8 +24,13 @@ k=K clock=C pos=x,y,z vel=vx,vy,vz dist=D lap=L` lines give every race record ea
 to the next) go to --samples in the PPSSPP recording's CSV form (the flip in the usec column; default LOG with
 `.grid.csv`), skipping the player's entry (the index the `player object` line names) and records whose lap field
 has bit 16 set (that ship's race is over). The line is made from the AI ship with the most progress over the race
-(the furthest along the track, the distance unwrapped at each wrap, at the last flip every AI ship still races;
-`--ships ai` takes the mean of all the AI ships instead, as
+(the furthest along the track, the distance unwrapped at each wrap, at the last flip every AI ship still races):
+the mean of its samples, over all its laps, that lie within --near metres (default 15) of its fastest whole pass
+of the track coordinate (from one wrap to the next). Not every lap as it is, because a track can fork: on Sinucit
+at about 800 m the winner took branches 130 m apart in different laps, and the mean of its laps ran between them,
+through the wall; and not the fastest pass alone, because one lap wanders: on Vineta K it lies 5.8 m (mean) from
+the PPSSPP line, the mean within 15 m 3.8 m. `--ships ai` takes the mean of all the AI ships over the race instead,
+as
 tools/campaign_sweep.py --export-line does with a PPSSPP recording): the AiLine of tools/campaign_sweep.py (2 m
 bins, gaps interpolated, smoothed over +-3 bins), written to --out as the `dist,x,z` rows a steering table's `follow`
 reads (default LOG with `.line.csv`). --compare REF reports how far the new line lies from REF, another `dist,x,z`
@@ -111,6 +116,19 @@ def progress(rows, player):
     return {k: (max(u for f, u in p if f <= at), at) for k, p in path.items()}
 
 
+def full_passes(rows):
+    """One ship's whole passes of the track: (first flip, last flip) of the samples from one wrap of the distance to
+    the next, so each covers the track coordinate from 0 to the wrap once."""
+    out, start, last = [], None, None
+    for r in rows:
+        if last is not None and r[9] < last - WRAP_M:
+            if start is not None:
+                out.append((start, prev))
+            start = r[0]
+        prev, last = r[0], r[9]
+    return out
+
+
 def port_main(a):
     sys.path.insert(0, str(ROOT / "tools"))
     from campaign_sweep import AiLine   # noqa: E402  (the follower's line, so the two agree)
@@ -126,12 +144,27 @@ def port_main(a):
     prog = progress(rows, player)
     for k in sorted(prog):
         print(f"ship {k}: {prog[k][0]:.0f} m along the track at flip {prog[k][1]}")
+    span = None
     if a.ships == "leader":
         leader = max(prog, key=lambda k: prog[k][0])
-        ships, what = {leader}, f"ship {leader}, the AI ship with the most progress"
+        passes = full_passes([r for r in rows if r[1] == leader])
+        if not passes:
+            sys.exit(f"pp_lines: ship {leader} never drove the whole track from one wrap to the next")
+        span = min(passes, key=lambda p: p[1] - p[0])
+        ships = {leader}
+        what = (f"ship {leader}, the AI ship with the most progress: its samples within {a.near:g} m of its fastest "
+                f"whole pass of the track (flips {span[0]} to {span[1]}, {(span[1] - span[0]) / 60.0:.1f} s; "
+                f"{len(passes)} whole passes)")
     else:
         ships, what = set(prog), f"the mean of the AI ships {', '.join(map(str, sorted(prog)))}"
-    line = AiLine(str(samples), player=player, ships=ships)
+    keep = None
+    if span is not None:
+        fastest = AiLine(str(samples), player=player, ships=ships, span=span)
+
+        def keep(d, x, z):
+            fx, fz = fastest.at(d)
+            return math.hypot(x - fx, z - fz) <= a.near
+    line = AiLine(str(samples), player=player, ships=ships, keep=keep)
     out = Path(a.out) if a.out else log.with_suffix(".line.csv")
     line.export(str(out))
     frames = [r[0] for r in rows]
@@ -161,6 +194,7 @@ def main():
     p.add_argument("--samples", help="--port: the samples CSV (default LOG with .grid.csv)")
     p.add_argument("--ships", choices=("leader", "ai"), default="leader")
     p.add_argument("--compare", metavar="LINE_CSV")
+    p.add_argument("--near", type=float, default=15.0, help="--port: metres from the leader's fastest pass")
     p.add_argument("--downs", type=int, default=0)
     p.add_argument("--race-seconds", type=float, default=80.0)
     p.add_argument("--out")

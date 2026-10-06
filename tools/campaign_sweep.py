@@ -2,9 +2,10 @@
 """Campaign sweep: each (mode, track) cell from a cold boot to the mode's end screen under scripted driving.
 
   tools/campaign_sweep.py [MODE [TRACK ...]] [--frames N] [--stall S] [--drive FILE] [--shots-every N] [--list]
-                          [--set KEY=VALUE ...] [--out DIR] [--no-damage]
+                          [--set KEY=VALUE ...] [--out DIR] [--no-damage] [--class NAME] [--unlock-all]
   tools/campaign_sweep.py MODE TRACK --tune [--line CSV] [--wn W] [--preview S]
   tools/campaign_sweep.py MODE TRACK --export-line OUT [--line CSV]
+  tools/campaign_sweep.py MODE TRACK --record-line OUT [--line REF] [--class NAME]
 
 MODE is a row of MODES (default single_race); TRACK names a track of the mode (default: all of them, in menu
 order). Each cell is one run of build/arm64/bin/PureNative, strict (PURE_STRICT_HLE=1) with
@@ -58,6 +59,18 @@ second, and Tournament's budget covers its four races.
 --no-damage sets PURE_TEST_NO_DAMAGE=1, the port's test switch that refills the player's shield every flip, so
 contacts cannot destroy the ship: the sweep's job is to reach every results screen and find halts, not to race
 well. The summary marks such a row's outcome `(no damage)`. Never a default.
+
+Leagues, classes and the unlock switch (task 032): Single Race picks the class (--class NAME, CLASSES, default
+vector), the league and the track by DOWN presses the sweep writes (MODES `class_at`, `league_at`, `downs_at`;
+--list prints them), so its TRACK names every track of every league (ALPHA, BETA, CLASSIC); Zone has zone_1 to
+zone_4. A cell whose track or class a new profile lacks (MODES `fresh`, FRESH_CLASSES) runs with
+PURE_TEST_UNLOCK_ALL=1, the port's test switch that makes every frontend lock check read "unlocked"; --unlock-all
+sets it for any cell. The summary marks such rows `(unlock all)`, and a class other than Vector shows in the track
+column as `track/class`. --record-line OUT records a racing line for a track from the port's own AI ships: the
+cell's route headless (unpaced, the race itself at the game's 60 flips a second) with Cross held and no steering,
+PURE_WATCH_GRID=1 and PURE_TEST_NO_DAMAGE=1, then tools/pp_lines.py --port writes the line of the AI ship with the
+most progress to OUT (`dist,x,z`, the form `follow` reads); --line REF also prints its distance from REF (see
+record_line).
 
 While the run goes the tool reads the `[pure] ship` lines (race clock, distance along the track, lap):
   - finished: the lap clock has restarted `laps` times (the player crossed the line at the end of the last lap; see
@@ -406,12 +419,13 @@ class Race:
 class AiLine:
     """An AI racing line: the AI ships' mean x, z per BIN metres of track distance, gaps interpolated, smoothed over
     +-3 bins, closed at the wrap. Read from tools/pp_lines.py's recording (PPSSPP's, or the port's from --port; `ships`
-    keeps only those ship indices), or from a `dist,x,z` line file that --export-line wrote from one (the form a
-    steering table's `follow` names)."""
+    keeps only those ship indices, `span` only the samples whose first column, the flip in a port recording, is in
+    that closed range, `keep(dist, x, z)` only the samples it accepts), or from a `dist,x,z` line file that --export-line wrote from one (the form a steering
+    table's `follow` names)."""
     BIN = 2.0
 
     @staticmethod
-    def samples(path, player, ships=None):
+    def samples(path, player, ships=None, span=None, keep=None):
         with open(path) as f:
             header = next(f).strip()
             for row in f:
@@ -419,18 +433,22 @@ class AiLine:
                 if header == "dist,x,z":
                     yield float(cols[0]), float(cols[1]), float(cols[2])
                     continue
-                _u, k, _clock, x, _y, z, vx, _vy, vz, dist, _lap = cols
+                u, k, _clock, x, _y, z, vx, _vy, vz, dist, _lap = cols
                 if int(k) == player or math.hypot(float(vx), float(vz)) < 20.0:
                     continue            # the idle player, and ships on the grid
                 if ships is not None and int(k) not in ships:
                     continue
+                if span is not None and not span[0] <= int(u) <= span[1]:
+                    continue
+                if keep is not None and not keep(float(dist), float(x), float(z)):
+                    continue
                 yield float(dist), float(x), float(z)
 
-    def __init__(self, path, player=7, ships=None):
+    def __init__(self, path, player=7, ships=None, span=None, keep=None):
         sums, dmax = {}, 0.0
         with open(path) as f:
             exported = f.readline().strip() == "dist,x,z"
-        for d, x, z in self.samples(path, player, ships):
+        for d, x, z in self.samples(path, player, ships, span, keep):
             s = sums.setdefault(int(d // self.BIN), [0.0, 0.0, 0])
             s[0] += x
             s[1] += z
