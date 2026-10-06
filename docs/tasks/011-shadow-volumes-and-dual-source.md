@@ -1,6 +1,6 @@
 # 011: Ship shadows (stencil shadow volumes) and exact REPLACE under source-alpha blends
 
-Milestone: M3 polish | Branch: task/011-shadow-volumes-and-dual-source | Status: OPEN
+Milestone: M3 polish | Branch: task/011-shadow-volumes-and-dual-source | Status: MERGED
 
 ## Goal
 Two leftovers from patch 0004 (docs/tasks/009-stencil-as-alpha.md, Open questions): (a) the ships' shadows are
@@ -144,4 +144,8 @@ Open questions:
 - Carried over from the first Result: should cmake compile a second fragment shader instead of editing the SPIR-V at runtime? On 5551/4444 targets, the stencil uses the 8-bit expansion of the reference.
 
 ## Review
-(Fable fills)
+Verify rerun by Fable after the merge on batch/m2: six-patch series ok; race frame 6016 with everything on scores
+0.067 against ref/vineta_k_start.png (worker: 0.069; 0.304 before 0006); the device reports D32_SFLOAT_S8_UINT,
+stencil buffer on, dual-source on. Spot-read: the resolve-quad slot fix and the stale-alpha rule. Merged into
+batch/m2. Follow-ups filed: heap corruption at shutdown (task 015, predates 0006); AI grid varies run to run (RNG
+seed, probably RTC; harmless for now); the SPIR-V edit vs a second shader build is a vendor-upstreaming question.
