@@ -4,7 +4,7 @@
 |---|---|---|---|
 | D-001 | 2026-10-05 | Vendor base: TeamGDB/PortableKit pinned at 8b0c3fe | accepted |
 | D-002 | 2026-10-05 | Renderer path: Vulkan/MoltenVK bootstrap, then native Metal behind a seam | accepted |
-| D-003 | pending | GE backend seam | open (M2) |
+| D-003 | 2026-10-06 | GE backend seam: shell vs GeBackend; Vulkan adapted, Metal implemented against it | accepted |
 | D-004 | pending | Determinism: virtual clock, fixed RTC, frame-indexed input | open (M3) |
 | D-005 | pending | Savedata directory layout, DLC-ready | open (M5) |
 | D-006 | 2026-10-05 | Licence of our code: GPL-2.0-or-later | accepted |
@@ -39,6 +39,20 @@ Consequences: a MoltenVK/glslang dependency and a patch that splits VulkanRender
 backends to keep at parity, checked by ge_replay and fuzzing.
 Alternatives: Metal from day one (renderer and CPU bugs arrive together, no A/B); Vulkan only (no native Metal).
 Status: accepted (Erik, 2026-10-05).
+
+## D-003  2026-10-06  GE backend seam
+Context: the vendored VulkanRenderer fuses the window shell and the GE backend; the Metal backend (M6) must
+replace only the latter, and patches 0003-0008 now define what this game needs from a backend.
+Decision: a `gpu::GeBackend` interface (docs/ge-backend.md) between the shell and the backend. The Vulkan
+renderer is adapted through a thin wrapper, not split or rewritten. The Metal backend is written against the
+interface, with a Metal presenter in the shell. `null` and `record` backends validate the split; ge_replay compares
+backends on recordings and fuzz. Backends are chosen by `PURE_GE_BACKEND`.
+Consequences: one vendor patch for the seam (upstream candidate), no change to Vulkan output (the regression
+suite must be unchanged); the Metal work lives in src/gpu/ in this repo; the shell's Metal presenter is a second
+patch. The render-target model (aliasing, stencil-as-alpha copy rule, depth write-back) is part of the contract.
+Alternatives: split VulkanRenderer into shell and backend (cleaner, but a large patch against a moving upstream);
+Metal only via MoltenVK (no native backend).
+Status: accepted.
 
 ## D-006  2026-10-05  Licence
 Context: the framework is MIT, FFmpeg is LGPL and linked dynamically, PPSSPP is GPL-2.0-or-later and may one
