@@ -1,29 +1,36 @@
 #!/bin/bash
 # The frame regression suite (task 020): boots the game through the known routes, captures five scenes, compares each
 # with its PPSSPP reference in ref/ (tools/imgdiff.py) and prints a PASS/FAIL table, also written to <out>/summary.txt.
-# Exit 0 only when every scene passes. Every renderer change runs this before merging, on both paths (D-008). About 7
-# minutes: three bounded windowed runs (input scripts need the shell's pad), one per route, each on an empty memory
-# stick of its own (<out>/game, EBOOT.ELF and disc.iso linked to game/), because main_menu.txt creates and saves a
-# profile.
-#   tools/frame_regress.sh [--backend metal|vulkan] [--shell metal|vulkan|headless] [--out DIR]
-#                          [--only SCENE[,SCENE...]] [--env KEY=VAL ...]
+# Exit 0 only when every scene passes. Every renderer change runs this before merging, on both paths (D-008). Three
+# bounded runs, one per route, each on an empty memory stick of its own (<out>/game, EBOOT.ELF and disc.iso linked
+# to game/), because main_menu.txt creates and saves a profile. By default (task 034) they run headless on the Metal
+# backend: no window, unpaced, the scenes the backend's own 480x272 pictures, under a minute in all; in a window
+# (--shell metal or vulkan) each run is paced to real time and the suite takes about 7 minutes.
+#   tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR]
+#                          [--only SCENE[,SCENE...]] [--env KEY=VAL ...] [--allow-parallel]
 #   --backend  sets PURE_GE_BACKEND for the runs, records it in the summary and picks the table's measured column
 #              (default metal, the macOS default since D-008; vulkan is the bootstrap path through MoltenVK).
-#   --shell    sets PURE_SHELL for the runs and records it in the summary beside the backend (default metal): the
-#              shots are the Metal shell's window (task 027), the Vulkan shell's, or, headless, the GE backend's own
-#              480x272 captures. The Vulkan path is --shell vulkan --backend vulkan.
+#   --shell    sets PURE_SHELL for the runs and records it in the summary beside the backend (default headless): the
+#              shots are the GE backend's own 480x272 captures, the Metal shell's window (task 027) or the Vulkan
+#              shell's. The window paths, the gates for shell changes (docs/verification.md), are --shell metal
+#              --backend metal and --shell vulkan --backend vulkan.
 #   --out      captures (<out>/shots/<scene>.png), run logs, diff images of failing scenes (<out>/<scene>.diff.png:
 #              the capture dimmed, differing pixels red) and summary.txt; default out/regress. The suite's files
 #              from an earlier run there are removed first.
-#   --only     these scenes only, and only the runs they need (--only race_hud takes about 3.5 minutes).
+#   --only     these scenes only, and only the runs they need (in a window --only race_hud takes about 3.5 minutes).
 #   --env      extra environment for every run (tools/run_boot.py --env), e.g. a deliberate regression:
 #              tools/frame_regress.sh --shell vulkan --backend vulkan --only race_hud --env PURE_NO_STENCIL_BUFFER=1
 #              (race_hud FAILs)
-# A scene's fraction is the share of pixels that differ by more than `tol` in any channel, with the 960x544 capture
-# and the 480x272 reference both at 480x272 (nearest neighbour). It passes at or below `limit`. The measured columns
-# hold what the scene scored on each backend when its limit or the backend last changed; the table prints the
-# difference from the running backend's column, and a move of more than 0.03 means something changed even when the
-# scene still passes. Re-baselining: docs/verification.md, "Frame regression suite".
+#   --allow-parallel  start even while another PureNative runs. Without it the suite refuses to start then, naming
+#              the process (task 034: one game at a time; a second game beside a windowed run has broken that
+#              run's menu route).
+# The runs are silent and use the data directory out/data/frame_regress (settings.ini, pipeline caches), not the
+# player's, unless the environment sets PURE_NO_AUDIO or PURE_DATA_DIR (tools/run_boot.py; task 034).
+# A scene's fraction is the share of pixels that differ by more than `tol` in any channel, with the capture (480x272
+# headless, 960x544 in a window) and the 480x272 reference both at 480x272 (nearest neighbour). It passes at or below
+# `limit`. The measured columns hold what the scene scored on each backend when its limit or the backend last
+# changed; the table prints the difference from the running backend's column, and a move of more than 0.03 means
+# something changed even when the scene still passes. Re-baselining: docs/verification.md, "Frame regression suite".
 set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
@@ -33,6 +40,8 @@ ROOT=$PWD
 # The scenes. Route: input scripts in config/pad_scripts/, joined in order with their own `shot` steps dropped; the
 # suite adds `FRAME:shot SCENE` for each scene of the route and runs to the route's last shot + EXTRA_FLIPS. Scenes on
 # the same route share one run. The measured values per backend (and where they come from) stay beside the limits.
+# The metal column serves the Metal window and the headless shell alike: the headless captures equal the window's,
+# reduced to 480x272, pixel for pixel in all five scenes, and three headless runs scored within 0.001 of it (task 034).
 #  scene      route                          frame  reference               tol  limit  vulkan  metal
 SCENES='
    lang       frontend.txt                   690    ref/frontend.png        24   0.07   0.054   0.0002  # vulkan task 006: one-pixel edges of lines and glyphs from the 2x-to-1x downscale; metal task 023: 22 px, the blinking cursor after ENGLISH
@@ -45,11 +54,12 @@ EXTRA_FLIPS=30
 
 OUT=out/regress
 BACKEND=metal
-SHELL_NAME=metal
+SHELL_NAME=headless
 ONLY=
 ENVS=()
+PARALLEL=no
 usage() {
-  echo "usage: tools/frame_regress.sh [--backend metal|vulkan] [--shell metal|vulkan|headless] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]"
+  echo "usage: tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...] [--allow-parallel]"
   exit 2
 }
 while [ $# -gt 0 ]; do
@@ -59,6 +69,7 @@ while [ $# -gt 0 ]; do
     --out) [ $# -ge 2 ] || usage; OUT=$2; shift 2 ;;
     --only) [ $# -ge 2 ] || usage; ONLY=$2; shift 2 ;;
     --env) [ $# -ge 2 ] || usage; case $2 in *=*) ;; *) usage ;; esac; ENVS+=(--env "$2"); shift 2 ;;
+    --allow-parallel) PARALLEL=yes; shift ;;
     -h|--help) usage ;;
     *) echo "frame_regress: unknown argument $1"; usage ;;
   esac
@@ -69,6 +80,19 @@ case $SHELL_NAME in vulkan|metal|headless) ;; *) echo "frame_regress: --shell is
 [ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
 [ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+
+# One game at a time (task 034): a second PureNative beside a windowed run has delayed its boot and broken its menu
+# route, and one beside this suite's runs would load the machine they are measured on.
+if [ $PARALLEL = no ]; then
+  others=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import run_boot
+print("\n".join(f"  pid {p}: {c}" for p, c in run_boot.other_games()))')
+  if [ -n "$others" ]; then
+    echo "frame_regress: another PureNative is running; one game at a time (--allow-parallel starts anyway):"
+    echo "$others"
+    exit 2
+  fi
+fi
+DATA=out/data/frame_regress
 
 # The table without comments and blank lines, filtered by --only.
 TABLE=$(printf '%s\n' "$SCENES" | sed 's/#.*//' | awk 'NF >= 8')
@@ -99,6 +123,7 @@ git diff --quiet HEAD 2>/dev/null || commit="$commit+changes"
 note "frame regression $(date '+%Y-%m-%d %H:%M'), commit $commit, shell $SHELL_NAME (PURE_SHELL), backend $BACKEND (PURE_GE_BACKEND), measured column $BACKEND"
 extra=$(printf '%s ' ${ENVS[@]+"${ENVS[@]}"} | sed 's/--env //g; s/ *$//')
 note "extra environment: ${extra:-none}"
+note "data directory: ${PURE_DATA_DIR:-$DATA}"
 
 # One run per route, in table order, on an empty memory stick.
 ROUTES=$(printf '%s\n' "$TABLE" | awk '!seen[$2]++ { print $2 }')
@@ -116,7 +141,7 @@ for route in $ROUTES; do
   mkdir -p "$OUT/game/ms0/PSP/SAVEDATA"
   echo "run $name: $frames flips ..."
   t0=$SECONDS
-  python3 tools/run_boot.py --script "$script" --shots "$OUT/shots" --frames "$frames" \
+  python3 tools/run_boot.py --script "$script" --shots "$OUT/shots" --frames "$frames" --data-dir "$DATA" \
     --env PURE_GAME_DIR="$OUT/game" --env PURE_GE_BACKEND="$BACKEND" --env PURE_SHELL="$SHELL_NAME" ${ENVS[@]+"${ENVS[@]}"} \
     "$OUT/$name.log" > "$OUT/$name.stdout" 2>&1
   rc=$?
