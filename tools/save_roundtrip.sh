@@ -10,7 +10,9 @@
 #   3. DLC   run 2 again with an empty sibling UCUS98612DGAMMAPACK1 (a download-pack folder without PI.WAD): the
 #            game's SAVEDATA scan sees it, the profile still loads and shows, and the run reaches its last frame.
 # Exit 0 only when all three hold. Logs, captures and the stick stay in out/014/. About 7 minutes: input scripts need
-# the renderer's pad, so every run is windowed.
+# the renderer's pad, so every run is windowed. The runs are silent and use the data directory
+# out/data/save_roundtrip (settings.ini, save backups), not the player's, unless the environment sets PURE_NO_AUDIO or
+# PURE_DATA_DIR (tools/run_boot.py; task 034).
 #   tools/save_roundtrip.sh
 set -u
 cd "$(dirname "$0")/.."
@@ -43,6 +45,7 @@ run() {
   local name=$1 script=$2 frames=$3; shift 3
   echo "$name: $(basename "$script"), $frames frames"
   python3 tools/run_boot.py --script "$script" --shots "$OUT/$name" --frames "$frames" --seconds 400 \
+    --data-dir out/data/save_roundtrip \
     --env PURE_GAME_DIR="$ROOT/$GAME" --env PURE_TRACE_SAVEDATA=1 "$@" "$OUT/$name.log" > "$OUT/$name.stdout" 2>&1
   local rc=$?
   if [ $rc -eq 0 ] && grep -q "^\[pure\] exit at frame $frames" "$OUT/$name.log"; then
