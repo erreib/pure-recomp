@@ -87,8 +87,9 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   lighting, fog, screen-space sprites, culling; the race frame at internal scale 1 matches Vulkan to its first
   stencil draw), 025 (Metal effects: stencil as alpha, bloom chain, read-backs and write-backs, ge_replay `--cut`).
   **M6 complete.** D-008: Metal by default on macOS. Running: 028 (the default switch in our entry point, per-backend
-  measured values in the suite, `run_boot.py --shell`). Next: M7 (app bundle, gamepad baseline, launcher, status
-  check) and the M5 breadth items in Follow-ups; then the enhancements (E1 controls, E2 widescreen, E3 internal
+  measured values in the suite, `run_boot.py --shell`), 030 (controls: docs/controls.md from the code, the menu's
+  binding editor and the virtual gamepad checked under the Metal shell). Briefed, waiting for 028: 029 (the app
+  bundle through the framework's release packer, the first-run installer, `tools/bundle.sh`). Next: M7's remainder and the M5 breadth items in Follow-ups; then the enhancements (E1 controls, E2 widescreen, E3 internal
   resolution, E4 60 fps in the 30-fps modes, E5 filtering) per the plan.
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
