@@ -2,8 +2,9 @@
 # The ge_replay check (task 022): replays GE backend recordings (.gerec) outside the game and checks what they present.
 #   tools/gerec/replay_check.sh
 # Recordings are made only when missing, each by one windowed run of a route of tools/frame_regress.sh (pad scripts
-# joined, `shot` steps dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend, and
-# must pass tools/gerec/gerec_dump.py --summary:
+# joined, `shot` steps dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend in the
+# Vulkan shell (PURE_SHELL=vulkan PURE_GE_RECORD_INNER=vulkan, set explicitly: the macOS default is the Metal path,
+# D-008, which has no Vulkan renderer to record), and must pass tools/gerec/gerec_dump.py --summary:
 #   out/gerec/race.gerec       main_menu.txt + single_race.txt, frames 6014-6016 (AT=6014 FRAMES=3), about 3.5 minutes
 #   out/gerec/race_warm.gerec  the same route, frames 6008-6016 (AT=6008 FRAMES=9): six frames that fill the render
 #                              targets before the three that are compared, about 3.5 minutes
@@ -57,8 +58,10 @@ record() {
   done
   echo "recording $name: $route, frames $at-$((at + frames - 1)), run to frame $last ..."
   local t0=$SECONDS
-  python3 tools/run_boot.py --script "$script" --frames "$last" \
-    --env PURE_GAME_DIR="$ROOT/$game" --env PURE_GE_BACKEND=record --env PURE_GE_RECORD="$ROOT/$file" \
+  # The Vulkan shell and an explicit Vulkan inner backend: the Metal default (D-008) has no Vulkan renderer to record.
+  python3 tools/run_boot.py --script "$script" --frames "$last" --shell vulkan \
+    --env PURE_GAME_DIR="$ROOT/$game" --env PURE_GE_BACKEND=record --env PURE_GE_RECORD_INNER=vulkan \
+    --env PURE_GE_RECORD="$ROOT/$file" \
     --env PURE_GE_RECORD_AT="$at" --env PURE_GE_RECORD_FRAMES="$frames" \
     "$OUT/$name.record.log" > "$OUT/$name.record.stdout" 2>&1
   local rc=$?
