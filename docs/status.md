@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
+Last updated: 2026-10-06 (session 4; see "Resume" below)
 
 ## Milestones
 
@@ -11,8 +11,8 @@ Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
 | M2 | frontend on screen (Vulkan via MoltenVK) | frame 900 of the frontend route matches `ref/frontend.png` | **main menu reached** by script (`config/pad_scripts/main_menu.txt`: language, notice, title, profile NEW, 9-slot name, tag, save question, warning, MAIN MENU at ~frame 4450; `out/milestones/04-main-menu.png`); PPSSPP compare pending | 2026-10-05 |
 | M3 | race start on Vineta K, faithful 3D | first full-HUD frame vs `ref/vineta_k_start.png` ≤ 0.30 at tol 32 (2x capture downscaled); 13,200-frame strict run (interpreter off, strict HLE, throttle held; retail has no Autopilot) exits 0 | **race reached**: Single Player > Single Race > Vector > Alpha > Vineta K > Feisar loads, countdown passes, HUD and music run (`out/milestones/05-race-vineta-k-magenta.png`); **done**: track, barriers, arches, sky, bloom, ship shadows and lens-flare occlusion (patches 0003-0006, 0008); frame 6016 vs PPSSPP **0.068** at tol 32; strict 13,200-frame run exits 0; clean shutdown (0007) | 2026-10-06 |
 | M4 | audio and video | `wavstats.py` active ≥ 0.9 from the first music (main menu) and over the race window; movies play (patch 0002) | **done** (task 013): music loops seamlessly, effects over music in the race, no clipping; `PURE_AUDIO_WAV` + `tools/wavstats.py` | 2026-10-05 |
-| M5 | saves and the whole campaign | `tools/campaign_sweep.py` cells PASS; `tools/save_roundtrip.sh` passes | in progress: Vineta K Single Race passes **3/3** (task 016, AI-line follower with dead-zone mapping and recovery); **all four Alpha tracks reach the results screen** (task 017: `--no-damage` test switch; Vineta K also without it); shield probe at be::Ship+0xF8; other modes task 018; save round trip passes (task 014: `tools/save_roundtrip.sh`, PSP-layout folder, LOAD restores name and tag, DLC pack folder tolerated); multiple profiles need a save-list dialog (framework picks the first slot) | 2026-10-05 |
-| M6 | native Metal backend | `ge_replay --backend metal` passes on all recordings | open | |
+| M5 | saves and the whole campaign | `tools/campaign_sweep.py` cells PASS; `tools/save_roundtrip.sh` passes | **every single-player mode reaches its end screen** (task 018, 2026-10-06): Single Race on all four Alpha tracks (task 017, `--no-damage` test switch; Vineta K also without it), Time Trial and Free Play on Vineta K, Zone on PRO TOZO (SHIP DESTROYED panel, zone 6: no racing line, the ship runs out of shield against the first barrier), the Alpha Tournament through all four races to the final TOURNAMENT STANDING; save round trip passes (task 014). Open: higher classes and leagues, the other tracks in the 30-fps modes (untested budgets), a Zone line, multiple profiles need a save-list dialog, finished-race autosave leg, the AI grid varies per run (RNG) | 2026-10-06 |
+| M6 | native Metal backend | `ge_replay --backend metal` passes on all recordings; `tools/frame_regress.sh --backend metal` passes | in progress: the seam landed (task 021, patch 0009: `gpu::GeBackend`, Vulkan adapter with pixel-identical captures, `null` and `record` backends, `tools/gerec/gerec_dump.py`); briefs 022 (ge_replay) and 023 (Metal first pictures) written | 2026-10-06 |
 | M7 | v1.0 polish | `tools/bundle.sh` app runs from Finder | open | |
 
 ## Works
@@ -35,6 +35,8 @@ Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
 | Input | `PURE_INPUT_SCRIPT` (framework): `pad a` = Cross confirms Language Selection, Cross clears the Memory Stick notice (shown ~frame 1500), title "PRESS START" ~frame 2050, Start opens the frontend |
 | Ship probe | `PURE_WATCH_SHIP=1` (task 007): per-flip player position, velocity, km/h, distance, lap from the static race record at 0x08B72010 + 7*0x1C0 (PPSSPP reads the same address through the driver) |
 | Regression | `tools/frame_regress.sh` (task 020): five scenes vs the PPSSPP references in 7 min, PASS at the measured values; the merge gate for renderer changes |
+| Sweep modes | `tools/campaign_sweep.py MODE TRACK` for single_race, time_trial, free_play, zone, tournament (task 018): routes in `config/pad_scripts/`, each mode's end screen detected (results TOTAL label, Free Play's END SESSION leg, Zone's SHIP DESTROYED title with the zone count read from the panel, Tournament's TOURNAMENT STANDING title); docs/tracks.md |
+| GE seam | patch 0009 (task 021): every GE call the HLE makes goes through `gpu::GeBackend` (`PURE_GE_BACKEND=vulkan|null|record`); `null` runs headless with `PURE_NO_RENDER=`, `record` writes `.gerec` streams (`PURE_GE_RECORD*`); docs/ge-backend.md section 6 |
 | Decompile | `tools/ghidra_headless.sh script Decompile <out> <addr>...` prints disassembly + C for any function |
 
 ## Blockers
@@ -45,9 +47,23 @@ Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
 | (resolved 2026-10-05) environment meshes | Patch 0005 (task 010): the vendored renderer had the GE alpha-test function numbering backwards (1 = ALWAYS, not NEVER), so 87% of the race frame's pixels were discarded. Race frame 6016 vs PPSSPP now 0.303 (`out/milestones/08-race-vineta-k-full.png`) |
 | (resolved 2026-10-05) bloom chain | Patch 0003 (framebuffer-texture lookup) + patch 0004 (stencil ops as alpha writes, task 009): the bloom lights strips, screens and engines; race frame 6016 vs PPSSPP 0.631 (no bloom 0.663). Open follow-ups: shadow volumes (stencil zfail INCR/DECR, test GREATER) so ship shadows are missing; exact REPLACE under source-alpha blends needs dual-source blending |
 | (resolved 2026-10-05) movies never ended, profile screen blank | Patch 0002: `sceMpegRingbufferAvailableSize` reported the ring empty while 16 pictures were still queued in the demuxer (the audio fetch runs ahead). The game ends a movie on an empty ring, so it dropped the end of every clip and never tore the instance down. With the patch all three movies (SCEA clip, `WoFMVNew_US.PMF`, `Profile_part1.PMF`) play and delete, the game autosaves `PPCD00001DLS001`, and the Profile screen (Load/New/Delete) appears (`out/milestones/03-profile-screen.png`). The 52-picture stop before the language confirm is by design (task 005) |
-| Headless input | `PURE_INPUT_SCRIPT` is driven by the renderer's pad, so headless runs have no input at all and sit on Language Selection. Routes run windowed for now; a headless input path (profile-level pad injection into sceCtrl) is a new task |
+| Headless input | `PURE_INPUT_SCRIPT` and the pad belong to the window shell (`VulkanRenderer`), so a run without a window has no input and sits on Language Selection; routes run windowed. A pad source outside the shell is part of the shell split (task 026, the Metal presenter), or a profile-level pad injection into sceCtrl |
+| Headless pace | without a window the kernel sleeps up to 1 ms of real time per clock step while any thread is in a host wait, and `user_main`'s `sceKernelWaitThreadEnd` is one for the whole run, so headless runs hold at about 19 frames a second (task 021). A kernel change (do not sleep for waits that depend only on guest state) is a Fable task when headless speed matters (ge_replay does not run the game) |
 | Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
+
+## Resume (session 4, 2026-10-06)
+- `main` = ad219ee (Erik's third fast-forward, 2026-10-05). `batch/m2` is ahead with tasks 016, 017, 018, 019, 020, 021 and
+  003 (diagnosis record) merged, D-003, briefs 022 and 023, `tools/verify_task.sh` (base-10 fix: `018` works).
+- Merge gate: `tools/frame_regress.sh` (5 scenes, 7 min) after any renderer change; `tools/verify_task.sh NNN` reruns a
+  brief's Verify from this checkout.
+- Next: dispatch 022 (ge_replay, in the game executable behind `--replay`; our own `main()` through `HOST_MAIN_NAME`)
+  and 023 (Metal backend, 2D frontend scenes) in parallel; both edit CMakeLists.txt, resolve by hand at merge. Then 024
+  (Metal 3D), 025 (Metal stencil/bloom/depth write-back), 026 (Metal presenter + UI, the shell split that also gives
+  headless input). `out/gerec/race.gerec` (23 MB, frames 6014 to 6016, Vulkan inner) is the first recording.
+- M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
+  a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
+  (`tools/pad_record.py`), the save-list dialog for multiple profiles.
 
 ## Resume (updated at the end of session 2, 2026-10-05)
 - `main` = 2971eff (Erik's second fast-forward). `batch/m2` is two commits past it (resume notes, `tools/pad_record.py`).

@@ -1,6 +1,6 @@
 # 021: The GE backend seam: interface, null and record backends, Vulkan adapter
 
-Milestone: M6 | Branch: task/021-ge-backend-seam | Status: OPEN
+Milestone: M6 | Branch: task/021-ge-backend-seam | Status: MERGED 2026-10-06 (c6403b7)
 
 ## Goal
 Introduce `portablekit::gpu::GeBackend` (docs/ge-backend.md section 1) as vendor patch 0009, adapt the existing
