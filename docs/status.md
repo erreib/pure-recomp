@@ -92,8 +92,9 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   **M6 complete.** D-008: Metal by default on macOS. Merged: 028 (the default in our entry point, per-backend
   measured columns in the suite, `run_boot.py --shell/--backend`; Verify rerun PASS on both paths), 030
   (controls doc + checker). Running: 031 (the Metal window's missing race HUD: one command queue for the backend
-  and the shell, `tools/hud_check.sh`). Briefed, waiting for 031: 029 (the app bundle through the framework's
-  release packer, the first-run installer, `tools/bundle.sh`). Next: M7's remainder
+  and the shell, `tools/hud_check.sh`), 029 (the app bundle through the framework's release packer, the first-run
+  installer, `tools/bundle.sh`; in parallel, its check uses the frontend only; the bundle is rebuilt after 031).
+  Next: M7's remainder
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
   (`tools/pad_record.py`), the save-list dialog for multiple profiles.
