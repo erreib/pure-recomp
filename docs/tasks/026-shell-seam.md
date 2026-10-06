@@ -1,6 +1,6 @@
 # 026: The shell seam: `host::Shell`, the Vulkan shell adapter, a headless shell (patch 0010)
 
-Milestone: M6 | Branch: task/026-shell-seam | Status: OPEN
+Milestone: M6 | Branch: task/026-shell-seam | Status: MERGED 2026-10-06 (e7446a8)
 
 ## Goal
 Task 021 put the GE behind `gpu::GeBackend` and left the window shell fused in `VulkanRenderer`. This task puts the
@@ -250,4 +250,21 @@ Open questions:
 8. `vulkan_renderer(Shell *)` uses a `dynamic_cast`, the first in the framework. RTTI is on in the build.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 026`): ten patches
+reproduce vendor at 8b0c3fe; `tools/frame_regress.sh` 5/5 at 0.0544, 0.0302, 0.0543, 0.0331, 0.0672, +0.000 each
+(7m 8s); the headless frontend route (`PURE_SHELL=headless PURE_GE_BACKEND=null`, `PURE_NO_RENDER=`) reaches frame
+2200 in 115.9 s with 20643 draws submitted and opens `Profile_part1.PMF` after the scripted Start.
+Spot-read: patch 0010's `hle_media.cpp` hunk (`media().shell` before the backend; `ensure_shell_and_backend` keeps
+the section 6 selection table, falls back to the headless shell when the window cannot be made, and passes the
+backend's `capture_frame` to a shell without a window; `present_frame` through the interface in the same order; the
+sceCtrl HLE samples the shell's pad), `vulkan_shell.cpp` (one-to-one forwarding; a Cpu image uploaded before the
+renderer's present), `headless_shell.cpp` (one script frame per flip, releases before steps, the live file every 10
+frames, `shot` captured by the backend within the same present, `quit` ends the run).
+Merged: e7446a8 into batch/m2 (README rows combined by hand with 023's). The brief's Verify now passes `--shots` so a
+run leaves no captures in the repo root; `.gitignore` also excludes root-level BMP and PNG files (open question 2).
+Notes: open question 1 (a headless shell without `NO_RENDER` is paced to real time) is answered by patch 0011
+(Fable): pacing follows the shell, and the host-wait sleep applies only to waits bound to real time (the adhoc
+network waits), so headless runs stop holding at 19 frames a second. Open question 3 (a `--shell headless` flag in
+run_boot.py that also silences audio) is a tools follow-up. The `dynamic_cast` in `vulkan_renderer(Shell *)` is
+acceptable (RTTI is on). Task 027's Metal shell uses `SdlPad` and moves the ImGui platform init into
+`Shell::initialize_ui` (patch 0012).

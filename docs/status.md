@@ -61,7 +61,7 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
 - Merge gate: `tools/frame_regress.sh` (5 scenes, 7 min) after any renderer change; `tools/verify_task.sh NNN` reruns a
   brief's Verify from this checkout.
 - Merged 2026-10-06: 022 (ge_replay, in the game executable behind `--replay`; our own `main()` through
-  `HOST_MAIN_NAME`), 023 (Metal backend: the 2D frontend scenes within 0.0002 of PPSSPP). Merged, Verify rerun pending: 026 (the shell seam, patch 0010: `host::Shell`,
+  `HOST_MAIN_NAME`), 023 (Metal backend: the 2D frontend scenes within 0.0002 of PPSSPP), 026 (the shell seam, patch 0010: `host::Shell`,
   Vulkan shell adapter, headless shell with pad from the input script; D-007, docs/ge-backend.md section 8). 022 and
   023 both edit CMakeLists.txt: resolve by hand at merge. Then 024 (Metal 3D), 025 (Metal stencil/bloom/depth
   write-back), 027 (Metal presenter + UI against the shell seam), and Fable's patch 0011 (the kernel's host-wait
