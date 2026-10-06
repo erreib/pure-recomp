@@ -1,18 +1,22 @@
-# The Metal GE backend (task 023, 2026-10-06)
+# The Metal GE backend (tasks 023 and 024, 2026-10-06)
 
 `PURE_GE_BACKEND=metal` draws the game with Metal, natively, behind the GE backend seam of D-003
 (`docs/ge-backend.md`). It is `src/gpu/metal_backend.mm`, in our sources, and registers itself as `metal`. Task
 023 built its skeleton (device, targets, textures, the draws of the 2D frontend, clears, blending, the alpha test,
 captures) and proved it on the frame regression suite's three frontend scenes, which it draws within a few pixels
-of PPSSPP: the language page, the title screen and the profile screen. 3D lighting, the stencil kept as alpha, the
-bloom chain and the read-backs into guest memory are tasks 024 and 025. The Metal shell (task 027, "The Metal shell"
-below) shows its pictures in a window of its own, with no Vulkan involved.
+of PPSSPP: the language page, the title screen and the profile screen. Task 024 added the 3D draws: the GE's
+per-vertex lighting and fog, transformed sprites expanded on the screen, and culling confirmed on the race. Against
+the Vulkan backend at the same scale, the race frame 6016 is drawn alike, within one level, up to its first draw
+that tests the stencil ("The 3D check" below). The stencil kept as alpha, the bloom chain and the read-backs into
+guest memory are task 025. The Metal shell (task 027, "The Metal shell" below) shows its pictures in a
+window of its own, with no Vulkan involved.
 
 ## Quick start
 
 ```sh
 tools/build.sh profile
 tools/frame_regress.sh --backend metal --only lang,title,profile          # the three frontend scenes (about 75 s)
+tools/gerec/metal_check.sh                                                 # Metal against Vulkan through ge_replay (below)
 PURE_GE_BACKEND=metal tools/run_boot.py --frames 300 out/x.log             # headless: no window, Metal still draws
 PURE_GE_BACKEND=metal tools/run_boot.py --frames 700 --env PURE_METAL_LOG=1 out/x.log   # a line per draw
 PURE_SHELL=metal PURE_GE_BACKEND=metal tools/run_boot.py --window --frames 700 out/x.log # the Metal shell: no Vulkan
@@ -26,6 +30,7 @@ tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile  
 | `PURE_METAL_SHELL=0` | under the Vulkan shell, do not hand the pictures to its window: the window stays black and the input script's `shot` steps capture nothing (see "The window"). Under any other shell there is no hand-over to turn off |
 | `PURE_SHELL=metal` | show the pictures in the Metal shell's window instead of the Vulkan shell's (see "The Metal shell") |
 | `PURE_NO_FB_TEXTURES=1` | every texture decoded from guest memory, none read from a target (the framework's switch, as for Vulkan) |
+| `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
 prints `[render] GE backend metal cannot run (...)`. At start the backend prints the device and the shader compile
@@ -39,6 +44,7 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | `src/gpu/metal_backend.mm` | `MetalGeBackend : portablekit::gpu::GeBackend` and its `BackendRegistration("metal", ...)`. Objective-C++ with ARC |
 | `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT) |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
+| `tools/gerec/metal_check.sh` | the 3D check (task 024): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check") |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
 | `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the three `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
@@ -52,8 +58,11 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 
 | What | How |
 |---|---|
-| Primitives | Expanded on the CPU into lists, as the Vulkan backend does: points (1 pixel), lines, line strips, triangles; strips and fans unrolled with every triangle keeping the strip's winding; sprites as two triangles by the GE's rule (the second vertex's depth and colour for the whole rectangle, each corner the u of the vertex it shares x with and the v of the one it shares y with). Indices are resolved while expanding. 32 bytes a vertex (`GpuVertex`: position, uv, colour) into 4 MB shared buffers that are reused once the GPU has finished with them |
-| Colour | the vertex colour, or the material colour (`DrawCall::material_color`) when the vertex type has none and the draw is unlit, Vulkan's rule. Lit draws are drawn with their vertex colour (white when they have none): no lighting or fog yet |
+| Primitives | Expanded on the CPU into lists, as the Vulkan backend does: points (1 pixel), lines, line strips, triangles; strips and fans unrolled with every triangle keeping the strip's winding; sprites as two triangles by the GE's rule (the second vertex's depth and colour for the whole rectangle, each corner the u of the vertex it shares x with and the v of the one it shares y with; transformed sprites below). Indices are resolved while expanding. 48 bytes a vertex (`GpuVertex`: position, uv, colour, the vertex a sprite corner is lit as, normal) into 4 MB shared buffers that are reused once the GPU has finished with them |
+| Colour | the vertex colour, or the material colour (`DrawCall::material_color`) when the vertex type has none and the draw is unlit, Vulkan's rule. A lit draw's colour is the lighting's |
+| Lighting | per vertex in `ge_vertex`, ported from `ge.vert` for transformed draws with `lighting_enabled` (never through mode or clears), in world space: emissive, plus the global ambient light times the material ambient, plus for each of the four lights that is on its ambient, diffuse and specular terms, scaled by distance attenuation (point and spot) and the spot cone. Directional, point and spot lights; diffuse, diffuse and specular, and powered diffuse kinds; the specular power; the viewer looking down z for the half vector; the normal transformed by the world matrix and normalised (`reverse_normals` flips it). The material update bits make the vertex colour stand in for the ambient, diffuse and specular material colours when the vertex has a colour; alpha is the global ambient alpha times the material ambient's. The result is clamped to 0..1; with the specular kept apart (`LightingState::mode`) the specular is added after texturing. The lights, material and fog go to the vertex function as one 688-byte block (`LightingUniforms`, buffer 2), bound again only when a lit or fogged draw changes it. The race lights with ambient, emissive and up to two directional diffuse lights; point and spot lights, specular, powered diffuse and reversed normals are ported but no recording exercises them |
+| Fog | `ge.vert`/`ge.frag`'s: per vertex, (view-space z + end) x scale (`FogState`), so 1 is clear and 0 fogged, for transformed draws with fog on; in the fragment shader after texturing and the separate specular, the colour mixed towards the fog colour by that factor clamped to 0..1, alpha untouched |
+| Transformed sprites | by the GE's rule, on the screen after projection: both vertices are projected, and the rectangle between them is axis-aligned in window coordinates, at the second vertex's depth, lit, coloured and fogged as the second vertex, texture coordinates interpolated without perspective. The corners go to the vertex function already in the PSP's clip space, all with the second vertex's w (`VertexUniforms::mode.y`), each naming the second vertex (appended to the buffer after the corners) as the one it is lit and fogged as. A sprite with a vertex behind the eye (w <= 0) is dropped. The Vulkan backend expands them in object space; the two agree whenever the transform keeps the rectangle axis-aligned on the screen, as it does for every transformed sprite in the recordings (26 in the TEAM frame, 28 in race frame 6016: 0.0000 px between the corners either way) |
 | Through mode | positions in screen pixels go straight to clip space for a 480x272 target; z is `z / 65535` |
 | Transformed | `projection x view x world`; the GE viewport (`screen = ndc x scale + offset - region offset`) folded into clip x and y, so the Metal viewport stays the whole target; clip z remapped from the PSP's [-w, w] to Metal's [0, w], and the GE's z scale and offset become the viewport's `znear` and `zfar` (reversed when the game reverses the range), as the Vulkan backend folds them into `minDepth`/`maxDepth` |
 | Texture coordinates | texels divided by the texture's size in through mode, the GE's scale and offset otherwise |
@@ -64,7 +73,7 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 | Write masks | whole colour channels the mask (0xE8) keeps are not written; a partial channel mask is written whole and logged once. The alpha, which is the PSP's stencil, is written only by clears (below); the alpha mask (0xE9) is carried as the stencil write mask for task 025 |
 | Depth | the GE function as the depth compare; written only where the GE tests it (`test_enabled && write_enabled`), through mode included |
 | Clears | CLEARMODE draws have no blend, texture or tests; bits 8..10 choose the colour, the alpha and the depth, and the depth compare is ALWAYS |
-| Culling | transformed triangles with culling on, back faces culled, the GE's clockwise front as Metal's `MTLWindingClockwise`: Metal counts the winding in window coordinates (y down), as the GE and Vulkan's flipping viewport do. Checked with a test triangle; the frontend culls nothing, so task 024 confirms it on the race |
+| Culling | transformed triangles with culling on, back faces culled, the GE's clockwise front as Metal's `MTLWindingClockwise`: Metal counts the winding in window coordinates (y down), as the GE and Vulkan's flipping viewport do. Confirmed on the race (task 024): race frame 6016 culls 593 of its 906 draws, 353 of them among the first 393 (344 with the counter-clockwise front, 266 of those into the display target; 9 with the clockwise one, the shadow volumes, which write only the stencil), and it matches Vulkan's up to its draw 394, while a build with the winding reversed differs from draw 41 on, 49% of the picture by draw 393 ("The 3D check"). The clockwise case shows in no picture until the stencil does (025) |
 | Scissor | the GE scissor, both ends included, clamped to 480x272; an empty one draws nothing |
 
 ### The pipeline key
@@ -76,9 +85,13 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 | `RenderKey` | blend on/off, Metal source and destination factors, blend operation, colour write mask, textured, alpha test | `MTLRenderPipelineState` (vertex function `ge_vertex`, fragment function `ge_fragment` specialised by the function constants `kTextured` and `kAlphaTest`; the four specialisations are made at start) |
 | `DepthStencilKey` | depth compare, depth write; the stencil test as the GE gives it: enabled (on a 5551, 4444 or 8888 target), function, fail, depth-fail and pass operations, reference, compare mask, write mask (~0xE9) | `MTLDepthStencilState`. The stencil fields are carried for task 025, which sets the state's stencil descriptors from them; today the stencil attachment is left untouched |
 
-Per draw, the vertex uniforms (matrix, folded viewport, uv transform, through flag), the fragment uniforms (FIX
-colour, texture function, TCC, opaque texel alpha, alpha test function, reference and mask), the blend colour, the
-viewport's depth range, the scissor and the cull mode are set on the encoder when they changed.
+Per draw, the vertex uniforms (matrix, folded viewport, uv transform, the row of view x world that gives view-space
+z, and the mode: through, sprite corners in clip space, fog, lighting), the fragment uniforms (FIX colour, texture
+function, TCC, opaque texel alpha, alpha test function, reference and mask, fog colour), the blend colour, the
+viewport's depth range, the scissor and the cull mode are set on the encoder when they changed, and the lighting
+block (world matrix, global ambient, material colours, update mask and flags, the four lights, fog end and scale)
+when a lit or fogged draw changed it, or the pass is new. Lighting and fog are uniform branches in the one vertex
+function, not pipeline variants.
 
 ## Targets
 
@@ -207,8 +220,18 @@ of task 027's check shows it over the paused language page.
 
 | Task | What |
 |---|---|
-| 024 | lighting and fog (lit draws use their vertex colour); transformed sprites are expanded in object space, as the Vulkan backend does, which is right only for the frontend's orthographic projection; culling to be confirmed on the race; the colour test, logic ops, the texture environment colour and colour doubling are not in `DrawCall` |
 | 025 | the stencil attachment's test and operations, the alpha copy rule (patches 0004 and 0006: today non-clear draws leave the alpha alone), `block_transfer`, `read_back_framebuffer`, `write_back_frame` and `write_back_depth`. These four are counted and say `[metal] <call>: not implemented (task 025); counted, nothing written` once; `write_back_depth` returns false. The frontend calls only `write_back_frame` (once a flip) |
+
+On race frame 6016 the first draw that differs from Vulkan is task 025's: ge_replay's draw 394 (gerec_dump's #393:
+ge_replay counts draws from 1, gerec_dump from 0), a full-screen quad blended FIX 0x606060 + FIX 0x9F9F9F (a
+darkening) where the stencil test passes, which is how the shadow volumes drawn just before it (stencil only, the
+clockwise-culled draws) reach the picture. Without the stencil it darkens the whole screen. Later the bloom chain
+(gerec_dump's #868 to #873) reads the stencil mask from the alpha.
+
+Not in the draw state (`DrawCall`), so neither backend draws them, and they wait for the framework's GE state to
+carry them: the colour test, logic ops, the texture environment colour (the blend texture function's), colour
+doubling, the texture map modes (environment and projection mapping: `texture_matrix` is carried, the map mode is
+not), and the depth range clamp (MINZ/MAXZ, which `docs/ge-backend.md` section 2 lets stay ignored).
 
 ## Where it differs from the Vulkan backend on purpose
 
@@ -221,6 +244,86 @@ of task 027's check shows it over the paused language page.
 - Points and lines are drawn (the Vulkan backend drops them).
 - Only a draw that reads the target it draws into goes through a copy.
 - An empty scissor draws nothing (the Vulkan backend draws one row or column).
+- Transformed sprites are expanded on the screen after projection, the GE's rule; the Vulkan backend expands them
+  in object space and projects the corners, which gives the same rectangle only while the transform keeps it
+  axis-aligned on the screen (every transformed sprite this game was recorded drawing does), and otherwise a
+  rotated or perspective quad.
+
+## The 3D check (task 024)
+
+`tools/gerec/metal_check.sh [TEAM_FRAME]` compares Metal with Vulkan through ge_replay (`docs/ge-backend.md`,
+section 7). It records, when missing, `out/gerec/team.gerec` (TEAM_FRAME and the frame after, default 5650) and
+`out/gerec/race_1x.gerec` (6008-6016), both at internal scale 1, and `out/gerec/race_warm.gerec` (6008-6016 at the
+settings' 2x, replay_check.sh's), each by one windowed run of `main_menu.txt` + `single_race.txt` on an empty memory
+stick (about 3, 3.5 and 3.5 minutes). Then:
+
+1. the team frames' draws must hold no stencil and no bloom-target draw (lit and fogged ones are counted);
+2. `--replay out/gerec/team.gerec --a vulkan --b metal --tol 24 --max-frac 0.02` must pass;
+3. for the record, race frame 6016 into both, bisected with `--first-diff --tol 24`: (a) `race_1x.gerec`, (b)
+   `race_warm.gerec`.
+
+### Choosing the frame
+
+The brief asked for a TEAM SELECTION frame with the ship model lit and no bloom or stencil draw in the list. There is
+none: no frontend frame has a lit draw at all. The route run on Metal with `PURE_METAL_LOG=1` to frame 5760 (151590
+draws, a line each, `lit`, `fog` and `cull` among the tags) gives:
+
+| Frames | Screen | Draws a frame | Lit | Fogged | Stencil | Bloom targets | Depth-tested |
+|---|---|---|---|---|---|---|---|
+| 1-5707 | boot, language, title, profile, menus, CLASS, LEAGUE, TRACK, TEAM, loading | up to 81 | 0 | 0 | 0 | 0 | 2 a frame at 5-123 (boot), 13 at 5702-5706 (loading) |
+| 5503-5701 | TEAM SELECTION (within the line above) | 59-81 while it comes in, 65-69 from 5531 | 0 | 0 | 0 | 0 | 0 |
+| 5708 on | the race | 682-684 | 220-261 | 434-436 | 519 | 5 | 672-674 |
+
+The TEAM screen's rotating ship is ten textured quads (pre-drawn outline pictures, 256x128 CLUT8 textures in VRAM),
+not a lit model. Every TEAM draw but the clear is transformed, under an orthographic projection, with linear
+filtering; none is lit, fogged, depth-tested or stencilled. So the TEAM frame checks the transformed path (matrices,
+the viewport, the transformed sprites, 26 sprite draws, texture coordinates), and lighting and fog are checked on the
+race up to its first stencil draw instead. 5650 is the middle of the TEAM screen (5503-5701 in the survey run), so a
+run that drifts by some tens of frames still lands on it; its recording holds 66 draws a frame, 131 of the two
+frames' 133 transformed.
+
+### Why at internal scale 1
+
+Recorded at the settings' 2x, the TEAM frames are 0.0519 over tol 24 (6773 pixels), all on glyph and outline edges.
+The text is drawn minified (8x15-texel glyphs into about 5x10 pixels, at fractional positions) and filtered, and
+reducing Vulkan's 960x544 picture to 480x272 by nearest neighbour keeps the sub-pixel whose centre is a quarter pixel
+up and left of Metal's pixel centre: 0.4 texel on a glyph edge, 25 to 64 levels. A replay draws at the scale of its
+recording, so a recording made with `PURE_INTERNAL_SCALE=1` has Vulkan draw at 1x like Metal, and then the two draw
+the TEAM frames identically: 0 of 130560 pixels differ, at tol 0. The race at 1x is likewise exact up to its first
+stencil draw, where at 2x the first pixel over tol 24 comes at draw 40 (11 pixels, the edge of an alpha test).
+
+### Numbers (2026-10-06, M4 Pro)
+
+| Comparison | Result |
+|---|---|
+| `team.gerec` (1x) frames 5650 and 5651, vulkan against metal | 0.000000 at tol 24 (0 pixels; 0 at tol 0 too): PASS |
+| the same frames recorded at 2x | 0.051877 at tol 24 (6773 pixels, glyph edges) |
+| `race_1x.gerec` frame 6016, `--first-diff --tol 24` | first difference at draw 394 of 906, the stencil-gated darkening quad (025's), in 10 steps. After draw 393: 0 pixels over tol 1, 36 one level off |
+| what draws 1-393 hold | 58 lit draws (45 into the display target), 360 fogged (275 into it), 353 culled (266 counter-clockwise into the display target) |
+| race frame 6016 whole, against Vulkan at 1x | 0.3246 at tol 24 (42380 pixels): the shadow darkening over the whole screen, the bloom, and what follows from them |
+| `race_warm.gerec` (2x) frame 6016, `--first-diff --tol 24` | first difference at draw 40 (11 pixels): a fogged, alpha-tested (GREATER 0x7F), bilinear-textured strip that writes the stencil, its alpha-test edge moved by the 2x-to-1x reduction. Bisected to the first draw past 5% of the pixels instead: draw 394 |
+| race frame 6016 whole, against Vulkan at 2x | 0.3768 at tol 24 |
+| race frame 6016 against PPSSPP (`tools/frame_regress.sh --backend metal --only race_hud`) | 0.2978 at tol 32, limit 0.10 (task 023: 0.2977; Vulkan 0.0672): FAIL, not yet a pass condition. The red is the track, the ships and the stands under the stencil-gated darkening quad, which without the stencil dims the whole screen, and the missing bloom: both 025's, and large enough to hide what lighting changed |
+
+That the race comparison would catch a wrong rule: the 1x recording cut after draw 393 of frame 6016, replayed into
+Vulkan, and into Metal alone with a switch (pixels over tol 24 against Vulkan's picture):
+
+| Metal | Over tol 24 | Over tol 8 |
+|---|---|---|
+| as built | 0 | 0 |
+| `PURE_NO_LIGHTING` (vertex colour, no fog) | 1936 (0.0148) | 3352 |
+| `PURE_NO_FOG` | 555 (0.0043) | 1049 |
+| `PURE_NO_CULL` (most back faces are hidden by the depth test anyway) | 68 (0.0005) | 81 |
+| the winding reversed (a throwaway build) | 63574 (0.4869); `--first-diff` stops at draw 41 | 64474 |
+
+What the race lights with (frames 6008-6016): lit draws whose vertex colour stands in for all three material colours
+with no light on (emissive plus the global ambient times the vertex colour; 1944 draws over the nine frames), and
+lit draws with the material colours and two directional diffuse lights (523); fog with four settings (end 1400 and
+scale 1/1230 towards the colour register 0xCCA38E (0xBBGGRR) or black, end 1270 and scale 1/770 towards 0xEDFCFF,
+end 5001 and scale 1 towards grey). No point or spot light, no specular, no powered diffuse, no reversed normals, no separate specular: those
+are ported from `ge.vert` as they are and checked by nothing but the port.
+
+In the replays Metal takes 4 to 6 ms a race frame and Vulkan 5 to 10 (each including its capture).
 
 ## Verify numbers
 
@@ -252,3 +355,12 @@ frame. The first shader compile on a machine takes about 0.7 s, later ones 0.5 t
 With the Metal sources built in, `tools/frame_regress.sh` (Vulkan) passes 5/5 with the fractions it had before
 (0.0544, 0.0302, 0.0543, 0.0331, 0.0672), and its five captures are pixel-identical to the main checkout's run of
 2026-10-06 03:35.
+
+### Task 024
+
+`tools/build.sh profile && tools/gerec/metal_check.sh && tools/frame_regress.sh --backend metal --only
+lang,title,profile` (2026-10-06, M4 Pro): metal_check PASS (6 s with its recordings made; team frames 0.000000 at
+tol 24, the race bisected to draw 394 at 1x and to draw 40 at 2x), and the three frontend scenes at their task 023
+fractions: `lang` 0.0002, `title` 0.0002, `profile` 0.0000. `tools/frame_regress.sh` (Vulkan): 5/5 at the fractions it
+had (0.0544, 0.0302, 0.0543, 0.0331, 0.0672), its five captures pixel-identical to the main checkout's run of
+2026-10-06 07:30-07:36.

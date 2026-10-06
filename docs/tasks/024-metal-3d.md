@@ -77,7 +77,88 @@ backend being wrong against the GE's documented rule (report both, do not match 
 change. Do not start on the stencil, the bloom chain, read-backs or write-backs (025).
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+**Status: PARTIAL.** All seven deliverables are done and the Verify line passes, but the brief's escalation
+condition occurred: no frontend frame has a lit model (none has a lit draw at all), so lighting and fog are checked
+against a different reference, the race at internal scale 1 up to its first stencil draw. That substitution, and
+recording the check at internal scale 1, need the reviewer's acceptance.
+
+**What was found.** The route run on Metal with `PURE_METAL_LOG=1` to frame 5760 (151590 draws): frames 1-5707 (boot
+to the loading screen) have no lit, fogged, stencil or bloom draw; depth-tested draws only at boot (5-123) and on the
+loading screen (5702-5706). TEAM SELECTION (5503-5701, 65-69 draws a frame once it has come in) draws its "rotating ship" as ten
+textured quads (pre-drawn 256x128 CLUT8 outline pictures), all draws orthographic and linear-filtered. The first lit
+draws are the race's (5708 on: 220-261 lit, 519 stencil, 5 bloom draws a frame). The previous worker's
+`team_range.gerec` (5540-5699) shows the same: no lit draw in 160 frames.
+
+**Results.**
+- `tools/gerec/metal_check.sh` (default TEAM frame 5650) passes: team frames 5650-5651 recorded at internal scale 1
+  replay into vulkan and metal identically (0 of 130560 pixels at tol 0). Recorded at 2x they score 0.0519 at tol 24
+  (6773 px, all glyph edges: the minified, filtered text moves 0.4 texel under the 2x-to-1x reduction), so the
+  brief's 0.02 could not pass at 2x by construction; the script records team.gerec (and race_1x.gerec) with
+  `PURE_INTERNAL_SCALE=1` and re-records a file that holds other frames or another scale.
+- Race frame 6016, `--first-diff --tol 24`: at 1x (race_1x.gerec) the first differing draw is 394 of 906, the
+  stencil-gated darkening quad that applies the shadow volumes (025's); draws 1-393 (58 lit, 360 fogged, 353 culled)
+  match Vulkan to 0 px over tol 1 (36 px one level off). At 2x (race_warm.gerec, the brief's command) it is draw 40:
+  11 px of an alpha-test edge on a fogged strip that writes the stencil, moved by the 2x-to-1x reduction; bisected
+  past 5% of the pixels it is 394 again. Whole frame against Vulkan 0.3246 (1x), 0.3768 (2x); against PPSSPP
+  (`frame_regress.sh --backend metal --only race_hud`) 0.2978 (task 023: 0.2977), dominated by that quad darkening the
+  whole screen without the stencil, and by the missing bloom.
+- Sensitivity, Metal alone against Vulkan at draw 393: NO_LIGHTING 1936 px over tol 24, NO_FOG 555, NO_CULL 68, the
+  winding reversed (throwaway build) 63574 and a first difference at draw 41; as built 0. Culling is right.
+- Transformed sprites: the GE's screen-space rule; on all 26 (TEAM) and 28 (race) recorded transformed sprite draws
+  it gives exactly Vulkan's object-space rectangles (0.0000 px), so no Vulkan deviation shows in this game's frames.
+- `frame_regress.sh --backend metal --only lang,title,profile`: 0.0002, 0.0002, 0.0000 (task 023's). Vulkan suite
+  5/5 at 0.0544, 0.0302, 0.0543, 0.0331, 0.0672, captures pixel-identical to the main checkout's run of 07:30.
+
+**The WIP (a013197).** Kept whole: the shader port of ge.vert's lighting and ge.frag's fog and separate specular,
+the uniform blocks and their layouts, `fill_lighting`, the screen-space transformed-sprite expansion, the
+`lighting_bound_` reset in `begin_pass` (already in the WIP: it built and ran as committed, and is exact against
+Vulkan as above). Changed: added the framework's `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` (read as Vulkan
+reads them; used for the sensitivity runs), brought the file header, culling and `expand` comments and the
+registration description up to date. No change to the lighting, fog or sprite code was needed.
+
+**Changed:** `src/gpu/metal_backend.mm`, `src/gpu/metal_shaders.h` (the WIP), `tools/gerec/metal_check.sh` (new),
+`docs/metal-backend.md` (lighting, fog and transformed-sprite rows, culling confirmed, "The 3D check" with the
+survey, the 1x rationale and the numbers, "What is not done yet" down to 025 and 026 plus what `DrawCall` lacks),
+`README.md` (metal_check.sh row, the Metal switch rows), this file.
+
+**Verify output (last 20 lines)** (`tools/verify_task.sh 024`, at c5f5527; later commits are docs only):
+```
+  blend off: source 2 destination 3 equation 0, fixed 0x000000/0x000000
+  alpha test on: function 6 reference 0x7F mask 0xFF
+  stencil on: function 1 reference 0x04 mask 0xFF, ops fail 0 depth fail 0 pass 2
+  clear mode off
+  depth test on function 6, write on, write masks colour 0x000000 alpha 0x00
+
+metal_check: PASS (6 s)
+frame regression 2026-10-06 07:26, commit c5f5527, backend metal (PURE_GE_BACKEND: recorded, not enforced)
+extra environment: none
+run frontend: 2130 flips ...
+run frontend: run_boot exit 0, frame 2130 reached: yes, 72 s, log /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-a0ae6699800a8e309/out/regress/frontend.log
+
+scene       frame  fraction  limit  tol  measured   delta  result
+lang          690    0.0002   0.07   24     0.054  -0.054  PASS
+title        1750    0.0002   0.05   24     0.030  -0.030  PASS
+profile      2100    0.0000   0.07   24     0.054  -0.054  PASS
+
+moved more than 0.03 from the measured value: lang profile (something changed; docs/verification.md)
+frame regression: PASS, 3/3 scenes pass (1m 12s)
+verify 024: PASS
+```
+(The "moved more than 0.03" line compares against Vulkan's measured values; the Metal fractions are task 023's.)
+
+**Open questions.**
+1. Accept the race at 1x, draws 1-393 of frame 6016, as the lighting and fog reference in place of the lit TEAM
+   frame that does not exist? It covers ambient, emissive, two directional diffuse lights, the material update bits
+   with and without a vertex colour, and four fog settings. Point and spot lights, specular, powered diffuse,
+   reversed normals and the separate specular are ported from ge.vert but no recording exercises them.
+2. Accept the check's recordings at internal scale 1? On a fresh checkout the Verify line records team.gerec (about
+   3 min) and race_1x.gerec (3.5 min) on its first run; race_warm.gerec is replay_check.sh's.
+3. The branch is based on 26ebe69 and does not contain main's patch 0011; `tools/worktree_init.sh` applied all
+   eleven patches, so every build and number here is with 0011, as main builds now. A rebase onto main was refused
+   by the session's permissions; main's two later commits touch only docs/ and patches/, no file of this branch.
+4. For 025: the throwaway tools that cut a recording after draw N and diff each backend's picture (scratch, in
+   `out/024/tools/` of the worktree) were what made this bisection readable; a `--cut N` with `--out` in ge_replay
+   would do the same in-tree.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
