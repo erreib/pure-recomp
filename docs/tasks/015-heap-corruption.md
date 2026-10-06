@@ -1,6 +1,6 @@
 # 015: Heap corruption reported at shutdown
 
-Milestone: M3/M5 hygiene | Branch: task/015-heap-corruption | Status: OPEN
+Milestone: M3/M5 hygiene | Branch: task/015-heap-corruption | Status: MERGED
 
 ## Goal
 After a race run ends by `PURE_EXIT_AT_FRAME`, the process sometimes prints
@@ -144,4 +144,7 @@ Open questions:
   other branches get the fix when 0007 is merged.
 
 ## Review
-(Fable fills)
+Verify rerun by Fable after the merge: seven-patch series ok; a race run to frame 6045 ends with `exit 0`, no
+`malloc:` line, no shutdown kill. The diagnosis (MallocScribble + lldb on vkDestroyDescriptorPool/vkFreeDescriptorSets)
+is exemplary and the patch is the minimal reorder. Upstream candidate, with the worker's note that an explicit
+renderer teardown after `runtime.run()` would be sturdier than the static destructor. Merged into batch/m2.

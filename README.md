@@ -64,7 +64,7 @@ runs under a pty, so a deadline kill loses no output, and the log always ends wi
 | `PURE_INPUT_SCRIPT="700:pad a;1350:pad start;1500:shot name"` | scripted input, frame-indexed; actions `pad a/b/x/y/start/select/dpup/...` (a = Cross), `key NAME`, `shot NAME`, `quit` |
 | `PURE_LIST_STUBS=1`, `PURE_STRICT_HLE=1` | list unimplemented imports at start; stop at the first one called |
 | `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | framework traces, one subsystem each |
-| `PURE_SKIP_FMV=1` | (task 003) skip the intro movie |
+| `PURE_MALLOC_DEBUG=1` (in `tools/env.sh`) | macOS malloc checks for a single run (task 015): `( export PURE_MALLOC_DEBUG=1; . tools/env.sh; python3 tools/run_boot.py ... )` |
 | `PURE_NO_STENCIL_ALPHA=1` | (patch 0004) the renderer stores each draw's fragment alpha and ignores the stencil ops and write masks, as before task 009 (the whole race scene blooms); implies `PURE_NO_STENCIL_BUFFER=1` |
 | `PURE_NO_STENCIL_BUFFER=1` | (patch 0006) no Vulkan stencil attachment, as with patch 0004 alone: every stencil test is drawn as ALWAYS and only the zpass REPLACE/ZERO reach the alpha, so the ship shadows (stencil volumes) are missing |
 | `PURE_NO_DUAL_SOURCE=1` | (patch 0006) no dual-source blending: a stencil REPLACE under a colour blend that reads the source alpha is stored through the blend constant (exact only where the fragment is opaque); with the stencil attachment on, the alpha is then copied from the stencil before anything reads it |
