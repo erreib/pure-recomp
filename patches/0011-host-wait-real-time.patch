@@ -1,0 +1,137 @@
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index fcc7fc2..eb09e9b 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -139,7 +139,8 @@ void block(AllegrexContext &ctx, const char *name, unsigned argc, std::uint32_t
+                                trace_line(label + " ends = " + psprecomp::hex32(*result) +
+                                           (timed_out ? " (timed out)" : ""));
+                            return result;
+-                       });
++                       },
++                       /*real_time=*/true);  // a reply from the network needs real time to arrive
+ }
+ 
+ Mac read_mac(const psprecomp::GuestMemory &memory, std::uint32_t address) {
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 835217a..8efef9f 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -1209,6 +1209,8 @@ gpu::GeBackend *ensure_shell_and_backend() {
+     if (shell_name != "vulkan")
+         std::cout << "[shell] " << shell_name << " (" << host::shell_description(shell_name) << ")\n";
+     media().shell = std::move(shell);
++    // A shell without a window shows nothing at the display's pace: the clock runs free.
++    kernel().set_paced(media().shell->has_window());
+     if (media().shell->has_window()) {
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+         ui::attach(*media().shell);
+diff --git a/host/kernel/kernel.cpp b/host/kernel/kernel.cpp
+index 4c8cf07..094a27a 100644
+--- a/host/kernel/kernel.cpp
++++ b/host/kernel/kernel.cpp
+@@ -384,7 +384,8 @@ void Kernel::delay_current(AllegrexContext &ctx, std::uint64_t microseconds, std
+     block(ctx, wait, result);
+ }
+ 
+-void Kernel::wait_host(AllegrexContext &ctx, std::optional<std::uint64_t> timeout_us, HostWaitPoll poll) {
++void Kernel::wait_host(AllegrexContext &ctx, std::optional<std::uint64_t> timeout_us, HostWaitPoll poll,
++                       bool real_time) {
+     // Already satisfied: no thread switch.
+     if (const auto result = poll(false)) {
+         finish(ctx, *result);
+@@ -398,6 +399,7 @@ void Kernel::wait_host(AllegrexContext &ctx, std::optional<std::uint64_t> timeou
+     wait.type = WaitType::Host;
+     if (timeout_us) wait.deadline_us = now_us_ + *timeout_us;
+     wait.host_poll = std::move(poll);
++    wait.real_time = real_time;
+     // The poll result replaces v0 when the wait ends.
+     block(ctx, wait, 0u);
+ }
+@@ -444,9 +446,13 @@ void Kernel::advance_clock(std::uint64_t target_us) {
+     if (pace_to_real_time()) return;
+     // Unpaced, idle time costs nothing, so a thread waiting for the network
+     // would see its PSP timeout expire long before a reply could arrive. Let
+-    // real time pass with the emulated time the wait covers.
++    // real time pass with the emulated time such a wait covers. A host wait
++    // on guest state alone (a thread's end, which user_main waits for during
++    // the whole run) needs none, and sleeping for it held every unpaced run
++    // to about one clock step a millisecond.
+     const bool host_wait = std::any_of(threads_.begin(), threads_.end(), [](const auto &entry) {
+-        return entry.second->status == ThreadStatus::Waiting && entry.second->wait.type == WaitType::Host;
++        return entry.second->status == ThreadStatus::Waiting && entry.second->wait.type == WaitType::Host &&
++               entry.second->wait.real_time;
+     });
+     if (host_wait) std::this_thread::sleep_for(std::chrono::microseconds(std::min(step_us, kHostWaitPollUs)));
+ }
+@@ -454,10 +460,11 @@ void Kernel::advance_clock(std::uint64_t target_us) {
+ bool Kernel::pace_to_real_time() {
+     // Virtual time jumps to the next event whenever every thread waits, so
+     // without this the game runs as fast as frames can be presented: two to
+-    // three times PSP speed on a 60-90 Hz display. Runs without a window, and
+-    // the unthrottled setting (<prefix>_UNTHROTTLED), keep the unpaced clock.
+-    static const bool windowed = portablekit::env("NO_RENDER") == nullptr;
+-    if (!windowed || settings::current().unthrottled) {
++    // three times PSP speed on a 60-90 Hz display. A shell without a window
++    // (set_paced(false): the headless one, or <prefix>_NO_RENDER), and the
++    // unthrottled setting (<prefix>_UNTHROTTLED), keep the unpaced clock.
++    const bool paced = paced_.value_or(portablekit::env("NO_RENDER") == nullptr);
++    if (!paced || settings::current().unthrottled) {
+         // Turning pacing back on starts from the current moment.
+         pacing_started_ = false;
+         return false;
+diff --git a/host/kernel/kernel.hpp b/host/kernel/kernel.hpp
+index 98f0897..90d57c5 100644
+--- a/host/kernel/kernel.hpp
++++ b/host/kernel/kernel.hpp
+@@ -116,6 +116,10 @@ struct WaitState {
+     std::uint32_t timeout_address{};
+     std::optional<std::uint64_t> deadline_us;
+     HostWaitPoll host_poll;       // WaitType::Host
++    // WaitType::Host: the poll depends on the outside world (a network
++    // reply), so real time must pass while the thread waits. False for
++    // polls of guest state alone (a thread's end, a pool, a pipe).
++    bool real_time{};
+ };
+ 
+ struct Thread {
+@@ -264,6 +268,13 @@ public:
+     // presents one that is already due.
+     using IdleHook = std::function<void(std::chrono::steady_clock::time_point wake)>;
+     using PollHook = std::function<void()>;
++    // Whether emulated time is held to real time (a window shows frames at
++    // the display's pace); off, the clock jumps to the next event. Set by the
++    // HLE from the shell it made: a shell without a window runs unpaced.
++    void set_paced(bool paced) noexcept {
++        if (!paced_ || *paced_ != paced) pacing_started_ = false;
++        paced_ = paced;
++    }
+     void set_idle_hook(IdleHook hook) { idle_hook_ = std::move(hook); }
+     void set_poll_hook(PollHook hook) { poll_hook_ = std::move(hook); }
+ 
+@@ -295,10 +306,14 @@ public:
+     void delay_current(AllegrexContext &ctx, std::uint64_t microseconds, std::uint32_t result = 0u);
+     // Blocks the current thread until `poll` returns a value, which becomes
+     // its v0. `poll` runs on the emulation thread every time the scheduler
+-    // looks for work, and at least every kHostWaitPollUs of emulated time,
+-    // which the kernel holds to real time. `timeout_us` (emulated time; none
+-    // waits indefinitely) makes the last poll a timed-out one.
+-    void wait_host(AllegrexContext &ctx, std::optional<std::uint64_t> timeout_us, HostWaitPoll poll);
++    // looks for work, and at least every kHostWaitPollUs of emulated time.
++    // With `real_time` the unpaced kernel lets that much real time pass as
++    // well (a wait for the outside world: the network); without it the wait
++    // costs no real time, as a wait on guest state alone should not.
++    // `timeout_us` (emulated time; none waits indefinitely) makes the last
++    // poll a timed-out one.
++    void wait_host(AllegrexContext &ctx, std::optional<std::uint64_t> timeout_us, HostWaitPoll poll,
++                   bool real_time = false);
+     // Calls a guest function from an HLE import, in the calling thread, the
+     // way a library calls back into the game: the function runs like any
+     // other guest code, so it may block, and when it returns `on_return` gets
+@@ -415,6 +430,7 @@ private:
+     SceUID busy_thread_{};
+     std::uint64_t busy_waits_{};
+     std::chrono::steady_clock::time_point busy_since_{};
++    std::optional<bool> paced_;  // set_paced(); until then <prefix>_NO_RENDER decides
+     bool pacing_started_{};
+     bool pacing_fast_{};  // the hold lets emulated time run ahead: a load runs fast
+     std::chrono::steady_clock::time_point pacing_real_base_{};

@@ -358,14 +358,17 @@ with the backend `<prefix>_GE_BACKEND` names when that backend needs no window, 
 the Vulkan one. `media().renderer` becomes `media().shell`; `active_renderer()` stays for the UI screens that need
 Vulkan itself (texture packs, device name) and returns the renderer only when the shell is the Vulkan one.
 
-### 8.4 What it does not solve
+### 8.4 Headless pace (solved by patch 0011, 2026-10-06)
 
-Headless pace. Without a window `Kernel::pace_to_real_time` is off, and `Kernel::advance_clock` sleeps up to 1 ms of
-real time per clock step while any thread is in a `WaitType::Host` wait, which `user_main`'s `sceKernelWaitThreadEnd`
-is for the whole run: about 19 frames a second (section 6). A headless route is therefore slower than a windowed one
-until the kernel stops sleeping for waits that depend only on guest state. That is a scheduler change and stays with
-Fable (patch 0011, after 026 lands); the shell seam is designed so that nothing else is needed for fast headless
-suites afterwards.
+Without a window `Kernel::pace_to_real_time` was off, but `Kernel::advance_clock` slept up to 1 ms of real time per
+clock step while any thread was in a `WaitType::Host` wait, which `user_main`'s `sceKernelWaitThreadEnd` is for the
+whole run: about 19 frames a second (section 6). Patch 0011 (Fable) gives `wait_host` a `real_time` flag that only
+the adhoc network waits set, so the sleep covers waits on the outside world alone, and adds `Kernel::set_paced(bool)`,
+which the HLE sets from the shell (`has_window()`): a headless shell runs unpaced whatever `<prefix>_NO_RENDER` says.
+Measured: the null backend to frame 2000 in 0.5 s (was 106 s); the headless frontend route (`PURE_SHELL=headless
+PURE_GE_BACKEND=null`, no `NO_RENDER`) to frame 2200 in 1.1 s (was 115 s), the same 20643 draws, the same movies
+opened, the four `shot` captures written. Windowed runs are paced before the sleep is reached and are unchanged
+(`lang` 0.0544).
 
 ### 8.5 What landed (task 026, 2026-10-06)
 
