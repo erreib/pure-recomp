@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <sstream>
 #include <vector>
 #include <iostream>
@@ -200,6 +201,40 @@ void test_no_damage(Runtime &rt, std::uint32_t ship) {
     rt.memory().store32(ship + kShipShield, u);
 }
 
+// PURE_PACED_FROM=N (task 034), for the tools: the kernel's clock runs unpaced (Kernel::set_paced(false), patch
+// 0011) from start-up until flip N, and is held to real time (set_paced(true)) from flip N on, whatever the shell.
+// Without a window the menus before a race then take seconds, while the race, where tools/campaign_sweep.py steers
+// closed loop from the probe's lines, keeps real time. A window still presents at the display's rate (the Metal
+// shell waits for a drawable at vsync), so a windowed run gains little. 0 is paced from the start; unset (or empty)
+// leaves pacing to the shell, as before: paced with a window, unpaced without. Set every flip, so nothing the shell
+// does later undoes it.
+std::optional<std::uint64_t> paced_from() {
+    static const std::optional<std::uint64_t> value = []() -> std::optional<std::uint64_t> {
+        const char *v = env("PACED_FROM");
+        if (v == nullptr || *v == '\0') return std::nullopt;
+        char *end = nullptr;
+        const std::uint64_t n = std::strtoull(v, &end, 10);
+        if (end == nullptr || *end != '\0') {
+            std::cout << "[pure] PURE_PACED_FROM=" << v << " is not a flip number; ignored\n";
+            return std::nullopt;
+        }
+        return n;
+    }();
+    return value;
+}
+
+void apply_paced_from(std::uint64_t frame) {
+    const auto from = paced_from();
+    if (!from) return;
+    const bool paced = frame >= *from;
+    static bool announced = false;
+    if (paced && !announced && *from != 0u) {
+        announced = true;
+        std::cout << "[pure] paced from frame " << frame << " t=" << kernel().now_us() << "\n";
+    }
+    kernel().set_paced(paced);
+}
+
 void wrap_flip_counter(HleRegistrar &hle) {
     static HleFunction original = hle.bound_function("sceDisplay", kNidSceDisplaySetFrameBuf);
     if (!original) return;
@@ -208,6 +243,7 @@ void wrap_flip_counter(HleRegistrar &hle) {
         static const std::uint64_t exit_at = [] { const char *v = env("EXIT_AT_FRAME"); return v ? std::strtoull(v, nullptr, 10) : 0ull; }();
         static const std::uint64_t log_every = [] { const char *v = env("FRAME_LOG"); return v ? std::strtoull(v, nullptr, 10) : 0ull; }();
         ++frames;
+        apply_paced_from(frames);
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
         static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE"),
                           grid = env_on("WATCH_GRID");
@@ -258,6 +294,13 @@ void register_pure_hle(HleRegistrar &hle) {
     if (env_on("TEST_NO_DAMAGE"))
         std::cout << "[pure] TEST SWITCH: no damage (PURE_TEST_NO_DAMAGE=1: the player's shield is refilled every "
                      "flip; a sweep instrument, never for play)\n";
+    if (const auto from = paced_from()) {
+        // The shell (register_media, before this hook) has set the pace from its window; the switch wins from here.
+        std::cout << "[pure] PURE_PACED_FROM=" << *from
+                  << (*from == 0u ? ": paced to real time from the start\n"
+                                  : ": unpaced until that flip, paced to real time from it\n");
+        apply_paced_from(0u);
+    }
     wrap_flip_counter(hle);
     wrap_call_traces(hle);
     register_audio_capture(hle);
