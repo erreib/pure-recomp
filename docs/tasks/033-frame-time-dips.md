@@ -1,6 +1,6 @@
 # 033: Frame-time dips in play: a per-frame trace with the cause of each long frame, and pipeline pre-warming
 
-Milestone: M7 (polish) | Branch: task/033-frame-time-dips | Status: OPEN (dispatch after task 032's cells are done)
+Milestone: M7 (polish) | Branch: task/033-frame-time-dips | Status: MERGED 2026-10-06 (90c7b09)
 
 ## Goal
 Erik's first race on the app had frame-rate dips "here and there", while the scripted race holds 59.7 to 60.1 fps
@@ -217,4 +217,18 @@ Open questions:
    occluded; runs E and F (window shown) are the player's view.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 033`, the trace
+passed through the environment): the Vineta K cell traced (17110 frames checked, no frame after flip 600 over 25 ms
+with a pipeline made in it; frame time mean 11.3 ms, 99th percentile 19.4 ms; 155 over 20 ms, the game's own
+two-vblank stretches), race_hud 0.0374. Then the headless suite 5/5 in 9 s, `--shell metal --backend metal` 5/5 in
+7m 8s, `tools/hud_check.sh` 61 of 61.
+Spot-read: the trace columns and the pre-warm in `metal_backend.mm` (asynchronous pipeline creation from the list, a
+draw waits only for one still compiling), the trace hook in `metal_device`, the shell's vblank-timed present and
+`PURE_METAL_PACE`, `tools/frame_times.py`'s check, `config/metal_pipelines.txt`.
+Merged: 90c7b09 into batch/m2.
+Notes: PARTIAL accepted as done: the escalated cause (the game's two-vblank stretches at fixed track positions, on
+the Vulkan path too) is outside the backend and is now item 6 of the fidelity audit (task 035): what sets the frame
+object's lock in a race, and whether PPSSPP shows the same cadence there; if the game decides it from a measured
+frame time, the HLE's clock answers are the suspect. The bundle's missing pipeline list and the present latency
+trade-off are in docs/status.md Follow-ups. The SIGNAL depth wait's occasional 13 to 40 ms spike stays (moving the
+read would move the lens flare).
