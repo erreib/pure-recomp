@@ -16,9 +16,21 @@
         "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "arm64-release",
+      "inherits": "arm64",
+      "displayName": "macOS arm64 release for the app bundle (tools/build.sh release, tools/bundle.sh)",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PORTABLEKIT_RELEASE": "ON",
+        "PORTABLEKIT_FFMPEG": "bundled"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "arm64", "configurePreset": "arm64" }
+    { "name": "arm64", "configurePreset": "arm64" },
+    { "name": "arm64-release", "configurePreset": "arm64-release" }
   ]
 }

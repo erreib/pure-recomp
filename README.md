@@ -6,6 +6,15 @@ engine is replaced by a native Metal backend, the default on macOS (D-008), and 
 that bootstrapped the port stays as the portable path. You need your own dump of the US Greatest Hits disc
 (UCUS-98612, v2.00, ISO CRC32 4502C588). Nothing from the game is in this repo.
 
+## Play
+`tools/bundle.sh` builds `out/release-macos/stage/Wipeout Pure.app` (a Release build, then the framework's packer:
+the app with its libraries, licences and icon, signed ad hoc, no game data). Open it from Finder; the first start asks
+for your disc image and sets the game up in `~/Library/Application Support/pure-recomp/PureNative/`, where the saves
+live too (as of 2026-10-06 the setup stops at preparing the executable, because the profile names the encrypted
+EBOOT.BIN without its key: docs/release.md, "First run: the setup"). How to build and bundle, what the app holds,
+the setup, the data directory, the Vulkan path from the app and `tools/bundle.sh --check`:
+[docs/release.md](docs/release.md). The player's read-me is `packaging/macos/README.txt`.
+
 Framework: the MIT [PSPRecomp](https://github.com/jessicanataliagta/PSPRecomp) lineage as carried by
 [TeamGDB/Yakumo](https://github.com/TeamGDB/Yakumo), vendored at a pinned commit under `vendor/` and modified
 through the numbered series in `patches/`. Our game profile lives in `src/` and is synced into the vendor tree.
@@ -22,6 +31,8 @@ See [docs/status.md](docs/status.md). Decisions: [docs/decisions.md](docs/decisi
 | `src/gpu/` | the Metal GE backend (tasks 023 to 025, `docs/metal-backend.md`): `metal_backend.mm` (Objective-C++ with ARC, registered as `metal`), `metal_shaders.h` (the MSL with the GE's lighting and fog and the stencil kept as alpha, compiled at run time: no Xcode needed), `metal_shell.cpp` (hands each picture to the Vulkan window shell until the Metal presenter exists) |
 | `src/host/metal_shell.mm` | the Metal shell (task 027, `PURE_SHELL=metal`, `docs/metal-backend.md` "The Metal shell"): an SDL window with a `CAMetalLayer`, the shared SDL pad, the Metal backend's texture presented directly, the interface on Dear ImGui's Metal backend (`third_party/imgui_metal/`, the 1.92.9b files verbatim) |
 | `patches/` | changes to the vendored framework, applied in numeric order (`tools/patches.sh`) |
+| `packaging/` | what the framework's packer reads for the app (task 029, [docs/release.md](docs/release.md)): `release.env`, `THIRD_PARTY_NOTICES.md`, `macos/Wipeout Pure.icns` and `macos/README.txt`, the icon's `icon.png` and `make_icon.py` |
+| `tools/bundle.sh` | `tools/bundle.sh [--zip\|--dist]`: the release build when it is stale (`tools/build.sh release`, preset `arm64-release`, `build/release`) and the packer, giving `out/release-macos/stage/Wipeout Pure.app`; `--check DIR`: signature and libraries, no game data or machine path in the app, setup from the disc image into `DIR/data`, the frontend route from there and through `open` (task 029) |
 | `tools/` | extraction, build, run, measurement, Ghidra and PPSSPP drivers |
 | `tools/patches.sh` | `check`: the vendor tree is `vendor/PIN` plus `patches/` exactly; `export NNNN-slug`: the vendor change beyond the series as a new patch |
 | `tools/worktree_init.sh` | first thing in a git worktree: vendor tree, links to the main checkout's `disc/`, `generated/`, `disc.iso`, its own `game/`, build from the shared ccache (about 35 s) |
@@ -113,4 +124,5 @@ carry out briefed tasks (`.claude/agents/`). The rules every session follows are
 file under `docs/tasks/` with one verification command.
 
 ## Licence
-Our code: GPL-2.0-or-later. Vendored framework: MIT. FFmpeg: LGPL, linked dynamically. See `docs/decisions.md` D-006.
+Our code: GPL-2.0-or-later (`LICENSE`, the GPL v2 text). Vendored framework: MIT. FFmpeg: LGPL, linked dynamically.
+See `docs/decisions.md` D-006; what the app bundles and under which licence: `packaging/THIRD_PARTY_NOTICES.md`.
