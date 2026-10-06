@@ -1,0 +1,9 @@
+# Mandrashee steering (Single Race, Classic league, track 4 of 4 (3 DOWN), 3901 m on the menu panel;
+# Vector, Feisar). tools/campaign_sweep.py reads this file; the track needs PURE_TEST_UNLOCK_ALL=1, which the sweep
+# sets for it. The follow settings are Vineta K's (config/pad_scripts/drive/vineta_k.txt says why), not tuned for
+# this track (task 032).
+# The line is the port's own: the AI ship with the most progress in a race the port ran headless with Cross held
+# and no steering (`tools/campaign_sweep.py single_race mandrashee --record-line
+# config/pad_scripts/drive/mandrashee.line.csv`, which runs the race with PURE_WATCH_GRID=1 and calls
+# `tools/pp_lines.py --port`), 2026-10-06; docs/tracks.md has the recording.
+follow config/pad_scripts/drive/mandrashee.line.csv 0.8 0.8 recover=60 absorb=2

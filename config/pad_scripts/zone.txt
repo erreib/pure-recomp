@@ -4,7 +4,8 @@
 # bronze, silver and gold targets 15, 20 and 25 zones); the race loads from 5100, the probe finds the player at 5130
 # (shield 75) and the clock starts at about 5380, at 30 flips a second. The HUD has SCORE and ZONE.
 # The track: tools/campaign_sweep.py adds N `pad dpdown` steps at 4980, 5010, ... for the Nth zone track and
-# stretches the Cross hold at 5250 to its flip budget.
+# stretches the Cross hold at 5250 to its flip budget. With PURE_TEST_UNLOCK_ALL=1 (task 032) the list is PRO TOZO,
+# MALLAVOL, CORIDON 12, SYNCOPIA (zone_1 to zone_4).
 4700:pad a
 4800:pad dpdown
 4830:pad dpdown
