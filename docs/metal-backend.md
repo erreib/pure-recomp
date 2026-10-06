@@ -540,4 +540,6 @@ Pro): metal_check PASS in 5 s with its recordings present (team frames 0.000000 
 (250 ms). `tools/frame_regress.sh` (Vulkan): 5/5 at 0.0544, 0.0302, 0.0543, 0.0331 and
 0.0673 (race_hud's AI grid varies; 0.0672 before), in 7m 8s, its four frontend captures pixel-identical to the main
 checkout's run of 2026-10-06 07:54. The race route on Metal ran to frame 6046 with `MTL_DEBUG_LAYER=1` (Metal API
-validation on) without a validation error or a `[metal] ... not implemented` line ("Cost" above).
+validation on) without a validation error or a `[metal] ... not implemented` line ("Cost" above). Beyond the Verify
+line, `tools/frame_regress.sh --shell metal --backend metal` (no Vulkan at all, M6's exit check) passes 5/5 with the
+same five fractions (0.0002, 0.0002, 0.0000, 0.0106, 0.0379) in 7m 10s.
