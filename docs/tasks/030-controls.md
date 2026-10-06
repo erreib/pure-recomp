@@ -1,6 +1,6 @@
 # 030: Controls: the keyboard and gamepad mapping documented and checked under the Metal shell
 
-Milestone: M7 | Branch: task/030-controls | Status: OPEN
+Milestone: M7 | Branch: task/030-controls | Status: MERGED 2026-10-06 (bca2b5d)
 
 ## Goal
 The framework maps the keyboard (two layouts, rebindable in its menu, saved in settings.ini) and SDL gamepads to the
@@ -187,4 +187,15 @@ Open questions:
   known script step; `out/030/rebind.txt` ends with `quit` ("Runtime stopped: window closed", run_boot exit 4).
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout, 2026-10-06 (`tools/verify_task.sh 030`): `controls_check: OK, docs/controls.md
+matches the code (20 actions in two layouts, 12 gamepad buttons, 6 tuning defaults)`; the Metal-shell frontend run
+prints `[pad] buttons 0x4000` for the script's `pad a`.
+Spot-read: docs/controls.md (the tables and the E1 starting points), tools/controls_check.py (parses the vendor's
+tables and compares the doc's marked tables; the worker's mutation check covers it), the README rows.
+Merged: bca2b5d into batch/m2. docs/tracks.md corrected here: Square uses the pickup and Circle absorbs it (the game's
+own controls screen), not the other way round as the FE.wad note had it.
+Notes: the E1 starting points are recorded in docs/status.md Follow-ups: the framework's confirm-button defaults and
+labels are its first game's (Wipeout confirms with Cross and goes back with Triangle), Triangle has only Mouse Left in
+the default keyboard layout, the camera rows act on a second stick this game lacks, gamepad buttons cannot be rebound
+in the menu, one radial dead zone. The input script counts menu frames while the paused menu is open, so a route that
+visits the menu cannot end at a known game flip; docs/controls.md says so.

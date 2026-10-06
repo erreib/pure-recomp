@@ -84,8 +84,8 @@ a `follow` line in `config/pad_scripts/drive/TRACK.txt`.
   than 10 m off.
 - **Speed pads.** The ship reaches 400 to 460 km/h on the pads (the AI ships race at 270 to 340 km/h), and most
   run met the left barrier at 2410 to 2450 m after the pad at about 2100 m, losing 190 to 380 km/h.
-- **Controls through the live file.** The game's default controls (FE.wad): X accelerate, O use pickup, SQ absorb
-  pickup, L1/R1 airbrakes, triangle reverse camera. The analog triggers press L and R, but `axis lefttrigger 0`
+- **Controls through the live file.** The game's default controls (its own controls screen, task 030): X accelerate, Square use pickup, Circle absorb
+  pickup, L/R airbrakes, Triangle reverse camera. The analog triggers press L and R, but `axis lefttrigger 0`
   leaves the trigger pressed: release with `axis lefttrigger -1`. A `pad a 1` (to lift Cross) and a `pad a N`
   (to hold it again) read in the same 10-flip batch run in the same frame, and the 1-frame release then lifts
   Cross for good: the hold has to go a couple of frames later (`2:pad a N`). Both mistakes looked like a ship

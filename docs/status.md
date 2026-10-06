@@ -42,6 +42,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | Shell seam | patch 0010 (task 026): `host::Shell` behind the HLE and the UI; `PURE_SHELL=vulkan|headless`; the headless shell reads the input script at pad level, so routes run without a window (`PURE_SHELL=headless PURE_GE_BACKEND=null --env PURE_NO_RENDER=`); pixel-identical Vulkan captures; docs/ge-backend.md 8.5 |
 | Headless runs | `PURE_SHELL=headless PURE_GE_BACKEND=null tools/run_boot.py --script ROUTE --shots DIR --frames N` runs a route with no window at thousands of frames a second (patches 0010 and 0011): the frontend route to frame 2200 in 1.1 s. With `PURE_GE_BACKEND=metal` the shots are real pictures |
 | Metal shell | `PURE_SHELL=metal` (task 027, `src/host/metal_shell.mm`): an SDL window with a CAMetalLayer, the shared SDL pad and input script, the Metal backend's texture shown directly (letterboxed; nearest at whole multiples of 480x272), ImGui on its Metal backend (`third_party/imgui_metal`, Dear ImGui 1.92.9b, MIT); `tools/frame_regress.sh --shell metal --backend metal`; patch 0012 moves the ImGui platform init into each shell |
+| Controls | docs/controls.md (task 030): keyboard layouts, mouse, gamepad mapping and dead zones, rebinding in the menu and settings.ini (`~/Library/Application Support/pure-recomp/PureNative/settings.ini`), the input script's names; `tools/controls_check.py` keeps the tables equal to the code. The game: Cross accelerate, Square use pickup, Circle absorb, L/R airbrakes, Triangle reverse camera |
 | Decompile | `tools/ghidra_headless.sh script Decompile <out> <addr>...` prints disassembly + C for any function |
 
 ## Blockers
@@ -73,6 +74,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | Time Trial and Free Play on the other Alpha tracks (budgets 11000 untested; the 30-fps modes read the live file every 10 flips) | task 018 | run with `--no-damage` |
 | Higher classes and leagues need unlocks a fresh profile lacks | M5 | a test-only unlock switch or a prepared save, then the whole sweep. The research's unlock address 0x08948870 is another version's: on v2.00 it lies inside the movie manager's open routine (FUN_089486d8), so the v2.00 routine is still to be found. Leads in BOOT.BIN's strings: "Unlock League", "Unlock Flash Class", "Unlock Liveries", "Unlock Billboard", "Show Unlock All", "Medals awarded", the save fields NumberOfGold/Silver/BronzeMedals, and `fe::ShowUnlocks_Screen` (0x0895143C, config/function_labels.csv); out/strings-xrefs.csv (tools/label_functions.py) names their users: FUN_0894d4c8 ("Show Unlock All", a frontend screen switch), FUN_08897a10 ("Medals awarded"), FUN_08813548 ("Gold Medal Awarded"); "Unlock League" and the others are reached through data, not code refs. Start the mapping there |
 | Multiple profiles need a save-list dialog; the finished-race autosave leg | task 014 | M5 breadth |
+| E1 starting points from task 030: the framework's confirm-button row and labels are its first game's (Wipeout confirms with Cross, goes back with Triangle; `PURE_AUTO_CONFIRM` presses Circle); Triangle has only Mouse Left in the default keyboard layout, so with `input.mouse=0` the keyboard cannot go back; the camera and mouse rows act on a second stick this game lacks; gamepad buttons are not rebindable in the menu; one radial dead zone, no outer zone or curve | task 030 | enhancement E1 (controls): a profile field for the confirm button and the menu's labels, a keyboard key for Triangle by default, gamepad rebinding, dead-zone options |
 | Erik's recorded lap (`tools/pad_record.py`) to replace the AI-line follower where it struggles | session 2 | the command and keys are in the Resume notes |
 
 ## Resume (session 4, 2026-10-06)
@@ -87,7 +89,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   lighting, fog, screen-space sprites, culling; the race frame at internal scale 1 matches Vulkan to its first
   stencil draw), 025 (Metal effects: stencil as alpha, bloom chain, read-backs and write-backs, ge_replay `--cut`).
   **M6 complete.** D-008: Metal by default on macOS. Running: 028 (the default switch in our entry point, per-backend
-  measured values in the suite, `run_boot.py --shell`), 030 (controls: docs/controls.md from the code, the menu's
+  measured values in the suite, `run_boot.py --shell`), 030 merged (controls: docs/controls.md from the code, the menu's
   binding editor and the virtual gamepad checked under the Metal shell). Briefed, waiting for 028: 029 (the app
   bundle through the framework's release packer, the first-run installer, `tools/bundle.sh`). Next: M7's remainder and the M5 breadth items in Follow-ups; then the enhancements (E1 controls, E2 widescreen, E3 internal
   resolution, E4 60 fps in the 30-fps modes, E5 filtering) per the plan.
