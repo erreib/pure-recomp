@@ -233,3 +233,106 @@ is for the whole run: about 19 frames a second (section 6). A headless route is 
 until the kernel stops sleeping for waits that depend only on guest state. That is a scheduler change and stays with
 Fable (patch 0011, after 026 lands); the shell seam is designed so that nothing else is needed for fast headless
 suites afterwards.
+
+### 8.5 What landed (task 026, 2026-10-06)
+
+Patch 0010 (`patches/0010-shell-seam.patch`) adds the seam to the vendored framework. Files, all under
+`vendor/portablekit/`:
+
+| File | Built with | What |
+|---|---|---|
+| `host/shell/shell.hpp`, `shell.cpp` | system layer | `host::Shell`, `ShellConfig`, `PadState`, `MouseMotion`, `CameraReading`, `kScriptedMouse`, the registry (`register_shell`, `make_shell`, `shell_names`, `shell_description`, `ShellRegistration`), `selected_shell()` (`<prefix>_SHELL`, vulkan when unset or empty) |
+| `host/shell/vulkan_shell.hpp`, `vulkan_shell.cpp` | renderer | `vulkan`: owns the `VulkanRenderer` and forwards every call to it; `host::vulkan_renderer(Shell *)` gives the renderer when the shell is this one, else null |
+| `host/shell/headless_shell.cpp` | system layer | `headless`: no window, no SDL, no GPU; the pad from the input script |
+| `host/shell/sdl_pad.hpp`, `sdl_pad.cpp` | renderer | `host::SdlPad`: the pad sampling, the gamepad attach (open, scan, close, the script's virtual pad taking over) and the scripted keys, moved out of `VulkanRenderer::Impl`, which now derives from it |
+| `host/shell/gamepad.hpp`, `gamepad.cpp` | system layer | the gamepad-to-PSP mapping moved out of the renderer (`read_gamepad`, `PadTuning`, `pad_tuning()`), over SDL-free button and axis numbers and SDL's names, so the headless shell maps a script's `pad a` exactly as the SDL shells map the virtual gamepad; `sdl_pad.cpp` checks the numbers against SDL's with `static_assert`s |
+| `host/shell/script_steps.hpp`, `script_steps.cpp` | system layer | the input script's grammar moved out of `ui/input_script.cpp` (`Step`, `parse_step`, `name_and_frames`, the live file, `load()` of `<prefix>_INPUT_SCRIPT` and `<prefix>_INPUT_LIVE`), shared by both readers |
+| `host/gpu/vulkan_renderer.hpp`, `.cpp` | renderer | moves only: the four types are aliases of the shell's, the pad code is `SdlPad`'s and `gamepad.cpp`'s; `Impl::sample_pad` calls `SdlPad::sample` with the window's pointer, touch controls and frame count |
+| `host/hle/hle_media.cpp` | system layer | `media().shell` (before the backend, so the backend is destroyed first), `ensure_shell_and_backend()`, `present_frame` and sceCtrl through the `Shell` |
+| `host/ui/*.cpp`, `.hpp` | renderer | the interface on a `Shell`: `Layer::attach(host::Shell &)`, `Layer::shell()`; `input_script.cpp` keeps its SDL path (events at `shell().window()`, the virtual gamepad) over the shared grammar |
+| `cmake/PortableKit.cmake` | | the six new sources |
+
+#### The interface as landed
+
+As in 8.1, with these differences:
+
+- `present(image, display_address, moment)`: `moment` is the `std::optional<steady_clock::time_point>` the
+  renderer's `present` takes; there is no default argument (a virtual function's default would bind statically).
+- `ShellConfig` is `{title, capture_frame}`. `title` is empty unless `<prefix>_WINDOW_TITLE` sets it, and the Vulkan
+  shell then uses `gpu::default_window_title()`; that function needs the build label header, which only the
+  renderer's sources see (the framework's `portablekit_host_check` compiles the system layer without it), so it stayed
+  in `vulkan_renderer.cpp` and `gpu::RendererConfig` stayed the renderer's own. `capture_frame` is how a shell
+  without a window takes a picture for `capture_window()` (the script's `shot`): the HLE passes the active GE
+  backend's `capture_frame`.
+- `default_window_title()` and `kFastForwardPresentInterval` stay in `vulkan_renderer.hpp`; `PadState`,
+  `MouseMotion`, `CameraReading` and `kScriptedMouse` moved, and `gpu::` names them through `using` declarations, so
+  `camera_probe.cpp` and the renderer are unchanged.
+- `active_renderer()` (`hle_common.hpp`, unchanged) returns `host::vulkan_renderer(shell)`: the renderer under the
+  Vulkan shell, null otherwise. Its users: the Vulkan GE backend's check in `active_backend()`, the camera probe, the
+  menu's resolution, texture filter and texture pack rows (left out under another shell) and the texture pack
+  screen. `ensure_renderer()` makes the shell and the backend; the setup screens now test `Layer::get().attached()`
+  after it, which is the same test under the Vulkan shell and also right for a future windowed shell.
+- `Layer::attach` refuses a shell without a window; ImGui's SDL3 platform backend is still initialised with
+  `ImGui_ImplSDL3_InitForVulkan` (task 027 picks the Metal one).
+- The kernel's idle and poll hooks (frame interpolation between flips) are set only for a shell with a window, as
+  they were only set with the renderer before.
+
+#### Selection
+
+`ensure_shell_and_backend()` (also behind `ensure_renderer()`): the backend is made first (it is asked
+`needs_window()`), then the shell `<prefix>_SHELL` names (`headless` whenever `<prefix>_NO_RENDER` is set), then the
+backend is initialised with `BackendConfig::vulkan_shell` set when the shell is the Vulkan one.
+
+| `GE_BACKEND` | `SHELL` unset or `vulkan`, `NO_RENDER` unset | `NO_RENDER` set (any value, also empty), or `SHELL=headless` |
+|---|---|---|
+| vulkan (default) | Vulkan shell, Vulkan draws (as before) | no rendering at all, no draw sink, no shell (as before) |
+| null | Vulkan shell; the null backend's black Cpu image is uploaded into the display target and shown; scripted input through the virtual gamepad | headless shell: no window, no GPU, every draw reaches the backend, the pad from the script |
+| record | as its inner backend | as its inner backend |
+
+An unknown `SHELL` prints the registered names and falls back to vulkan. When the Vulkan shell cannot be made
+("Renderer: unavailable (...); running headless"), a backend that needs no window runs in the headless shell. The
+pacing is unchanged: `Kernel::pace_to_real_time` still keys on `<prefix>_NO_RENDER` only, so `SHELL=headless` without
+`NO_RENDER` is paced to real time.
+
+#### The headless shell
+
+`pad()` is built at `present()`, which counts the flips: one script frame per flip, as `ui::draw_over_game()` ticks the
+script once per flip in a window, so a route's frame numbers mean the same in both (the frontend route's
+`[script] frame N` lines and the movies opened match the windowed run's line for line). Releases run before the
+steps due, the live file is read every 10 frames, as in `ui/input_script.cpp`. `pad` holds SDL-named buttons, `axis`
+holds an axis at the value SDL's virtual joystick is given (`int16(clamp(v) * 32767)`; a trigger reads 0 until set,
+then SDL's full-range-to-trigger mapping), and the pad is `read_gamepad` of those, exactly what `SdlPad::sample`
+computes for the virtual gamepad with no key, mouse button or touch held. `<prefix>_TRACE_PAD` prints the same
+`[pad] buttons ...` lines. `shot NAME` queues `capture_window(<prefix>_SCREENSHOT_DIR/NAME.bmp)` (`./` without the
+variable, as in a window) and the capture is taken by the backend's `capture_frame` within the same `present()`, of
+the image just presented; `quit` makes `pump_events()` false and the HLE stops the run ("quit from the input script").
+`key`, `mouse`, `click`, `text` and `drop` print `[script] ACTION steps need a window; the headless shell ignores them`
+once each. The UI methods do nothing and `initialize_ui` fails with a message; the interface never attaches.
+
+#### Numbers
+
+Frame regression suite (`tools/frame_regress.sh`), before on c394d8b (patches 0001-0009) and after on the patched
+tree, both 7m 8s:
+
+| Scene | Before | After | Captures, before vs after (`imgdiff.py --tol 0`) |
+|---|---|---|---|
+| lang | 0.0544 | 0.0544 | identical (0 of 522240 px) |
+| title | 0.0302 | 0.0302 | identical |
+| profile | 0.0543 | 0.0543 | identical |
+| main_menu | 0.0331 | 0.0331 | identical |
+| race_hud | 0.0672 | 0.0672 | identical |
+
+The headless frontend route (`PURE_SHELL=headless PURE_GE_BACKEND=null`, `--script config/pad_scripts/frontend.txt
+--frames 2200 --env PURE_NO_RENDER=`): 2200 frames, 20586 draws submitted, in 114.6 s (19.0 frames a second, the
+kernel's headless pace of section 8.4; the seam adds nothing measurable). The script's presses take effect: Cross at
+700, 1600 and 1650 (`[pad] buttons 0x4000` with `PURE_TRACE_PAD`), Start at 1800 (`0x8`), and the game opens
+`Movies/WoFMVNew_US.PMF` after the second and `Movies/Profile_part1.PMF` after Start, as the windowed run does (a
+run with a neutral pad stays on Language Selection from frame 690, task 021). With `--shots`, `lang`, `notice`, `title` and `profile` are written
+(black 480x272, from null) at the script's frames. Other paths checked with short runs: null in the Vulkan window
+(the uploaded black image is what the `shot` captures), `PURE_SHELL=bogus` (falls back to vulkan with the message),
+`PURE_SHELL=headless` with the Vulkan backend (nothing drawn, with the message), `PURE_NO_RENDER=1` with the Vulkan
+backend ("Renderer: disabled", as before), and the live file headless (lines appended during the run are read every
+10 frames; `pad start`, `shot`, `key` reported as ignored, `quit` stops the run).
+
+The patch is 3030 lines (1576 added, 608 removed); `vulkan_renderer.cpp` only loses code (the pad mapping, the
+gamepad attach and the sampler, about 260 lines) and gains the base class and one call.
