@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below)
+Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
 
 ## Milestones
 
@@ -47,9 +47,25 @@ Last updated: 2026-10-05 13:05 (session paused at this point; see "Resume" below
 | Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
 
-## Resume (written 2026-10-05 at the pause)
-- Branches: `main` fast-forwarded to 32c4c7c on 2026-10-05 (Erik: "fast-forward main"): patches 0001-0004, tasks
-  001-009. `batch/m2` continues from there. Both other workers committed PARTIAL results on their branches (worktrees under `.claude/worktrees/`):
+## Resume (updated at the end of session 2, 2026-10-05)
+- `main` = 2971eff (Erik's second fast-forward). `batch/m2` is two commits past it (resume notes, `tools/pad_record.py`).
+- `task/011-shadow-volumes-and-dual-source` (29ec191): PARTIAL, patch 0006 exported but never built; the Result section
+  holds the stencil-versus-alpha design rule and the exact remaining steps (wire `submit()`, build, capture, Verify).
+  Finish it from that branch; do not merge the unbuilt patch. `task/012-campaign-sweep`: PARTIAL; the sweep tool, the single_race route, `docs/tracks.md` and a Vineta K
+  notes file exist, no steering tuned (the first corner is a right-hander; a race needs ~18,000 flips). Decisions for
+  the follow-up (Fable): `--frames` counts from the Cross hold, as the tool does; distance-keyed steering tables are
+  acceptable; prefer Erik's recorded lap (`tools/pad_record.py`) over the closed-loop tuner, and keep the tuner's
+  PPSSPP AI-line idea as the fallback for tracks nobody drives. Merge per the checklist;
+  re-export 0006 over the series if `tools/patches.sh check` complains.
+- Next steps in order: merge 011/012; Erik's recorded lap (`tools/pad_record.py` turns a run log with
+  `PURE_TRACE_PAD=1 PURE_FRAME_LOG=1` into a script; the command and keys are in the chat recap and README) to replace
+  hand-tuned steering; M4 audio checks (wavstats); M5 save round trip; then the Metal backend (M6) on top of the five
+  vendor patches, which are all upstream candidates.
+- Earlier resume notes (session 1) follow.
+
+## Resume (written 2026-10-05 at the first pause)
+- Branches: `main` fast-forwarded to 2971eff on 2026-10-05 (Erik: "fast-forward main", twice today): patches
+  0001-0005, tasks 001-010, briefs 011-012. `batch/m2` continues from there. Both other workers committed PARTIAL results on their branches (worktrees under `.claude/worktrees/`):
   - `task/001-tooling-port`: `tools/patches.sh` DONE (check/export tested), `tools/worktree_init.sh` written (a fresh
     worktree builds in 33 s, all 144 corpus units ccache hits, so R5 is resolved); run_boot flags, check_env PIN check,
     README rows NOT done. Merge the two scripts after rerunning `tools/patches.sh check`; re-brief the rest as task 004.
