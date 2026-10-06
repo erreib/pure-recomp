@@ -36,6 +36,8 @@ Environment switches take the framework's names with our prefix: `PURE_NO_RENDER
 Switches this repo adds are listed in `README.md`.
 
 ## Task protocol (subagents)
+0. Your worktree may start on `main`, which lags the integration branch. Before anything else:
+   `git switch -c task/NNN-slug batch/m2` (the branch must start from `batch/m2`), then `tools/worktree_init.sh`.
 1. Read `docs/tasks/NNN-slug.md` fully, then every file under "Read first".
 2. Stay inside "May touch". If the fix needs a file under "Must not touch", stop: write the Result section with
    status BLOCKED and the reason, commit, and end.
