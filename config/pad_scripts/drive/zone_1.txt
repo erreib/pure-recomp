@@ -1,0 +1,6 @@
+# Zone track 1 (PRO TOZO, the only Zone track on a new profile; Zone mode, 0 DOWN on its TRACK SELECTION).
+# tools/campaign_sweep.py reads this file. No steering: Zone has no AI ships, so tools/pp_lines.py cannot record a
+# racing line here, and the cell's job is to reach Zone's end panel. With Cross held and the stick centred the ship
+# meets the barrier of the first corner at about 262 m, 4.8 s in, and stays against it; the shield (75 at the
+# start) drains against the wall and runs out at about 59 s, when the HUD shows ZONE 6 (out/018/e-zone2,
+# 2026-10-06). A racing line for this track would let the sweep reach later zones.

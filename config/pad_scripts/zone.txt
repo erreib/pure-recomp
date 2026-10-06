@@ -1,0 +1,14 @@
+# MAIN MENU -> SINGLE PLAYER -> ZONE (3 DOWN) -> TRACK SELECTION -> race, Cross held from 5250. Follows main_menu.txt
+# (MAIN MENU at ~4450); measured 2026-10-06 (out/018/e-zone, e-zone2). Zone has no class, league or team screen:
+# TRACK SELECTION is up by 5000 with PRO TOZO alone on a new profile (with BEST ZONE and BEST SCORE, and the
+# bronze, silver and gold targets 15, 20 and 25 zones); the race loads from 5100, the probe finds the player at 5130
+# (shield 75) and the clock starts at about 5380, at 30 flips a second. The HUD has SCORE and ZONE.
+# The track: tools/campaign_sweep.py adds N `pad dpdown` steps at 4980, 5010, ... for the Nth zone track and
+# stretches the Cross hold at 5250 to its flip budget.
+4700:pad a
+4800:pad dpdown
+4830:pad dpdown
+4860:pad dpdown
+4900:pad a
+5100:pad a
+5250:pad a 3000
