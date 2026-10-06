@@ -1,6 +1,6 @@
 # 003: Headless runs must get past the intro movie
 
-Milestone: M2 | Branch: task/003-headless-intro-movie | Status: OPEN
+Milestone: M2 | Branch: task/003-headless-intro-movie | Status: CLOSED (diagnosis merged 2026-10-06; superseded by patch 0002)
 
 ## Goal
 With `PURE_NO_RENDER=1 PURE_NO_AUDIO=1` the game plays its intro movie (sceMpeg, `Data/Movies/IntroMovieP1_US.PMF`
@@ -145,4 +145,9 @@ Verify's greps on that log print PASS. The last 20 lines:
   `.claude/worktrees/` worktree. I imported into a scratch directory instead.
 
 ## Review
-(Fable fills)
+Merged 2026-10-06 (51f681a), docs only, as the record; no fix was needed from this brief. The loop the worker saw
+is the language page holding the clip at picture 52 until the player confirms (task 005), and headless has no
+input, so the run sat there in both modes: the brief's premise, a headless-only stall, was wrong. The movie defect
+proper was found later and fixed by patch 0002: `sceMpegRingbufferAvailableSize` reported the ring empty while 16
+pictures were still queued, so the game ended every clip early and never deleted the instance. The worker was
+right that the brief's Verify greps pass with or without a fix. `PURE_SKIP_FMV` was not built and is not needed.
