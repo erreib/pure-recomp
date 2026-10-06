@@ -1,6 +1,6 @@
 # 012: Campaign sweep: every track to the results screen under scripted driving
 
-Milestone: M5 | Branch: task/012-campaign-sweep | Status: OPEN
+Milestone: M5 | Branch: task/012-campaign-sweep | Status: MERGED (partial)
 
 ## Goal
 The port reaches a race and drives (task 007: physics match PPSSPP). The campaign milestone needs every track and
@@ -36,7 +36,7 @@ league tracks first (Vector class), then extend.
 - [ ] At least four Alpha league tracks PASS; the summary lists every cell attempted with its outcome.
 
 ## Verify
-`python3 tools/campaign_sweep.py single_race vineta_k --frames 12000 && grep -q PASS out/sweep/summary.txt`
+`python3 tools/campaign_sweep.py single_race vineta_k --frames 13000 && grep -q PASS out/sweep/summary.txt`
 
 ## May touch
 - tools/campaign_sweep.py, config/pad_scripts/drive/, config/pad_scripts/*.txt (new route files only), docs/tracks.md,
@@ -138,7 +138,13 @@ Not run. The session was stopped, and with no Vineta K steering the cell can onl
 2. Is a distance-keyed steering table acceptable if frame-keyed tables prove flaky across runs?
 
 ## Review
-(Fable fills)
+Merged as PARTIAL progress (Fable): the tool, the PPSSPP AI-line recorder and the closed-loop follower are the right
+design; one PASS (3:01.7, three laps, results panel) and one lap-3 stall. Decisions: the measured AI line may live in
+config/pad_scripts/drive/ (numbers measured in PPSSPP, not game bytes; the config rule means assets and keys);
+`follow` replaces the open-loop tables; the Verify budget is `--frames 13000`; tools/pp_lines.py is accepted outside
+the original May-touch. Reliability (stall shot, fewer contacts, airbrakes, pass rate over three runs) and the
+other Alpha tracks continue as task 016. Not rerun by Fable: a cell is 7 minutes and the pass rate is the open
+question, which task 016 measures.
 
 ## Result (continued)
 Status: PARTIAL. Vineta K reached the results panel once through the Verify command (strict, no interpreter, three
