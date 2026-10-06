@@ -11,7 +11,7 @@ PSP's stencil (the shadow volumes, the bloom's mask), the bloom chain's passes o
 and read-backs from targets into guest memory, the frame write-back and the depth write-back the lens flare reads
 at a GE SIGNAL. The race frame 6016 is now drawn as the Vulkan backend draws it, 2 pixels of 130560 over tol 24 at
 the same scale ("The race check" below), and the frame regression suite passes 5/5 with `--backend metal`, race_hud
-at {{RACE_HUD}} against PPSSPP (Vulkan's 0.067). The Metal shell (task 027, "The Metal shell" below) shows its
+at 0.0379 against PPSSPP (Vulkan's 0.067). The Metal shell (task 027, "The Metal shell" below) shows its
 pictures in a window of its own, with no Vulkan involved.
 
 ## Quick start
@@ -351,8 +351,10 @@ stick (about 3, 3.5 and 3.5 minutes). Then:
 
 1. the team frames' draws must hold no stencil and no bloom-target draw (lit and fogged ones are counted);
 2. `--replay out/gerec/team.gerec --a vulkan --b metal --tol 24 --max-frac 0.02` must pass;
-3. for the record, race frame 6016 into both, bisected with `--first-diff --tol 24`: (a) `race_1x.gerec`, (b)
-   `race_warm.gerec`.
+3. (task 025) `--replay out/gerec/race_1x.gerec --a vulkan --b metal --frames 6016 --tol 24 --max-frac 0.02` must
+   pass; on a failure the first differing draw is printed and both pictures after it are kept ("The race check");
+4. for the record, race frame 6016 into both, bisected with `--first-diff --tol 24`: (a) `race_1x.gerec`, (b)
+   `race_warm.gerec`. (Task 024 had these as step 3, before the race could pass.)
 
 ### Choosing the frame
 
@@ -436,11 +438,12 @@ checkout's metal_check run (frame 6016: 864 draws; task 024's had 906: the AI fi
 | frame 6016 with task 024's backend | 0.3246 at tol 24 (42380 pixels): no shadows, the darkening over the whole screen, no bloom |
 | `--first-diff --tol 24` (no fraction) | draw 508 of 864, one pixel: an alpha-tested crowd strip (below) |
 | `race_warm.gerec` (2x) frames 6014, 6015, 6016 | 0.0777, 0.0788, 0.0804 at tol 24 (task 024: 0.3768 for 6016): edges and the crowds' texture detail moved by the 2x-to-1x reduction, accumulating from the first alpha-tested draws (`--first-diff --max-frac 0.02` passes 2% at draw 261 of 906, an opaque strip) |
-| race frame 6016 against PPSSPP (`tools/frame_regress.sh --backend metal --only race_hud`) | {{RACE_HUD_LINE}} |
+| race frame 6016 against PPSSPP (`tools/frame_regress.sh --backend metal --only race_hud`) | 0.0379 at tol 32 (4954 pixels), limit 0.10: PASS, twice (the verify run and an earlier one). Task 024: 0.2978; the Vulkan backend 0.0672 (runs 0.063 to 0.086, the AI grid varies) |
 
-Metal draws the race with the effects in: shadows under the ships, the bloom on the light strips and the screens,
-the lens flare. The pictures of frame 6016 after the whole frame differ in
-three places, all small, which item 5 of the brief asked to classify:
+Metal draws the race with the effects in: shadows under the ships, the bloom on the light strips and the screens, the
+lens flare. Against PPSSPP, what stays over tol 32 in race_hud is the AI ships (the grid differs from run to run),
+the crowds' alpha-tested texels, parts of the player's ship and one-pixel edges (`imgdiff.py --out`). The pictures of
+frame 6016 after the whole frame differ in three places, all small, which item 5 of the brief asked to classify:
 
 | Pixels | Levels | First draw (ge_replay numbering) | What it is | Whose |
 |---|---|---|---|---|
@@ -477,12 +480,13 @@ Over the race route to frame 6046 (339 race frames), counted by the backend's ex
 | Vulkan shell, `MTL_DEBUG_LAYER=1` (the acceptance run) | 6383 (3325) | 6043/6046, 0 ms | 339/339, 283 ms (0.83 ms) | 339 |
 | Metal shell (`PURE_SHELL=metal`, `PURE_PERF=log`) | 353 (254) | 6043/6046, 46 ms in 14 waits, the rest already drawn | 339/339, 209 ms (0.62 ms) | 339 |
 
-So a race frame waits for the GPU once, at its SIGNAL, for about 0.6 to 0.8 ms (the flare's depth; the Vulkan
-backend's write-back takes 0.8 to 1.4 ms on the same frames), plus, under the Vulkan shell, the hand-over's read-back
-at the flip (0.48 ms on average). Under the Metal shell the race runs at 59.9 to 60.0 fps, frame 16.7 ms (guest 2.1 to
-2.6, render 3.2 to 3.4, pacing wait 10.7 to 11.3 ms). None of the runs printed a `[metal] ... not implemented` line,
-and the one with Metal's API validation (`Metal API Validation Enabled`) reached frame 6046 with no validation
-error. The race's 570 to 589 block transfers come from main memory, so none is written back.
+So a race frame waits for the GPU once, at its SIGNAL, for about 0.6 to 0.8 ms (the flare's depth; in the drive runs
+above, Metal's write-back took 0.8 to 0.9 ms at frames 6016, 6400 and 6600 and the Vulkan backend's 1.0 to 1.4 ms),
+plus, under the Vulkan shell, the hand-over's read-back at the flip (0.48 ms on average). Under the Metal shell the
+race runs at 59.9 to 60.0 fps, frame 16.7 ms (guest 2.1 to 2.6, render 3.2 to 3.4, pacing wait 10.7 to 11.3 ms). None
+of the runs printed a `[metal] ... not implemented` line, and the one with Metal's API validation (`Metal API
+Validation Enabled`) reached frame 6046 with no validation error. The race's 570 to 606 block transfers (the number
+varies from run to run) come from main memory, so none is written back.
 
 ## Verify numbers
 
@@ -523,3 +527,17 @@ tol 24, the race bisected to draw 394 at 1x and to draw 40 at 2x), and the three
 fractions: `lang` 0.0002, `title` 0.0002, `profile` 0.0000. `tools/frame_regress.sh` (Vulkan): 5/5 at the fractions it
 had (0.0544, 0.0302, 0.0543, 0.0331, 0.0672), its five captures pixel-identical to the main checkout's run of
 2026-10-06 07:30-07:36.
+
+### Task 025
+
+`tools/build.sh profile && tools/gerec/metal_check.sh && tools/frame_regress.sh --backend metal` (2026-10-06, M4
+Pro): metal_check PASS in 5 s with its recordings present (team frames 0.000000 at tol 24; race_1x frame 6016
+0.000015 at tol 24, 2 pixels, PASS; bisected for the record to draw 508 at 1x and draw 40 at 2x), and the suite 5/5:
+`lang` 0.0002, `title` 0.0002, `profile` 0.0000, `main_menu` 0.0106 (tasks 023 and 024's fractions) and `race_hud`
+0.0379 (limit 0.10), in 7m 12s. In those runs the backend stored the frame in guest memory at 2127 of 2130 flips
+(frontend), 4727 of 4730 (main menu) and 6043 of 6046 (race) with no wait of its own, and waited for the GPU 2128,
+4728 and 6383 times (1024, 2195 and 3149 ms), as many times as before task 025 plus the race's 339 depth write-backs
+(250 ms). `tools/frame_regress.sh` (Vulkan): 5/5 at 0.0544, 0.0302, 0.0543, 0.0331 and
+0.0673 (race_hud's AI grid varies; 0.0672 before), in 7m 8s, its four frontend captures pixel-identical to the main
+checkout's run of 2026-10-06 07:54. The race route on Metal ran to frame 6046 with `MTL_DEBUG_LAYER=1` (Metal API
+validation on) without a validation error or a `[metal] ... not implemented` line ("Cost" above).
