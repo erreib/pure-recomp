@@ -1,6 +1,6 @@
 # 025: The Metal GE backend, effects: stencil as alpha, the bloom chain, read-backs and write-backs
 
-Milestone: M6 | Branch: task/025-metal-effects | Status: OPEN (after task 024)
+Milestone: M6 | Branch: task/025-metal-effects | Status: MERGED 2026-10-06 (17a76e3)
 
 ## Goal
 After tasks 023 and 024 the Metal backend draws the race's geometry lit and fogged but without the effects the
@@ -195,4 +195,20 @@ Open questions:
    the old file. Task 025's refer to the new one.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 025`):
+`metal_check.sh` race pass condition `race_1x.gerec` frame 6016 vulkan against metal 0.000015 (2 of 130560 px at tol
+24); `tools/frame_regress.sh --backend metal` 5/5 at 0.0002, 0.0002, 0.0000, 0.0106, 0.0384 (7m 14s); then
+`tools/frame_regress.sh` (Vulkan) 5/5 at 0.0544, 0.0302, 0.0544, 0.0331, 0.0667 (unchanged; 7m 13s), and M6's exit
+check `tools/frame_regress.sh --shell metal --backend metal` 5/5 at 0.0002, 0.0002, 0.0002, 0.0106, 0.0364 (7m 13s):
+the whole suite with no Vulkan or MoltenVK in the process.
+Spot-read: `resolve_stencil_alpha` (nine quads inside the pass: the alpha cleared, then each stencil bit added
+where the attachment EQUALs it under a per-bit compare mask; patch 0006's method), the dual-source fragment variant
+and its pipeline key, `write_back_depth` (`store_depth`: a blit, a wait, round(z x 65535) in rows of the stride),
+`metal_check.sh` step 3, ge_replay `--cut`.
+Merged: 17a76e3 into batch/m2.
+Notes: M6 is complete with this task (see docs/status.md). Open question 1 (the Vulkan backend loses column 0 of
+transformed draws whose GE viewport is offset: the race HUD) is a vendor follow-up patch, recorded; the Metal
+backend follows the GE's rule and is not changed to match. Open question 2 (block transfers and read-backs from a
+rendered target are unexercised by the race) is recorded; a scene that does them needs a recording when found in
+the wider sweep. The recordings' draw counts vary with the AI field (864 against 906 in frame 6016), so draw numbers
+in the docs refer to the file they were measured on.

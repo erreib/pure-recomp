@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-06 (session 4; see "Resume" below)
+Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 
 ## Milestones
 
@@ -12,7 +12,7 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
 | M3 | race start on Vineta K, faithful 3D | first full-HUD frame vs `ref/vineta_k_start.png` ≤ 0.30 at tol 32 (2x capture downscaled); 13,200-frame strict run (interpreter off, strict HLE, throttle held; retail has no Autopilot) exits 0 | **race reached**: Single Player > Single Race > Vector > Alpha > Vineta K > Feisar loads, countdown passes, HUD and music run (`out/milestones/05-race-vineta-k-magenta.png`); **done**: track, barriers, arches, sky, bloom, ship shadows and lens-flare occlusion (patches 0003-0006, 0008); frame 6016 vs PPSSPP **0.068** at tol 32; strict 13,200-frame run exits 0; clean shutdown (0007) | 2026-10-06 |
 | M4 | audio and video | `wavstats.py` active ≥ 0.9 from the first music (main menu) and over the race window; movies play (patch 0002) | **done** (task 013): music loops seamlessly, effects over music in the race, no clipping; `PURE_AUDIO_WAV` + `tools/wavstats.py` | 2026-10-05 |
 | M5 | saves and the whole campaign | `tools/campaign_sweep.py` cells PASS; `tools/save_roundtrip.sh` passes | **every single-player mode reaches its end screen** (task 018, 2026-10-06): Single Race on all four Alpha tracks (task 017, `--no-damage` test switch; Vineta K also without it), Time Trial and Free Play on Vineta K, Zone on PRO TOZO (SHIP DESTROYED panel, zone 6: no racing line, the ship runs out of shield against the first barrier), the Alpha Tournament through all four races to the final TOURNAMENT STANDING; save round trip passes (task 014). Open: higher classes and leagues, the other tracks in the 30-fps modes (untested budgets), a Zone line, multiple profiles need a save-list dialog, finished-race autosave leg, the AI grid varies per run (RNG) | 2026-10-06 |
-| M6 | native Metal backend | `PureNative --replay <rec> --a vulkan --b metal` passes on all recordings; `tools/frame_regress.sh --shell metal --backend metal` passes 5/5 | in progress: GE seam (021, patch 0009), ge_replay (022), **Metal backend draws the 2D frontend** (023: lang 0.0002, title 0.0002, profile 0.0000 vs PPSSPP), shell seam (026, patch 0010), headless runs unpaced (patch 0011), **Metal shell** (027, patch 0012: `PURE_SHELL=metal PURE_GE_BACKEND=metal` runs the game with no Vulkan or MoltenVK; the three frontend scenes at 0.0002); running 024 (Metal 3D), then 025 (stencil, bloom chain, read-backs: race_hud 0.30 today) | 2026-10-06 |
+| M6 | native Metal backend | `tools/frame_regress.sh --shell metal --backend metal` passes 5/5; `tools/gerec/metal_check.sh` passes (Metal against Vulkan on the team and race recordings) | **done** 2026-10-06: GE seam (021, patch 0009), ge_replay (022), Metal backend (023 frontend, 024 lighting/fog/sprites/culling, 025 stencil as alpha, bloom chain, read-backs, write-backs), shell seam (026, patch 0010), headless pace (patch 0011), Metal shell (027, patch 0012). Metal-only suite: lang 0.0002, title 0.0002, profile 0.0002, main_menu 0.0106, race_hud 0.0364 (Vulkan path: 0.054, 0.030, 0.054, 0.033, 0.067); race frame 6016 within 2 px of Vulkan at scale 1; 60 fps in the race under the Metal shell | 2026-10-06 |
 | M7 | v1.0 polish | `tools/bundle.sh` app runs from Finder | open | |
 
 ## Works
@@ -85,9 +85,11 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
   0010: `host::Shell`, Vulkan shell adapter, headless shell with pad from the input script; D-007), and Fable's patch
   0011 (headless runs unpaced: thousands of frames a second), 027 (the Metal shell, patch 0012), 024 (Metal 3D:
   lighting, fog, screen-space sprites, culling; the race frame at internal scale 1 matches Vulkan to its first
-  stencil draw; merged fda9d9d, Verify rerun PASS). Running: 025 (Metal effects: stencil
-  as alpha, the bloom chain, read-backs and write-backs, ge_replay `--cut`). M6's exit after 025:
-  `tools/frame_regress.sh --shell metal --backend metal` 5/5 and the recordings replayed vulkan against metal.
+  stencil draw), 025 (Metal effects: stencil as alpha, bloom chain, read-backs and write-backs, ge_replay `--cut`).
+  **M6 complete.** D-008: Metal by default on macOS. Running: 028 (the default switch in our entry point, per-backend
+  measured values in the suite, `run_boot.py --shell`). Next: M7 (app bundle, gamepad baseline, launcher, status
+  check) and the M5 breadth items in Follow-ups; then the enhancements (E1 controls, E2 widescreen, E3 internal
+  resolution, E4 60 fps in the 30-fps modes, E5 filtering) per the plan.
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
   (`tools/pad_record.py`), the save-list dialog for multiple profiles.
