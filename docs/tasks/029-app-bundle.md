@@ -1,6 +1,6 @@
 # 029: The macOS app bundle: packaging files, a release build, the installer path, tools/bundle.sh
 
-Milestone: M7 | Branch: task/029-app-bundle | Status: OPEN (after task 028)
+Milestone: M7 | Branch: task/029-app-bundle | Status: MERGED 2026-10-06 (merge after ff79514; profile fix 16718e6)
 
 ## Goal
 A `Wipeout Pure.app` that Erik can launch from Finder on this Mac: on first run it asks for the disc image (the
@@ -288,4 +288,20 @@ Open questions:
    opens on the setup screen there. I installed nothing there, per the brief.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout, 2026-10-06, after the profile fix (16718e6: `executable_path_on_disc` is the
+disc's plain `BOOT.BIN`, whose SHA-256 the profile already carried; nothing decrypts). `tools/verify_task.sh 029`: the
+packer ran on this Mac (the Command Line Tools carry the 13.3 SDK), `Wipeout Pure.app` 88 MB, 6 Mach-O files, marked
+for macOS 13.0; the seven checks PASS: bundle (ad hoc signed, every library inside), machine (no path of this Mac),
+names, content (no game file, the image's hash nowhere), setup (the image copied, 245 MiB data directory with
+`disc.iso`, `EBOOT.ELF`, `settings.ini`), route (frame 2200 from the data directory on the Metal shell, title
+0.000237), finder (`open` shows the title). The developer build: `lang` 0.0002 after `tools/build.sh profile`.
+Spot-read: `packaging/release.env` (the game-name patterns that the packer refuses; `*wipeout*pure*usa*` instead of
+the bare pattern that would match the app's own name), `THIRD_PARTY_NOTICES.md` (every bundled component and pin, FFmpeg
+LGPL and replaceable), `tools/bundle.sh` (the Release build when stale, the packer, `--check`'s seven checks),
+`CMakePresets.json` and `tools/build.sh release`, `LICENSE` (GPL v2 text; D-006 says or later, the notices say so).
+Merged: into batch/m2 after ff79514 (clean).
+Notes: PARTIAL accepted and completed by the profile fix. The packer's deps built in the worktree were reused in the
+main checkout's out/. Follow-ups recorded in docs/status.md: the Info.plist copyright and the setup screen's sentence
+come from the framework's templates (vendor patches, cosmetic); macOS 13 is the packer's mark, not tested; a public
+source URL only if the app is ever distributed. The bundle in `out/release-macos/stage` is rebuilt after task 031
+(the Metal window's race HUD) lands, so the first app Erik plays has the fix.

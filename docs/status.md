@@ -13,7 +13,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | M4 | audio and video | `wavstats.py` active ≥ 0.9 from the first music (main menu) and over the race window; movies play (patch 0002) | **done** (task 013): music loops seamlessly, effects over music in the race, no clipping; `PURE_AUDIO_WAV` + `tools/wavstats.py` | 2026-10-05 |
 | M5 | saves and the whole campaign | `tools/campaign_sweep.py` cells PASS; `tools/save_roundtrip.sh` passes | **every single-player mode reaches its end screen** (task 018, 2026-10-06): Single Race on all four Alpha tracks (task 017, `--no-damage` test switch; Vineta K also without it), Time Trial and Free Play on Vineta K, Zone on PRO TOZO (SHIP DESTROYED panel, zone 6: no racing line, the ship runs out of shield against the first barrier), the Alpha Tournament through all four races to the final TOURNAMENT STANDING; save round trip passes (task 014). Open: higher classes and leagues, the other tracks in the 30-fps modes (untested budgets), a Zone line, multiple profiles need a save-list dialog, finished-race autosave leg, the AI grid varies per run (RNG) | 2026-10-06 |
 | M6 | native Metal backend | `tools/frame_regress.sh --shell metal --backend metal` passes 5/5; `tools/gerec/metal_check.sh` passes (Metal against Vulkan on the team and race recordings) | **done** 2026-10-06: GE seam (021, patch 0009), ge_replay (022), Metal backend (023 frontend, 024 lighting/fog/sprites/culling, 025 stencil as alpha, bloom chain, read-backs, write-backs), shell seam (026, patch 0010), headless pace (patch 0011), Metal shell (027, patch 0012). Metal-only suite: lang 0.0002, title 0.0002, profile 0.0002, main_menu 0.0106, race_hud 0.0364 (Vulkan path: 0.054, 0.030, 0.054, 0.033, 0.067); race frame 6016 within 2 px of Vulkan at scale 1; 60 fps in the race under the Metal shell | 2026-10-06 |
-| M7 | v1.0 polish | `tools/bundle.sh` app runs from Finder | open | |
+| M7 | v1.0 polish | `tools/bundle.sh && tools/bundle.sh --check out/029` passes; controls documented | in progress: 028 (Metal by default), 030 (controls doc + checker), 029 (**the app bundle**: `tools/bundle.sh` packs `Wipeout Pure.app` through the framework's packer, 88 MB, signed ad hoc, no game data; the first-run setup takes Erik's ISO and plays; `docs/release.md`); open: 031 (the Metal window's race HUD, running), the follow-ups | 2026-10-06 |
 
 ## Works
 
@@ -43,6 +43,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | Headless runs | `PURE_SHELL=headless PURE_GE_BACKEND=null tools/run_boot.py --script ROUTE --shots DIR --frames N` runs a route with no window at thousands of frames a second (patches 0010 and 0011): the frontend route to frame 2200 in 1.1 s. With `PURE_GE_BACKEND=metal` the shots are real pictures |
 | Metal shell | `PURE_SHELL=metal` (task 027, `src/host/metal_shell.mm`): an SDL window with a CAMetalLayer, the shared SDL pad and input script, the Metal backend's texture shown directly (letterboxed; nearest at whole multiples of 480x272), ImGui on its Metal backend (`third_party/imgui_metal`, Dear ImGui 1.92.9b, MIT); `tools/frame_regress.sh --shell metal --backend metal`; patch 0012 moves the ImGui platform init into each shell |
 | Controls | docs/controls.md (task 030): keyboard layouts, mouse, gamepad mapping and dead zones, rebinding in the menu and settings.ini (`~/Library/Application Support/pure-recomp/PureNative/settings.ini`), the input script's names; `tools/controls_check.py` keeps the tables equal to the code. The game: Cross accelerate, Square use pickup, Circle absorb, L/R airbrakes, Triangle reverse camera |
+| App bundle | `tools/bundle.sh` (task 029): a Release build (`tools/build.sh release`, preset `arm64-release`) packed by `vendor/portablekit/scripts/release_macos.sh` into `out/release-macos/stage/Wipeout Pure.app` (SDL3, Vulkan loader, MoltenVK, FFmpeg inside; licences; no game data); first run: the framework's setup asks for the disc image and copies it under `~/Library/Application Support/pure-recomp/PureNative/`; `tools/bundle.sh --check DIR` runs the seven checks; docs/release.md |
 | Decompile | `tools/ghidra_headless.sh script Decompile <out> <addr>...` prints disassembly + C for any function |
 
 ## Blockers
@@ -95,8 +96,8 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   **M6 complete.** D-008: Metal by default on macOS. Merged: 028 (the default in our entry point, per-backend
   measured columns in the suite, `run_boot.py --shell/--backend`; Verify rerun PASS on both paths), 030
   (controls doc + checker). Running: 031 (the Metal window's missing race HUD: one command queue for the backend
-  and the shell, `tools/hud_check.sh`), 029 (the app bundle through the framework's release packer, the first-run
-  installer, `tools/bundle.sh`; in parallel, its check uses the frontend only; the bundle is rebuilt after 031).
+  and the shell, `tools/hud_check.sh`), 029 merged (the app bundle through the framework's release packer, the first-run
+  installer, `tools/bundle.sh`; the profile now names the plain BOOT.BIN; the bundle is rebuilt after 031).
   Next: M7's remainder
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
