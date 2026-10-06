@@ -1,22 +1,28 @@
-# The Metal GE backend (tasks 023 and 024, 2026-10-06)
+# The Metal GE backend (tasks 023 to 025, 2026-10-06)
 
 `PURE_GE_BACKEND=metal` draws the game with Metal, natively, behind the GE backend seam of D-003
 (`docs/ge-backend.md`). It is `src/gpu/metal_backend.mm`, in our sources, and registers itself as `metal`. Task
 023 built its skeleton (device, targets, textures, the draws of the 2D frontend, clears, blending, the alpha test,
 captures) and proved it on the frame regression suite's three frontend scenes, which it draws within a few pixels
 of PPSSPP: the language page, the title screen and the profile screen. Task 024 added the 3D draws: the GE's
-per-vertex lighting and fog, transformed sprites expanded on the screen, and culling confirmed on the race. Against
-the Vulkan backend at the same scale, the race frame 6016 is drawn alike, within one level, up to its first draw
-that tests the stencil ("The 3D check" below). The stencil kept as alpha, the bloom chain and the read-backs into
-guest memory are task 025. The Metal shell (task 027, "The Metal shell" below) shows its pictures in a
-window of its own, with no Vulkan involved.
+per-vertex lighting and fog, transformed sprites expanded on the screen, and culling confirmed on the race. Task 025
+added the effects of patches 0003 to 0008: the stencil test and operations with the target's alpha kept as the
+PSP's stencil (the shadow volumes, the bloom's mask), the bloom chain's passes over aliased VRAM, block transfers
+and read-backs from targets into guest memory, the frame write-back and the depth write-back the lens flare reads
+at a GE SIGNAL. The race frame 6016 is now drawn as the Vulkan backend draws it, 2 pixels of 130560 over tol 24 at
+the same scale ("The race check" below), and the frame regression suite passes 5/5 with `--backend metal`, race_hud
+at {{RACE_HUD}} against PPSSPP (Vulkan's 0.067). The Metal shell (task 027, "The Metal shell" below) shows its
+pictures in a window of its own, with no Vulkan involved.
 
 ## Quick start
 
 ```sh
 tools/build.sh profile
+tools/frame_regress.sh --backend metal                                     # the five scenes against PPSSPP (about 5 min)
 tools/frame_regress.sh --backend metal --only lang,title,profile          # the three frontend scenes (about 75 s)
 tools/gerec/metal_check.sh                                                 # Metal against Vulkan through ge_replay (below)
+build/arm64/bin/PureNative --replay out/gerec/race_1x.gerec --a vulkan --b metal --frames 6016 --cut 393 \
+  --tol 24 --out out/cut                                                   # both pictures after draw 393 of frame 6016
 PURE_GE_BACKEND=metal tools/run_boot.py --frames 300 out/x.log             # headless: no window, Metal still draws
 PURE_GE_BACKEND=metal tools/run_boot.py --frames 700 --env PURE_METAL_LOG=1 out/x.log   # a line per draw
 PURE_SHELL=metal PURE_GE_BACKEND=metal tools/run_boot.py --window --frames 700 out/x.log # the Metal shell: no Vulkan
@@ -30,6 +36,8 @@ tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile  
 | `PURE_METAL_SHELL=0` | under the Vulkan shell, do not hand the pictures to its window: the window stays black and the input script's `shot` steps capture nothing (see "The window"). Under any other shell there is no hand-over to turn off |
 | `PURE_SHELL=metal` | show the pictures in the Metal shell's window instead of the Vulkan shell's (see "The Metal shell") |
 | `PURE_NO_FB_TEXTURES=1` | every texture decoded from guest memory, none read from a target (the framework's switch, as for Vulkan) |
+| `PURE_NO_DEPTH_READBACK=1` | the framework's switch (patch 0008): the HLE does not ask for the depth write-back at a SIGNAL, so the lens flare is never occluded. ge_replay replays a recording's WriteBackDepth records regardless |
+| `PURE_TRACE_STENCIL_COPY=1`, `PURE_TRACE_DEPTH_READBACK=1` | the framework's traces, as the Vulkan backend prints them: `[metal] stencil copied into the alpha of 0x... in frame N (reason)` for each copy of the stencil into the alpha, and `[metal] frame N signal 0x200: depth of 0x... written back to 0x4110000 stride 512, z MIN-MAX, T ms (GPU wait W ms)` for each depth write-back |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -44,7 +52,7 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | `src/gpu/metal_backend.mm` | `MetalGeBackend : portablekit::gpu::GeBackend` and its `BackendRegistration("metal", ...)`. Objective-C++ with ARC |
 | `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT) |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
-| `tools/gerec/metal_check.sh` | the 3D check (task 024): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check") |
+| `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
 | `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the three `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
@@ -69,11 +77,12 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 | Texture function | modulate, decal, blend, replace and add, with TCC (alpha from the texture or not). The blend function's environment colour is not in the draw state; the texel stands in for it, as in `ge.frag` |
 | Filtering and wrap | the GE's own filter bits (nearest or linear for magnification and minification, the base level only) and wrap bits (clamp or repeat) choose one of 16 samplers; `sharp_textures` forces nearest |
 | Alpha test | in the fragment shader, by the GE's numbering (0 NEVER, 1 ALWAYS, then EQUAL ... GEQUAL: patch 0005), on the 8-bit alpha and reference under the test's mask, with `discard_fragment`. Draws without a test, or with ALWAYS, use a fragment function compiled without it |
-| Blend | Metal's blend units for the GE factors and the equations ADD, SUBTRACT, REVERSE SUBTRACT, MIN and MAX (MIN and MAX take no factors). A FIX source factor is applied in the shader (the colour arrives multiplied, the blend takes it ONE), so any pair of FIX colours is exact, unless the destination factor reads the source colour, when it is the blend colour; a FIX destination is ONE, ZERO or the blend colour. The doubled factors (2xSA and so on) are drawn single and ABSDIFF as ADD, each logged once (`[metal] ... is not emulated`) |
-| Write masks | whole colour channels the mask (0xE8) keeps are not written; a partial channel mask is written whole and logged once. The alpha, which is the PSP's stencil, is written only by clears (below); the alpha mask (0xE9) is carried as the stencil write mask for task 025 |
+| Blend | Metal's blend units for the GE factors and the equations ADD, SUBTRACT, REVERSE SUBTRACT, MIN and MAX (MIN and MAX take no factors). A FIX source factor is applied in the shader (the colour arrives multiplied, the blend takes it ONE), so any pair of FIX colours is exact, unless the destination factor reads the source colour, when it is the blend colour; a FIX destination is ONE, ZERO or the blend colour. The doubled factors (2xSA and so on) are drawn single and ABSDIFF as ADD, each logged once (`[metal] ... is not emulated`). A draw that stores a stencil value under a blend that reads the source alpha blends with the fragment's own alpha from a second output (dual-source blending, below). The alpha channel's own blend stores the fragment's alpha (ONE, ZERO): the stencil value or a clear's alpha |
+| Write masks | whole colour channels the mask (0xE8) keeps are not written; a partial channel mask is written whole and logged once. The alpha, the PSP's stencil, is written only as "The stencil and the alpha" says; the alpha mask (0xE9) is the stencil attachment's write mask (~0xE9) |
+| Stencil | the GE's test (0x24, 0xDC: function, reference, compare mask) and operations (0xDD: sfail, zfail, zpass as KEEP, ZERO, REPLACE, INVERT, INCR and DECR, both clamping) on the target's `Depth32Float_Stencil8` attachment, for draws into 5551, 4444 and 8888 targets; the GE compares reference OP stencil under the mask, as Metal does, with the alpha test's function numbers. The reference is the one the target's alpha holds (the top bit of a 5551 target, the top nibble of a 4444 one), set on the encoder (`setStencilReferenceValue`) |
 | Depth | the GE function as the depth compare; written only where the GE tests it (`test_enabled && write_enabled`), through mode included |
-| Clears | CLEARMODE draws have no blend, texture or tests; bits 8..10 choose the colour, the alpha and the depth, and the depth compare is ALWAYS |
-| Culling | transformed triangles with culling on, back faces culled, the GE's clockwise front as Metal's `MTLWindingClockwise`: Metal counts the winding in window coordinates (y down), as the GE and Vulkan's flipping viewport do. Confirmed on the race (task 024): race frame 6016 culls 593 of its 906 draws, 353 of them among the first 393 (344 with the counter-clockwise front, 266 of those into the display target; 9 with the clockwise one, the shadow volumes, which write only the stencil), and it matches Vulkan's up to its draw 394, while a build with the winding reversed differs from draw 41 on, 49% of the picture by draw 393 ("The 3D check"). The clockwise case shows in no picture until the stencil does (025) |
+| Clears | CLEARMODE draws have no blend, texture or tests; bits 8..10 choose the colour, the alpha and the depth, and the depth compare is ALWAYS. A clear of the alpha on a 5551, 4444 or 8888 target writes the stencil with it: ALWAYS, REPLACE with the clear colour's alpha (patch 0006) |
+| Culling | transformed triangles with culling on, back faces culled, the GE's clockwise front as Metal's `MTLWindingClockwise`: Metal counts the winding in window coordinates (y down), as the GE and Vulkan's flipping viewport do. Confirmed on the race (task 024): race frame 6016 culls 593 of its 906 draws, 353 of them among the first 393 (344 with the counter-clockwise front, 266 of those into the display target; 9 with the clockwise one, the shadow volumes, which write only the stencil), and it matches Vulkan's up to its draw 394, while a build with the winding reversed differs from draw 41 on, 49% of the picture by draw 393 ("The 3D check"). The clockwise case, the shadow volumes, reaches the picture through the stencil since task 025 |
 | Scissor | the GE scissor, both ends included, clamped to 480x272; an empty one draws nothing |
 
 ### The pipeline key
@@ -82,13 +91,14 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 
 | Part | Fields | Makes |
 |---|---|---|
-| `RenderKey` | blend on/off, Metal source and destination factors, blend operation, colour write mask, textured, alpha test | `MTLRenderPipelineState` (vertex function `ge_vertex`, fragment function `ge_fragment` specialised by the function constants `kTextured` and `kAlphaTest`; the four specialisations are made at start) |
-| `DepthStencilKey` | depth compare, depth write; the stencil test as the GE gives it: enabled (on a 5551, 4444 or 8888 target), function, fail, depth-fail and pass operations, reference, compare mask, write mask (~0xE9) | `MTLDepthStencilState`. The stencil fields are carried for task 025, which sets the state's stencil descriptors from them; today the stencil attachment is left untouched |
+| `RenderKey` | blend on/off, Metal source and destination factors, blend operation, colour write mask (alpha included when the draw stores a stencil value), the alpha's destination factor (ZERO, or ONE for the copy of the stencil into the alpha), dual source, textured, alpha test | `MTLRenderPipelineState` (vertex function `ge_vertex`, fragment function `ge_fragment`, or `ge_fragment_dual` with dual source, specialised by the function constants `kTextured` and `kAlphaTest`; the eight specialisations are made at start). With dual source the colour factors SA and 1-SA become `Source1Alpha` and `OneMinusSource1Alpha` |
+| `DepthStencilKey` | depth compare, depth write; the stencil test as the GE gives it: enabled (on a 5551, 4444 or 8888 target), function, fail, depth-fail and pass operations, compare mask, write mask (~0xE9) | `MTLDepthStencilState`, with the same `MTLStencilDescriptor` for both faces. The reference is the encoder's, not the state's |
 
 Per draw, the vertex uniforms (matrix, folded viewport, uv transform, the row of view x world that gives view-space
 z, and the mode: through, sprite corners in clip space, fog, lighting), the fragment uniforms (FIX colour, texture
-function, TCC, opaque texel alpha, alpha test function, reference and mask, fog colour), the blend colour, the
-viewport's depth range, the scissor and the cull mode are set on the encoder when they changed, and the lighting
+function, TCC, opaque texel alpha, alpha test function, reference and mask, fog colour, the stencil value the
+alpha stores), the blend colour, the stencil reference, the viewport's depth range, the scissor and the cull mode
+are set on the encoder when they changed, and the lighting
 block (world matrix, global ambient, material colours, update mask and flags, the four lights, fog end and scale)
 when a lit or fogged draw changed it, or the pass is new. Lighting and fog are uniform branches in the one vertex
 function, not pipeline variants.
@@ -114,7 +124,7 @@ for now) and a `Depth32Float_Stencil8` texture, both private to the GPU: interna
   texel is pixel (x, y) of the target, the sampler clamps at the target's edges, and a 5650 texture reads alpha 1. A
   draw that samples the target it draws into reads a copy made by a blit when the target has changed (which ends
   the pass); any other target is sampled directly, Metal ordering the passes. The frontend reads no target; the
-  race's bloom does (task 025).
+  race's billboards and bloom do ("The bloom chain").
 - **From guest memory.** Anything else is decoded with the framework's `decode_texture` (every PSP format to
   RGBA8888; no decoder of our own) and cached by its contents: the key hashes the address, size, format, buffer
   width and swizzle, every byte of the texels the decoder reads, and for the palette formats the CLUT address,
@@ -127,11 +137,86 @@ In the frontend route 57 textures are decoded by frame 600 and 347 by frame 2130
 textures are found again rather than decoded. (The language page draws the paused intro movie's picture as a
 512x512 8888 texture from main memory in 150 sprites; it is decoded again only when the picture changes.)
 
+## The stencil and the alpha (task 025)
+
+The PSP keeps the stencil in the alpha channel of a 5551, 4444 or 8888 target, and never stores a fragment's own
+alpha there. The backend follows patches 0004 and 0006 (`docs/ge-effects.md`, "The stencil attachment and the copy
+rule"; `docs/ge-backend.md` section 2): the `Depth32Float_Stencil8` attachment is exact, and the colour target's
+alpha, which is what sampling, blending, the display and the write-backs read, is kept as its copy.
+
+| Case | What the draw does to the alpha |
+|---|---|
+| no stencil test, a 5650 target, or alpha bits masked (0xE9 not 0) | nothing: the alpha is not in the write mask |
+| zpass REPLACE | the stored reference (`stencil_alpha`): the fragment function writes it as alpha (`FragmentUniforms::stencil`), so only fragments that pass every test write it, as the attachment's zpass does |
+| zpass ZERO | 0, the same way |
+| zpass KEEP, INVERT, INCR, DECR | nothing from the fragment; INVERT, INCR and DECR are done by the attachment |
+| REPLACE or ZERO under a blend that reads the source alpha (SA or 1-SA) | dual-source blending: `ge_fragment_dual` returns the colour with the stencil value as alpha at `[[color(0), index(0)]]` and the fragment's own alpha at `[[color(0), index(1)]]`, and the colour blend reads `Source1Alpha`. Metal has it on every Apple GPU, so the constant-alpha fallback of patch 0004 (exact only for opaque fragments) is not needed |
+| clear mode with the alpha flag | the clear colour's alpha, and the stencil REPLACEd with it |
+
+A draw leaves the alpha behind the stencil when the colour path cannot express its effect (patch 0006's
+`alpha_follows_stencil`): an sfail operation other than KEEP under a test that can fail, a zfail operation other
+than KEEP under a depth test that can fail, INVERT, INCR or DECR on pass, or an alpha write mask that keeps some
+bits. The pass is then marked stale, and the stencil is copied into the alpha (`resolve_stencil_alpha`) before the
+next draw in the pass whose blend reads the destination alpha (DA or 1-DA), and when the pass ends: every end of a
+pass goes through `end_encoder`, so a texture bind, a copy, a read-back, a write-back and the flip all see the copy.
+The copy never reads the stencil in a shader: inside the pass, a quad over the target writes alpha 0 (alpha written
+alone), then for each of the 8 bits a quad passes the stencil test EQUAL under a compare mask of that bit (reference
+the bit, write mask 0) and adds the bit's value to the alpha (alpha blend ONE + ONE); sums of k/255 are exact in an
+8-bit target. Nine draws, from a 6-vertex quad in the frame's vertex space; the encoder's state is set again by the
+next draw.
+
+On the race the shadow volumes (zfail INCR and DECR, colour masked) leave the alpha stale and the full-screen
+darkening quad (stencil test GREATER ref 4, REPLACE) darkens only where the volumes left the stencil below 4. The
+stencil is copied into the alpha once a race frame, at the end of the back buffer's pass: {{COPIES}}, as patch 0006
+measured for Vulkan (338 for frames 5707-6044). None in the frontend.
+
+## The bloom chain (task 025)
+
+The six draws of `docs/ge-effects.md` ("The bloom chain"), as this backend resolves them with section 2's target
+model and patch 0003's lookup, which task 023 already had:
+
+| Draw (gerec_dump, frame 6016) | Target | Texture bind and what it samples |
+|---|---|---|
+| downsample | 0x04110000 8888/256: the depth buffer's bytes as a colour target of its own | 0x04088000 8888 512x512 bufw 512: the back buffer, sampled directly, its alpha the stencil mask (copied at the end of its pass, which this draw's pass ends). Blend add(SA, FIXB 0): the scene times the mask |
+| black sprite | 0x04132000 8888/256, which lies inside 0x04110000's memory: a target of its own | none |
+| horizontal blur | 0x04132000 | 0x04110000 bufw 256: the exact target at the address (0x04110000) |
+| black sprite | 0x04110000 | none |
+| vertical blur | 0x04110000 | 0x04132000 bufw 256: two targets contain the address, 0x04110000 (row 136) and 0x04132000 (row 0); the one starting there wins (patch 0003), as on the PSP |
+| composite | 0x04088000 8888/512 | 0x04110000: the blurred bloom, added at FIX 0xAFAFAF with the alpha masked |
+
+The aliasing cases behave as the Vulkan backend's, and no better: a texture bind inside a target of another stride
+or pixel size is decoded from guest memory; a target made over memory another target covers is a texture of its
+own, so the vertical blur's overshoot into rows 136 to 141 of 0x04110000 does not reach 0x04132000's rows 0 to 5
+as it does on the PSP (the next frame's black sprite clears them there anyway). Guest memory under the bloom targets
+changes at each SIGNAL (the depth write-back, below), before their first draw of the frame takes their guest-word
+snapshot, so the binds still find the targets. The four billboard rounds (565 target 0x04154000, stride 128) are
+sampled the same way, as opaque 5650 textures.
+
+## Guest memory: transfers, read-backs and write-backs (task 025)
+
+All four go through the same steps: a blit of the target's colour (or its depth) into a shared buffer, a commit and
+a wait, then the CPU stores the pixels in guest memory in the target's own format and stride (8888 as it is; 5650,
+5551 and 4444 packed with red in the low bits, as `texture_decode` reads them and the Vulkan backend's `store_frame`
+writes them), and takes the target's guest-word snapshot again, since memory now holds what it shows. Each is
+counted with the time it waited for the GPU; the exit line `[metal] stencil: ... guest memory written/asked: ...`
+prints them.
+
+| Call | Target | What is written |
+|---|---|---|
+| `block_transfer` (before the HLE copies the rows) | the target the GE drew, in VRAM, that holds the first byte the copy reads: the one starting at the source buffer first, else the one drawn last | the target's rows the copy's bytes fall in, `min(stride, 480)` pixels each. Nothing when the source lies in no target (the race's 584 transfers over the route are texture uploads from main memory) |
+| `read_back_framebuffer(address)` | the same choice for `address`, at least 480 pixels wide (the Vulkan backend's rule) | the whole 480x272 |
+| `write_back_frame` (each flip, before the image is asked for) | the target the previous flip showed, if the GE drew it, in VRAM and at least 480 wide (Vulkan's `record_writeback` rule) | the whole 480x272, as it was shown: the Vulkan backend likewise stores at each flip the picture recorded at the flip before. Under the Vulkan shell the picture read back for the window is reused, so this costs no GPU wait; under any other shell `present_image` records the copy into a shared buffer with the frame's commands, and the next flip waits for that command buffer, which has almost always finished by then |
+| `write_back_depth(color, depth, stride)` | the target at `color` drawn last | its depth (`MTLBlitOptionDepthFromDepthStencil`) as z = round(depth x 65535) in 16 bits, 480x272 in rows of `stride` from `depth` (VRAM, `0x04000000 | (depth & 0x1FFFF0)`), screen-wide buffers only (stride 480 or more), patch 0008's rule; returns whether it wrote. The vertex function and the viewport's depth range map the GE's z onto depth z / 65535, so this is the GE's own z |
+
+`PURE_NO_FB_TEXTURES` turns the first two off, as it does for the Vulkan backend's `read_back_framebuffer`.
+
 ## Frames, captures and the window
 
 - One command buffer a frame, committed at the flip (`present_image`). Without the window no frame waits for the
   GPU unless two are already in flight.
 - `present_image` returns `ImageApi::Metal` with the target's `id<MTLTexture>` as `image`, valid until the next call.
+  When the frame write-back will store the shown target at the next flip, the picture is kept for it: the read-back
+  the Vulkan shell gets anyway, or else a blit into a shared buffer recorded with the frame's commands.
 - `capture_frame` reads that texture back synchronously (a blit into a shared buffer, `waitUntilCompleted`) and
   writes the 480x272 BMP of `gpu::write_bmp_file` (`PURE_SCREENSHOT_EVERY` captures go through it).
 - `upload_frame` (a CPU-drawn picture: a movie frame shown from main memory, or one decoded into VRAM) copies the
@@ -220,13 +305,12 @@ of task 027's check shows it over the paused language page.
 
 | Task | What |
 |---|---|
-| 025 | the stencil attachment's test and operations, the alpha copy rule (patches 0004 and 0006: today non-clear draws leave the alpha alone), `block_transfer`, `read_back_framebuffer`, `write_back_frame` and `write_back_depth`. These four are counted and say `[metal] <call>: not implemented (task 025); counted, nothing written` once; `write_back_depth` returns false. The frontend calls only `write_back_frame` (once a flip) |
+| 027 (landed) | what the Metal shell leaves out ("The Metal shell"): frame interpolation, the Fill aspect, the touch controls, the performance overlay, and the menu's resolution, texture filter and texture-pack rows |
+| enhancements | drawing above 480x272 (an internal scale above 1, which D-002 leaves for after the native picture) and texture packs, both the Vulkan renderer's today |
 
-On race frame 6016 the first draw that differs from Vulkan is task 025's: ge_replay's draw 394 (gerec_dump's #393:
-ge_replay counts draws from 1, gerec_dump from 0), a full-screen quad blended FIX 0x606060 + FIX 0x9F9F9F (a
-darkening) where the stencil test passes, which is how the shadow volumes drawn just before it (stencil only, the
-clockwise-culled draws) reach the picture. Without the stencil it darkens the whole screen. Later the bloom chain
-(gerec_dump's #868 to #873) reads the stencil mask from the alpha.
+The race exercises neither `read_back_framebuffer` nor a block transfer from a target (its transfers come from
+main memory), and the frontend calls only `write_back_frame`: the 16-bit store formats and the transfer's row range
+are written to the rules above and the Vulkan backend's, and checked by no recording yet.
 
 Not in the draw state (`DrawCall`), so neither backend draws them, and they wait for the framework's GE state to
 carry them: the colour test, logic ops, the texture environment colour (the blend texture function's), colour
@@ -244,6 +328,12 @@ not), and the depth range clamp (MINZ/MAXZ, which `docs/ge-backend.md` section 2
 - Points and lines are drawn (the Vulkan backend drops them).
 - Only a draw that reads the target it draws into goes through a copy.
 - An empty scissor draws nothing (the Vulkan backend draws one row or column).
+- Transformed draws are clipped only at the target's edges and the scissor, as the GE clips them: the GE viewport is
+  folded into clip space and the Metal viewport is the whole target. The Vulkan backend makes the GE viewport its
+  `VkViewport`, which clips at the viewport's edges: the race's HUD is drawn with a viewport shifted one pixel right
+  and down (x offset 2048 - 1807), so there the Vulkan backend leaves column 0 and row 0 undrawn ("The race check").
+- A block transfer from a target writes back only the target's rows the copy reads, from targets of any width; the
+  Vulkan backend writes back the whole target, only for screen-wide ones.
 - Transformed sprites are expanded on the screen after projection, the GE's rule; the Vulkan backend expands them
   in object space and projects the corners, which gives the same rectangle only while the transform keeps it
   axis-aligned on the screen (every transformed sprite this game was recorded drawing does), and otherwise a
