@@ -1,0 +1,3030 @@
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 907e768..b6b9ce3 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -41,6 +41,10 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/gpu/texture_decode.cpp
+     host/input/bindings.cpp
+     host/input/touch_controls.cpp
++    host/shell/gamepad.cpp
++    host/shell/headless_shell.cpp
++    host/shell/script_steps.cpp
++    host/shell/shell.cpp
+     host/gpu/texture_pack.cpp
+     host/gpu/texture_pack_import.cpp
+     host/perf/frame_stats.cpp
+@@ -99,6 +103,8 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/gpu/replacement_textures.cpp
+     host/gpu/vulkan_ge_backend.cpp
+     host/gpu/vulkan_renderer.cpp
++    host/shell/sdl_pad.cpp
++    host/shell/vulkan_shell.cpp
+     host/ui/file_browser.cpp
+     host/ui/font_menu.cpp
+     host/ui/input_script.cpp
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 0cd30da..3b74b29 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1,6 +1,6 @@
+ #include "../profile.hpp"
+ #include "portablekit_build_label.hpp"
+-#include "ui/input_script.hpp"
++#include "shell/sdl_pad.hpp"
+ #include "vulkan_renderer.hpp"
+ 
+ #include "frame_interpolation.hpp"
+@@ -575,112 +575,8 @@ bool write_bmp(const std::string &path, const std::uint8_t *pixels, std::uint32_
+     return static_cast<bool>(out);
+ }
+ 
+-struct PadTuning {
+-    float dead_zone{0.15f};
+-    float trigger{0.25f};
+-    std::uint32_t triggers{};
+-    float right_stick{0.5f};
+-    settings::RightStick right_stick_mode{settings::RightStick::Camera};
+-    bool invert_x{};
+-    bool invert_y{};
+-    bool confirm_south{};
+-    bool trace{false};
+-};
+-
+-// Read on every poll, so the in-game menu's changes apply at once.
+-PadTuning pad_tuning() {
+-    static const bool trace = portablekit::env("TRACE_PAD") != nullptr;
+-    const settings::Settings &player = settings::current();
+-    PadTuning value{};
+-    value.dead_zone = player.dead_zone;
+-    value.trigger = player.trigger;
+-    value.triggers = player.trigger_profile;
+-    value.right_stick = player.right_stick_zone;
+-    // The right stick is a real nub on this release, so driving the D-pad
+-    // from it as well would turn the camera twice.
+-    value.right_stick_mode = player.right_stick;
+-    value.invert_x = player.invert_camera_x;
+-    value.invert_y = player.invert_camera_y;
+-    // A PlayStation pad already carries the PSP's own face buttons, so the
+-    // positional mapping puts confirm on circle where the prompts want it.
+-    value.confirm_south = player.confirm_south;
+-    value.trace = trace;
+-    return value;
+-}
+-
+-// Adds one gamepad's state to the pad bits and to the analog offsets the
+-// keyboard path also writes, so the two sources simply OR together.
+-void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog_y) {
+-    const PadTuning tuning = pad_tuning();
+-    std::uint32_t &buttons = pad.buttons;
+-    const auto held = [&](SDL_GamepadButton button, std::uint32_t bit) {
+-        if (SDL_GetGamepadButton(device, button)) buttons |= bit;
+-    };
+-    held(SDL_GAMEPAD_BUTTON_DPAD_UP, 0x0010u);
+-    held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 0x0020u);
+-    held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, 0x0040u);
+-    held(SDL_GAMEPAD_BUTTON_DPAD_LEFT, 0x0080u);
+-    held(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 0x0100u);
+-    held(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 0x0200u);
+-    held(SDL_GAMEPAD_BUTTON_START, 0x0008u);
+-    held(SDL_GAMEPAD_BUTTON_BACK, 0x0001u);
+-    held(SDL_GAMEPAD_BUTTON_NORTH, 0x1000u);
+-    held(SDL_GAMEPAD_BUTTON_WEST, 0x8000u);
+-    // The game prompts "circle Enter / cross Back", and on a PlayStation pad
+-    // those are the same two buttons in the same two places.
+-    held(SDL_GAMEPAD_BUTTON_SOUTH, tuning.confirm_south ? 0x2000u : 0x4000u);
+-    held(SDL_GAMEPAD_BUTTON_EAST, tuning.confirm_south ? 0x4000u : 0x2000u);
+-
+-    // The PSP triggers are digital, and games hold L or R for long stretches,
+-    // so the analog triggers press the same bits as the shoulders.
+-    const auto axis = [&](SDL_GamepadAxis id) {
+-        return std::clamp(static_cast<float>(SDL_GetGamepadAxis(device, id)) / 32767.0f, -1.0f, 1.0f);
+-    };
+-    // A game's trigger profiles put other buttons on them, such as a weapon's
+-    // attack for shooting. The buttons copied keep working.
+-    std::uint32_t left_trigger = 0x0100u;   // L
+-    std::uint32_t right_trigger = 0x0200u;  // R
+-    const std::span<const TriggerProfile> profiles = portablekit::game().trigger_profiles;
+-    if (tuning.triggers != 0u && tuning.triggers <= profiles.size()) {
+-        left_trigger = profiles[tuning.triggers - 1u].left;
+-        right_trigger = profiles[tuning.triggers - 1u].right;
+-    }
+-    if (axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > tuning.trigger) buttons |= left_trigger;
+-    if (axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > tuning.trigger) buttons |= right_trigger;
+-
+-    const float right_x = axis(SDL_GAMEPAD_AXIS_RIGHTX);
+-    const float right_y = axis(SDL_GAMEPAD_AXIS_RIGHTY);
+-    // The HD release has its own right-stick camera, so the stick normally goes
+-    // there. Pressing the D-pad bits as well would turn the camera twice, hence
+-    // the either/or: the claw emulation is only for builds where that path is
+-    // not wanted.
+-    if (tuning.right_stick_mode == settings::RightStick::DPad) {
+-        if (right_x < -tuning.right_stick) buttons |= 0x0080u;
+-        if (right_x > tuning.right_stick) buttons |= 0x0020u;
+-        if (right_y < -tuning.right_stick) buttons |= 0x0010u;
+-        if (right_y > tuning.right_stick) buttons |= 0x0040u;
+-    }
+-
+-    // Rescale the live range, otherwise leaving the dead zone snaps the stick
+-    // straight to a sixth of its travel.
+-    const auto deflect = [&](float x, float y, std::uint8_t &out_x, std::uint8_t &out_y) {
+-        const float length = std::sqrt(x * x + y * y);
+-        if (length <= tuning.dead_zone) return;
+-        const float scale = std::min((length - tuning.dead_zone) / (1.0f - tuning.dead_zone), 1.0f) / length;
+-        out_x = static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(x * scale * 127.0f), 0, 255));
+-        out_y = static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(y * scale * 127.0f), 0, 255));
+-    };
+-    if (tuning.right_stick_mode == settings::RightStick::Camera)
+-        deflect(tuning.invert_x ? -right_x : right_x, tuning.invert_y ? -right_y : right_y, pad.right_x, pad.right_y);
+-
+-    const float left_x = axis(SDL_GAMEPAD_AXIS_LEFTX);
+-    const float left_y = axis(SDL_GAMEPAD_AXIS_LEFTY);
+-    std::uint8_t nub_x = 0x80u;
+-    std::uint8_t nub_y = 0x80u;
+-    deflect(left_x, left_y, nub_x, nub_y);
+-    analog_x += static_cast<int>(nub_x) - 0x80;
+-    analog_y += static_cast<int>(nub_y) - 0x80;
+-}
++// The pad's tuning and the gamepad mapping are the shells' (shell/gamepad.hpp).
++using host::pad_tuning;
+ 
+ // Background texture decoding (<prefix>_SYNC_TEXTURE_DECODE turns it off): a
+ // texture first drawn while a frame is recorded is copied out of guest
+@@ -764,7 +660,10 @@ private:
+ 
+ } // namespace
+ 
+-struct VulkanRenderer::Impl {
++// The pad (host::SdlPad: pad, gamepad, game_input, the held-button
++// suppression, the scripted keys, open/scan/close_gamepad) is the SDL shells'
++// shared sampler; the renderer's window is what it samples.
++struct VulkanRenderer::Impl : host::SdlPad {
+     struct Texture {
+         VkImage image{};
+         VkDeviceMemory memory{};
+@@ -1024,9 +923,6 @@ struct VulkanRenderer::Impl {
+     bool ui_ready{};
+     ImDrawData *ui_draw_data{};
+     std::function<bool(const SDL_Event &)> event_hook;
+-    bool game_input{true};
+-    bool suppress_held{};
+-    std::uint32_t suppressed_buttons{};
+     // Keyboard and mouse (input/bindings.hpp). Mouse buttons are followed
+     // through their events, so a scripted click counts like a real one.
+     bool pointer_free{};
+@@ -1120,7 +1016,6 @@ struct VulkanRenderer::Impl {
+         touch_motion.x += drag.x / static_cast<float>(height);
+         touch_motion.y += drag.y / static_cast<float>(height);
+     }
+-    std::array<bool, input::kKeyPositions> scripted_keys{};
+ 
+     // Captures the pointer for the game when everything allows it and frees
+     // it otherwise. Whatever the mouse did or held across a change is dropped,
+@@ -1845,93 +1740,12 @@ struct VulkanRenderer::Impl {
+     // those that differed.
+     std::uint64_t direct_checked{};
+     std::uint64_t direct_mismatched{};
+-    PadState pad{};
+-    SDL_Gamepad *gamepad{};
+-    SDL_JoystickID gamepad_id{};
+     bool recording{};
+     bool quit{};
+     bool ready{};
+     std::uint64_t frames{};
+     std::uint64_t draws{};
+ 
+-    // Only the first pad is used; a second one arriving is ignored rather than
+-    // stealing the stick from whoever is already playing.
+-    void open_gamepad(SDL_JoystickID id) {
+-        if (gamepad != nullptr) {
+-            // The virtual pad of <prefix>_INPUT_SCRIPT takes over from a real
+-            // one, so a controller within reach does not steal a scripted run.
+-            const char *name = SDL_GetGamepadNameForID(id);
+-            if (name == nullptr || std::strcmp(name, portablekit::kInputScriptName) != 0) return;
+-            SDL_CloseGamepad(gamepad);
+-            gamepad = nullptr;
+-        }
+-        SDL_Gamepad *device = SDL_OpenGamepad(id);
+-        if (device == nullptr) {
+-            std::cout << "[pad] SDL_OpenGamepad failed: " << SDL_GetError() << "\n";
+-            return;
+-        }
+-#if defined(__ANDROID__)
+-        // Android reports a keyboard with arrow keys (the emulator's qwerty2,
+-        // many tablets' keyboards) as a D-pad device, and SDL lists it as a
+-        // gamepad. It has no sticks; taking it as the pad would leave a real
+-        // controller connected later unused. Its keys still reach the game
+-        // through the keyboard.
+-        if (SDL_GetNumJoystickAxes(SDL_GetGamepadJoystick(device)) <= 0) {
+-            const char *skipped = SDL_GetGamepadName(device);
+-            std::cout << "[pad] " << (skipped != nullptr ? skipped : "gamepad")
+-                      << " has no sticks (a keyboard's D-pad), ignored\n";
+-            SDL_CloseGamepad(device);
+-            return;
+-        }
+-#endif
+-        gamepad = device;
+-        gamepad_id = id;
+-        const char *name = SDL_GetGamepadName(device);
+-        const PadTuning tuning = pad_tuning();
+-        std::cout << "[pad] " << (name != nullptr ? name : "gamepad") << " connected; confirm on "
+-                  << (tuning.confirm_south ? "the south button" : "circle") << ", right stick "
+-                  << (tuning.right_stick_mode == settings::RightStick::DPad     ? "as D-pad"
+-                      : tuning.right_stick_mode == settings::RightStick::Camera ? "as camera"
+-                                                                                : "off")
+-                  << "\n";
+-    }
+-
+-    // Picks up a pad that was already plugged in before the window existed, and
+-    // falls back to a still-connected second pad when the first one is unplugged.
+-    void scan_gamepads() {
+-        int count = 0;
+-        SDL_JoystickID *ids = SDL_GetGamepads(&count);
+-        if (ids != nullptr) {
+-            for (int i = 0; i < count && gamepad == nullptr; ++i) open_gamepad(ids[i]);
+-            SDL_free(ids);
+-        }
+-        if (gamepad != nullptr) return;
+-        // Say why there is no pad rather than staying silent: a stick with no
+-        // entry in SDL's mapping database enumerates as a joystick only, which
+-        // looks identical to "nothing plugged in" from the player's side.
+-        int joysticks = 0;
+-        SDL_JoystickID *sticks = SDL_GetJoysticks(&joysticks);
+-        if (sticks != nullptr) {
+-            for (int i = 0; i < joysticks; ++i) {
+-                if (SDL_IsGamepad(sticks[i])) continue;
+-                const char *name = SDL_GetJoystickNameForID(sticks[i]);
+-                std::cout << "[pad] " << (name != nullptr ? name : "joystick")
+-                          << " has no gamepad mapping, ignored\n";
+-            }
+-            SDL_free(sticks);
+-        }
+-        if (joysticks == 0) std::cout << "[pad] no gamepad connected, keyboard only\n";
+-    }
+-
+-    void close_gamepad(SDL_JoystickID id) {
+-        if (gamepad == nullptr || id != gamepad_id) return;
+-        SDL_CloseGamepad(gamepad);
+-        gamepad = nullptr;
+-        gamepad_id = 0;
+-        std::cout << "[pad] gamepad disconnected\n";
+-        scan_gamepads();
+-    }
+-
+     [[nodiscard]] std::uint32_t find_memory_type(std::uint32_t mask, VkMemoryPropertyFlags properties) const {
+         VkPhysicalDeviceMemoryProperties memory_properties{};
+         vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+@@ -5035,79 +4849,9 @@ void VulkanRenderer::sample_pad() {
+ }
+ 
+ void VulkanRenderer::Impl::sample_pad(bool focused) {
+-    Impl *const impl_ = this;
+-    // While a menu or the on-screen keyboard is open, nothing reaches the game.
+-    if (!impl_->game_input) {
+-        impl_->pad = PadState{};
+-        return;
+-    }
+-
+-    // Keyboard and mouse buttons to the PSP pad, through the player's
+-    // bindings. Bits follow SceCtrlButtons; the stick is centred at 0x80.
+-    const settings::Settings &player = settings::current();
+-    const bool *keys = SDL_GetKeyboardState(nullptr);
+-    const input::PadInput typed = input::read(player.bindings, [&](input::Binding binding) {
+-        if (const int button = input::mouse_button_of(binding))
+-            return impl_->mouse_captured && (impl_->mouse_buttons & (1u << button)) != 0u;
+-        const int position = input::key_position(binding);
+-        return position >= 0 && ((focused && position < SDL_SCANCODE_COUNT && keys[position]) ||
+-                                 impl_->scripted_keys[static_cast<std::size_t>(position)]);
+-    });
+-    PadState pad{};
+-    pad.buttons = typed.buttons;
+-    int analog_x = typed.stick_x;
+-    int analog_y = typed.stick_y;
+-    // Camera keys push the second stick fully, as a right stick would: in
+-    // the D-pad mode they press the D-pad instead, and with it off, nothing.
+-    if (player.right_stick == settings::RightStick::Camera) {
+-        pad.right_x = static_cast<std::uint8_t>(0x80 + typed.camera_x);
+-        pad.right_y = static_cast<std::uint8_t>(0x80 + typed.camera_y);
+-    } else if (player.right_stick == settings::RightStick::DPad) {
+-        if (typed.camera_x < 0) pad.buttons |= 0x0080u;
+-        if (typed.camera_x > 0) pad.buttons |= 0x0020u;
+-        if (typed.camera_y < 0) pad.buttons |= 0x0010u;
+-        if (typed.camera_y > 0) pad.buttons |= 0x0040u;
+-    }
+-
+-    // The gamepad adds to the same bits and offsets, so both sources are live.
+-    if (impl_->gamepad != nullptr) read_gamepad(impl_->gamepad, pad, analog_x, analog_y);
+-    // So do the on-screen controls.
+-    if (impl_->touch_visible) {
+-        pad.buttons |= impl_->touch.buttons();
+-        const input::touch::Point stick = impl_->touch.stick();
+-        analog_x += static_cast<int>(std::lround(stick.x * 127.0f));
+-        analog_y += static_cast<int>(std::lround(stick.y * 127.0f));
+-    }
+-
+-    pad.analog_x = static_cast<std::uint8_t>(std::clamp(0x80 + analog_x, 0, 255));
+-    pad.analog_y = static_cast<std::uint8_t>(std::clamp(0x80 + analog_y, 0, 255));
+-
+-    // Unattended runs (overlay bootstrapping) press confirm periodically so the
+-    // game walks through title screens and dialogs on its own.
+-    static const std::uint64_t auto_confirm = [] {
+-        const char *text = portablekit::env("AUTO_CONFIRM");
+-        return text != nullptr ? std::strtoull(text, nullptr, 10) : 0ull;
+-    }();
+-    if (auto_confirm != 0u) {
+-        const std::uint64_t phase = impl_->frames % auto_confirm;
+-        if (phase < auto_confirm / 8u) pad.buttons |= 0x2000u;  // circle
+-    }
+-    // Buttons held when the game got its input back stay hidden from it until
+-    // they are released.
+-    if (impl_->suppress_held) {
+-        impl_->suppressed_buttons = pad.buttons;
+-        impl_->suppress_held = false;
+-    }
+-    impl_->suppressed_buttons &= pad.buttons;
+-    pad.buttons &= ~impl_->suppressed_buttons;
+-    if (pad_tuning().trace && (pad.buttons != impl_->pad.buttons || pad.analog_x != impl_->pad.analog_x ||
+-                               pad.analog_y != impl_->pad.analog_y || pad.right_x != impl_->pad.right_x ||
+-                               pad.right_y != impl_->pad.right_y)) {
+-        std::cout << "[pad] buttons 0x" << std::hex << pad.buttons << std::dec << " analog "
+-                  << static_cast<int>(pad.analog_x) << "," << static_cast<int>(pad.analog_y) << " right "
+-                  << static_cast<int>(pad.right_x) << "," << static_cast<int>(pad.right_y) << std::endl;
+-    }
+-    impl_->pad = pad;
++    // The keyboard, the mouse's buttons and the gamepad (host::SdlPad), with
++    // the pointer and the on-screen controls this window has.
++    sample(focused, mouse_captured, mouse_buttons, touch_visible ? &touch : nullptr, frames);
+ }
+ 
+ PadState VulkanRenderer::pad() const noexcept { return impl_ ? impl_->pad : PadState{}; }
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index f31226d..62f08be 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -16,6 +16,7 @@
+ 
+ #include "input/touch_controls.hpp"
+ #include "settings/settings.hpp"
++#include "shell/shell.hpp"
+ 
+ union SDL_Event;
+ struct SDL_Window;
+@@ -24,47 +25,17 @@ struct ImDrawData;
+ 
+ namespace portablekit::gpu {
+ 
+-// PSP pad state gathered from the keyboard, the mouse's buttons and the gamepad.
+-struct PadState {
+-    std::uint32_t buttons{};
+-    std::uint8_t analog_x{0x80u};
+-    std::uint8_t analog_y{0x80u};
+-    // The HD release reads a second stick from the two SceCtrlData bytes after
+-    // Ly, which the PSP itself left reserved. 0x80 is its centre: the guest
+-    // skips its camera path entirely only when both bytes are exactly centred.
+-    std::uint8_t right_x{0x80u};
+-    std::uint8_t right_y{0x80u};
+-};
+-
+-// The mouse the input script's events come from. With scripted input on,
+-// only these reach the game, so a person moving the real pointer over the
+-// window does not disturb a scripted run.
+-inline constexpr std::uint32_t kScriptedMouse = 0xFFFFFF00u;
++// The shell's types (shell/shell.hpp), under the names the renderer has
++// always used.
++using host::CameraReading;
++using host::kScriptedMouse;
++using host::MouseMotion;
++using host::PadState;
+ 
+ // How often a load running faster than real time shows a picture: about 30
+ // times a second, which a display never makes wait (set_fast_forward).
+ inline constexpr std::chrono::milliseconds kFastForwardPresentInterval{33};
+ 
+-// Relative mouse motion, in counts, while the pointer is captured for the game.
+-struct MouseMotion {
+-    float x{};
+-    float y{};
+-};
+-
+-// The camera the game itself set, read back from the view matrix it uploads.
+-// Only filled while <prefix>_TRACE_CAMERA or <prefix>_FIND_CAMERA is on.
+-struct CameraReading {
+-    bool valid{};
+-    float yaw{};    // degrees, from the direction the camera looks along
+-    float pitch{};  // degrees
+-    float turn{};   // degrees of yaw since the previous traced frame
+-    std::array<float, 3> position{};
+-    // The matrix itself, in the layout the game holds it in: the GE's twelve
+-    // uploaded floats expanded to a 4x4, which is byte for byte the matrix the
+-    // game passed to the GE.
+-    std::array<float, 16> view{};
+-};
+-
+ // The program's name, followed by the build label (PORTABLEKIT_BUILD_LABEL)
+ // when there is one.
+ [[nodiscard]] std::string default_window_title();
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 242bd05..835217a 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -22,8 +22,10 @@
+ #include "gpu/ge_backend.hpp"
+ #include "gpu/ge_state.hpp"
+ #include "perf/frame_stats.hpp"
++#include "shell/shell.hpp"
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+ #include "gpu/vulkan_renderer.hpp"
++#include "shell/vulkan_shell.hpp"
+ #include "ui/ui.hpp"
+ #endif
+ 
+@@ -123,11 +125,10 @@ struct MediaState {
+     // chosen by the guest. -1 when it has not been reserved.
+     std::int32_t output2_channel{-1};
+     gpu::GeState ge;
+-#if defined(PORTABLEKIT_HAS_RENDERER)
+-    // The window shell: window, swapchain, pad, interface, pacing. Also the
+-    // Vulkan GE backend's renderer, which it is not split from.
+-    std::unique_ptr<gpu::VulkanRenderer> renderer;
+-#endif
++    // The shell (shell/shell.hpp): window or none, events, pad, input script,
++    // interface, presenting and pacing. The Vulkan shell's renderer is also
++    // the Vulkan GE backend's, which it is not split from.
++    std::unique_ptr<host::Shell> shell;
+     // What draws the GE's work (gpu/ge_backend.hpp). Declared after the shell
+     // so that it goes first: the Vulkan backend draws with the shell's device.
+     std::unique_ptr<gpu::GeBackend> backend;
+@@ -138,13 +139,18 @@ MediaState &media() {
+     return state;
+ }
+ 
++// The shell, once made, while it runs.
++host::Shell *active_shell() {
++    return media().shell && media().shell->available() ? media().shell.get() : nullptr;
++}
++
+ // The GE backend, once made, while it can draw: one that draws with the
+-// window's renderer only while that renderer is available.
++// Vulkan shell's renderer only while that renderer is available.
+ gpu::GeBackend *active_backend() {
+     gpu::GeBackend *backend = media().backend.get();
+     if (backend == nullptr) return nullptr;
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+-    if (backend->needs_window() && !(media().renderer && media().renderer->available())) return nullptr;
++    if (backend->needs_window() && active_renderer() == nullptr) return nullptr;
+ #endif
+     return backend;
+ }
+@@ -235,21 +241,20 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
+     perf::add_render_time(perf::Clock::now() - start);
+ }
+ 
+-#if defined(PORTABLEKIT_HAS_RENDERER)
+ // The mouse's motion since the previous pump, as degrees for the camera
+ // layer. Added after the flip, so whoever drives the camera takes it in the
+ // update this frame leads to.
+-void feed_mouse(gpu::VulkanRenderer &renderer) {
++void feed_mouse(host::Shell &shell) {
+     const settings::Settings &s = settings::current();
+     // A drag on the touch screen: Touch camera speed degrees for the screen's
+     // height, slowed while aiming as the mouse is.
+-    const gpu::MouseMotion drag = renderer.take_touch_motion();
++    const host::MouseMotion drag = shell.take_touch_motion();
+     if (drag.x != 0.0f || drag.y != 0.0f) {
+         const float scale = camera::game_camera_degrees_per_second() / std::max(s.camera_speed, 1.0f);
+         const float degrees = s.touch_camera_speed * scale;
+         camera::add_motion(camera::Source::Touch, drag.x * degrees, drag.y * degrees);
+     }
+-    const gpu::MouseMotion motion = renderer.take_mouse_motion();
++    const host::MouseMotion motion = shell.take_mouse_motion();
+     if (motion.x == 0.0f && motion.y == 0.0f) return;
+     // While a bow or a bowgun aims, Aim speed's share of Camera speed, as
+     // for the stick.
+@@ -262,7 +267,6 @@ void feed_mouse(gpu::VulkanRenderer &renderer) {
+         std::cout << "[pad] mouse " << motion.x << "," << motion.y << " -> " << turn.yaw << "," << turn.pitch
+                   << " degrees" << std::endl;
+ }
+-#endif
+ 
+ // The emulated time of the vblank the frame being flipped started from. A
+ // game at 30 frames a second starts a frame every other vblank, when its
+@@ -294,10 +298,8 @@ void present_frame(Runtime &rt) {
+         perf::end_frame(kernel().now_us());
+         return;
+     }
+-#if defined(PORTABLEKIT_HAS_RENDERER)
+-    // The window shell; none when the backend runs without a window.
+-    gpu::VulkanRenderer *shell = active_renderer();
+-#endif
++    // The shell that shows the frame (a window, or the headless one).
++    host::Shell *shell = active_shell();
+     // The guest passes a VRAM offset when the high byte is zero.
+     const std::uint32_t address = (media().display.framebuffer & 0xFF000000u) == 0u
+                                       ? (media().display.framebuffer | 0x04000000u)
+@@ -317,19 +319,18 @@ void present_frame(Runtime &rt) {
+     if (shell != nullptr) ui::draw_over_game();
+ #endif
+     backend->write_back_frame(rt.memory());
+-    // The display target's image. The window shows it through the Vulkan
+-    // renderer's present, which for the Vulkan backend is the target named
+-    // here; without a window it goes nowhere.
++    // The display target's image, which the shell shows (the Vulkan shell
++    // shows the Vulkan backend's target itself, and uploads another
++    // backend's picture first).
+     const gpu::PresentedImage image = backend->present_image(address);
+     bool presented = image.valid();
+-#if defined(PORTABLEKIT_HAS_RENDERER)
+     if (shell != nullptr) {
+-        gpu::VulkanRenderer &renderer = *shell;
+         // A load running fast flips far more often than the display refreshes.
+-        renderer.set_fast_forward(fast_loading::active());
++        shell->set_fast_forward(fast_loading::active());
+         // The real time the frame stands for, which frame interpolation spaces
+         // its presents by: that of the vblank the game's frame started from.
+-        presented = renderer.present(address, kernel().real_time_of(frame_start_us(kernel().last_vblank_us())));
++        presented =
++            shell->present(image, address, kernel().real_time_of(frame_start_us(kernel().last_vblank_us())));
+         // The frame's camera has been measured by now, so the hunt for the guest
+         // variables behind it can compare RAM against it.
+         probe::camera_frame(rt, media().ge.view_matrix_source());
+@@ -340,15 +341,14 @@ void present_frame(Runtime &rt) {
+         static perf::Clock::time_point previous_flip = present_start;
+         const float seconds = std::chrono::duration<float>(present_start - previous_flip).count();
+         previous_flip = present_start;
+-        camera::set_rate(camera::Source::Stick, (static_cast<int>(renderer.pad().right_x) - 0x80) / 127.0f,
+-                         (static_cast<int>(renderer.pad().right_y) - 0x80) / 127.0f);
++        camera::set_rate(camera::Source::Stick, (static_cast<int>(shell->pad().right_x) - 0x80) / 127.0f,
++                         (static_cast<int>(shell->pad().right_y) - 0x80) / 127.0f);
+         camera::game_camera_frame(rt);
+         // The view's shape follows the picture's: the game builds its next
+         // projection with the aspect ratio of the target it will draw into.
+-        camera::game_aspect_frame(rt, renderer.game_aspect());
++        camera::game_aspect_frame(rt, shell->game_aspect());
+         camera::advance(seconds, camera::game_camera_degrees_per_second());
+     }
+-#endif
+     perf::add_render_time(perf::Clock::now() - present_start);
+     // A frame ends when its image has been handed to the swapchain, or with
+     // frame interpolation when the presents after it are scheduled.
+@@ -377,20 +377,21 @@ void present_frame(Runtime &rt) {
+     }
+     // The frame has been shown (and captured); what comes next is the next frame's.
+     backend->begin_frame();
+-#if defined(PORTABLEKIT_HAS_RENDERER)
+     if (shell == nullptr) return;
+-    gpu::VulkanRenderer &renderer = *shell;
+-    const bool window_open = renderer.pump_events();
+-    feed_mouse(renderer);
++    const bool window_open = shell->pump_events();
++    feed_mouse(*shell);
+     if (!window_open) {
+-        rt.stop("window closed");
+-    } else if (ui::take_quit_request()) {
++        rt.stop(shell->has_window() ? "window closed" : "quit from the input script");
++        return;
++    }
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    if (ui::take_quit_request()) {
+         rt.stop("quit from the menu");
+     } else if (!ui::menu_over_game() && ui::menu_requested()) {
+         if (ui::menu_pauses()) {
+             // The menu pauses the game: guest code and emulated time stand
+             // still while it runs in here, and the device stops playing.
+-            renderer.pause_interpolation();
++            shell->pause_interpolation();
+             audio::AudioSink::instance().set_paused(true);
+             const bool keep_playing = ui::run_menu();
+             audio::AudioSink::instance().set_paused(false);
+@@ -419,13 +420,12 @@ struct CtrlSample {
+ 
+ CtrlSample sample_ctrl() {
+     CtrlSample sample;
+-#if defined(PORTABLEKIT_HAS_RENDERER)
+-    if (media().renderer && media().renderer->available()) {
++    if (host::Shell *shell = active_shell()) {
+         // The pad as it is now, not as it was at the last flip (#8).
+         // <prefix>_PAD_AT_FLIP keeps the state of the flip, as before.
+         static const bool at_flip = portablekit::env("PAD_AT_FLIP") != nullptr;
+-        if (!at_flip) media().renderer->sample_pad();
+-        const gpu::PadState pad = media().renderer->pad();
++        if (!at_flip) shell->sample_pad();
++        const host::PadState pad = shell->pad();
+         sample.buttons = pad.buttons;
+         fast_loading::note_buttons(sample.buttons != 0u);
+         sample.analog_x = pad.analog_x;
+@@ -465,7 +465,6 @@ CtrlSample sample_ctrl() {
+             if (const int turn = camera::game_camera_mouse_stock_turn()) sample.right_x = turn > 0 ? 0xFFu : 0x01u;
+         }
+     }
+-#endif
+     return sample;
+ }
+ 
+@@ -1128,11 +1127,14 @@ void register_audio(HleRegistrar &hle) {
+     });
+ }
+ 
+-// Makes the GE backend <prefix>_GE_BACKEND names (gpu/ge_backend.hpp), and
+-// the window shell unless <prefix>_NO_RENDER is set, the first time either is
+-// needed. Without a window, only a backend that needs none (null, or record
+-// over it) is made; the Vulkan one draws with the shell's renderer.
+-gpu::GeBackend *ensure_backend() {
++// Makes the shell <prefix>_SHELL names (shell/shell.hpp; the headless one when
++// <prefix>_NO_RENDER is set, or when the window cannot be made) and then the GE
++// backend <prefix>_GE_BACKEND names (gpu/ge_backend.hpp), the first time
++// either is needed. A backend that needs the window (the Vulkan one, which
++// draws with the Vulkan shell's renderer) runs only in the Vulkan shell, so
++// with <prefix>_NO_RENDER it draws nothing at all, as before the shell seam;
++// one that needs none (null, or record over it) runs in any shell.
++gpu::GeBackend *ensure_shell_and_backend() {
+     static bool tried = false;
+     if (tried) return active_backend();
+     tried = true;
+@@ -1154,51 +1156,80 @@ gpu::GeBackend *ensure_backend() {
+     gpu::BackendConfig config;
+     config.internal_scale = settings::current().internal_scale;
+     config.sharp_textures = settings::current().sharp_textures;
+-#if defined(PORTABLEKIT_HAS_RENDERER)
+-    if (no_render) {
+-        if (backend->needs_window()) {
+-            std::cout << "Renderer: disabled by " << portablekit::env_name("NO_RENDER") << "\n";
+-            return nullptr;
+-        }
+-    } else {
+-        auto renderer = std::make_unique<gpu::VulkanRenderer>();
+-        std::string error;
+-        gpu::RendererConfig renderer_config;
+-        // Tells windows apart when several instances run side by side, e.g. two
+-        // players testing ad hoc play on one machine.
+-        if (const char *title = portablekit::env("WINDOW_TITLE"); title != nullptr && *title != '\0')
+-            renderer_config.title = title;
+-        if (!renderer->initialize(renderer_config, error)) {
+-            std::cerr << "Renderer: unavailable (" << error << "); running headless\n";
+-            if (backend->needs_window()) return nullptr;
++    if (no_render && backend->needs_window()) {
++        std::cout << "Renderer: disabled by " << portablekit::env_name("NO_RENDER") << "\n";
++        return nullptr;
++    }
++
++    // The shell, before the backend: the Vulkan backend draws with its renderer.
++    const auto registered = [](const std::string &shell_name) {
++        const std::vector<std::string> names = host::shell_names();
++        return std::find(names.begin(), names.end(), shell_name) != names.end();
++    };
++    std::string shell_name = no_render ? std::string("headless") : host::selected_shell();
++    if (!registered(shell_name)) {
++        const std::string fallback = registered("vulkan") ? "vulkan" : "headless";
++        if (shell_name == "vulkan") {
++            std::cout << "Renderer: not built\n";
+         } else {
+-            media().renderer = std::move(renderer);
+-            ui::attach(*media().renderer);
+-            // Frame interpolation presents between flips: while the kernel waits for
+-            // real time, and while the game's code runs.
+-            kernel().set_idle_hook([](std::chrono::steady_clock::time_point wake) {
+-                if (gpu::VulkanRenderer *active = active_renderer()) active->present_until(wake);
+-            });
+-            kernel().set_poll_hook([] {
+-                if (gpu::VulkanRenderer *active = active_renderer()) active->present_due();
+-            });
+-            config.vulkan_shell = media().renderer.get();
++            std::cerr << "[shell] " << portablekit::env_name("SHELL") << "=" << shell_name
++                      << ": there is no such shell (there are:";
++            for (const std::string &known : host::shell_names()) std::cerr << " " << known;
++            std::cerr << "); using " << fallback << "\n";
+         }
++        shell_name = fallback;
+     }
+-#else
+-    if (backend->needs_window()) {
+-        std::cout << "Renderer: not built\n";
++    std::unique_ptr<host::Shell> shell = host::make_shell(shell_name);
++    host::ShellConfig shell_config;
++    // Tells windows apart when several instances run side by side, e.g. two
++    // players testing ad hoc play on one machine.
++    if (const char *title = portablekit::env("WINDOW_TITLE"); title != nullptr && *title != '\0')
++        shell_config.title = title;
++    // A shell without a window shows the input script's shots from the backend.
++    shell_config.capture_frame = [](const std::string &path) {
++        gpu::GeBackend *active = active_backend();
++        return active != nullptr && active->capture_frame(path);
++    };
++    std::string error;
++    if (shell == nullptr || !shell->initialize(shell_config, error)) {
++        std::cerr << "Renderer: unavailable (" << error << "); running headless\n";
++        if (backend->needs_window()) return nullptr;
++        shell_name = "headless";
++        shell = host::make_shell(shell_name);
++        if (shell == nullptr || !shell->initialize(shell_config, error)) return nullptr;
++    }
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    config.vulkan_shell = host::vulkan_renderer(shell.get());
++#endif
++    if (backend->needs_window() && config.vulkan_shell == nullptr) {
++        std::cout << "Renderer: the " << name << " GE backend draws with the Vulkan shell's renderer, and the "
++                  << shell_name << " shell has none; nothing is drawn\n";
+         return nullptr;
+     }
++    if (shell_name != "vulkan")
++        std::cout << "[shell] " << shell_name << " (" << host::shell_description(shell_name) << ")\n";
++    media().shell = std::move(shell);
++    if (media().shell->has_window()) {
++#if defined(PORTABLEKIT_HAS_RENDERER)
++        ui::attach(*media().shell);
+ #endif
+-    std::string error;
++        // Frame interpolation presents between flips: while the kernel waits for
++        // real time, and while the game's code runs.
++        kernel().set_idle_hook([](std::chrono::steady_clock::time_point wake) {
++            if (host::Shell *active = active_shell()) active->present_until(wake);
++        });
++        kernel().set_poll_hook([] {
++            if (host::Shell *active = active_shell()) active->present_due();
++        });
++    }
++
+     if (!backend->initialize(config, error)) {
+         std::cerr << "[render] GE backend " << name << " cannot run (" << error << "); nothing is drawn\n";
+         return nullptr;
+     }
+     if (name != "vulkan")
+         std::cout << "[render] GE backend " << name << " (" << gpu::backend_description(name) << "), "
+-                  << (config.vulkan_shell != nullptr ? "in the window" : "without a window") << "\n";
++                  << (media().shell->has_window() ? "in the window" : "without a window") << "\n";
+     media().backend = std::move(backend);
+     media().backend->begin_frame();
+     return active_backend();
+@@ -1206,7 +1237,7 @@ gpu::GeBackend *ensure_backend() {
+ 
+ } // namespace
+ 
+-void initialize_renderer() { (void)ensure_backend(); }
++void initialize_renderer() { (void)ensure_shell_and_backend(); }
+ 
+ // A picture the CPU wrote straight into a VRAM framebuffer (the movie
+ // player decoding into the display buffers, as God of War's does): the
+@@ -1235,12 +1266,15 @@ void register_media(HleRegistrar &hle) {
+ }
+ 
+ #if defined(PORTABLEKIT_HAS_RENDERER)
++// The Vulkan shell's renderer, for what needs Vulkan itself (the Vulkan GE
++// backend, texture packs, the internal scale, the camera probe); null under
++// another shell. Everything else goes through the shell.
+ gpu::VulkanRenderer *active_renderer() {
+-    return media().renderer && media().renderer->available() ? media().renderer.get() : nullptr;
++    return active_shell() != nullptr ? host::vulkan_renderer(media().shell.get()) : nullptr;
+ }
+ 
+ gpu::VulkanRenderer *ensure_renderer() {
+-    (void)ensure_backend();
++    (void)ensure_shell_and_backend();
+     return active_renderer();
+ }
+ #endif
+diff --git a/host/shell/gamepad.cpp b/host/shell/gamepad.cpp
+new file mode 100644
+index 0000000..54fd8bb
+--- /dev/null
++++ b/host/shell/gamepad.cpp
+@@ -0,0 +1,134 @@
++#include "shell/gamepad.hpp"
++
++#include "../profile.hpp"
++
++#include <algorithm>
++#include <array>
++#include <cctype>
++#include <cmath>
++#include <span>
++
++namespace portablekit::host {
++namespace {
++
++// SDL3's names, in its order (SDL_GetGamepadStringForButton, ...ForAxis).
++constexpr std::array<std::string_view, kGamepadButtons> kButtonNames = {
++    "a",      "b",          "x",        "y",       "back",    "guide",   "start",
++    "leftstick", "rightstick", "leftshoulder", "rightshoulder", "dpup", "dpdown", "dpleft",
++    "dpright", "misc1",     "paddle1",  "paddle2", "paddle3", "paddle4", "touchpad",
++    "misc2",  "misc3",      "misc4",    "misc5",   "misc6"};
++constexpr std::array<std::string_view, kGamepadAxes> kAxisNames = {"leftx", "lefty", "rightx", "righty",
++                                                                   "lefttrigger", "righttrigger"};
++
++bool same_name(std::string_view a, std::string_view b) {
++    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
++               return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
++           });
++}
++
++} // namespace
++
++std::optional<GamepadButton> gamepad_button_from_name(std::string_view name) {
++    for (int i = 0; i < kGamepadButtons; ++i)
++        if (same_name(name, kButtonNames[static_cast<std::size_t>(i)])) return static_cast<GamepadButton>(i);
++    return std::nullopt;
++}
++
++std::optional<GamepadAxis> gamepad_axis_from_name(std::string_view name) {
++    if (!name.empty() && (name.front() == '+' || name.front() == '-')) name.remove_prefix(1);
++    for (int i = 0; i < kGamepadAxes; ++i)
++        if (same_name(name, kAxisNames[static_cast<std::size_t>(i)])) return static_cast<GamepadAxis>(i);
++    return std::nullopt;
++}
++
++PadTuning pad_tuning() {
++    static const bool trace = portablekit::env("TRACE_PAD") != nullptr;
++    const settings::Settings &player = settings::current();
++    PadTuning value{};
++    value.dead_zone = player.dead_zone;
++    value.trigger = player.trigger;
++    value.triggers = player.trigger_profile;
++    value.right_stick = player.right_stick_zone;
++    // The right stick is a real nub on this release, so driving the D-pad
++    // from it as well would turn the camera twice.
++    value.right_stick_mode = player.right_stick;
++    value.invert_x = player.invert_camera_x;
++    value.invert_y = player.invert_camera_y;
++    // A PlayStation pad already carries the PSP's own face buttons, so the
++    // positional mapping puts confirm on circle where the prompts want it.
++    value.confirm_south = player.confirm_south;
++    value.trace = trace;
++    return value;
++}
++
++void read_gamepad(const std::function<bool(GamepadButton)> &is_held, const std::function<float(GamepadAxis)> &axis,
++                  PadState &pad, int &analog_x, int &analog_y) {
++    const PadTuning tuning = pad_tuning();
++    std::uint32_t &buttons = pad.buttons;
++    const auto held = [&](GamepadButton button, std::uint32_t bit) {
++        if (is_held(button)) buttons |= bit;
++    };
++    held(GamepadButton::DpadUp, 0x0010u);
++    held(GamepadButton::DpadRight, 0x0020u);
++    held(GamepadButton::DpadDown, 0x0040u);
++    held(GamepadButton::DpadLeft, 0x0080u);
++    held(GamepadButton::LeftShoulder, 0x0100u);
++    held(GamepadButton::RightShoulder, 0x0200u);
++    held(GamepadButton::Start, 0x0008u);
++    held(GamepadButton::Back, 0x0001u);
++    held(GamepadButton::North, 0x1000u);
++    held(GamepadButton::West, 0x8000u);
++    // The game prompts "circle Enter / cross Back", and on a PlayStation pad
++    // those are the same two buttons in the same two places.
++    held(GamepadButton::South, tuning.confirm_south ? 0x2000u : 0x4000u);
++    held(GamepadButton::East, tuning.confirm_south ? 0x4000u : 0x2000u);
++
++    // The PSP triggers are digital, and games hold L or R for long stretches,
++    // so the analog triggers press the same bits as the shoulders.
++    // A game's trigger profiles put other buttons on them, such as a weapon's
++    // attack for shooting. The buttons copied keep working.
++    std::uint32_t left_trigger = 0x0100u;   // L
++    std::uint32_t right_trigger = 0x0200u;  // R
++    const std::span<const TriggerProfile> profiles = portablekit::game().trigger_profiles;
++    if (tuning.triggers != 0u && tuning.triggers <= profiles.size()) {
++        left_trigger = profiles[tuning.triggers - 1u].left;
++        right_trigger = profiles[tuning.triggers - 1u].right;
++    }
++    if (axis(GamepadAxis::LeftTrigger) > tuning.trigger) buttons |= left_trigger;
++    if (axis(GamepadAxis::RightTrigger) > tuning.trigger) buttons |= right_trigger;
++
++    const float right_x = axis(GamepadAxis::RightX);
++    const float right_y = axis(GamepadAxis::RightY);
++    // The HD release has its own right-stick camera, so the stick normally goes
++    // there. Pressing the D-pad bits as well would turn the camera twice, hence
++    // the either/or: the claw emulation is only for builds where that path is
++    // not wanted.
++    if (tuning.right_stick_mode == settings::RightStick::DPad) {
++        if (right_x < -tuning.right_stick) buttons |= 0x0080u;
++        if (right_x > tuning.right_stick) buttons |= 0x0020u;
++        if (right_y < -tuning.right_stick) buttons |= 0x0010u;
++        if (right_y > tuning.right_stick) buttons |= 0x0040u;
++    }
++
++    // Rescale the live range, otherwise leaving the dead zone snaps the stick
++    // straight to a sixth of its travel.
++    const auto deflect = [&](float x, float y, std::uint8_t &out_x, std::uint8_t &out_y) {
++        const float length = std::sqrt(x * x + y * y);
++        if (length <= tuning.dead_zone) return;
++        const float scale = std::min((length - tuning.dead_zone) / (1.0f - tuning.dead_zone), 1.0f) / length;
++        out_x = static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(x * scale * 127.0f), 0, 255));
++        out_y = static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(y * scale * 127.0f), 0, 255));
++    };
++    if (tuning.right_stick_mode == settings::RightStick::Camera)
++        deflect(tuning.invert_x ? -right_x : right_x, tuning.invert_y ? -right_y : right_y, pad.right_x, pad.right_y);
++
++    const float left_x = axis(GamepadAxis::LeftX);
++    const float left_y = axis(GamepadAxis::LeftY);
++    std::uint8_t nub_x = 0x80u;
++    std::uint8_t nub_y = 0x80u;
++    deflect(left_x, left_y, nub_x, nub_y);
++    analog_x += static_cast<int>(nub_x) - 0x80;
++    analog_y += static_cast<int>(nub_y) - 0x80;
++}
++
++} // namespace portablekit::host
+diff --git a/host/shell/gamepad.hpp b/host/shell/gamepad.hpp
+new file mode 100644
+index 0000000..f9ceb35
+--- /dev/null
++++ b/host/shell/gamepad.hpp
+@@ -0,0 +1,57 @@
++#pragma once
++
++// How a gamepad becomes the PSP pad, for every shell: the SDL shells read a
++// real or the input script's virtual gamepad (sdl_pad.cpp), the headless
++// shell the input script's steps (headless_shell.cpp). No SDL here, so the
++// buttons and axes are numbered and named as SDL3 numbers and names them
++// (SDL_GamepadButton, SDL_GamepadAxis, SDL_GetGamepadStringForButton);
++// sdl_pad.cpp checks the numbers against SDL's.
++#include "shell/shell.hpp"
++
++#include "settings/settings.hpp"
++
++#include <cstdint>
++#include <functional>
++#include <optional>
++#include <string_view>
++
++namespace portablekit::host {
++
++enum class GamepadButton : int {
++    South, East, West, North, Back, Guide, Start, LeftStick, RightStick, LeftShoulder, RightShoulder,
++    DpadUp, DpadDown, DpadLeft, DpadRight, Misc1, RightPaddle1, LeftPaddle1, RightPaddle2, LeftPaddle2,
++    Touchpad, Misc2, Misc3, Misc4, Misc5, Misc6, Count
++};
++enum class GamepadAxis : int { LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count };
++inline constexpr int kGamepadButtons = static_cast<int>(GamepadButton::Count);
++inline constexpr int kGamepadAxes = static_cast<int>(GamepadAxis::Count);
++
++// SDL_GetGamepadButtonFromString and SDL_GetGamepadAxisFromString: SDL's
++// names ("a", "start", "dpdown", "leftx", "righttrigger"), in any case; an
++// axis may carry a leading + or -.
++[[nodiscard]] std::optional<GamepadButton> gamepad_button_from_name(std::string_view name);
++[[nodiscard]] std::optional<GamepadAxis> gamepad_axis_from_name(std::string_view name);
++
++struct PadTuning {
++    float dead_zone{0.15f};
++    float trigger{0.25f};
++    std::uint32_t triggers{};
++    float right_stick{0.5f};
++    settings::RightStick right_stick_mode{settings::RightStick::Camera};
++    bool invert_x{};
++    bool invert_y{};
++    bool confirm_south{};
++    bool trace{false};
++};
++
++// Read on every poll, so the in-game menu's changes apply at once.
++[[nodiscard]] PadTuning pad_tuning();
++
++// Adds one gamepad's state to the pad bits and to the analog offsets the
++// keyboard path also writes, so the two sources simply OR together. `held`
++// tells whether a button is down, `axis` an axis's position, -1 to 1 (0 to 1
++// for the triggers), each read once per button or axis the mapping uses.
++void read_gamepad(const std::function<bool(GamepadButton)> &held, const std::function<float(GamepadAxis)> &axis,
++                  PadState &pad, int &analog_x, int &analog_y);
++
++} // namespace portablekit::host
+diff --git a/host/shell/headless_shell.cpp b/host/shell/headless_shell.cpp
+new file mode 100644
+index 0000000..8869597
+--- /dev/null
++++ b/host/shell/headless_shell.cpp
+@@ -0,0 +1,255 @@
++// The headless shell: no window, no GPU, no SDL. The pad the game reads comes
++// from the input script (<prefix>_INPUT_SCRIPT, and the live file
++// <prefix>_INPUT_LIVE) read at pad level: the same file format and step names
++// as ui/input_script.cpp (shell/script_steps.hpp), run frame by frame as the
++// flips are presented, and mapped to the PSP pad as the SDL shells map their
++// gamepad (shell/gamepad.hpp), so one script drives the game the same way in
++// a window and without one.
++//
++//   pad NAME[+NAME...] [N]  hold gamepad buttons (SDL's names) for N frames, 4 by default
++//   axis NAME VALUE         hold an axis at VALUE, -1 to 1, as the virtual gamepad does
++//   shot NAME               the GE backend's picture (capture_frame) as <prefix>_SCREENSHOT_DIR/NAME.bmp
++//   quit                    pump_events() returns false: the run ends
++// key, mouse, click, text and drop need a window; each is reported once and
++// ignored.
++#include "shell/gamepad.hpp"
++#include "shell/script_steps.hpp"
++#include "shell/shell.hpp"
++
++#include "../profile.hpp"
++
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <cstdlib>
++#include <iostream>
++#include <optional>
++#include <set>
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace portablekit::host {
++namespace {
++
++class HeadlessShell final : public Shell {
++public:
++    const char *name() const noexcept override { return "headless"; }
++    bool initialize(const ShellConfig &config, std::string &) override {
++        capture_frame_ = config.capture_frame;
++        // Mouse steps are reported when they come up (run()).
++        bool uses_pad = false;
++        bool uses_mouse = false;
++        script::load(script_, uses_pad, uses_mouse);
++        ready_ = true;
++        return true;
++    }
++    void shutdown() override { ready_ = false; }
++    bool available() const noexcept override { return ready_; }
++    bool has_window() const noexcept override { return false; }
++
++    // The script's steps run at present(); nothing else happens between flips.
++    bool pump_events() override { return !quit_; }
++    void sample_pad() override {}
++    PadState pad() const noexcept override { return game_input_ ? pad_ : PadState{}; }
++    MouseMotion take_mouse_motion() noexcept override { return {}; }
++    MouseMotion take_touch_motion() noexcept override { return {}; }
++    bool take_touch_menu() noexcept override { return false; }
++    bool touch_controls_visible() const noexcept override { return false; }
++    const input::touch::Controls &touch_controls() const override { return touch_; }
++    bool mouse_captured() const noexcept override { return false; }
++    bool quit_requested() const noexcept override { return quit_; }
++    void request_quit() noexcept override { quit_ = true; }
++    void set_game_input(bool enabled) override { game_input_ = enabled; }
++    void set_pointer_free(bool) override {}
++    void set_scripted_key(int, bool) override {}
++    void set_scripted_input(bool) override {}
++    void set_event_hook(std::function<bool(const SDL_Event &)>) override {}
++    SDL_Gamepad *gamepad() const noexcept override { return nullptr; }
++    SDL_Window *window() const noexcept override { return nullptr; }
++
++    // A flip: the script's steps due run, then the captures they asked for
++    // are taken, of the image this flip presents.
++    bool present(const gpu::PresentedImage &image, std::uint32_t,
++                 std::optional<std::chrono::steady_clock::time_point>) override {
++        tick();
++        for (const std::string &path : captures_) {
++            if (!capture_frame_ || !capture_frame_(path))
++                std::cout << "[script] cannot capture the frame to " << path << std::endl;
++        }
++        captures_.clear();
++        return image.valid();
++    }
++    void present_due() override {}
++    void present_until(std::chrono::steady_clock::time_point) override {}
++    void pause_interpolation() override {}
++    void set_fast_forward(bool) override {}
++    void hold_frame(bool) override {}
++    // No window: the next presented picture is the GE backend's.
++    void capture_window(const std::string &path) override { captures_.push_back(path); }
++    float game_aspect() const noexcept override {
++        return static_cast<float>(gpu::kScreenWidth) / static_cast<float>(gpu::kScreenHeight);
++    }
++    float display_refresh() const noexcept override { return 0.0f; }
++    double frame_rate_now() const noexcept override { return 0.0; }
++    void set_frame_rate(settings::FrameRate) override {}
++    void set_frame_rate_auto(bool) override {}
++    void set_window_scale(std::uint32_t) override {}
++    void set_fullscreen(bool) override {}
++    void set_present_mode(settings::PresentMode) override {}
++    bool supports_present_mode(settings::PresentMode) const override { return false; }
++    void set_aspect(settings::Aspect) override {}
++    void set_sharp_screen(bool) override {}
++    void set_perf_overlay(bool) override {}
++    std::string device_name() const override { return {}; }
++
++    bool initialize_ui(std::string &error) override {
++        error = "the headless shell has no window to draw the interface in";
++        return false;
++    }
++    void shutdown_ui() override {}
++    void begin_ui_frame() override {}
++    void set_ui_draw_data(ImDrawData *) override {}
++    void present_ui(bool) override {}
++
++private:
++    // Releases due later: the buttons a `pad` step pressed.
++    struct Release {
++        std::uint64_t frame{};
++        std::vector<GamepadButton> buttons;
++    };
++
++    // ui::script::tick() at pad level: one script frame per flip.
++    void tick() {
++        if (script_.steps.empty() && releases_.empty() && script_.live_path.empty()) return;
++        ++frame_;
++        if (!script_.live_path.empty() && frame_ % 10u == 0u) script::read_live(script_, frame_);
++        bool changed = false;
++        for (auto it = releases_.begin(); it != releases_.end();) {
++            if (it->frame > frame_) {
++                ++it;
++                continue;
++            }
++            for (GamepadButton button : it->buttons) held_[static_cast<std::size_t>(button)] = false;
++            changed = true;
++            it = releases_.erase(it);
++        }
++        while (!script_.steps.empty() && script_.steps.front().frame <= frame_) {
++            changed = run(script_.steps.front()) || changed;
++            script_.steps.pop_front();
++        }
++        if (changed) update_pad();
++    }
++
++    // Returns whether the pad changed.
++    bool run(const script::Step &step) {
++        std::cout << "[script] frame " << frame_ << ": " << step.action << " " << step.argument << std::endl;
++        if (step.action == "pad") {
++            const auto [names, frames] = script::name_and_frames(step.argument, script::kHoldFrames);
++            std::vector<GamepadButton> buttons;
++            std::stringstream list(names);
++            std::string name;
++            while (std::getline(list, name, '+')) {
++                const std::optional<GamepadButton> button = gamepad_button_from_name(name);
++                if (!button) {
++                    std::cout << "[script] unknown button " << name << std::endl;
++                    continue;
++                }
++                held_[static_cast<std::size_t>(*button)] = true;
++                buttons.push_back(*button);
++            }
++            releases_.push_back({frame_ + frames, buttons});
++            return true;
++        }
++        if (step.action == "axis") {
++            const auto space = step.argument.find(' ');
++            const std::optional<GamepadAxis> axis = gamepad_axis_from_name(step.argument.substr(0, space));
++            const float value =
++                space == std::string::npos ? 0.0f : std::strtof(step.argument.c_str() + space + 1u, nullptr);
++            if (!axis) {
++                std::cout << "[script] unknown axis " << step.argument << std::endl;
++                return false;
++            }
++            // What SDL_SetJoystickVirtualAxis is given in a window.
++            const auto index = static_cast<std::size_t>(*axis);
++            axes_[index] = static_cast<std::int16_t>(std::clamp(value, -1.0f, 1.0f) * 32767.0f);
++            axis_set_[index] = true;
++            return true;
++        }
++        if (step.action == "shot") {
++            const char *dir = portablekit::env("SCREENSHOT_DIR");
++            const std::string name = step.argument.empty() ? "frame_" + std::to_string(frame_) : step.argument;
++            capture_window((dir != nullptr ? std::string(dir) : std::string(".")) + "/" + name + ".bmp");
++            return false;
++        }
++        if (step.action == "quit") {
++            quit_ = true;
++            return false;
++        }
++        if (step.action == "key" || step.action == "mouse" || step.action == "click" || step.action == "text" ||
++            step.action == "drop") {
++            if (ignored_.insert(step.action).second)
++                std::cout << "[script] " << step.action
++                          << " steps need a window; the headless shell ignores them" << std::endl;
++            return false;
++        }
++        std::cout << "[script] unknown action " << step.action << std::endl;
++        return false;
++    }
++
++    // An axis as SDL reads the input script's virtual gamepad back: a stick
++    // as it was set; a trigger 0 until a step sets it, then its -1 to 1 spread
++    // over 0 to 1 (SDL maps a virtual joystick's full axis range onto the
++    // trigger's).
++    float axis_value(GamepadAxis axis) const {
++        const auto index = static_cast<std::size_t>(axis);
++        const int raw = axes_[index];
++        if (axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger) {
++            if (!axis_set_[index]) return 0.0f;
++            return static_cast<float>((raw + 32768) * 32767 / 65535) / 32767.0f;
++        }
++        return std::clamp(static_cast<float>(raw) / 32767.0f, -1.0f, 1.0f);
++    }
++
++    // The PSP pad from the held buttons and axes, as SdlPad::sample makes it
++    // from a gamepad with no key, mouse button or touch held.
++    void update_pad() {
++        PadState next{};
++        int analog_x = 0;
++        int analog_y = 0;
++        read_gamepad([this](GamepadButton button) { return held_[static_cast<std::size_t>(button)]; },
++                     [this](GamepadAxis axis) { return axis_value(axis); }, next, analog_x, analog_y);
++        next.analog_x = static_cast<std::uint8_t>(std::clamp(0x80 + analog_x, 0, 255));
++        next.analog_y = static_cast<std::uint8_t>(std::clamp(0x80 + analog_y, 0, 255));
++        if (pad_tuning().trace && (next.buttons != pad_.buttons || next.analog_x != pad_.analog_x ||
++                                   next.analog_y != pad_.analog_y || next.right_x != pad_.right_x ||
++                                   next.right_y != pad_.right_y)) {
++            std::cout << "[pad] buttons 0x" << std::hex << next.buttons << std::dec << " analog "
++                      << static_cast<int>(next.analog_x) << "," << static_cast<int>(next.analog_y) << " right "
++                      << static_cast<int>(next.right_x) << "," << static_cast<int>(next.right_y) << std::endl;
++        }
++        pad_ = next;
++    }
++
++    bool ready_{};
++    bool quit_{};
++    bool game_input_{true};
++    PadState pad_{};
++    input::touch::Controls touch_;
++    std::function<bool(const std::string &)> capture_frame_;
++    std::vector<std::string> captures_;
++
++    script::Steps script_;
++    std::uint64_t frame_{};
++    std::vector<Release> releases_;
++    std::array<bool, kGamepadButtons> held_{};
++    std::array<std::int16_t, kGamepadAxes> axes_{};
++    std::array<bool, kGamepadAxes> axis_set_{};
++    std::set<std::string> ignored_;
++};
++
++const ShellRegistration registration("headless", "no window and no GPU; the pad from the input script",
++                                     [] { return std::unique_ptr<Shell>(new HeadlessShell()); });
++
++} // namespace
++} // namespace portablekit::host
+diff --git a/host/shell/script_steps.cpp b/host/shell/script_steps.cpp
+new file mode 100644
+index 0000000..d9057de
+--- /dev/null
++++ b/host/shell/script_steps.cpp
+@@ -0,0 +1,95 @@
++#include "shell/script_steps.hpp"
++
++#include "../profile.hpp"
++
++#include <algorithm>
++#include <cstdlib>
++#include <fstream>
++#include <iostream>
++#include <sstream>
++
++namespace portablekit::host::script {
++
++std::string trim(const std::string &text) {
++    const auto first = text.find_first_not_of(" \t");
++    if (first == std::string::npos) return {};
++    return text.substr(first, text.find_last_not_of(" \t") - first + 1u);
++}
++
++std::pair<std::string, std::uint64_t> name_and_frames(const std::string &argument, std::uint64_t fallback) {
++    const auto space = argument.find_last_of(' ');
++    if (space == std::string::npos) return {argument, fallback};
++    const std::string last = argument.substr(space + 1u);
++    if (last.empty() || last.find_first_not_of("0123456789") != std::string::npos) return {argument, fallback};
++    return {argument.substr(0, space), std::max<std::uint64_t>(1u, std::strtoull(last.c_str(), nullptr, 10))};
++}
++
++bool mouse_step(const std::string &action) { return action == "mouse" || action == "click"; }
++
++bool parse_step(std::string item, std::uint64_t base, Step &step) {
++    item = trim(item);
++    const auto colon = item.find(':');
++    if (item.empty() || colon == std::string::npos) return false;
++    step.frame = base + std::strtoull(item.substr(0, colon).c_str(), nullptr, 10);
++    const std::string rest = trim(item.substr(colon + 1u));
++    const auto space = rest.find(' ');
++    step.action = rest.substr(0, space);
++    step.argument = space == std::string::npos ? std::string{} : trim(rest.substr(space + 1u));
++    return true;
++}
++
++void sort_steps(Steps &s) {
++    std::stable_sort(s.steps.begin(), s.steps.end(),
++                     [](const Step &a, const Step &b) { return a.frame < b.frame; });
++}
++
++void read_live(Steps &s, std::uint64_t frame) {
++    std::ifstream file(s.live_path, std::ios::binary);
++    if (!file) return;
++    file.seekg(0, std::ios::end);
++    const std::streamoff size = file.tellg();
++    if (size < s.live_offset) s.live_offset = 0;  // the file was replaced
++    if (size == s.live_offset) return;
++    file.seekg(s.live_offset);
++    std::string line;
++    bool added = false;
++    while (std::getline(file, line)) {
++        if (file.eof()) break;  // an incomplete last line: read it next time
++        s.live_offset = file.tellg();
++        Step step;
++        if (parse_step(line, frame, step)) {
++            s.steps.push_back(step);
++            added = true;
++        }
++    }
++    if (added) sort_steps(s);
++}
++
++void load(Steps &s, bool &uses_pad, bool &uses_mouse) {
++    uses_pad = false;
++    uses_mouse = false;
++    if (const char *live = portablekit::env("INPUT_LIVE"); live != nullptr && *live != '\0') {
++        s.live_path = live;
++        // Only what is appended after start-up counts.
++        std::ifstream file(s.live_path, std::ios::binary | std::ios::ate);
++        if (file) s.live_offset = file.tellg();
++        uses_pad = true;
++        uses_mouse = true;
++        std::cout << "[script] reading live input from " << s.live_path << std::endl;
++    }
++    if (const char *text = portablekit::env("INPUT_SCRIPT"); text != nullptr) {
++        std::stringstream list(text);
++        std::string item;
++        while (std::getline(list, item, ';')) {
++            Step step;
++            if (!parse_step(item, 0u, step)) continue;
++            uses_pad = uses_pad || step.action == "pad" || step.action == "axis";
++            uses_mouse = uses_mouse || mouse_step(step.action);
++            s.steps.push_back(step);
++        }
++        sort_steps(s);
++        std::cout << "[script] " << s.steps.size() << " steps" << std::endl;
++    }
++}
++
++} // namespace portablekit::host::script
+diff --git a/host/shell/script_steps.hpp b/host/shell/script_steps.hpp
+new file mode 100644
+index 0000000..6e72dc0
+--- /dev/null
++++ b/host/shell/script_steps.hpp
+@@ -0,0 +1,50 @@
++#pragma once
++
++// The input script's grammar (<prefix>_INPUT_SCRIPT and the live file
++// <prefix>_INPUT_LIVE; the actions are documented in ui/input_script.hpp),
++// shared by the shells that read it: ui/input_script.cpp turns the steps into
++// SDL events at a shell's window, the headless shell (headless_shell.cpp)
++// into its pad. No SDL here.
++#include <cstdint>
++#include <deque>
++#include <ios>
++#include <string>
++#include <utility>
++
++namespace portablekit::host::script {
++
++// Frames a scripted button stays down: ImGui samples the pad once per frame.
++inline constexpr std::uint64_t kHoldFrames = 4u;
++
++struct Step {
++    std::uint64_t frame{};
++    std::string action;
++    std::string argument;
++};
++
++// The steps not run yet, by frame, and the live file being followed.
++struct Steps {
++    std::deque<Step> steps;
++    // <prefix>_INPUT_LIVE: a file whose appended lines are read as they come.
++    std::string live_path;
++    std::streamoff live_offset{};
++};
++
++[[nodiscard]] std::string trim(const std::string &text);
++// "NAME N": the name, and N frames if the last word is a number.
++[[nodiscard]] std::pair<std::string, std::uint64_t> name_and_frames(const std::string &argument,
++                                                                  std::uint64_t fallback);
++[[nodiscard]] bool mouse_step(const std::string &action);
++// Parses `frame:action argument`; `base` is added to the frame.
++bool parse_step(std::string item, std::uint64_t base, Step &step);
++void sort_steps(Steps &s);
++// Reads the lines appended to the live file since the last call. Their frames
++// count from `frame`, so a line `30:pad a` presses it half a second after it
++// is read.
++void read_live(Steps &s, std::uint64_t frame);
++// Reads <prefix>_INPUT_LIVE and <prefix>_INPUT_SCRIPT into `s` and says what
++// it found ("[script] N steps"). `uses_pad` and `uses_mouse`: whether a step
++// presses the gamepad or moves the mouse; the live file counts as both.
++void load(Steps &s, bool &uses_pad, bool &uses_mouse);
++
++} // namespace portablekit::host::script
+diff --git a/host/shell/sdl_pad.cpp b/host/shell/sdl_pad.cpp
+new file mode 100644
+index 0000000..b381f84
+--- /dev/null
++++ b/host/shell/sdl_pad.cpp
+@@ -0,0 +1,209 @@
++#include "shell/sdl_pad.hpp"
++
++#include "../profile.hpp"
++#include "ui/input_script.hpp"
++
++#include "settings/settings.hpp"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdlib>
++#include <cstring>
++#include <iostream>
++
++namespace portablekit::host {
++
++// gamepad.hpp numbers buttons and axes as SDL3 does.
++static_assert(static_cast<int>(GamepadButton::South) == SDL_GAMEPAD_BUTTON_SOUTH);
++static_assert(static_cast<int>(GamepadButton::East) == SDL_GAMEPAD_BUTTON_EAST);
++static_assert(static_cast<int>(GamepadButton::West) == SDL_GAMEPAD_BUTTON_WEST);
++static_assert(static_cast<int>(GamepadButton::North) == SDL_GAMEPAD_BUTTON_NORTH);
++static_assert(static_cast<int>(GamepadButton::Back) == SDL_GAMEPAD_BUTTON_BACK);
++static_assert(static_cast<int>(GamepadButton::Guide) == SDL_GAMEPAD_BUTTON_GUIDE);
++static_assert(static_cast<int>(GamepadButton::Start) == SDL_GAMEPAD_BUTTON_START);
++static_assert(static_cast<int>(GamepadButton::LeftStick) == SDL_GAMEPAD_BUTTON_LEFT_STICK);
++static_assert(static_cast<int>(GamepadButton::RightStick) == SDL_GAMEPAD_BUTTON_RIGHT_STICK);
++static_assert(static_cast<int>(GamepadButton::LeftShoulder) == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
++static_assert(static_cast<int>(GamepadButton::RightShoulder) == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
++static_assert(static_cast<int>(GamepadButton::DpadUp) == SDL_GAMEPAD_BUTTON_DPAD_UP);
++static_assert(static_cast<int>(GamepadButton::DpadDown) == SDL_GAMEPAD_BUTTON_DPAD_DOWN);
++static_assert(static_cast<int>(GamepadButton::DpadLeft) == SDL_GAMEPAD_BUTTON_DPAD_LEFT);
++static_assert(static_cast<int>(GamepadButton::DpadRight) == SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
++static_assert(static_cast<int>(GamepadButton::Misc1) == SDL_GAMEPAD_BUTTON_MISC1);
++static_assert(static_cast<int>(GamepadButton::RightPaddle1) == SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1);
++static_assert(static_cast<int>(GamepadButton::LeftPaddle1) == SDL_GAMEPAD_BUTTON_LEFT_PADDLE1);
++static_assert(static_cast<int>(GamepadButton::RightPaddle2) == SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2);
++static_assert(static_cast<int>(GamepadButton::LeftPaddle2) == SDL_GAMEPAD_BUTTON_LEFT_PADDLE2);
++static_assert(static_cast<int>(GamepadButton::Touchpad) == SDL_GAMEPAD_BUTTON_TOUCHPAD);
++static_assert(static_cast<int>(GamepadButton::Misc2) == SDL_GAMEPAD_BUTTON_MISC2);
++static_assert(static_cast<int>(GamepadButton::Misc6) == SDL_GAMEPAD_BUTTON_MISC6);
++static_assert(kGamepadButtons == SDL_GAMEPAD_BUTTON_COUNT);
++static_assert(static_cast<int>(GamepadAxis::LeftX) == SDL_GAMEPAD_AXIS_LEFTX);
++static_assert(static_cast<int>(GamepadAxis::LeftY) == SDL_GAMEPAD_AXIS_LEFTY);
++static_assert(static_cast<int>(GamepadAxis::RightX) == SDL_GAMEPAD_AXIS_RIGHTX);
++static_assert(static_cast<int>(GamepadAxis::RightY) == SDL_GAMEPAD_AXIS_RIGHTY);
++static_assert(static_cast<int>(GamepadAxis::LeftTrigger) == SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
++static_assert(static_cast<int>(GamepadAxis::RightTrigger) == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
++static_assert(kGamepadAxes == SDL_GAMEPAD_AXIS_COUNT);
++
++void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog_y) {
++    read_gamepad(
++        [device](GamepadButton button) { return SDL_GetGamepadButton(device, static_cast<SDL_GamepadButton>(button)); },
++        [device](GamepadAxis id) {
++            return std::clamp(
++                static_cast<float>(SDL_GetGamepadAxis(device, static_cast<SDL_GamepadAxis>(id))) / 32767.0f, -1.0f,
++                1.0f);
++        },
++        pad, analog_x, analog_y);
++}
++
++void SdlPad::open_gamepad(SDL_JoystickID id) {
++    if (gamepad != nullptr) {
++        // The virtual pad of <prefix>_INPUT_SCRIPT takes over from a real
++        // one, so a controller within reach does not steal a scripted run.
++        const char *name = SDL_GetGamepadNameForID(id);
++        if (name == nullptr || std::strcmp(name, portablekit::kInputScriptName) != 0) return;
++        SDL_CloseGamepad(gamepad);
++        gamepad = nullptr;
++    }
++    SDL_Gamepad *device = SDL_OpenGamepad(id);
++    if (device == nullptr) {
++        std::cout << "[pad] SDL_OpenGamepad failed: " << SDL_GetError() << "\n";
++        return;
++    }
++#if defined(__ANDROID__)
++    // Android reports a keyboard with arrow keys (the emulator's qwerty2,
++    // many tablets' keyboards) as a D-pad device, and SDL lists it as a
++    // gamepad. It has no sticks; taking it as the pad would leave a real
++    // controller connected later unused. Its keys still reach the game
++    // through the keyboard.
++    if (SDL_GetNumJoystickAxes(SDL_GetGamepadJoystick(device)) <= 0) {
++        const char *skipped = SDL_GetGamepadName(device);
++        std::cout << "[pad] " << (skipped != nullptr ? skipped : "gamepad")
++                  << " has no sticks (a keyboard's D-pad), ignored\n";
++        SDL_CloseGamepad(device);
++        return;
++    }
++#endif
++    gamepad = device;
++    gamepad_id = id;
++    const char *name = SDL_GetGamepadName(device);
++    const PadTuning tuning = pad_tuning();
++    std::cout << "[pad] " << (name != nullptr ? name : "gamepad") << " connected; confirm on "
++              << (tuning.confirm_south ? "the south button" : "circle") << ", right stick "
++              << (tuning.right_stick_mode == settings::RightStick::DPad     ? "as D-pad"
++                  : tuning.right_stick_mode == settings::RightStick::Camera ? "as camera"
++                                                                            : "off")
++              << "\n";
++}
++
++void SdlPad::scan_gamepads() {
++    int count = 0;
++    SDL_JoystickID *ids = SDL_GetGamepads(&count);
++    if (ids != nullptr) {
++        for (int i = 0; i < count && gamepad == nullptr; ++i) open_gamepad(ids[i]);
++        SDL_free(ids);
++    }
++    if (gamepad != nullptr) return;
++    // Say why there is no pad rather than staying silent: a stick with no
++    // entry in SDL's mapping database enumerates as a joystick only, which
++    // looks identical to "nothing plugged in" from the player's side.
++    int joysticks = 0;
++    SDL_JoystickID *sticks = SDL_GetJoysticks(&joysticks);
++    if (sticks != nullptr) {
++        for (int i = 0; i < joysticks; ++i) {
++            if (SDL_IsGamepad(sticks[i])) continue;
++            const char *name = SDL_GetJoystickNameForID(sticks[i]);
++            std::cout << "[pad] " << (name != nullptr ? name : "joystick") << " has no gamepad mapping, ignored\n";
++        }
++        SDL_free(sticks);
++    }
++    if (joysticks == 0) std::cout << "[pad] no gamepad connected, keyboard only\n";
++}
++
++void SdlPad::close_gamepad(SDL_JoystickID id) {
++    if (gamepad == nullptr || id != gamepad_id) return;
++    SDL_CloseGamepad(gamepad);
++    gamepad = nullptr;
++    gamepad_id = 0;
++    std::cout << "[pad] gamepad disconnected\n";
++    scan_gamepads();
++}
++
++void SdlPad::sample(bool focused, bool mouse_captured, std::uint32_t mouse_buttons,
++                    const input::touch::Controls *touch, std::uint64_t frames) {
++    // While a menu or the on-screen keyboard is open, nothing reaches the game.
++    if (!game_input) {
++        pad = PadState{};
++        return;
++    }
++
++    // Keyboard and mouse buttons to the PSP pad, through the player's
++    // bindings. Bits follow SceCtrlButtons; the stick is centred at 0x80.
++    const settings::Settings &player = settings::current();
++    const bool *keys = SDL_GetKeyboardState(nullptr);
++    const input::PadInput typed = input::read(player.bindings, [&](input::Binding binding) {
++        if (const int button = input::mouse_button_of(binding))
++            return mouse_captured && (mouse_buttons & (1u << button)) != 0u;
++        const int position = input::key_position(binding);
++        return position >= 0 && ((focused && position < SDL_SCANCODE_COUNT && keys[position]) ||
++                                 scripted_keys[static_cast<std::size_t>(position)]);
++    });
++    PadState next{};
++    next.buttons = typed.buttons;
++    int analog_x = typed.stick_x;
++    int analog_y = typed.stick_y;
++    // Camera keys push the second stick fully, as a right stick would: in
++    // the D-pad mode they press the D-pad instead, and with it off, nothing.
++    if (player.right_stick == settings::RightStick::Camera) {
++        next.right_x = static_cast<std::uint8_t>(0x80 + typed.camera_x);
++        next.right_y = static_cast<std::uint8_t>(0x80 + typed.camera_y);
++    } else if (player.right_stick == settings::RightStick::DPad) {
++        if (typed.camera_x < 0) next.buttons |= 0x0080u;
++        if (typed.camera_x > 0) next.buttons |= 0x0020u;
++        if (typed.camera_y < 0) next.buttons |= 0x0010u;
++        if (typed.camera_y > 0) next.buttons |= 0x0040u;
++    }
++
++    // The gamepad adds to the same bits and offsets, so both sources are live.
++    if (gamepad != nullptr) read_gamepad(gamepad, next, analog_x, analog_y);
++    // So do the on-screen controls.
++    if (touch != nullptr) {
++        next.buttons |= touch->buttons();
++        const input::touch::Point stick = touch->stick();
++        analog_x += static_cast<int>(std::lround(stick.x * 127.0f));
++        analog_y += static_cast<int>(std::lround(stick.y * 127.0f));
++    }
++
++    next.analog_x = static_cast<std::uint8_t>(std::clamp(0x80 + analog_x, 0, 255));
++    next.analog_y = static_cast<std::uint8_t>(std::clamp(0x80 + analog_y, 0, 255));
++
++    // Unattended runs (overlay bootstrapping) press confirm periodically so the
++    // game walks through title screens and dialogs on its own.
++    static const std::uint64_t auto_confirm = [] {
++        const char *text = portablekit::env("AUTO_CONFIRM");
++        return text != nullptr ? std::strtoull(text, nullptr, 10) : 0ull;
++    }();
++    if (auto_confirm != 0u) {
++        const std::uint64_t phase = frames % auto_confirm;
++        if (phase < auto_confirm / 8u) next.buttons |= 0x2000u;  // circle
++    }
++    // Buttons held when the game got its input back stay hidden from it until
++    // they are released.
++    if (suppress_held) {
++        suppressed_buttons = next.buttons;
++        suppress_held = false;
++    }
++    suppressed_buttons &= next.buttons;
++    next.buttons &= ~suppressed_buttons;
++    if (pad_tuning().trace && (next.buttons != pad.buttons || next.analog_x != pad.analog_x ||
++                               next.analog_y != pad.analog_y || next.right_x != pad.right_x ||
++                               next.right_y != pad.right_y)) {
++        std::cout << "[pad] buttons 0x" << std::hex << next.buttons << std::dec << " analog "
++                  << static_cast<int>(next.analog_x) << "," << static_cast<int>(next.analog_y) << " right "
++                  << static_cast<int>(next.right_x) << "," << static_cast<int>(next.right_y) << std::endl;
++    }
++    pad = next;
++}
++
++} // namespace portablekit::host
+diff --git a/host/shell/sdl_pad.hpp b/host/shell/sdl_pad.hpp
+new file mode 100644
+index 0000000..f47077d
+--- /dev/null
++++ b/host/shell/sdl_pad.hpp
+@@ -0,0 +1,56 @@
++#pragma once
++
++// The PSP pad of a shell with an SDL window: the keyboard and the mouse's
++// buttons through the player's bindings, the first gamepad (or the input
++// script's virtual one, which takes over), the on-screen touch controls and
++// the input script's keys. Taken out of VulkanRenderer so the SDL shells share
++// it; the renderer's Impl derives from it, so its members keep their names.
++#include "shell/gamepad.hpp"
++#include "shell/shell.hpp"
++
++#include "input/bindings.hpp"
++#include "input/touch_controls.hpp"
++
++#include <SDL3/SDL.h>
++
++#include <array>
++#include <cstdint>
++
++namespace portablekit::host {
++
++struct SdlPad {
++    PadState pad{};
++    SDL_Gamepad *gamepad{};
++    SDL_JoystickID gamepad_id{};
++    // While off, the game reads a neutral pad (an interface screen is up).
++    bool game_input{true};
++    // Buttons held when the game got its input back stay hidden from it until
++    // they are released.
++    bool suppress_held{};
++    std::uint32_t suppressed_buttons{};
++    // Keys the input script holds (set_scripted_key): a pushed SDL event does
++    // not change SDL's keyboard snapshot, which the bindings read.
++    std::array<bool, input::kKeyPositions> scripted_keys{};
++
++    // Only the first pad is used; a second one arriving is ignored rather than
++    // stealing the stick from whoever is already playing.
++    void open_gamepad(SDL_JoystickID id);
++    // Picks up a pad that was already plugged in before the window existed, and
++    // falls back to a still-connected second pad when the first one is unplugged.
++    void scan_gamepads();
++    void close_gamepad(SDL_JoystickID id);
++
++    // The PSP pad from the keyboard, the mouse's buttons and the gamepad as
++    // they are now, into `pad`. `focused`: the window has input focus (the
++    // keyboard counts only then); `mouse_captured` and `mouse_buttons` (bit n:
++    // SDL mouse button n held): the pointer the game has; `touch`: the
++    // on-screen controls while shown, else null; `frames`: frames presented
++    // (<prefix>_AUTO_CONFIRM).
++    void sample(bool focused, bool mouse_captured, std::uint32_t mouse_buttons, const input::touch::Controls *touch,
++                std::uint64_t frames);
++};
++
++// read_gamepad (gamepad.hpp) over an SDL gamepad.
++void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog_y);
++
++} // namespace portablekit::host
+diff --git a/host/shell/shell.cpp b/host/shell/shell.cpp
+new file mode 100644
+index 0000000..18ed47a
+--- /dev/null
++++ b/host/shell/shell.cpp
+@@ -0,0 +1,68 @@
++#include "shell/shell.hpp"
++
++#include "../profile.hpp"
++
++#include <utility>
++
++namespace portablekit::host {
++namespace {
++
++struct Entry {
++    std::string name;
++    std::string description;
++    ShellFactory factory;
++};
++
++// Made on first use, so it is there for registrations that run before main().
++std::vector<Entry> &registry() {
++    static std::vector<Entry> entries;
++    return entries;
++}
++
++const Entry *find(std::string_view name) {
++    for (const Entry &entry : registry())
++        if (entry.name == name) return &entry;
++    return nullptr;
++}
++
++} // namespace
++
++void register_shell(std::string name, ShellFactory factory, std::string description) {
++    for (Entry &entry : registry()) {
++        if (entry.name == name) {
++            entry.factory = std::move(factory);
++            entry.description = std::move(description);
++            return;
++        }
++    }
++    registry().push_back({std::move(name), std::move(description), std::move(factory)});
++}
++
++std::unique_ptr<Shell> make_shell(std::string_view name) {
++    const Entry *entry = find(name);
++    if (entry == nullptr || !entry->factory) return nullptr;
++    return entry->factory();
++}
++
++std::vector<std::string> shell_names() {
++    std::vector<std::string> names;
++    names.reserve(registry().size());
++    for (const Entry &entry : registry()) names.push_back(entry.name);
++    return names;
++}
++
++std::string shell_description(std::string_view name) {
++    const Entry *entry = find(name);
++    return entry != nullptr ? entry->description : std::string{};
++}
++
++std::string selected_shell() {
++    const char *name = portablekit::env("SHELL");
++    return name != nullptr && *name != '\0' ? std::string(name) : std::string("vulkan");
++}
++
++ShellRegistration::ShellRegistration(const char *name, const char *description, ShellFactory factory) {
++    register_shell(name, std::move(factory), description != nullptr ? description : "");
++}
++
++} // namespace portablekit::host
+diff --git a/host/shell/shell.hpp b/host/shell/shell.hpp
+new file mode 100644
+index 0000000..c43ff4e
+--- /dev/null
++++ b/host/shell/shell.hpp
+@@ -0,0 +1,222 @@
++#pragma once
++
++// The shell seam: what is around the GE backend (gpu/ge_backend.hpp). A shell
++// owns the window (or none), the events and the pad the game reads, the input
++// script, the port's interface (Dear ImGui), the presenting of each flip's
++// image with its pacing and frame interpolation, and window captures. The HLE
++// (hle_media.cpp) and the interface layer (ui/) talk to a Shell and a
++// GeBackend and to nothing else.
++//
++// The shells:
++//   vulkan    the VulkanRenderer's window, pad, interface and presenting
++//             (vulkan_shell.cpp). The Vulkan GE backend draws with this
++//             shell's renderer, so it runs only in this shell.
++//   headless  no window and no GPU (headless_shell.cpp): the pad comes from the
++//             input script read at pad level, frame by frame as the flips are
++//             presented, and the script's shots are the GE backend's captures.
++// <prefix>_SHELL names the one to use (vulkan when unset or empty);
++// <prefix>_NO_RENDER always means the headless one. A shell in the game's own
++// sources adds itself with a ShellRegistration, linked into the program
++// directly, as a GE backend does.
++#include "gpu/ge_backend.hpp"
++#include "input/touch_controls.hpp"
++#include "settings/settings.hpp"
++
++#include <array>
++#include <chrono>
++#include <cstdint>
++#include <functional>
++#include <memory>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++union SDL_Event;
++struct SDL_Window;
++struct SDL_Gamepad;
++struct ImDrawData;
++
++namespace portablekit::host {
++
++// PSP pad state gathered from the keyboard, the mouse's buttons and the gamepad.
++struct PadState {
++    std::uint32_t buttons{};
++    std::uint8_t analog_x{0x80u};
++    std::uint8_t analog_y{0x80u};
++    // The HD release reads a second stick from the two SceCtrlData bytes after
++    // Ly, which the PSP itself left reserved. 0x80 is its centre: the guest
++    // skips its camera path entirely only when both bytes are exactly centred.
++    std::uint8_t right_x{0x80u};
++    std::uint8_t right_y{0x80u};
++};
++
++// The mouse the input script's events come from. With scripted input on,
++// only these reach the game, so a person moving the real pointer over the
++// window does not disturb a scripted run.
++inline constexpr std::uint32_t kScriptedMouse = 0xFFFFFF00u;
++
++// Relative mouse motion, in counts, while the pointer is captured for the game.
++struct MouseMotion {
++    float x{};
++    float y{};
++};
++
++// The camera the game itself set, read back from the view matrix it uploads.
++// Only filled while <prefix>_TRACE_CAMERA or <prefix>_FIND_CAMERA is on.
++struct CameraReading {
++    bool valid{};
++    float yaw{};    // degrees, from the direction the camera looks along
++    float pitch{};  // degrees
++    float turn{};   // degrees of yaw since the previous traced frame
++    std::array<float, 3> position{};
++    // The matrix itself, in the layout the game holds it in: the GE's twelve
++    // uploaded floats expanded to a 4x4, which is byte for byte the matrix the
++    // game passed to the GE.
++    std::array<float, 16> view{};
++};
++
++// What a shell is made with.
++struct ShellConfig {
++    // The window's title; empty for the shell's own (the Vulkan shell's is the
++    // program's name and the build label, gpu::default_window_title()).
++    std::string title;
++    // How a shell without a window captures the game's picture for
++    // capture_window() (the input script's `shot`): the GE backend's
++    // capture_frame(). A shell with a window captures its own.
++    std::function<bool(const std::string &path)> capture_frame;
++};
++
++class Shell {
++public:
++    Shell() = default;
++    Shell(const Shell &) = delete;
++    Shell &operator=(const Shell &) = delete;
++    virtual ~Shell() = default;
++
++    // Lifecycle.
++    // The name it is registered under.
++    [[nodiscard]] virtual const char *name() const noexcept = 0;
++    // Returns false and fills `error` when the shell cannot run (no window, no
++    // device).
++    virtual bool initialize(const ShellConfig &config, std::string &error) = 0;
++    virtual void shutdown() = 0;
++    [[nodiscard]] virtual bool available() const noexcept = 0;
++    // Whether there is a window: events, the interface and the frame
++    // interpolation's presents between flips exist only then.
++    [[nodiscard]] virtual bool has_window() const noexcept = 0;
++
++    // Events and input.
++    // Handles the window's events (and runs the input script's steps due);
++    // returns false once the window has been closed or the script quit.
++    virtual bool pump_events() = 0;
++    // Reads the devices again for pad() without handling window events: the
++    // game reads its pad each frame, and taking the state then instead of at
++    // the last flip saves up to a game frame of latency.
++    virtual void sample_pad() = 0;
++    [[nodiscard]] virtual PadState pad() const noexcept = 0;
++    // The mouse's motion gathered by the pumps since the last call, while the
++    // pointer was captured for the game.
++    [[nodiscard]] virtual MouseMotion take_mouse_motion() noexcept = 0;
++    // A camera drag on the touch screen since the last take, as a fraction of
++    // the screen's height.
++    [[nodiscard]] virtual MouseMotion take_touch_motion() noexcept = 0;
++    // The on-screen menu button was tapped since the last take.
++    [[nodiscard]] virtual bool take_touch_menu() noexcept = 0;
++    // The on-screen touch controls: shown once the screen is touched while the
++    // game runs, hidden again by a gamepad, the keyboard or a real mouse.
++    [[nodiscard]] virtual bool touch_controls_visible() const noexcept = 0;
++    [[nodiscard]] virtual const input::touch::Controls &touch_controls() const = 0;
++    // The pointer is captured for the game: hidden, and its motion and buttons
++    // go to the game.
++    [[nodiscard]] virtual bool mouse_captured() const noexcept = 0;
++    [[nodiscard]] virtual bool quit_requested() const noexcept = 0;
++    virtual void request_quit() noexcept = 0;
++    // While off, the game reads a neutral pad. Turning it back on ignores the
++    // buttons still held until they are released.
++    virtual void set_game_input(bool enabled) = 0;
++    // An interface screen is up: the pointer stays free for it.
++    virtual void set_pointer_free(bool free) = 0;
++    // The input script (<prefix>_INPUT_SCRIPT) on a shell with a window: keys
++    // it holds reach the game as well as the interface, and with scripted
++    // input on, only the script's mouse reaches the game.
++    virtual void set_scripted_key(int position, bool down) = 0;
++    virtual void set_scripted_input(bool scripted) = 0;
++    // The port's own interface (host/ui). Every window event is offered to the
++    // hook first; returning true keeps it from the game.
++    virtual void set_event_hook(std::function<bool(const SDL_Event &)> hook) = 0;
++    // The pad the game reads, or null.
++    [[nodiscard]] virtual SDL_Gamepad *gamepad() const noexcept = 0;
++    // The window, or null without one.
++    [[nodiscard]] virtual SDL_Window *window() const noexcept = 0;
++
++    // Presenting.
++    // Shows `image`, the GE backend's display target at `display_address`
++    // (GeBackend::present_image), at the guest's flip. `moment` is the real
++    // time the flip's emulated time stands for (Kernel::real_time_of). Returns
++    // whether the flip itself presented the frame (with frame interpolation,
++    // the presents that follow show it).
++    virtual bool present(const gpu::PresentedImage &image, std::uint32_t display_address,
++                         std::optional<std::chrono::steady_clock::time_point> moment) = 0;
++    // Frame interpolation: the kernel calls present_due() while the game's code
++    // runs, and present_until() while it waits for real time.
++    virtual void present_due() = 0;
++    virtual void present_until(std::chrono::steady_clock::time_point wake) = 0;
++    // Drops the presents scheduled, as the game pauses.
++    virtual void pause_interpolation() = 0;
++    // A load running faster than real time: only some flips reach the window.
++    virtual void set_fast_forward(bool on) = 0;
++    // While held, the window keeps showing the frame on screen when hold began.
++    virtual void hold_frame(bool hold) = 0;
++    // Writes the next presented image, with the interface over it, as a BMP.
++    virtual void capture_window(const std::string &path) = 0;
++    // The shape the game's 3D view should have, width over height.
++    [[nodiscard]] virtual float game_aspect() const noexcept = 0;
++    // The refresh rate of the window's display, 0 when unknown.
++    [[nodiscard]] virtual float display_refresh() const noexcept = 0;
++    // The rate frames are presented at now.
++    [[nodiscard]] virtual double frame_rate_now() const noexcept = 0;
++    virtual void set_frame_rate(settings::FrameRate rate) = 0;
++    virtual void set_frame_rate_auto(bool automatic) = 0;
++    virtual void set_window_scale(std::uint32_t scale) = 0;
++    virtual void set_fullscreen(bool fullscreen) = 0;
++    virtual void set_present_mode(settings::PresentMode mode) = 0;
++    [[nodiscard]] virtual bool supports_present_mode(settings::PresentMode mode) const = 0;
++    virtual void set_aspect(settings::Aspect aspect) = 0;
++    virtual void set_sharp_screen(bool sharp) = 0;
++    virtual void set_perf_overlay(bool visible) = 0;
++    [[nodiscard]] virtual std::string device_name() const = 0;
++
++    // Interface (Dear ImGui), on a shell with a window. The caller has made the
++    // ImGui context and its SDL3 platform backend.
++    virtual bool initialize_ui(std::string &error) = 0;
++    virtual void shutdown_ui() = 0;
++    // The renderer backend's NewFrame, before ImGui::NewFrame.
++    virtual void begin_ui_frame() = 0;
++    // Draw data from ImGui::Render, drawn over the next presented image.
++    virtual void set_ui_draw_data(ImDrawData *draw_data) = 0;
++    // Presents a frame outside the game's own flips: the last game frame when
++    // there is one and `show_game` is set, a plain background otherwise, with
++    // the interface over it.
++    virtual void present_ui(bool show_game) = 0;
++};
++
++using ShellFactory = std::function<std::unique_ptr<Shell>()>;
++
++// Adds a shell under `name`; a later registration of the same name replaces it.
++void register_shell(std::string name, ShellFactory factory, std::string description = {});
++// A new, uninitialised shell, or null when no shell has that name.
++[[nodiscard]] std::unique_ptr<Shell> make_shell(std::string_view name);
++// The registered names, in the order they were registered.
++[[nodiscard]] std::vector<std::string> shell_names();
++[[nodiscard]] std::string shell_description(std::string_view name);
++// The shell <prefix>_SHELL names; "vulkan" when it is unset or empty.
++[[nodiscard]] std::string selected_shell();
++
++// One line in a shell's source file registers it before main():
++//   const ShellRegistration registration("headless", "no window", [] { return std::make_unique<HeadlessShell>(); });
++struct ShellRegistration {
++    ShellRegistration(const char *name, const char *description, ShellFactory factory);
++};
++
++} // namespace portablekit::host
+diff --git a/host/shell/vulkan_shell.cpp b/host/shell/vulkan_shell.cpp
+new file mode 100644
+index 0000000..308b2a5
+--- /dev/null
++++ b/host/shell/vulkan_shell.cpp
+@@ -0,0 +1,110 @@
++// The Vulkan shell: the VulkanRenderer behind host::Shell (shell.hpp). The
++// renderer is the window shell and the Vulkan GE backend's draw path at once
++// and is not split; this adapter owns it and forwards each shell call to the
++// renderer method the HLE and the interface called before the seam existed,
++// with the same arguments, so nothing it shows changes.
++//
++// present(): the Vulkan backend's image is the renderer's own target, which
++// VulkanRenderer::present shows for the display address as it always has, so
++// the image is not looked at. Another backend's Cpu image is uploaded into the
++// display address's target first (VulkanRenderer::upload_frame), then shown by
++// the same present: how a non-Vulkan backend's picture reaches the window, at
++// the cost of a copy a frame.
++#include "shell/vulkan_shell.hpp"
++
++#include "gpu/vulkan_renderer.hpp"
++
++#include <memory>
++#include <utility>
++
++namespace portablekit::host {
++namespace {
++
++class VulkanShell final : public Shell {
++public:
++    VulkanShell() : renderer_(std::make_unique<gpu::VulkanRenderer>()) {}
++
++    [[nodiscard]] gpu::VulkanRenderer &renderer() noexcept { return *renderer_; }
++
++    const char *name() const noexcept override { return "vulkan"; }
++    bool initialize(const ShellConfig &config, std::string &error) override {
++        gpu::RendererConfig renderer_config;
++        if (!config.title.empty()) renderer_config.title = config.title;
++        return renderer_->initialize(renderer_config, error);
++    }
++    void shutdown() override { renderer_->shutdown(); }
++    bool available() const noexcept override { return renderer_->available(); }
++    bool has_window() const noexcept override { return renderer_->window() != nullptr; }
++
++    bool pump_events() override { return renderer_->pump_events(); }
++    void sample_pad() override { renderer_->sample_pad(); }
++    PadState pad() const noexcept override { return renderer_->pad(); }
++    MouseMotion take_mouse_motion() noexcept override { return renderer_->take_mouse_motion(); }
++    MouseMotion take_touch_motion() noexcept override { return renderer_->take_touch_motion(); }
++    bool take_touch_menu() noexcept override { return renderer_->take_touch_menu(); }
++    bool touch_controls_visible() const noexcept override { return renderer_->touch_controls_visible(); }
++    const input::touch::Controls &touch_controls() const override { return renderer_->touch_controls(); }
++    bool mouse_captured() const noexcept override { return renderer_->mouse_captured(); }
++    bool quit_requested() const noexcept override { return renderer_->quit_requested(); }
++    void request_quit() noexcept override { renderer_->request_quit(); }
++    void set_game_input(bool enabled) override { renderer_->set_game_input(enabled); }
++    void set_pointer_free(bool free) override { renderer_->set_pointer_free(free); }
++    void set_scripted_key(int position, bool down) override { renderer_->set_scripted_key(position, down); }
++    void set_scripted_input(bool scripted) override { renderer_->set_scripted_input(scripted); }
++    void set_event_hook(std::function<bool(const SDL_Event &)> hook) override {
++        renderer_->set_event_hook(std::move(hook));
++    }
++    SDL_Gamepad *gamepad() const noexcept override { return renderer_->gamepad(); }
++    SDL_Window *window() const noexcept override { return renderer_->window(); }
++
++    bool present(const gpu::PresentedImage &image, std::uint32_t display_address,
++                 std::optional<std::chrono::steady_clock::time_point> moment) override {
++        if (image.api == gpu::ImageApi::Cpu && image.pixels != nullptr)
++            renderer_->upload_frame(display_address, image.pixels, image.width, image.height, image.width);
++        return renderer_->present(display_address, moment);
++    }
++    void present_due() override { renderer_->present_due(); }
++    void present_until(std::chrono::steady_clock::time_point wake) override { renderer_->present_until(wake); }
++    void pause_interpolation() override { renderer_->pause_interpolation(); }
++    void set_fast_forward(bool on) override { renderer_->set_fast_forward(on); }
++    void hold_frame(bool hold) override { renderer_->hold_frame(hold); }
++    void capture_window(const std::string &path) override { renderer_->capture_window(path); }
++    float game_aspect() const noexcept override { return renderer_->game_aspect(); }
++    float display_refresh() const noexcept override { return renderer_->display_refresh(); }
++    double frame_rate_now() const noexcept override { return renderer_->frame_rate_now(); }
++    void set_frame_rate(settings::FrameRate rate) override { renderer_->set_frame_rate(rate); }
++    void set_frame_rate_auto(bool automatic) override { renderer_->set_frame_rate_auto(automatic); }
++    void set_window_scale(std::uint32_t scale) override { renderer_->set_window_scale(scale); }
++    void set_fullscreen(bool fullscreen) override { renderer_->set_fullscreen(fullscreen); }
++    void set_present_mode(settings::PresentMode mode) override { renderer_->set_present_mode(mode); }
++    bool supports_present_mode(settings::PresentMode mode) const override {
++        return renderer_->supports_present_mode(mode);
++    }
++    void set_aspect(settings::Aspect aspect) override { renderer_->set_aspect(aspect); }
++    void set_sharp_screen(bool sharp) override { renderer_->set_sharp_screen(sharp); }
++    void set_perf_overlay(bool visible) override { renderer_->set_perf_overlay(visible); }
++    std::string device_name() const override { return renderer_->device_name(); }
++
++    bool initialize_ui(std::string &error) override { return renderer_->initialize_ui(error); }
++    void shutdown_ui() override { renderer_->shutdown_ui(); }
++    void begin_ui_frame() override { renderer_->begin_ui_frame(); }
++    void set_ui_draw_data(ImDrawData *draw_data) override { renderer_->set_ui_draw_data(draw_data); }
++    void present_ui(bool show_game) override { renderer_->present_ui(show_game); }
++
++private:
++    // Destroyed with the shell; ~VulkanRenderer shuts it down, as it did when
++    // the HLE owned it.
++    std::unique_ptr<gpu::VulkanRenderer> renderer_;
++};
++
++const ShellRegistration registration("vulkan", "an SDL window drawn with Vulkan (the VulkanRenderer)",
++                                     [] { return std::unique_ptr<Shell>(new VulkanShell()); });
++
++} // namespace
++
++gpu::VulkanRenderer *vulkan_renderer(Shell *shell) noexcept {
++    auto *vulkan = dynamic_cast<VulkanShell *>(shell);
++    return vulkan != nullptr ? &vulkan->renderer() : nullptr;
++}
++
++} // namespace portablekit::host
+diff --git a/host/shell/vulkan_shell.hpp b/host/shell/vulkan_shell.hpp
+new file mode 100644
+index 0000000..22b9095
+--- /dev/null
++++ b/host/shell/vulkan_shell.hpp
+@@ -0,0 +1,18 @@
++#pragma once
++
++// The Vulkan shell (vulkan_shell.cpp): the VulkanRenderer's window, pad,
++// interface and presenting behind host::Shell. Built with the renderer.
++#include "shell/shell.hpp"
++
++namespace portablekit::gpu {
++class VulkanRenderer;
++}
++
++namespace portablekit::host {
++
++// The renderer of `shell` when it is the Vulkan shell, else null: for the
++// Vulkan GE backend (BackendConfig::vulkan_shell) and for what needs Vulkan
++// itself (texture packs, the internal scale, the camera probe).
++[[nodiscard]] gpu::VulkanRenderer *vulkan_renderer(Shell *shell) noexcept;
++
++} // namespace portablekit::host
+diff --git a/host/ui/file_browser.cpp b/host/ui/file_browser.cpp
+index a032d5a..9765982 100644
+--- a/host/ui/file_browser.cpp
++++ b/host/ui/file_browser.cpp
+@@ -3,7 +3,7 @@
+ #include "ui/layer.hpp"
+ #include "ui/widgets.hpp"
+ 
+-#include "gpu/vulkan_renderer.hpp"
++#include "shell/shell.hpp"
+ #include "install/user_data.hpp"
+ 
+ #include "imgui.h"
+@@ -262,8 +262,8 @@ FileBrowser::Result FileBrowser::frame(bool back) {
+             delete shared;
+         };
+         const std::string start = install::path_to_utf8(folder_);
+-        if (folders) SDL_ShowOpenFolderDialog(callback, state, Layer::get().renderer().window(), start.c_str(), false);
+-        else SDL_ShowOpenFileDialog(callback, state, Layer::get().renderer().window(), kFilters, 2, start.c_str(), false);
++        if (folders) SDL_ShowOpenFolderDialog(callback, state, Layer::get().shell().window(), start.c_str(), false);
++        else SDL_ShowOpenFileDialog(callback, state, Layer::get().shell().window(), kFilters, 2, start.c_str(), false);
+     }
+     ImGui::NewLine();
+ 
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index b43d0c4..5c51c53 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -3,7 +3,8 @@
+ 
+ #include "ui/layer.hpp"
+ 
+-#include "gpu/vulkan_renderer.hpp"
++#include "shell/script_steps.hpp"
++#include "shell/shell.hpp"
+ 
+ #include <SDL3/SDL.h>
+ 
+@@ -11,7 +12,6 @@
+ #include <cstdint>
+ #include <cstdlib>
+ #include <deque>
+-#include <fstream>
+ #include <iostream>
+ #include <sstream>
+ #include <string>
+@@ -21,18 +21,16 @@
+ namespace portablekit::ui::script {
+ namespace {
+ 
+-// Frames a scripted button stays down: ImGui samples the pad once per frame.
+-constexpr std::uint64_t kHoldFrames = 4u;
++// The grammar is shared with the headless shell (shell/script_steps.hpp).
++using host::script::kHoldFrames;
++using host::script::name_and_frames;
++using host::script::read_live;
++using host::script::sort_steps;
++using host::script::Step;
+ 
+-struct Step {
+-    std::uint64_t frame{};
+-    std::string action;
+-    std::string argument;
+-};
+-
+-struct State {
++// The steps, by frame, and the live file (host::script::Steps).
++struct State : host::script::Steps {
+     bool attached{};
+-    std::deque<Step> steps;
+     std::uint64_t frame{};
+     SDL_Joystick *pad{};
+     // Releases due later: frame, key or pad buttons.
+@@ -45,9 +43,6 @@ struct State {
+     std::vector<Release> releases;
+     // Strings handed to SDL events must outlive them.
+     std::deque<std::string> strings;
+-    // <prefix>_INPUT_LIVE: a file whose appended lines are read as they come.
+-    std::string live_path;
+-    std::streamoff live_offset{};
+ };
+ 
+ State &state() {
+@@ -55,49 +50,32 @@ State &state() {
+     return value;
+ }
+ 
+-std::string trim(const std::string &text) {
+-    const auto first = text.find_first_not_of(" \t");
+-    if (first == std::string::npos) return {};
+-    return text.substr(first, text.find_last_not_of(" \t") - first + 1u);
+-}
+-
+ void push_key(SDL_Keycode key, bool down) {
+     SDL_Event event{};
+     event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+     event.key.timestamp = SDL_GetTicksNS();
+-    event.key.windowID = SDL_GetWindowID(Layer::get().renderer().window());
++    event.key.windowID = SDL_GetWindowID(Layer::get().shell().window());
+     event.key.key = key;
+     event.key.scancode = SDL_GetScancodeFromKey(key, nullptr);
+     event.key.down = down;
+     SDL_PushEvent(&event);
+     // A pushed event does not change SDL's keyboard snapshot, which the game's
+-    // bindings read, so the key is handed to the renderer as well.
+-    Layer::get().renderer().set_scripted_key(static_cast<int>(event.key.scancode), down);
++    // bindings read, so the key is handed to the shell as well.
++    Layer::get().shell().set_scripted_key(static_cast<int>(event.key.scancode), down);
+ }
+ 
+ void push_mouse_button(std::uint8_t button, bool down) {
+     SDL_Event event{};
+     event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+     event.button.timestamp = SDL_GetTicksNS();
+-    event.button.windowID = SDL_GetWindowID(Layer::get().renderer().window());
+-    event.button.which = gpu::kScriptedMouse;
++    event.button.windowID = SDL_GetWindowID(Layer::get().shell().window());
++    event.button.which = host::kScriptedMouse;
+     event.button.button = button;
+     event.button.down = down;
+     event.button.clicks = 1u;
+     SDL_PushEvent(&event);
+ }
+ 
+-// "NAME N": the name, and N frames if the last word is a number.
+-std::pair<std::string, std::uint64_t> name_and_frames(const std::string &argument, std::uint64_t fallback) {
+-    const auto space = argument.find_last_of(' ');
+-    if (space == std::string::npos) return {argument, fallback};
+-    const std::string last = argument.substr(space + 1u);
+-    if (last.empty() || last.find_first_not_of("0123456789") != std::string::npos) return {argument, fallback};
+-    return {argument.substr(0, space), std::max<std::uint64_t>(1u, std::strtoull(last.c_str(), nullptr, 10))};
+-}
+-
+-bool mouse_step(const std::string &action) { return action == "mouse" || action == "click"; }
+-
+ void run(const Step &step) {
+     State &s = state();
+     std::cout << "[script] frame " << s.frame << ": " << step.action << " " << step.argument << std::endl;
+@@ -117,8 +95,8 @@ void run(const Step &step) {
+         SDL_Event event{};
+         event.type = SDL_EVENT_MOUSE_MOTION;
+         event.motion.timestamp = SDL_GetTicksNS();
+-        event.motion.windowID = SDL_GetWindowID(Layer::get().renderer().window());
+-        event.motion.which = gpu::kScriptedMouse;
++        event.motion.windowID = SDL_GetWindowID(Layer::get().shell().window());
++        event.motion.which = host::kScriptedMouse;
+         event.motion.xrel = dx;
+         event.motion.yrel = dy;
+         SDL_PushEvent(&event);
+@@ -165,20 +143,20 @@ void run(const Step &step) {
+     } else if (step.action == "text") {
+         SDL_Event event{};
+         event.type = SDL_EVENT_TEXT_INPUT;
+-        event.text.windowID = SDL_GetWindowID(Layer::get().renderer().window());
++        event.text.windowID = SDL_GetWindowID(Layer::get().shell().window());
+         event.text.text = s.strings.emplace_back(step.argument).c_str();
+         SDL_PushEvent(&event);
+     } else if (step.action == "drop") {
+         SDL_Event event{};
+         event.type = SDL_EVENT_DROP_FILE;
+-        event.drop.windowID = SDL_GetWindowID(Layer::get().renderer().window());
++        event.drop.windowID = SDL_GetWindowID(Layer::get().shell().window());
+         event.drop.data = s.strings.emplace_back(step.argument).c_str();
+         SDL_PushEvent(&event);
+     } else if (step.action == "shot") {
+         const char *dir = portablekit::env("SCREENSHOT_DIR");
+         const std::string name = step.argument.empty() ? "frame_" + std::to_string(s.frame) : step.argument;
+-        Layer::get().renderer().capture_window((dir != nullptr ? std::string(dir) : std::string(".")) + "/" + name +
+-                                               ".bmp");
++        Layer::get().shell().capture_window((dir != nullptr ? std::string(dir) : std::string(".")) + "/" + name +
++                                            ".bmp");
+     } else if (step.action == "quit") {
+         SDL_Event event{};
+         event.type = SDL_EVENT_QUIT;
+@@ -188,48 +166,6 @@ void run(const Step &step) {
+     }
+ }
+ 
+-// Parses `frame:action argument`; `base` is added to the frame.
+-bool parse_step(std::string item, std::uint64_t base, Step &step) {
+-    item = trim(item);
+-    const auto colon = item.find(':');
+-    if (item.empty() || colon == std::string::npos) return false;
+-    step.frame = base + std::strtoull(item.substr(0, colon).c_str(), nullptr, 10);
+-    const std::string rest = trim(item.substr(colon + 1u));
+-    const auto space = rest.find(' ');
+-    step.action = rest.substr(0, space);
+-    step.argument = space == std::string::npos ? std::string{} : trim(rest.substr(space + 1u));
+-    return true;
+-}
+-
+-void sort_steps(State &s) {
+-    std::stable_sort(s.steps.begin(), s.steps.end(),
+-                     [](const Step &a, const Step &b) { return a.frame < b.frame; });
+-}
+-
+-// Reads the lines appended to the live file since the last call. Their frames
+-// count from now, so a line `30:pad a` presses ○ half a second after it is read.
+-void read_live(State &s) {
+-    std::ifstream file(s.live_path, std::ios::binary);
+-    if (!file) return;
+-    file.seekg(0, std::ios::end);
+-    const std::streamoff size = file.tellg();
+-    if (size < s.live_offset) s.live_offset = 0;  // the file was replaced
+-    if (size == s.live_offset) return;
+-    file.seekg(s.live_offset);
+-    std::string line;
+-    bool added = false;
+-    while (std::getline(file, line)) {
+-        if (file.eof()) break;  // an incomplete last line: read it next time
+-        s.live_offset = file.tellg();
+-        Step step;
+-        if (parse_step(line, s.frame, step)) {
+-            s.steps.push_back(step);
+-            added = true;
+-        }
+-    }
+-    if (added) sort_steps(s);
+-}
+-
+ void attach_pad(State &s);
+ 
+ } // namespace
+@@ -240,30 +176,9 @@ void attach() {
+     s.attached = true;
+     bool uses_pad = false;
+     bool uses_mouse = false;
+-    if (const char *live = portablekit::env("INPUT_LIVE"); live != nullptr && *live != '\0') {
+-        s.live_path = live;
+-        // Only what is appended after start-up counts.
+-        std::ifstream file(s.live_path, std::ios::binary | std::ios::ate);
+-        if (file) s.live_offset = file.tellg();
+-        uses_pad = true;
+-        uses_mouse = true;
+-        std::cout << "[script] reading live input from " << s.live_path << std::endl;
+-    }
+-    if (const char *text = portablekit::env("INPUT_SCRIPT"); text != nullptr) {
+-        std::stringstream list(text);
+-        std::string item;
+-        while (std::getline(list, item, ';')) {
+-            Step step;
+-            if (!parse_step(item, 0u, step)) continue;
+-            uses_pad = uses_pad || step.action == "pad" || step.action == "axis";
+-            uses_mouse = uses_mouse || mouse_step(step.action);
+-            s.steps.push_back(step);
+-        }
+-        sort_steps(s);
+-        std::cout << "[script] " << s.steps.size() << " steps" << std::endl;
+-    }
++    host::script::load(s, uses_pad, uses_mouse);
+     if (uses_pad) attach_pad(s);
+-    if (uses_mouse) Layer::get().renderer().set_scripted_input(true);
++    if (uses_mouse) Layer::get().shell().set_scripted_input(true);
+ }
+ 
+ namespace {
+@@ -295,7 +210,7 @@ void tick() {
+     State &s = state();
+     if (s.steps.empty() && s.releases.empty() && s.live_path.empty()) return;
+     ++s.frame;
+-    if (!s.live_path.empty() && s.frame % 10u == 0u) read_live(s);
++    if (!s.live_path.empty() && s.frame % 10u == 0u) read_live(s, s.frame);
+     for (auto it = s.releases.begin(); it != s.releases.end();) {
+         if (it->frame > s.frame) {
+             ++it;
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index 2d00338..7107eaf 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -34,6 +34,13 @@
+ // `echo "0:shot now" >> file` captures the window within a few frames. It
+ // always connects the virtual pad. Used to drive two instances side by side,
+ // for example in ad hoc tests.
++//
++// This file drives a shell with a window. The headless shell
++// (<prefix>_SHELL=headless or <prefix>_NO_RENDER; shell/headless_shell.cpp)
++// reads the same script and live file at pad level, one frame per flip:
++// pad, axis, shot (the GE backend's picture) and quit; key, mouse, click,
++// text and drop are reported and ignored. The grammar both read is in
++// shell/script_steps.hpp.
+ namespace portablekit {
+ 
+ // The name the virtual gamepad reports, so the renderer can tell it from a
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index cabfd80..ce2a642 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -6,10 +6,10 @@
+ #include "ui/input_script.hpp"
+ #include "ui/widgets.hpp"
+ 
+-#include "gpu/vulkan_renderer.hpp"
+ #include "input/bindings.hpp"
+ #include "install/user_data.hpp"
+ #include "settings/settings.hpp"
++#include "shell/shell.hpp"
+ 
+ #include "backends/imgui_impl_sdl3.h"
+ #include "imgui.h"
+@@ -133,8 +133,10 @@ Layer &Layer::get() {
+     return layer;
+ }
+ 
+-bool Layer::attach(gpu::VulkanRenderer &renderer) {
+-    if (renderer_ != nullptr) return true;
++bool Layer::attach(host::Shell &shell) {
++    if (shell_ != nullptr) return true;
++    // ImGui's SDL3 platform backend needs a window.
++    if (!shell.has_window()) return false;
+     IMGUI_CHECKVERSION();
+     ImGui::CreateContext();
+     ImGuiIO &io = ImGui::GetIO();
+@@ -144,7 +146,7 @@ bool Layer::attach(gpu::VulkanRenderer &renderer) {
+     // Keep the focused row highlighted: on a gamepad there is no pointer.
+     io.ConfigNavCursorVisibleAlways = true;
+     io.ConfigNavEscapeClearFocusItem = false;
+-    if (!ImGui_ImplSDL3_InitForVulkan(renderer.window())) {
++    if (!ImGui_ImplSDL3_InitForVulkan(shell.window())) {
+         std::cout << "[ui] ImGui_ImplSDL3_InitForVulkan failed; no menu\n";
+         ImGui::DestroyContext();
+         return false;
+@@ -153,18 +155,18 @@ bool Layer::attach(gpu::VulkanRenderer &renderer) {
+     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
+     load_fonts();
+     std::string error;
+-    if (!renderer.initialize_ui(error)) {
++    if (!shell.initialize_ui(error)) {
+         std::cout << "[ui] cannot draw the interface (" << error << "); no menu\n";
+         ImGui_ImplSDL3_Shutdown();
+         ImGui::DestroyContext();
+         return false;
+     }
+-    renderer.set_event_hook([this](const SDL_Event &event) { return handle_event(event); });
+-    renderer_ = &renderer;
++    shell.set_event_hook([this](const SDL_Event &event) { return handle_event(event); });
++    shell_ = &shell;
+     // While the game runs the pointer may be captured for it, hidden by SDL;
+     // the overlays drawn then must not show it again.
+     io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+-    if (renderer.gamepad() != nullptr) device_ = InputDevice::Gamepad;
++    if (shell.gamepad() != nullptr) device_ = InputDevice::Gamepad;
+     script::attach();
+     return true;
+ }
+@@ -179,8 +181,8 @@ void Layer::set_interactive(bool interactive) {
+     io.ClearInputKeys();
+     if (interactive) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+     else io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+-    // A screen needs the pointer; the renderer frees it before the next frame.
+-    if (renderer_ != nullptr) renderer_->set_pointer_free(interactive);
++    // A screen needs the pointer; the shell frees it before the next frame.
++    if (shell_ != nullptr) shell_->set_pointer_free(interactive);
+     menu_toggle_ = false;
+     back_ = false;
+     capturing_binding_ = false;
+@@ -321,7 +323,7 @@ void Layer::apply_theme() {
+ }
+ 
+ void Layer::begin_frame() {
+-    renderer_->begin_ui_frame();
++    shell_->begin_ui_frame();
+     ImGui_ImplSDL3_NewFrame();
+     ImGuiIO &io = ImGui::GetIO();
+     io.ConfigNavSwapGamepadButtons = !confirm_south();
+@@ -335,19 +337,19 @@ void Layer::begin_frame() {
+ 
+ void Layer::end_frame() {
+     ImGui::Render();
+-    renderer_->set_ui_draw_data(ImGui::GetDrawData());
++    shell_->set_ui_draw_data(ImGui::GetDrawData());
+ }
+ 
+ bool Layer::run(const std::function<bool()> &frame, bool show_game) {
+     for (;;) {
+         const Clock::time_point start = Clock::now();
+         script::tick();
+-        if (!renderer_->pump_events()) window_closed_ = true;
++        if (!shell_->pump_events()) window_closed_ = true;
+         if (window_closed_) return false;
+         begin_frame();
+         const bool keep_going = frame();
+         end_frame();
+-        renderer_->present_ui(show_game);
++        shell_->present_ui(show_game);
+         if (!keep_going) return true;
+         const Clock::duration spent = Clock::now() - start;
+         if (spent < kMinFrameTime) std::this_thread::sleep_for(kMinFrameTime - spent);
+diff --git a/host/ui/layer.hpp b/host/ui/layer.hpp
+index 30ef180..4cc77e0 100644
+--- a/host/ui/layer.hpp
++++ b/host/ui/layer.hpp
+@@ -10,12 +10,12 @@
+ union SDL_Event;
+ struct ImFont;
+ 
+-namespace portablekit::gpu {
+-class VulkanRenderer;
++namespace portablekit::host {
++class Shell;
+ }
+ 
+ // Shared machinery of the interface screens: the Dear ImGui context on the
+-// renderer's window, the theme and fonts scaled to the window, and input.
++// shell's window, the theme and fonts scaled to the window, and input.
+ //
+ // Input. While a screen runs (the menu, the setup) it is "interactive": window
+ // events go to ImGui and none reach the game. While the game runs, events are
+@@ -33,9 +33,10 @@ class Layer {
+ public:
+     static Layer &get();
+ 
+-    bool attach(gpu::VulkanRenderer &renderer);
+-    [[nodiscard]] bool attached() const noexcept { return renderer_ != nullptr; }
+-    [[nodiscard]] gpu::VulkanRenderer &renderer() noexcept { return *renderer_; }
++    // Only a shell with a window has an interface.
++    bool attach(host::Shell &shell);
++    [[nodiscard]] bool attached() const noexcept { return shell_ != nullptr; }
++    [[nodiscard]] host::Shell &shell() noexcept { return *shell_; }
+ 
+     void set_interactive(bool interactive);
+ 
+@@ -87,7 +88,7 @@ private:
+     void resolve_escape();
+     void apply_theme();
+ 
+-    gpu::VulkanRenderer *renderer_{};
++    host::Shell *shell_{};
+     bool interactive_{};
+     bool window_closed_{};
+     InputDevice device_{InputDevice::Keyboard};
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index b71f547..1d1a682 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -20,7 +20,9 @@
+ #include "audio/audio_sink.hpp"
+ #include "gpu/frame_pacing.hpp"
+ #include "gpu/vulkan_renderer.hpp"
++#include "hle/hle_common.hpp"
+ #include "profile.hpp"
++#include "shell/shell.hpp"
+ #include "input/bindings.hpp"
+ #include "install/installer.hpp"
+ #include "install/user_data.hpp"
+@@ -123,7 +125,11 @@ private:
+     void system();
+     bool confirm_dialog();
+ 
+-    gpu::VulkanRenderer &renderer() { return Layer::get().renderer(); }
++    host::Shell &shell() { return Layer::get().shell(); }
++    // The rows that are the Vulkan renderer's own (the resolution, the
++    // texture filter, texture packs) need it; under another shell they are
++    // left out.
++    gpu::VulkanRenderer *renderer() { return active_renderer(); }
+ 
+     bool paused_{};  // the game is paused behind the menu, rather than running
+     int tab_{};
+@@ -202,12 +208,12 @@ void Menu::video() {
+     if (texture_pack_screen(back_)) return;
+     settings::Settings &s = settings::current();
+     section("Picture");
+-    {
++    if (renderer() != nullptr) {
+         RowOptions o = options_for("video.internal_scale",
+                                    "Auto draws the game at the window's own size and follows it (at most 1632 "
+                                    "lines). ×1 to ×6 draw 272 lines per step, 480×272 times the step unless the "
+                                    "aspect ratio is Fill. Higher is sharper and needs more from the GPU.");
+-        const std::array<std::uint32_t, 2> size = renderer().target_size();
++        const std::array<std::uint32_t, 2> size = renderer()->target_size();
+         const std::string drawn = std::to_string(size[0]) + "×" + std::to_string(size[1]);
+         const std::string value =
+             (s.internal_scale == 0u ? std::string("Auto") : "×" + std::to_string(s.internal_scale)) + "   " + drawn;
+@@ -217,7 +223,7 @@ void Menu::video() {
+             const int limit = std::max<int>(kMenuMaxInternalScale, static_cast<int>(s.internal_scale));
+             s.internal_scale =
+                 static_cast<std::uint32_t>(cycle(static_cast<int>(s.internal_scale), delta, limit + 1));
+-            renderer().set_internal_scale(s.internal_scale);
++            renderer()->set_internal_scale(s.internal_scale);
+             settings::save();
+         }
+     }
+@@ -229,7 +235,7 @@ void Menu::video() {
+                        options_for("video.fullscreen", "Fill the screen, or play in a window you can resize."));
+         if (delta != 0) {
+             s.fullscreen = !s.fullscreen;
+-            renderer().set_fullscreen(s.fullscreen);
++            shell().set_fullscreen(s.fullscreen);
+             settings::save();
+         }
+     }
+@@ -243,7 +249,7 @@ void Menu::video() {
+         if (const int delta = choice_row("Window size", value, o)) {
+             s.window_scale = static_cast<std::uint32_t>(
+                 cycle(static_cast<int>(s.window_scale) - 1, delta, static_cast<int>(settings::kMaxWindowScale)) + 1);
+-            renderer().set_window_scale(s.window_scale);
++            shell().set_window_scale(s.window_scale);
+             settings::save();
+         }
+     }
+@@ -261,7 +267,7 @@ void Menu::video() {
+                   : "");
+         if (const int delta = choice_row("Aspect ratio", kAspects[current], options_for("video.aspect", description))) {
+             s.aspect = static_cast<settings::Aspect>(cycle(current, delta, fill ? 3 : 2));
+-            renderer().set_aspect(s.aspect);
++            shell().set_aspect(s.aspect);
+             settings::save();
+         }
+     }
+@@ -269,25 +275,26 @@ void Menu::video() {
+                    options_for("video.sharp_screen", "How the finished picture is scaled to the window: smooth "
+                                                      "(bilinear) or sharp (nearest pixel)."))) {
+         s.sharp_screen = !s.sharp_screen;
+-        renderer().set_sharp_screen(s.sharp_screen);
++        shell().set_sharp_screen(s.sharp_screen);
+         settings::save();
+     }
+-    if (choice_row("Texture filter", s.sharp_textures ? "Sharp" : "Smooth",
++    if (renderer() != nullptr &&
++        choice_row("Texture filter", s.sharp_textures ? "Sharp" : "Smooth",
+                    options_for("video.sharp_textures", "How the game's textures are sampled: smooth (bilinear) or "
+                                                        "sharp (nearest texel)."))) {
+         s.sharp_textures = !s.sharp_textures;
+-        renderer().set_sharp_textures(s.sharp_textures);
++        renderer()->set_sharp_textures(s.sharp_textures);
+         settings::save();
+     }
+-    {
++    if (renderer() != nullptr) {
+         RowOptions o = options_for("video.texture_pack",
+                                    std::string("Draws an HD texture pack in PPSSPP's format from textures/") +
+                                        portablekit::game().disc_id + " in the data folder instead of the game's textures.");
+         // The footer shows the note under the description: what is loaded,
+         // or where the pack was looked for.
+         if (o.note.empty()) {
+-            const std::string status = renderer().texture_pack_status();
+-            o.note = status == "Not installed" ? "No pack in " + renderer().texture_pack_folder() : status;
++            const std::string status = renderer()->texture_pack_status();
++            o.note = status == "Not installed" ? "No pack in " + renderer()->texture_pack_folder() : status;
+             // A pack used in place that has moved: its path is on the "Pack
+             // used from" row below; the footer has room for its name only.
+             if (status.rfind("Folder missing: ", 0) == 0)
+@@ -296,11 +303,11 @@ void Menu::video() {
+         }
+         if (choice_row("Texture pack", s.texture_pack ? "On" : "Off", o)) {
+             s.texture_pack = !s.texture_pack;
+-            renderer().set_texture_pack(s.texture_pack);
++            renderer()->set_texture_pack(s.texture_pack);
+             settings::save();
+         }
+     }
+-    texture_pack_rows();
++    if (renderer() != nullptr) texture_pack_rows();
+     section("Timing");
+     {
+         struct Mode {
+@@ -308,9 +315,9 @@ void Menu::video() {
+             const char *name;
+         };
+         std::vector<Mode> modes{{settings::PresentMode::Fifo, "On"}};
+-        if (renderer().supports_present_mode(settings::PresentMode::Mailbox))
++        if (shell().supports_present_mode(settings::PresentMode::Mailbox))
+             modes.push_back({settings::PresentMode::Mailbox, "Off (mailbox)"});
+-        if (renderer().supports_present_mode(settings::PresentMode::Immediate))
++        if (shell().supports_present_mode(settings::PresentMode::Immediate))
+             modes.push_back({settings::PresentMode::Immediate, "Off (immediate)"});
+         int current = 0;
+         for (std::size_t i = 0; i < modes.size(); ++i)
+@@ -320,7 +327,7 @@ void Menu::video() {
+                 options_for("video.present_mode", "On waits for the display's refresh and never tears. Off shows "
+                                                   "each frame at once; the game's speed is the same either way."))) {
+             s.present_mode = modes[static_cast<std::size_t>(cycle(current, delta, static_cast<int>(modes.size())))].mode;
+-            renderer().set_present_mode(s.present_mode);
++            shell().set_present_mode(s.present_mode);
+             settings::save();
+         }
+     }
+@@ -342,19 +349,19 @@ void Menu::video() {
+         }
+         const int current = static_cast<int>(s.frame_rate);
+         std::string value = kRates[current];
+-        if (s.frame_rate == settings::FrameRate::Display && renderer().display_refresh() > 0.0f)
+-            value += "  " + std::to_string(static_cast<int>(std::lround(renderer().display_refresh()))) + " Hz";
++        if (s.frame_rate == settings::FrameRate::Display && shell().display_refresh() > 0.0f)
++            value += "  " + std::to_string(static_cast<int>(std::lround(shell().display_refresh()))) + " Hz";
+         if (s.frame_rate != settings::FrameRate::Fps30 && !o.disabled) {
+             // Vsync caps the rate at the display's, and the renderer steps
+             // down rather than slow the game.
+-            const double now = renderer().frame_rate_now();
++            const double now = shell().frame_rate_now();
+             const double chosen = s.frame_rate == settings::FrameRate::Display
+-                                      ? static_cast<double>(renderer().display_refresh())
++                                      ? static_cast<double>(shell().display_refresh())
+                                       : std::stod(kRates[current]);
+             if (now + 0.5 < chosen) {
+                 value += " (running at " + std::to_string(static_cast<int>(std::lround(now))) + ")";
+-                o.description = s.present_mode == settings::PresentMode::Fifo && renderer().display_refresh() > 0.0f &&
+-                                        now + 0.5 >= static_cast<double>(renderer().display_refresh())
++                o.description = s.present_mode == settings::PresentMode::Fifo && shell().display_refresh() > 0.0f &&
++                                        now + 0.5 >= static_cast<double>(shell().display_refresh())
+                                     ? "With Vsync on, no faster than the display refreshes."
+                                     : "Lowered to keep the game at full speed; it tries the chosen rate again later.";
+             }
+@@ -364,7 +371,7 @@ void Menu::video() {
+             do next = cycle(next, delta, 6);
+             while (!offered(next) && next != current);
+             s.frame_rate = static_cast<settings::FrameRate>(next);
+-            renderer().set_frame_rate(s.frame_rate);
++            shell().set_frame_rate(s.frame_rate);
+             settings::save();
+         }
+     }
+@@ -375,7 +382,7 @@ void Menu::video() {
+         if (s.unthrottled || s.frame_rate == settings::FrameRate::Fps30) o.disabled = true;
+         if (choice_row("Lower when behind", s.frame_rate_auto ? "On" : "Off", o)) {
+             s.frame_rate_auto = !s.frame_rate_auto;
+-            renderer().set_frame_rate_auto(s.frame_rate_auto);
++            shell().set_frame_rate_auto(s.frame_rate_auto);
+             settings::save();
+         }
+     }
+@@ -407,7 +414,7 @@ void Menu::video() {
+                 options_for("video.performance", "Frame times and speed in the top-left corner, and a [perf] line "
+                                                  "per second on the console. F3 shows or hides the overlay."))) {
+             s.perf = static_cast<settings::PerfDisplay>(cycle(current, delta, 4));
+-            renderer().set_perf_overlay(perf::options().overlay);
++            shell().set_perf_overlay(perf::options().overlay);
+             settings::save();
+         }
+     }
+@@ -431,17 +438,17 @@ void Menu::video() {
+         restore("video.unthrottled", s.unthrottled, d.unthrottled);
+         restore("video.fast_loading", s.fast_loading, d.fast_loading);
+         restore("video.performance", s.perf, d.perf);
+-        renderer().set_internal_scale(s.internal_scale);
+-        renderer().set_fullscreen(s.fullscreen);
+-        renderer().set_window_scale(s.window_scale);
+-        renderer().set_aspect(s.aspect);
+-        renderer().set_sharp_screen(s.sharp_screen);
+-        renderer().set_sharp_textures(s.sharp_textures);
+-        renderer().set_texture_pack(s.texture_pack);
+-        renderer().set_present_mode(s.present_mode);
+-        renderer().set_frame_rate(s.frame_rate);
+-        renderer().set_frame_rate_auto(s.frame_rate_auto);
+-        renderer().set_perf_overlay(perf::options().overlay);
++        if (renderer() != nullptr) renderer()->set_internal_scale(s.internal_scale);
++        shell().set_fullscreen(s.fullscreen);
++        shell().set_window_scale(s.window_scale);
++        shell().set_aspect(s.aspect);
++        shell().set_sharp_screen(s.sharp_screen);
++        if (renderer() != nullptr) renderer()->set_sharp_textures(s.sharp_textures);
++        if (renderer() != nullptr) renderer()->set_texture_pack(s.texture_pack);
++        shell().set_present_mode(s.present_mode);
++        shell().set_frame_rate(s.frame_rate);
++        shell().set_frame_rate_auto(s.frame_rate_auto);
++        shell().set_perf_overlay(perf::options().overlay);
+         settings::save();
+     }
+ }
+@@ -581,7 +588,7 @@ void Menu::controls() {
+     settings::Settings &s = settings::current();
+     section("Gamepad");
+     {
+-        SDL_Gamepad *pad = renderer().gamepad();
++        SDL_Gamepad *pad = shell().gamepad();
+         const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
+         info_row("Connected", pad == nullptr ? "No gamepad; the keyboard and mouse drive the game"
+                                              : (name != nullptr ? name : "Gamepad"));
+@@ -1258,7 +1265,7 @@ void Menu::system() {
+     info_row("Data folder", data_dir);
+     if (!savedata::memory_stick().empty())
+         info_row("Saves folder", install::path_to_utf8(savedata::memory_stick() / "PSP" / "SAVEDATA"));
+-    info_row("Graphics", "Vulkan on " + renderer().device_name());
++    info_row("Graphics", "Vulkan on " + shell().device_name());
+     info_row("Interface", std::string("Dear ImGui ") + IMGUI_VERSION);
+ }
+ 
+@@ -1396,7 +1403,7 @@ void note_menu_closed(bool quit) {
+ 
+ } // namespace
+ 
+-bool attach(gpu::VulkanRenderer &renderer) { return Layer::get().attach(renderer); }
++bool attach(host::Shell &shell) { return Layer::get().attach(shell); }
+ 
+ namespace {
+ bool (*g_status_overlay_visible)() = nullptr;
+@@ -1423,11 +1430,11 @@ void draw_over_game() {
+     }
+     const double hint_left = menu || settings::current().menu_hint_seen ? -1.0 : hint_seconds_left();
+     const bool overlay = network_overlay();
+-    const bool touch = !menu && layer.renderer().touch_controls_visible();
++    const bool touch = !menu && layer.shell().touch_controls_visible();
+     const bool status = g_status_overlay_visible != nullptr && g_status_overlay_visible();
+     if (hint_left <= 0.0 && !overlay && !menu && !touch && !status) return;
+     layer.begin_frame();
+-    if (touch) draw_touch_controls(layer.renderer().touch_controls(), settings::current().touch_opacity);
++    if (touch) draw_touch_controls(layer.shell().touch_controls(), settings::current().touch_opacity);
+     if (hint_left > 0.0) draw_hint(hint_left);
+     if (overlay) draw_network_overlay();
+     if (status) g_status_overlay_draw();
+@@ -1435,7 +1442,7 @@ void draw_over_game() {
+         const bool quit = menu->quit() || layer.window_closed();
+         menu.reset();
+         layer.set_interactive(false);
+-        layer.renderer().set_game_input(true);
++        layer.shell().set_game_input(true);
+         note_menu_closed(quit);
+         if (quit) quit_requested() = true;
+     }
+@@ -1452,7 +1459,7 @@ void open_menu_over_game() {
+     if (menu) return;
+     Layer &layer = Layer::get();
+     note_menu_opened(false);
+-    layer.renderer().set_game_input(false);
++    layer.shell().set_game_input(false);
+     layer.set_interactive(true);
+     menu.emplace(false);
+ }
+@@ -1465,19 +1472,19 @@ bool menu_requested() {
+     Layer &layer = Layer::get();
+     if (!layer.attached() || text_input_open()) return false;
+     // The on-screen menu button, then Esc or L3+R3.
+-    const bool touched = layer.renderer().take_touch_menu();
++    const bool touched = layer.shell().take_touch_menu();
+     return layer.take_menu_toggle() || touched;
+ }
+ 
+ bool run_menu() {
+     Layer &layer = Layer::get();
+     note_menu_opened(true);
+-    layer.renderer().set_game_input(false);
++    layer.shell().set_game_input(false);
+     layer.set_interactive(true);
+     Menu menu(true);
+     const bool window_open = layer.run([&] { return menu.frame(); }, true);
+     layer.set_interactive(false);
+-    layer.renderer().set_game_input(true);
++    layer.shell().set_game_input(true);
+     note_menu_closed(menu.quit());
+     return window_open && !menu.quit();
+ }
+diff --git a/host/ui/setup_screens.cpp b/host/ui/setup_screens.cpp
+index d440b66..aadf58b 100644
+--- a/host/ui/setup_screens.cpp
++++ b/host/ui/setup_screens.cpp
+@@ -475,13 +475,17 @@ ProblemAnswer run_problem(const std::string &title, const std::string &message,
+ 
+ } // namespace
+ 
++// ensure_renderer() makes the shell (and the backend) the first time; the
++// interface is attached only to a shell with a window.
+ std::unique_ptr<install::InstallerUi> make_setup_screens() {
+-    if (ensure_renderer() == nullptr || !Layer::get().attached()) return nullptr;
++    (void)ensure_renderer();
++    if (!Layer::get().attached()) return nullptr;
+     return std::make_unique<SetupScreens>();
+ }
+ 
+ ProblemAnswer show_problem(const std::string &title, const std::string &message, bool ask_setup) {
+-    if (ensure_renderer() == nullptr || !Layer::get().attached()) return ProblemAnswer::Unavailable;
++    (void)ensure_renderer();
++    if (!Layer::get().attached()) return ProblemAnswer::Unavailable;
+     return run_problem(title, message, ask_setup);
+ }
+ 
+diff --git a/host/ui/text_input.cpp b/host/ui/text_input.cpp
+index e47b6f7..64c8c12 100644
+--- a/host/ui/text_input.cpp
++++ b/host/ui/text_input.cpp
+@@ -3,7 +3,7 @@
+ #include "ui/layer.hpp"
+ #include "ui/widgets.hpp"
+ 
+-#include "gpu/vulkan_renderer.hpp"
++#include "shell/shell.hpp"
+ 
+ #include "imgui.h"
+ 
+@@ -169,7 +169,7 @@ char32_t key_char(const Key &key) {
+ // a system keyboard over ours unless the player asked for Steam's.
+ void start_system_text_input(bool show_screen_keyboard) {
+     Keyboard &k = keyboard();
+-    SDL_Window *window = Layer::get().renderer().window();
++    SDL_Window *window = Layer::get().shell().window();
+     if (window == nullptr) return;
+     if (SDL_TextInputActive(window)) SDL_StopTextInput(window);
+     SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, show_screen_keyboard ? "1" : "0");
+@@ -179,7 +179,7 @@ void start_system_text_input(bool show_screen_keyboard) {
+ 
+ void stop_system_text_input() {
+     Keyboard &k = keyboard();
+-    SDL_Window *window = Layer::get().renderer().window();
++    SDL_Window *window = Layer::get().shell().window();
+     if (window != nullptr && SDL_TextInputActive(window)) SDL_StopTextInput(window);
+     SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD,
+                 k.saved_screen_keyboard_hint.empty() ? nullptr : k.saved_screen_keyboard_hint.c_str());
+@@ -210,8 +210,8 @@ void finish(bool confirmed) {
+     if (k.over_game) {
+         Layer &layer = Layer::get();
+         layer.set_interactive(false);
+-        layer.renderer().set_game_input(true);
+-        layer.renderer().hold_frame(false);
++        layer.shell().set_game_input(true);
++        layer.shell().hold_frame(false);
+     }
+     std::optional<std::string> result;
+     if (confirmed) result = encode_utf8(k.text);
+@@ -502,8 +502,8 @@ bool open_game_text_input(TextInputRequest request, TextInputDone on_done) {
+     if (!layer.attached()) return false;
+     // The frame on screen now stays behind the keyboard: the game blanks the
+     // screen while the PSP's own keyboard would cover it.
+-    layer.renderer().hold_frame(true);
+-    layer.renderer().set_game_input(false);
++    layer.shell().hold_frame(true);
++    layer.shell().set_game_input(false);
+     layer.set_interactive(true);
+     begin(std::move(request), std::move(on_done), true);
+     return true;
+diff --git a/host/ui/texture_pack_screen.cpp b/host/ui/texture_pack_screen.cpp
+index bdbe823..37f18a2 100644
+--- a/host/ui/texture_pack_screen.cpp
++++ b/host/ui/texture_pack_screen.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include "gpu/texture_pack_import.hpp"
+ #include "gpu/vulkan_renderer.hpp"
++#include "hle/hle_common.hpp"
+ #include "profile.hpp"
+ #include "install/user_data.hpp"
+ #include "settings/settings.hpp"
+@@ -78,7 +79,9 @@ float px(float value) { return std::round(value * Layer::get().scale()); }
+ 
+ std::string utf8(const fs::path &path) { return install::path_to_utf8(path); }
+ 
+-gpu::VulkanRenderer &renderer() { return Layer::get().renderer(); }
++// The texture pack is the Vulkan renderer's own: the menu offers these rows
++// and this screen only under the Vulkan shell (active_renderer() not null).
++gpu::VulkanRenderer &renderer() { return *active_renderer(); }
+ 
+ fs::path textures_root() { return gpu::VulkanRenderer::textures_root(); }
+ 
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index 3a9e140..7372166 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -6,8 +6,8 @@
+ // The port's own interface, drawn with Dear ImGui over the game's window: the
+ // in-game menu and the first-run setup screens. Only builds with the renderer
+ // have it.
+-namespace portablekit::gpu {
+-class VulkanRenderer;
++namespace portablekit::host {
++class Shell;
+ }
+ namespace portablekit::install {
+ class InstallerUi;
+@@ -15,9 +15,9 @@ class InstallerUi;
+ 
+ namespace portablekit::ui {
+ 
+-// Puts the interface on the renderer's window. False when it cannot start;
+-// the game then runs without a menu.
+-bool attach(gpu::VulkanRenderer &renderer);
++// Puts the interface on the shell's window. False when it cannot start (or
++// the shell has no window); the game then runs without a menu.
++bool attach(host::Shell &shell);
+ 
+ // Before each game frame is presented: draws what the interface shows over
+ // the running game (the hint that says how to open the menu, the network
+diff --git a/host/ui/widgets.cpp b/host/ui/widgets.cpp
+index dfd5014..c9f92fd 100644
+--- a/host/ui/widgets.cpp
++++ b/host/ui/widgets.cpp
+@@ -2,7 +2,7 @@
+ 
+ #include "ui/layer.hpp"
+ 
+-#include "gpu/vulkan_renderer.hpp"
++#include "shell/shell.hpp"
+ 
+ #include "imgui_internal.h"
+ 
+@@ -134,7 +134,7 @@ float draw_face(ImDrawList *draw, ImVec2 at, SDL_GamepadButton button) {
+     const float radius = font() * 0.62f;
+     const ImVec2 center{at.x + radius, at.y + font() * 0.5f};
+     draw->AddCircleFilled(center, radius, colors::kAccent);
+-    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().renderer().gamepad() : nullptr;
++    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().shell().gamepad() : nullptr;
+     SDL_GamepadButtonLabel label = pad != nullptr ? SDL_GetGamepadButtonLabel(pad, button)
+                                                   : SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN;
+     if (label == SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN) {
+@@ -176,7 +176,7 @@ float draw_face(ImDrawList *draw, ImVec2 at, SDL_GamepadButton button) {
+ }
+ 
+ const char *shoulder_name(bool right) {
+-    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().renderer().gamepad() : nullptr;
++    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().shell().gamepad() : nullptr;
+     const SDL_GamepadType type = pad != nullptr ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN;
+     const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
+     const bool playstation = type == SDL_GAMEPAD_TYPE_PS3 || type == SDL_GAMEPAD_TYPE_PS4 ||
+@@ -191,7 +191,7 @@ const char *shoulder_name(bool right) {
+ 
+ // The button left of the pad's centre, as the pad in use names it.
+ const char *select_name() {
+-    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().renderer().gamepad() : nullptr;
++    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().shell().gamepad() : nullptr;
+     switch (pad != nullptr ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN) {
+     case SDL_GAMEPAD_TYPE_PS3: return "Select";
+     case SDL_GAMEPAD_TYPE_PS4: return "Share";

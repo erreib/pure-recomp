@@ -21,3 +21,5 @@ vendor/
 # os / python
 .DS_Store
 __pycache__/
+/*.bmp
+/*.png
