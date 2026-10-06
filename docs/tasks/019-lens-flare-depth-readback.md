@@ -1,6 +1,6 @@
 # 019: Depth write-back for the lens flare's CPU read
 
-Milestone: M3 fidelity | Branch: task/019-lens-flare-depth-readback | Status: OPEN
+Milestone: M3 fidelity | Branch: task/019-lens-flare-depth-readback | Status: MERGED
 
 ## Goal
 After the sky cube the game raises GE SIGNAL 0x0200; its handler reads the depth buffer with the CPU around the sun
@@ -149,4 +149,8 @@ Open questions:
   committed per-address VRAM read trace would need a framework change there.
 
 ## Review
-(Fable fills)
+Verify rerun by Fable after the merge: eight-patch series ok; frame 6016 scores 0.068 against ref/vineta_k_start.png
+with the write-back on (the worker: 0.0676); clean shutdown. The evidence (depth values matching PPSSPP's 23/1168,
+the flare alpha falling with the number of covered sun samples) is exactly what the brief asked for. Merged into
+batch/m2. Follow-ups: a per-game GameProfile field for the write-back when the framework is upstreamed (today it is
+on for every game, 1 ms a frame); a committed per-address VRAM read trace would need a framework change.
