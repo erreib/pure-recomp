@@ -3,9 +3,11 @@
 # SELECTION by 5000, TOURNAMENT SELECTION by 5200 (ALPHA only on a new profile; the panel lists Vineta K, Modesto
 # Heights, Chenghou Project and Blue Ridge), TEAM SELECTION by 5400; there is no track screen. The first race
 # (Vineta K, eight ships, the player 8th on the grid at 1079 m) loads from 5500, the probe finds the player at 5520
-# and the clock starts at about 5975, at 60 flips a second.
+# and the clock starts at about 5975 to 6055, at 60 flips a second.
 # The league: tools/campaign_sweep.py adds N `pad dpdown` steps at 5180, 5210, ... for the Nth league and stretches
-# the Cross hold at 5850 to the first race's budget; between races it answers the screens itself (MODES).
+# the Cross hold at 5850 to the cell's budget; between races it answers the screens itself (Cross every 2 s: ENTER
+# TAG, the race standings, TOURNAMENT STANDING, PROFILE AUTOSAVED, NEXT RACE) and holds Cross again from the next
+# grid (docs/tracks.md).
 4700:pad a
 4800:pad dpdown
 4900:pad a

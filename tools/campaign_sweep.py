@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Campaign sweep: each (mode, track) cell from a cold boot to the race's results screen under scripted driving.
+"""Campaign sweep: each (mode, track) cell from a cold boot to the mode's end screen under scripted driving.
 
   tools/campaign_sweep.py [MODE [TRACK ...]] [--frames N] [--stall S] [--drive FILE] [--shots-every N] [--list]
                           [--set KEY=VALUE ...] [--out DIR] [--no-damage]
@@ -49,9 +49,10 @@ time, lap and distance. The summary's detail counts them a lap. A `ref` shot 600
 HUD's shield bar (SHIELD_BAR, full) to check the reading.
 
 --frames N is the race budget: the run stops at flip THROTTLE + N, THROTTLE being the race route's Cross-hold step
-(6100), since the menu route alone takes that long (a three-lap race at Vector is 150 s, 9000 flips, more). Without
---frames each track gets its budget from MODES (`frames`): the follower's laps take about 60 s on Vineta K and 75 to
-95 s on the other Alpha tracks.
+(6100 in Single Race; MODES `throttle`), since the menu route alone takes that long (a three-lap race at Vector is
+150 s, 9000 flips, more). Without --frames each track gets its budget from MODES (`frames`): the follower's laps take
+about 60 s on Vineta K and 75 to 95 s on the other Alpha tracks; Time Trial, Free Play and Zone run at 30 flips a
+second, and Tournament's budget covers its four races.
 
 --no-damage sets PURE_TEST_NO_DAMAGE=1, the port's test switch that refills the player's shield every flip, so
 contacts cannot destroy the ship: the sweep's job is to reach every results screen and find halts, not to race
@@ -72,6 +73,14 @@ While the run goes the tool reads the `[pure] ship` lines (race clock, distance 
     out/sweep/<mode>-<track>.stall.csv holds those 5 s in full.
   - halted: a `[hle-stub]`, `unsupported` or `Runtime stopped` line other than the frame exit and our own quit.
   - no race: no race clock 1800 flips after the Cross-hold step means the menu route broke; the sweep stops there.
+  - stuck (Tournament): no next race on its grid, or no final standings, ADVANCE_LIMIT flips after a race's
+    results panel.
+The other modes end on their own screens (MODES `end`): Time Trial on TIME TRIAL COMPLETED and Free Play, paused
+after its laps and ended with END SESSION, on FREE PLAY SESSION RESULTS, both by the TOTAL label rule above (Free
+Play's label is TOTAL LAPS, in the same place); Zone, run without the stall rule, on the SHIP DESTROYED panel (two
+shots in a row), whose TOTAL ZONES CLEAR goes into the detail; Tournament, after each race's results panel, presses
+Cross every ADVANCE_EVERY flips through the screens between races and ends on the TOURNAMENT STANDING screen after
+the last race (STANDING_TITLE).
 Outputs: out/sweep/<mode>-<track>.log (the game's output, repeated lines folded), out/sweep/<mode>-<track>.png (the
 results screen, the stall shot, or the last frame captured), out/sweep/<mode>-<track>/ (the live shots), and
 out/sweep/summary.txt, a table with one row per cell ever run (the latest outcome replaces the cell's earlier row;
@@ -104,12 +113,13 @@ OUT = "out/sweep"
 #           budgets are flips at 30 a second, and the flip-counted waits (the `ref` shot, the live shots after the
 #           finish) are scaled to keep their times
 #   end     how a cell ends: `results` (the results panel's TOTAL label, as in Single Race), `session` (Free Play has
-#           no last lap: after `laps` laps the sweep pauses and picks END SESSION, and the "RETURN TO MAIN MENU" banner
-#           is the end), `destroyed` (Zone ends when the shield runs out: the "SHIP DESTROYED" panel with TOTAL ZONES
+#           no last lap: after `laps` laps the sweep pauses and picks END SESSION; FREE PLAY SESSION RESULTS, whose
+#           TOTAL LAPS label is where TOTAL is, is the end, or with no lap done the "RETURN TO MAIN MENU" banner),
+#           `destroyed` (Zone ends when the shield runs out: the "SHIP DESTROYED" panel with TOTAL ZONES
 #           CLEAR is the end, the zones are read from it, and the stall rule and --no-damage do not apply),
 #           `standings` (Tournament: the races of `races` in a row; after each results panel the sweep presses Cross
-#           every ADVANCE_EVERY flips through ENTER TAG and the standings until the next race's player object
-#           appears; after the last race the standings screen is the end)
+#           every ADVANCE_EVERY flips through ENTER TAG and the standings until the next race's ship is on its
+#           grid; after the last race the TOURNAMENT STANDING screen, by its title, is the end)
 #   races   Tournament: the tracks of each league in race order (each race steers with its track's table)
 ALPHA = ["vineta_k", "modesto_heights", "chenghou_project", "blue_ridge"]
 DEFAULT_FRAMES = 13000
@@ -118,23 +128,25 @@ MODES = {
                     "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
                     "frames": {"vineta_k": 13000, "modesto_heights": 18000, "chenghou_project": 18000,
                                "blue_ridge": 18000}},
-    # Three laps alone against the clock; 60 to 95 s laps are 1800 to 2900 flips at 30 a second.
+    # Three laps alone against the clock, at 30 flips a second. The live file is read every 10 flips, a third of
+    # a second here, and the follower's laps are slower than in Single Race: 81.8, 67.5 and 73.6 s on Vineta K
+    # (2026-10-06), 6800 flips with the results panel. The other tracks' 75 to 95 s laps would be up to 9000.
     "time_trial": {"route": "config/pad_scripts/time_trial.txt", "laps": 3, "throttle": 5900, "fps": 30,
                    "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
-                   "frames": {"vineta_k": 8000, "modesto_heights": 10000, "chenghou_project": 10000,
-                              "blue_ridge": 10000}},
+                   "frames": {"vineta_k": 9000, "modesto_heights": 11000, "chenghou_project": 11000,
+                              "blue_ridge": 11000}},
     "free_play": {"route": "config/pad_scripts/free_play.txt", "laps": 3, "throttle": 5900, "fps": 30,
                   "end": "session", "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
-                  "frames": {"vineta_k": 8000, "modesto_heights": 10000, "chenghou_project": 10000,
-                             "blue_ridge": 10000}},
+                  "frames": {"vineta_k": 9000, "modesto_heights": 11000, "chenghou_project": 11000,
+                             "blue_ridge": 11000}},
     # Zone tracks: zone_1 is PRO TOZO, the only one open on a new profile.
     "zone": {"route": "config/pad_scripts/zone.txt", "laps": 0, "throttle": 5250, "fps": 30, "end": "destroyed",
              "downs_at": 4980, "downs_gap": 30, "tracks": ["zone_1"], "frames": {"zone_1": 9000}},
-    # Leagues: ALPHA only on a new profile. The budget covers all four races (Single Race's budgets, with the
-    # screens between them).
+    # Leagues: ALPHA only on a new profile. The budget covers all four races (Single Race's budgets, 13000 +
+    # 3 * 18000, and about 3000 flips for the screens after each race).
     "tournament": {"route": "config/pad_scripts/tournament.txt", "laps": 3, "throttle": 5850, "end": "standings",
                    "downs_at": 5180, "downs_gap": 30, "tracks": ["alpha"], "races": {"alpha": ALPHA},
-                   "frames": {"alpha": 75000}},
+                   "frames": {"alpha": 80000}},
 }
 
 SHIP_RE = re.compile(r"\[pure\] ship frame (\d+) t=\d+ clock=(\S+) pos=(\S+),(\S+),(\S+) vel=(\S+),(\S+),(\S+) "
@@ -182,14 +194,26 @@ TITLE_MAX_MISMATCH = 8          # columns
 # TAG. ZONES_VALUE is where TOTAL ZONES CLEAR's number is drawn (left-aligned at x 240, 8 pixels high; room for
 # three digits), read by read_digits.
 ZONES_VALUE = (236, 52, 40, 14)
-# Free Play (task 018, out/018/e-fp3): END SESSION in the pause menu (CONTINUE, RESTART, END SESSION) leads to a
-# fly-by with a "RETURN TO MAIN MENU" banner and PRESS X TO CONFIRM; MENU_BANNER is the banner's lit columns in
-# BANNER_REGION, as DESTROYED_TITLE is the title's (shots of the banner differ from it by 0 to 2 columns).
+# Free Play (task 018, out/018/e-fp3): END SESSION in the pause menu (CONTINUE, RESTART, END SESSION) leads to
+# FREE PLAY SESSION RESULTS (the laps best first, TOTAL LAPS, ENTER TAG; free_play-vineta_k, 2026-10-06) when a lap
+# was done, and with none to a fly-by with a "RETURN TO MAIN MENU" banner and PRESS X TO CONFIRM; MENU_BANNER is the
+# banner's lit columns in BANNER_REGION, as DESTROYED_TITLE is the title's (shots of the banner differ from it by 0
+# to 2 columns).
 BANNER_REGION = (52, 80, 220, 20)
 MENU_BANNER = (-5, 11, -1, 11, -1, 11, -1, 11, -1, 11, -1, 11, -7, 11, -1, 11, -7, 13, -2, 11, -1, 2, -1, 11, -7, 13,
                -2, 11, -1, 11, -1, 11, -9)
+# Tournament (tournament-alpha, 2026-10-06): after a race's results panel ("BAD LUCK... 6TH", the laps, TOTAL, ENTER
+# TAG) Cross answers ENTER TAG one letter at a time (three presses for AAA), then PRESS X TO CONTINUE leads to the
+# race's standings ("ALPHA / RACE 1 OF 4": team, time, points), TOURNAMENT STANDING (team, points), PROFILE
+# AUTOSAVED and NEXT RACE / QUIT TOURNAMENT (Cross on NEXT RACE), all over a moving fly-by. STANDING_TITLE is the
+# lit columns of TOURNAMENT STANDING's title in STANDING_REGION, as DESTROYED_TITLE is the SHIP DESTROYED title's
+# (shots of it differ by 0 to 3 columns, the results panel's title by 104).
+STANDING_REGION = (16, 18, 236, 16)
+STANDING_TITLE = (-4, 11, -1, 11, -1, 11, -1, 11, -1, 11, -1, 11, -1, 13, -2, 11, -1, 11, -1, 11, -7, 11, -1, 11, -1,
+                  11, -1, 11, -1, 12, -1, 2, -1, 11, -1, 11, -16)
 PAUSE_GAP = 40                  # flips between the steps of the pause-menu answer (Start, DOWN, DOWN, Cross)
 ADVANCE_EVERY = 120             # Tournament: flips between the Cross presses that answer the screens between races
+ADVANCE_LIMIT = 4800            # Tournament: flips from a race's results to the next grid (or the final standings)
 
 
 def parse_drive(path, drop_shots=True):
@@ -927,6 +951,7 @@ def run_cell(mode, track, opts):
     tuner, table, ai_line = legs[0].tuner, legs[0].table, legs[0].ai_line
     race = Race(m["laps"], refilled=no_damage)
     done = []                         # Tournament: (track, Race) of each race whose results panel came up
+    standings = {}                    # Tournament: race number -> flip of its TOURNAMENT STANDING shot
     state = {"outcome": None, "detail": "", "quit": False, "quit_at": None, "halt": None, "lx": 0.0,
              "steering": True, "thrust": 1, "airbrake": 0, "frame": 0, "steady": 0, "prev_shot": None,
              "results": None, "last_shot": None, "ref": False, "slow_shots": 0, "slow_at": -10**9,
@@ -991,7 +1016,7 @@ def run_cell(mode, track, opts):
               f"({race_text(race)}; {race.contact_text()}{race.damage_text()})", flush=True)
         set_controls(0, 0)
         state["advance"] = {"last": race.frame, "shot": race.frame, "presses": 0, "final": leg == len(legs) - 1,
-                            "steady": 0, "prev": None, "prev_name": None, "pressed": set(), "candidate": False}
+                            "candidate": False, "since": race.frame}
 
     def next_race(frame):
         """A new player object after a race's results: the next race of the tournament is loading."""
@@ -1015,12 +1040,15 @@ def run_cell(mode, track, opts):
 
     def on_ship(s, text):
         adv = state["advance"]
-        if adv and adv["candidate"]:
-            # The first line of a new player object: the next race when the ship is on its grid (lap 0, clock 0);
-            # the replay behind the results panel runs with lap 65537.
+        if adv and adv["candidate"] and int(s[11]) == 0 and float(s[2]) == 0.0:
+            # After a new player object: the next race once the ship is on its grid (lap 0, clock 0); the replay
+            # behind the results panel runs with lap 65537, and a record not yet reset would show the race just done.
             adv["candidate"] = False
-            if int(s[11]) == 0 and float(s[2]) == 0.0:
-                next_race(int(s[1]))
+            next_race(int(s[1]))
+        if state["advance"]:
+            # Between races: the replay's lines would add laps to the race just done.
+            state["frame"] = max(state["frame"], int(s[1]))
+            return
         race.feed(s, text)
         state["frame"] = race.frame
         if not race.started or state["quit"] or state["advance"]:
@@ -1088,7 +1116,9 @@ def run_cell(mode, track, opts):
                 race.contacts[-1][4] = off
         if (race.finished_frame is None and race.total > 5.0 and race.kmh < 30.0 and state["slow_shots"] < 3
                 and race.frame - state["slow_at"] >= slow_gap):
-            send(f"0:shot slow{race.frame}")         # what slowed the ship down (for the stall diagnosis)
+            # What slowed the ship down (for the stall diagnosis); 3 flips on, since a second shot in the flip of
+            # the `ref` shot is lost (time_trial-vineta_k, 2026-10-06: both at flip 6320, no ref.bmp).
+            send(f"3:shot slow{race.frame}")
             state["slow_shots"] += 1
             state["slow_at"] = race.frame
         psi = (wrap_angle(geo.line_heading(race.dist) - math.atan2(race.vz, race.vx))
@@ -1128,22 +1158,18 @@ def run_cell(mode, track, opts):
 
     def analyse(name, path):
         """A live shot taken after the finish (`f...`) or between races (`a...`)."""
-        if name.startswith("a") and state["advance"]:
-            adv = state["advance"]
-            if not adv["final"]:
+        if name.startswith("a"):
+            # Between races (the race number is in the name): the TOURNAMENT STANDING screen, by its title. Every
+            # screen there is drawn over a moving fly-by, so none is ever still. After the last race it is the
+            # final standings, the cell's end.
+            k = int(name[1:].split("-")[0])
+            if k in standings or not title_match(path, STANDING_REGION, STANDING_TITLE):
                 return
-            # After the last race: the final standings are the first screen that stays still (two shots in a row
-            # with no Cross between them equal over the whole screen) once ENTER TAG is answered (three presses);
-            # the results panel never is (it is drawn over a moving replay).
-            steady = (adv["prev"] is not None and adv["prev_name"] not in adv["pressed"]
-                      and same_region(path, adv["prev"], (0, 0, 480, 272)))
-            adv["steady"] = adv["steady"] + 1 if steady and adv["presses"] >= 3 else 0
-            adv["prev"], adv["prev_name"] = path, name
-            print(f"[sweep] {cell}: shot {name}: still {steady} ({adv['steady']} in a row, {adv['presses']} "
-                  f"presses)", flush=True)
-            if adv["steady"] >= 1 and state["outcome"] is None:
+            standings[k] = shots_seen[name]
+            print(f"[sweep] {cell}: shot {name}: TOURNAMENT STANDING after race {k}", flush=True)
+            if k == len(legs) and state["outcome"] is None:
                 state["results"] = path
-                stop("PASS", f"final standings at flip {shots_seen[name]}")
+                stop("PASS", f"final standings (TOURNAMENT STANDING after race {k}) at flip {shots_seen[name]}")
             return
         if race.finished_frame is None or not name.startswith("f"):
             return
@@ -1203,6 +1229,10 @@ def run_cell(mode, track, opts):
                 state["quit"] = True
         # Between races: a shot every shot_every flips, Cross every ADVANCE_EVERY (10 flips after a shot).
         adv = state["advance"]
+        if adv and state["outcome"] is None and state["frame"] - adv["since"] > ADVANCE_LIMIT:
+            stop("STUCK", f"{'no final standings' if adv['final'] else f'race {leg + 2} not on its grid'} "
+                          f"{state['frame'] - adv['since']} flips after race {leg + 1}'s results "
+                          f"({adv['presses']} Cross presses)")
         if adv and state["outcome"] is None and not state["quit"]:
             if state["frame"] - adv["shot"] >= shot_every:
                 adv["shot"] = state["frame"]
@@ -1212,14 +1242,16 @@ def run_cell(mode, track, opts):
                     adv["last"] = state["frame"]
                     send("10:pad a")
                     adv["presses"] += 1
-                    adv["pressed"].add(name)
         # Live shots once the race is finished (and for tuning, every --shots-every flips).
         if state["outcome"] is None and not state["quit"] and race.started and not adv:
             every = shot_every if race.finished_frame is not None else opts.shots_every
             prefix = "f" if race.finished_frame is not None else "t"
-            if every and race.frame - shots_seen.get("_last_req", -10**9) >= every:
-                send(f"0:shot {prefix}{race.frame}")
-                shots_seen["_last_req"] = race.frame
+            # After the finish the flip count goes on from the frame log too: the probe prints only while the
+            # record changes, and Free Play's pause menu and Zone's destroyed ship stop it.
+            now = state["frame"] if race.finished_frame is not None else race.frame
+            if every and now - shots_seen.get("_last_req", -10**9) >= every:
+                send(f"0:shot {prefix}{now}")
+                shots_seen["_last_req"] = now
         # Analyse the shots that are written.
         for name in sorted((n for n in shots_seen if not n.startswith("_")), key=lambda n: shots_seen[n]):
             path = os.path.join(shots, name + ".bmp")
@@ -1276,6 +1308,7 @@ def run_cell(mode, track, opts):
     if len(legs) > 1:
         # Tournament: each race's laps and contacts, and where the cell stopped.
         races = [f"race {k + 1} {t}: {race_text(r)}, {r.contact_text()}{r.damage_text()}"
+                 + (f", TOURNAMENT STANDING at flip {standings[k + 1]}" if k + 1 in standings else "")
                  for k, (t, r, _total) in enumerate(done)]
         if current:
             races.append(f"race {leg + 1} {legs[leg].track} (stopped here): {race_text(race)}, "
