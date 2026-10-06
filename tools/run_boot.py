@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """Bounded run of PureNative with a de-duplicated, length-capped log.
 
-  tools/run_boot.py [--seconds N] [--frames N] [--window] [--strict] [--script FILE] [--shots DIR] [--every N]
-                    [--stubs] [--max-lines N] [--env KEY=VAL ...] out/run.log
+  tools/run_boot.py [--seconds N] [--frames N] [--window] [--shell vulkan|metal|headless] [--backend NAME]
+                    [--strict] [--script FILE] [--shots DIR] [--every N] [--stubs] [--max-lines N]
+                    [--env KEY=VAL ...] out/run.log
 
 Defaults: headless (PURE_NO_RENDER=1 PURE_NO_AUDIO=1), 60 s wall-clock deadline, stubs listed at start-up
-(PURE_LIST_STUBS=1). --window keeps the renderer and audio on. --strict sets PURE_STRICT_HLE=1.
+(PURE_LIST_STUBS=1). The shell and the GE backend are PureNative's own default (on macOS the Metal ones unless the
+environment names others, D-008; PURE_NO_RENDER makes the shell headless). --window keeps the renderer and audio on.
+--shell NAME sets PURE_SHELL. vulkan and metal are window shells and imply --window. headless (no window, no GPU
+unless a backend that draws is named) implies no window: the run is headless as by default, even with --script or
+--shots, with the null GE backend (PURE_GE_BACKEND=null unless --backend or the environment names one) and no audio
+device (PURE_NO_AUDIO=1 unless the environment sets it). Such a run is unpaced, so --shell headless --script FILE
+--shots DIR runs a route in seconds, its shots the backend's own 480x272 captures. --backend NAME sets
+PURE_GE_BACKEND (vulkan, metal, null, record). --strict sets PURE_STRICT_HLE=1.
 --frames N sets PURE_EXIT_AT_FRAME=N (the profile stops the runtime at that flip), raises the deadline to
 max(seconds, N/15) and exits 0 when the run ended there (`[pure] exit at frame` in the output).
 --script FILE joins the file's non-empty lines that do not start with `#` with `;` into PURE_INPUT_SCRIPT and
-implies --window (the script drives the renderer's virtual pad). --shots DIR sets PURE_SCREENSHOT_DIR (and implies
---window: headless runs capture nothing); after the run every BMP that is new or rewritten there is converted to a
-PNG of the same name with tools/png.py, and the BMP is kept. --every N sets PURE_SCREENSHOT_EVERY (default 0 with
---shots, so only the script's `shot` steps write). --stubs writes <log>.stubs.txt: the start-up "Unimplemented
-imports" list and each `[hle-stub]` call with its ra (the framework prints a stub's first call only).
+implies --window unless --shell headless (in a window the script drives the shell's virtual pad; the headless shell
+reads it at pad level). --shots DIR sets PURE_SCREENSHOT_DIR (and implies --window unless --shell headless); after
+the run every BMP that is new or rewritten there is converted to a PNG of the same name with tools/png.py, and the
+BMP is kept. --every N sets PURE_SCREENSHOT_EVERY (default 0 with --shots, so only the script's `shot` steps
+write). --stubs writes <log>.stubs.txt: the start-up "Unimplemented imports" list and each `[hle-stub]` call with its
+ra (the framework prints a stub's first call only).
 --env KEY=VAL is applied last and overrides all of the above.
 
 The game runs under a pty, so its stdout is line-buffered and nothing is lost when the deadline kills it. The parent
@@ -41,6 +50,8 @@ def parse(argv):
     p.add_argument("--seconds", type=float, default=60.0)
     p.add_argument("--frames", type=int)
     p.add_argument("--window", action="store_true")
+    p.add_argument("--shell", choices=("vulkan", "metal", "headless"))
+    p.add_argument("--backend", metavar="NAME")
     p.add_argument("--strict", action="store_true")
     p.add_argument("--script")
     p.add_argument("--shots")
@@ -135,9 +146,20 @@ def main(argv=None):
     env = dict(os.environ)
     env.setdefault("PURE_GAME_DIR", os.path.join(ROOT, "game"))
     env.setdefault("PURE_LIST_STUBS", "1")
-    window = opts.window or opts.script is not None or opts.shots is not None
+    headless = opts.shell == "headless"
+    window = opts.window or (opts.shell is not None and not headless) or \
+        (not headless and (opts.script is not None or opts.shots is not None))
     if not window:
         env.setdefault("PURE_NO_RENDER", "1"); env.setdefault("PURE_NO_AUDIO", "1")
+    if opts.shell is not None:
+        env["PURE_SHELL"] = opts.shell
+    if opts.backend is not None:
+        env["PURE_GE_BACKEND"] = opts.backend
+    if headless:
+        # No window and no audio device; the null backend unless one is named (the default one would draw on the GPU).
+        if opts.backend is None and not env.get("PURE_GE_BACKEND"):
+            env["PURE_GE_BACKEND"] = "null"
+        env.setdefault("PURE_NO_AUDIO", "1")
     if opts.strict:
         env["PURE_STRICT_HLE"] = "1"
     if opts.frames is not None:
