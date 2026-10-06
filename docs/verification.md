@@ -88,7 +88,10 @@ by both backends.
   The main menu capture catches the help text partway through typing.
 - `race_hud` is frame 6016 of the race route, with bloom and shadows on (the defaults). It is the first frame where
   the HUD has fully faded in, and the same game moment as the PPSSPP frame 7155. The AI ships on the grid change from
-  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086 on the Vulkan path.
+  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086 on the Vulkan path, and 0.0366 to
+  0.0383 on the Metal path (task 025's 0.0379 and four runs of task 028), plus one of 0.0823 whose capture most
+  likely lacked the HUD: the Metal shell's window drops the race HUD in many frames once the race runs
+  (docs/tasks/028-metal-by-default.md, Result), which adds about 0.04 to a frame.
 
 How the runs are made:
 - Each route's input script is written to `<out>/<route>.route.txt`. The route files are joined in order with their
