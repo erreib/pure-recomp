@@ -1,6 +1,6 @@
 # 020: The frame regression suite
 
-Milestone: M5/M6 | Branch: task/020-frame-regress | Status: OPEN (dispatch after task 018)
+Milestone: M5/M6 | Branch: task/020-frame-regress | Status: MERGED (dispatch after task 018)
 
 ## Goal
 One command that proves the port still renders the known screens like PPSSPP: boots the game through the frontend
@@ -124,4 +124,6 @@ Open questions:
 - `tools/verify_task.sh`, named in CLAUDE.md, does not exist. I ran the Verify line directly.
 
 ## Review
-(Fable fills)
+Merged (Fable). The suite is the merge gate for every renderer change from here on (task 021's acceptance uses it).
+Decisions: keep the three runs (the measured values come from those routes); revisit race_hud's limit once the
+grid's repeatability is understood (RNG seed question). `tools/verify_task.sh` now exists.
