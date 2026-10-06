@@ -60,7 +60,12 @@ costs once the menus are unpaced, and adds a cached-profile LOAD route only if i
    (`audio.mute=1` in `~/Library/Application Support/pure-recomp/PureNative/settings.ini`) to silence the running
    worker's windows: once the tools no longer read that file (item 4), set that line back to `audio.mute=0` so
    the app plays sound again, and say so in Result.
-7. `tools/hud_check.sh` keeps its windowed default (it tests the window); `tools/verify_task.sh` unchanged.
+7. One game at a time: task 032 found that a second PureNative running beside a windowed cell (a headless
+   recording) delayed the cell's boot and broke its menu route (NO RACE). The sweep and the suite refuse to start
+   while another PureNative process runs (`pgrep -f build/.*/bin/PureNative`), with a message naming it, unless
+   `--allow-parallel` is given; a headless run is not affected by timing and may skip the check when it is told
+   so (say which runs do).
+8. `tools/hud_check.sh` keeps its windowed default (it tests the window); `tools/verify_task.sh` unchanged.
    docs/verification.md: the new defaults, the wall times before and after, which path to run for which change.
 
 ## Acceptance criteria

@@ -65,10 +65,10 @@ Single Race cell per new track run to its results screen with the no-damage swit
       `tools/campaign_sweep.py single_race vineta_k --no-damage` still PASSes.
 
 ## Verify
-`tools/build.sh profile && python3 tools/campaign_sweep.py single_race sinucit --no-damage && python3 tools/campaign_sweep.py zone zone_2 && grep -c PASS out/sweep/summary.txt`
+`tools/build.sh profile && python3 tools/campaign_sweep.py single_race citta_nuova --no-damage && python3 tools/campaign_sweep.py zone zone_2 && grep -c PASS out/sweep/summary.txt`
 
-(Use the first Beta track's name as the sweep names it; change `sinucit` in this line to that name when you add the
-row, and say so in Result.)
+(Citta Nuova stands in for the first Beta track, Sinucit, which the follower cannot drive past its fork: a limit of the
+test driver, recorded in the Result and the follow-ups, not of the port.)
 
 ## May touch
 - src/profile/pure_profile.cpp (the GPI override and the grid probe only), tools/campaign_sweep.py, tools/pp_lines.py,
