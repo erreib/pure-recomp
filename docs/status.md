@@ -88,8 +88,8 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | Erik's recorded lap (`tools/pad_record.py`) to replace the AI-line follower where it struggles | session 2 | the command and keys are in the Resume notes |
 
 ## Resume (session 4, 2026-10-06)
-- `main` = b5cb152 (Erik's fifth fast-forward, 2026-10-06, the app playable from Finder): tasks 003, 016 to 031
-  merged, patches 0001 to 0012, D-003, D-007, D-008, D-009, briefs 032 to 034. `batch/m2` continues from there. Remote: `origin` =
+- `main` = 0407832 (Erik's sixth fast-forward, 2026-10-06): tasks 003, 016 to 032 and 034 merged, patches 0001 to
+  0012, D-003, D-007, D-008, D-009, briefs 033 and 035, the task protocol's step 0. `batch/m2` continues from there. Remote: `origin` =
   https://dev.eriksmedia.com/erreib/pure-recomp.git (private GitLab, created 2026-10-06 by Erik's push of `main`);
   Erik pushes, nobody else (the session's permissions deny pushes; CLAUDE.md forbids them for workers).
 - Merge gate: `tools/frame_regress.sh` (5 scenes, 7 min) after any renderer change; `tools/verify_task.sh NNN` reruns a
