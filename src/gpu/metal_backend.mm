@@ -77,24 +77,64 @@ struct GpuVertex {
     float x{}, y{}, z{}, w{1.0f};
     float u{}, v{};
     std::uint32_t color{};
-    std::uint32_t unused{};
+    std::uint32_t source{};  // a transformed sprite's corner: the vertex it is lit and fogged as
+    float nx{}, ny{}, nz{}, nw{};
 };
-static_assert(sizeof(GpuVertex) == 32u, "GpuVertex must match GeVertex in metal_shaders.h");
+static_assert(sizeof(GpuVertex) == 48u, "GpuVertex must match GeVertex in metal_shaders.h");
+
+// VertexUniforms::mode, y and z.
+constexpr std::uint32_t kClipPositions = 1u;  // y: positions in the PSP's clip space (transformed sprite corners)
+constexpr std::uint32_t kFog = 1u;            // z bits
+constexpr std::uint32_t kLighting = 2u;
 
 struct VertexUniforms {
     std::array<float, 16> transform{};
     std::array<float, 4> screen{};
     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
     std::array<std::uint32_t, 4> mode{};
+    std::array<float, 4> view_z{};
 };
-static_assert(sizeof(VertexUniforms) == 112u, "VertexUniforms must match metal_shaders.h");
+static_assert(sizeof(VertexUniforms) == 128u, "VertexUniforms must match metal_shaders.h");
+
+struct Light {
+    std::array<float, 4> position{};
+    std::array<float, 4> direction{};
+    std::array<float, 4> attenuation{};
+    std::array<float, 4> spot{};
+    std::array<float, 4> ambient{};
+    std::array<float, 4> diffuse{};
+    std::array<float, 4> specular{};
+    std::array<std::uint32_t, 4> mode{};  // enabled, type, kind
+};
+static_assert(sizeof(Light) == 128u, "Light must match metal_shaders.h");
+
+// What a lit or fogged draw reads besides its vertices (ge.vert's Environment and Object blocks in one).
+struct LightingUniforms {
+    std::array<float, 16> world{};
+    std::array<float, 4> ambient{};
+    std::array<float, 4> emissive{};  // w: the specular power
+    std::array<float, 4> material_ambient{};
+    std::array<float, 4> material_diffuse{};
+    std::array<float, 4> material_specular{};
+    std::array<float, 4> fog{};       // end, scale
+    std::array<std::uint32_t, 4> flags{};  // update mask, vertex colour, separate specular, reversed normals
+    std::array<Light, 4> lights{};
+};
+static_assert(sizeof(LightingUniforms) == 688u, "LightingUniforms must match metal_shaders.h");
 
 struct FragmentUniforms {
     std::array<float, 4> fix{};
     std::array<std::uint32_t, 4> texture{};
     std::array<std::uint32_t, 4> alpha_test{};
+    std::array<float, 4> fog{};  // rgb: the fog colour; w: 1 when fogged
 };
-static_assert(sizeof(FragmentUniforms) == 48u, "FragmentUniforms must match metal_shaders.h");
+static_assert(sizeof(FragmentUniforms) == 64u, "FragmentUniforms must match metal_shaders.h");
+
+// A GE colour register (0x00BBGGRR) as 0..1 floats, with an explicit fourth value.
+std::array<float, 4> unpack_color(std::uint32_t color, float fourth = 1.0f) {
+    return {static_cast<float>(color & 0xFFu) / 255.0f, static_cast<float>((color >> 8u) & 0xFFu) / 255.0f,
+            static_cast<float>((color >> 16u) & 0xFFu) / 255.0f, fourth};
+}
 
 // Says once per value which GE state is drawn approximately.
 void not_emulated(const char *what, std::uint32_t value) {
@@ -112,6 +152,14 @@ std::array<float, 16> multiply(const std::array<float, 16> &a, const std::array<
             result[column * 4u + row] = sum;
         }
     }
+    return result;
+}
+
+// A column-major matrix times (x, y, z, 1).
+std::array<float, 4> transform_point(const std::array<float, 16> &m, const std::array<float, 4> &p) {
+    std::array<float, 4> result{};
+    for (std::uint32_t row = 0; row < 4u; ++row)
+        result[row] = m[row] * p[0] + m[4u + row] * p[1] + m[8u + row] * p[2] + m[12u + row];
     return result;
 }
 
@@ -599,6 +647,7 @@ private:
         current_target_ = &target;
         last_drawn_ = &target;
         bound_ = Bound{};
+        lighting_bound_ = false;
         ++stats_.passes;
     }
 
@@ -844,10 +893,14 @@ private:
     // -----------------------------------------------------------------------------------------------
     // Draws
 
-    // The draw's vertices as a list of the Metal primitive it is drawn as; false for none.
-    bool expand(const DrawCall &call, MTLPrimitiveType &type) {
+    // The draw's vertices as a list of the Metal primitive it is drawn as, `count` of them; false for none.
+    // `transform` (projection x view x world) is what a transformed sprite is projected with.
+    bool expand(const DrawCall &call, const std::array<float, 16> &transform, MTLPrimitiveType &type,
+                std::size_t &drawn) {
         vertices_.clear();
-        // A vertex without a colour is drawn with the material colour, unlit (no lighting yet: 024).
+        sprite_corners_ = 0u;
+        // A vertex without a colour is drawn with the material colour when the draw is unlit; a lit one
+        // takes it from the material registers in the shader (Vulkan's rule).
         const bool use_material_color = !call.has_vertex_color && !call.lighting_enabled;
         const std::size_t total = call.vertices.size();
         const std::size_t count = call.indices.empty() ? total : call.indices.size();
@@ -855,7 +908,7 @@ private:
             const std::size_t index = call.indices.empty() ? i : call.indices[i];
             return call.vertices[std::min(index, total - 1u)];
         };
-        const auto push = [&](const Vertex &vertex) {
+        const auto convert = [&](const Vertex &vertex) {
             GpuVertex out;
             out.x = vertex.position[0];
             out.y = vertex.position[1];
@@ -863,8 +916,12 @@ private:
             out.u = vertex.texcoord[0];
             out.v = vertex.texcoord[1];
             out.color = use_material_color ? call.material_color : vertex.color;
-            vertices_.push_back(out);
+            out.nx = vertex.normal[0];
+            out.ny = vertex.normal[1];
+            out.nz = vertex.normal[2];
+            return out;
         };
+        const auto push = [&](const Vertex &vertex) { vertices_.push_back(convert(vertex)); };
         switch (call.primitive) {
         case PrimitiveType::Points:
             type = MTLPrimitiveTypePoint;
@@ -913,6 +970,10 @@ private:
             // rectangle (sceGuClear relies on it: its first vertex has z 0), and each corner the u of the
             // vertex it shares x with and the v of the one it shares y with.
             type = MTLPrimitiveTypeTriangle;
+            if (!call.through) {
+                expand_transformed_sprites(call, transform, count, at, convert);
+                break;
+            }
             for (std::size_t i = 0; i + 1u < count; i += 2u) {
                 Vertex a = at(i);
                 const Vertex &b = at(i + 1u);
@@ -935,7 +996,58 @@ private:
         default:
             return false;
         }
-        return !vertices_.empty();
+        drawn = sprite_corners_ != 0u ? sprite_corners_ : vertices_.size();
+        return drawn != 0u;
+    }
+
+    // Transformed sprites, by the GE's rule: both vertices are projected, and the rectangle between them is
+    // axis-aligned on the screen, at the second vertex's depth, with its colour, lighting and fog. The
+    // corners go to the shader in the PSP's clip space (VertexUniforms kClipPositions), all with the second
+    // vertex's w, so that nothing is interpolated in perspective; each names the second vertex, appended
+    // after the corners in object space, as the vertex it is lit and fogged as. A sprite with a vertex
+    // behind the eye (w <= 0) is dropped.
+    template <typename At, typename Convert>
+    void expand_transformed_sprites(const DrawCall &call, const std::array<float, 16> &transform, std::size_t count,
+                                    const At &at, const Convert &convert) {
+        sprite_sources_.clear();
+        for (std::size_t i = 0; i + 1u < count; i += 2u) {
+            const Vertex &a = at(i);
+            const Vertex &b = at(i + 1u);
+            const std::array<float, 4> clip_a = transform_point(transform, a.position);
+            const std::array<float, 4> clip_b = transform_point(transform, b.position);
+            if (!(clip_a[3] > 0.0f) || !(clip_b[3] > 0.0f)) continue;
+            const float w = clip_b[3];
+            const float x0 = clip_a[0] / clip_a[3] * w;
+            const float y0 = clip_a[1] / clip_a[3] * w;
+            const auto source = static_cast<std::uint32_t>(sprite_sources_.size());
+            const GpuVertex second = convert(b);
+            sprite_sources_.push_back(second);
+            const auto corner = [&](float x, float y, float u, float v) {
+                GpuVertex out = second;
+                out.x = x;
+                out.y = y;
+                out.z = clip_b[2];
+                out.w = w;
+                out.u = u;
+                out.v = v;
+                out.source = source;
+                return out;
+            };
+            const GpuVertex top_left = corner(x0, y0, a.texcoord[0], a.texcoord[1]);
+            const GpuVertex top_right = corner(clip_b[0], y0, b.texcoord[0], a.texcoord[1]);
+            const GpuVertex bottom_right = corner(clip_b[0], clip_b[1], b.texcoord[0], b.texcoord[1]);
+            const GpuVertex bottom_left = corner(x0, clip_b[1], a.texcoord[0], b.texcoord[1]);
+            vertices_.push_back(top_left);
+            vertices_.push_back(top_right);
+            vertices_.push_back(bottom_right);
+            vertices_.push_back(top_left);
+            vertices_.push_back(bottom_right);
+            vertices_.push_back(bottom_left);
+        }
+        sprite_corners_ = vertices_.size();
+        if (sprite_corners_ == 0u) return;
+        for (GpuVertex &vertex : vertices_) vertex.source += static_cast<std::uint32_t>(sprite_corners_);
+        vertices_.insert(vertices_.end(), sprite_sources_.begin(), sprite_sources_.end());
     }
 
     // The blend: Metal's blend units for the GE's factors and equations. A FIX source factor is applied
@@ -1020,6 +1132,41 @@ private:
         key.destination = static_cast<std::uint8_t>(out_destination);
     }
 
+    // The lights, the material and the fog of a lit or fogged draw into lighting_ (ge.vert's Environment
+    // and Object blocks, filled as vulkan_renderer.cpp fills them).
+    void fill_lighting(const DrawCall &call, bool lit, bool fogged) {
+        LightingUniforms block{};
+        const pk::LightingState &state = call.lighting;
+        if (fogged) block.fog = {call.fog.end, call.fog.scale, 0.0f, 0.0f};
+        if (lit) {
+            block.world = call.world;
+            block.ambient = unpack_color(state.ambient_color, static_cast<float>(state.ambient_alpha & 0xFFu) / 255.0f);
+            block.emissive = unpack_color(state.material_emissive, state.specular_power);
+            block.material_ambient =
+                unpack_color(call.material_color, static_cast<float>(call.material_color >> 24u) / 255.0f);
+            block.material_diffuse = unpack_color(state.material_diffuse);
+            block.material_specular = unpack_color(state.material_specular);
+            block.flags = {state.material_update & 7u, call.has_vertex_color ? 1u : 0u, (state.mode & 1u) != 0u ? 1u : 0u,
+                           state.reverse_normals ? 1u : 0u};
+            for (std::size_t i = 0; i < state.lights.size(); ++i) {
+                const pk::LightState &light = state.lights[i];
+                Light &out = block.lights[i];
+                out.position = {light.position[0], light.position[1], light.position[2], 0.0f};
+                out.direction = {light.direction[0], light.direction[1], light.direction[2], 0.0f};
+                out.attenuation = {light.attenuation[0], light.attenuation[1], light.attenuation[2], 0.0f};
+                out.spot = {light.spot_exponent, light.spot_cutoff, 0.0f, 0.0f};
+                out.ambient = unpack_color(light.ambient);
+                out.diffuse = unpack_color(light.diffuse);
+                out.specular = unpack_color(light.specular);
+                out.mode = {light.enabled ? 1u : 0u, light.type, light.kind, 0u};
+            }
+        }
+        if (std::memcmp(&block, &lighting_, sizeof(block)) != 0) {
+            lighting_ = block;
+            lighting_changed_ = true;
+        }
+    }
+
     id<MTLRenderPipelineState> render_pipeline(const RenderKey &key) {
         if (const auto found = render_pipelines_.find(key); found != render_pipelines_.end()) return found->second;
         MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
@@ -1061,8 +1208,11 @@ private:
     void draw(const DrawCall &call, const GuestMemory &memory) {
         // Transformed draws reach the backend decoded (gpu_decode() is false).
         if (call.vertices.empty()) return;
+        const std::array<float, 16> view_world = multiply(call.view, call.world);
+        const std::array<float, 16> transform = multiply(call.projection, view_world);
         MTLPrimitiveType type{};
-        if (!expand(call, type)) return;
+        std::size_t drawn = 0u;
+        if (!expand(call, transform, type, drawn)) return;
 
         // The scissor, both ends included; an empty one draws nothing.
         const ViewportScissor scissor = scissor_of(call);
@@ -1158,11 +1308,21 @@ private:
         if (pipeline == nil) return;
         id<MTLDepthStencilState> depth = depth_state(key.depth);
 
+        // Lighting and fog, as ge.vert and ge.frag: transformed draws only, never a clear.
+        const bool lit = call.lighting_enabled && !call.through && !call.clear_mode;
+        const bool fogged = call.fog.enabled && !call.through && !call.clear_mode;
+        if (lit || fogged) fill_lighting(call, lit, fogged);
+        if (fogged) {
+            fragment.fog = unpack_color(call.fog.color, 1.0f);
+            vertex.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
+        }
+
         // Positions: screen pixels in through mode; the GE viewport folded into clip space otherwise.
         MTLViewport viewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0};
-        vertex.mode[0] = call.through ? 1u : 0u;
+        vertex.mode = {call.through ? 1u : 0u, sprite_corners_ != 0u ? kClipPositions : 0u,
+                       (fogged ? kFog : 0u) | (lit ? kLighting : 0u), 0u};
         if (!call.through) {
-            vertex.transform = multiply(call.projection, multiply(call.view, call.world));
+            vertex.transform = transform;
             const pk::ViewportState &vp = call.viewport;
             if (vp.x_scale != 0.0f && vp.y_scale != 0.0f) {
                 // screen = ndc * scale + offset - region offset, then to Metal's y-up device space.
@@ -1239,6 +1399,13 @@ private:
             [encoder_ setVertexBufferOffset:offset atIndex:0];
         }
         [encoder_ setVertexBytes:&vertex length:sizeof(vertex) atIndex:1];
+        // The lighting block: a lit or fogged draw's whenever it changed, and something always, since the
+        // vertex function names it.
+        if (!lighting_bound_ || ((lit || fogged) && lighting_changed_)) {
+            [encoder_ setVertexBytes:&lighting_ length:sizeof(lighting_) atIndex:2];
+            lighting_bound_ = true;
+            lighting_changed_ = false;
+        }
         [encoder_ setFragmentBytes:&fragment length:sizeof(fragment) atIndex:0];
         if (bound_.texture != texture) {
             [encoder_ setFragmentTexture:texture atIndex:0];
@@ -1249,7 +1416,7 @@ private:
             bound_.sampler = sampler;
             bound_.sampler_set = true;
         }
-        [encoder_ drawPrimitives:type vertexStart:0 vertexCount:vertices_.size()];
+        [encoder_ drawPrimitives:type vertexStart:0 vertexCount:drawn];
 
         if (log_draws_) log_draw(call, target, source, source_x, source_y, scissor);
         ++stats_.draws;
@@ -1303,6 +1470,10 @@ private:
             if (call.depth.test_enabled) std::cout << " z " << call.depth.function << (call.depth.write_enabled ? " w" : "");
             if (call.stencil.enabled) std::cout << " stencil " << call.stencil.function;
             if (call.color_write_mask != 0u) std::cout << " cmask " << std::hex << call.color_write_mask << std::dec;
+            if (!call.through && call.lighting_enabled) std::cout << " lit";
+            if (!call.through && call.fog.enabled) std::cout << " fog";
+            if (!call.through && call.culling_enabled && call.primitive != PrimitiveType::Sprites)
+                std::cout << (call.cull_clockwise ? " cull cw" : " cull ccw");
         }
         std::cout << " scissor " << scissor.x << "," << scissor.y << "+" << scissor.width << "x" << scissor.height
                   << "\n";
@@ -1400,6 +1571,11 @@ private:
     std::uint64_t texture_clock_{};
     std::vector<std::uint32_t> pixels_;
     std::vector<GpuVertex> vertices_;
+    std::vector<GpuVertex> sprite_sources_;
+    std::size_t sprite_corners_{};  // of a transformed sprite draw: vertices_ holds its sources after them
+    LightingUniforms lighting_{};   // the last lit or fogged draw's, bound at buffer 2
+    bool lighting_changed_{};       // since it was last bound
+    bool lighting_bound_{};         // in the open encoder
 
     std::vector<std::uint8_t> picture_;  // the last picture read back
     std::uint64_t picture_frame_{~0ull};
