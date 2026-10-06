@@ -431,10 +431,12 @@ track and set back along it), and the flip of the outcome with the flip the budg
 | manor_top | STALL: put back by the game, 3 times at about 1500 m and then 4 times after it left the track at 2198 to 2305 m, set down at about 2008 m; 0 laps | | 26 (26) | 91 | 7 | 10470 (26100) | 276 |
 | mandrashee | PASS | 79.4, 72.8, 82.3 | 69 (25, 20, 24) | 140 | 0 | 20520 (24600) | 447 |
 
-The two stalls ran before the put-back class existed, so their summary rows say "stuck on geometry" (an incidental
-contact); the class above is from their traces (`tools/campaign_sweep.py`'s `classify_stall` on the same logs gives
-"put back by the game 4 times since the last progress" for both). Their stall shots are
-`out/sweep/single_race-sinucit/stall.png` and `out/sweep/single_race-manor_top/stall.png`. What happens there:
+Both stalls ran before the put-back class existed, so their rows first said "stuck on geometry" (an incidental
+contact); `classify_stall` on the same logs gives "put back by the game 4 times since the last progress" for both.
+The Verify run of Sinucit (14:43, the summary's row now) stalled the same way with the class in place: put back 5
+times, after leaving the track at 891 to 952 m, set down at about 518 m, STALL at flip 8500. Manor Top's row is
+still the first run's. The stall shots are `out/sweep/single_race-sinucit/stall.png` and
+`out/sweep/single_race-manor_top/stall.png`. What happens there:
 
 - **Sinucit.** The track forks at about 800 m, and the AI ships take both branches (in the recording, 81 samples on
   the branch near x 430 to 470 and 78 on the one near x 570 to 610 at 850 m). The line follows the winner's fastest
@@ -442,7 +444,7 @@ contact); the class above is from their traces (`tools/campaign_sweep.py`'s `cla
   the AI pack keeps within about 9 m of its own mean, and fell off: the probe's height dropped from 124 to 95 m in
   1.2 s and the game put the ship back at about 517 m, nine times. Tries with the follower's own options, apart from
   the summary: `--set preview=0.5` (`out/032/p05`) got through twice in sixteen falls and stalled in lap 3 at 942 to
-  1012 m; a line round the winner's other pass, on the other branch (`out/032/alt`), fell at 1012 to 1042 m.
+  1012 m; a line round the winner's other pass, on the other branch (`out/032/alt`), fell seven times, at 871 to 1042 m.
 - **Manor Top.** No fork: the AI pack keeps within 3 to 7 m of its mean through a tight right-left bend at 2150 to
   2350 m. The follower turned in at full lock and swung 15 to 23 m right of the line, off the track; `--set
   preview=0.5` (`out/032/p05`) stalled at the same bend (2195 to 2462 m).
