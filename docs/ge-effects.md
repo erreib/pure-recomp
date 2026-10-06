@@ -320,6 +320,69 @@ faces in turn, and the GE state ignores both
 stencil and the write masks: task 009), the lens flare's haze over the upper left (the CPU depth read, section
 above), and no bloom with `PURE_NO_FB_TEXTURES=1`.
 
+## The stencil attachment and the copy rule (patch 0006, task 011, 2026-10-05)
+
+Patch 0004 kept the PSP's stencil only as the target's alpha, which a draw can write but never test, so the shadow
+volumes (339-356) and the GREATER test of the darkening quad 357 were drawn as ALWAYS: 357 darkened the whole opaque
+world to 0x9f/0xff (62%) instead of the shadowed pixels. Patch 0006 gives every render target a real stencil aspect
+and keeps the alpha as a copy of it; the 0004 behaviour above is what `PURE_NO_STENCIL_BUFFER=1` gives now.
+
+The attachment: the depth image is D32_SFLOAT_S8_UINT (format 130; on the M4 Pro under MoltenVK, which also reports
+`dualSrcBlend`), or D24_UNORM_S8_UINT; the render pass loads and stores the stencil, and the clear-load variant that
+skips loading colour skips it too, because a full clear of colour and alpha clears the stencil. Every draw with the
+stencil test on and a 5551/4444/8888 target puts the GE's state in the pipeline: the test function (0xDC; the GE
+compares reference OP stencil under the mask as Vulkan does), the sfail, zfail and zpass ops (0xDD; INCR and DECR
+clamp), the reference as the target's alpha holds it, the compare mask, and the write mask (~0xE9). A clear-mode draw
+that clears the alpha writes the stencil with ALWAYS/REPLACE of the clear colour's alpha. A draw whose stencil test
+fails is discarded, as on the PSP; stencil off writes nothing to either.
+
+The copy rule. The stencil is always exact; the alpha is what textures, the display, write-back and destination-alpha
+blends read. A draw leaves the alpha behind the stencil (`alpha_follows_stencil`) when the colour path cannot express
+its stencil effect: an sfail op other than KEEP under a test that can fail, a zfail op other than KEEP under a depth
+test that can fail, INVERT/INCR/DECR on pass, a write mask that keeps some bits, or REPLACE under a source-alpha blend
+without dual-source blending. The renderer then marks the alpha stale and copies the stencil into it before the next
+draw in the pass whose colour blend reads DA or 1-DA, and when the pass ends (anything that samples, shows or writes
+back the target ends the pass first). The copy (`resolve_stencil_alpha`) stays inside the pass and never samples the
+stencil: a quad over the target writes alpha 0, then one quad per bit b passes a stencil test EQUAL with compare mask
+and reference 1<<b and adds (1<<b)/255 to the alpha (blend ONE+ONE, alpha written alone, stencil write mask 0); sums
+of k/255 are exact in an 8-bit target. Its six vertices live in a fixed slot at the end of each frame's vertex region,
+because a draw's vertices are already in the buffer, past `vertex_offset`, when its pass is ended or the copy is
+needed. Measured with `PURE_TRACE_STENCIL_COPY=1` over the race route: one copy per race frame (338 copies for the 338
+frames 5707-6044, alternating between the back buffers 0x04000000 and 0x04088000), always at the end of the pass and
+never before a destination-alpha read, and none in the frontend.
+
+Dual-source blending. When the colour blend reads SA or 1-SA and the draw stores a non-zero stencil value, the shader
+stores the value as alpha and hands its own alpha to the blend as a second output (SRC1_ALPHA, `kAlphaDual`), so the
+track strips 93-102 (REPLACE 0x80 under add(SA, 1-SA)) and the engine glows 820/828 store their reference exactly.
+Pipelines that do not use it take a copy of the SPIR-V whose second output is moved to location 1, where no
+attachment takes it. ZERO keeps the exact (ZERO, ZERO) alpha factors of patch 0004.
+
+Result on frame 6016 of the race route (2x capture downscaled to 480x272; mean luma 0.299 R + 0.587 G + 0.114 B;
+`PURE_NO_STENCIL_BUFFER=1 PURE_NO_DUAL_SOURCE=1` is the 0004 path). The shadow regions were chosen from the
+reference: a throwaway rasteriser over `ppdmp.py`'s `walk()` (the `cover` rules plus back-face culling and the
+volumes' zfail INCR/DECR counts) marks 1046 pixels of the dump's frame that the volumes leave below 4, under the
+player's ship, the left-row ship, the middle ship and a far one; each region below lies inside that mask.
+
+| Region (x,y w x h) | PPSSPP | 0006 (`out/011/hud.png`) | other 0006 runs | 0006 off (`out/011/off/hud.png`) |
+|---|---|---|---|---|
+| player ship's shadow (222,250 16x22) | 30.0 | 32.0 | 34.1, 33.5, 32.0 | 32.0 |
+| left-row ship's shadow (53,197 26x3) | 38.1 | 40.7 | 43.4, 40.3, 40.2 | 39.6 |
+| middle ship's shadow (231,171 15x2) | 85.5 | 94.1 | 107.6, 98.2, 94.2 | 89.5 |
+| plain track (160,205 40x8) | 173.3 | 181.2 | 182.5, 182.1, 181.1 | 120.0 |
+| plain track (300,200 30x8) | 184.3 | 192.1 | 201.5, 197.5, 192.0 | 128.0 |
+| whole frame vs reference at tol 32 | | 6.9% differ | 7.5%, 8.6%, 6.3% | 30.4% |
+
+With the stencil off, 357 darkens every pixel it covers, so the shadow regions match the reference and the open track
+is 62% as bright as it should be; with it, only the shadows are dark. A throwaway build that drew 357 unblended
+(black where its stencil test passes) left 308 pixels below luma 10 in rows 140-271, all of them inside the
+reference's mask (the player's shadow), and a ship-shaped dark patch under the left-row ship, whose model in that run
+was not the dump's. The rest of the mask lies under ships the port draws differently: the AI field is not the same
+from run to run (our frame 5977 has nine volume pairs of 312, 108, 252, 168, 240, 156, 144, 540 and 432 vertices
+where the dump has 420, 456, 180, 252, 312, 156, 108, 240 and 168, and the four captures show different ships in
+the left and middle slots), so the middle region varies most between runs. The frontend draws nothing that needs the
+copy (the first one is at the race's first frame), and the title capture is 3.0% against ref/title.png at tol 24, as
+before.
+
 ## Reproducing
 
 ```
@@ -342,4 +405,15 @@ $P tools/ppsspp/ppdmp.py cover ref/vineta_k_start.ppdmp out/010/cover_hl.png --h
 $P tools/run_boot.py --script out/010/route.txt --frames 6420 --shots out/010/gelist --max-lines 1500000 \
   --env PURE_NO_FB_TEXTURES=1 --env PURE_FRAME_LOG=1 --env PURE_TRACE_GE_LIST=470000:4000 out/010/gelist.log
 # frames 6361-6372 traced in that run; slice between two "[pure] frame" lines, then gelist --all --vt
+
+# task 011: the race frame with and without the stencil attachment, the copies, and our frame's volume draws
+(grep -v shot ~/dev/pure-recomp/out/race/route.txt; echo "6016:shot hud") > out/011/route.txt
+$P tools/run_boot.py --script out/011/route.txt --frames 6045 --shots out/011/shots out/011/hud.log
+$P tools/run_boot.py --script out/011/route.txt --frames 6045 --shots out/011/off \
+  --env PURE_NO_STENCIL_BUFFER=1 --env PURE_NO_DUAL_SOURCE=1 out/011/off.log
+$P tools/run_boot.py --script out/011/route.txt --frames 6045 --shots out/011/copy --max-lines 200000 \
+  --env PURE_TRACE_STENCIL_COPY=1 --env PURE_FRAME_LOG=1 out/011/copy.log
+$P tools/run_boot.py --script out/011/route.txt --frames 6030 --shots out/011/gel --max-lines 1500000 \
+  --env PURE_FRAME_LOG=1 --env PURE_TRACE_GE_LIST=325000:30000 out/011/gelist.log
+# run 325000 is frame 5938 and the log cap ends in frame 5978; frame 5977 replayed with gelist --all
 ```

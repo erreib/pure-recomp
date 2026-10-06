@@ -64,7 +64,10 @@ runs under a pty, so a deadline kill loses no output, and the log always ends wi
 | `PURE_LIST_STUBS=1`, `PURE_STRICT_HLE=1` | list unimplemented imports at start; stop at the first one called |
 | `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | framework traces, one subsystem each |
 | `PURE_SKIP_FMV=1` | (task 003) skip the intro movie |
-| `PURE_NO_STENCIL_ALPHA=1` | (patch 0004) the renderer stores each draw's fragment alpha and ignores the stencil ops and write masks, as before task 009 (the whole race scene blooms) |
+| `PURE_NO_STENCIL_ALPHA=1` | (patch 0004) the renderer stores each draw's fragment alpha and ignores the stencil ops and write masks, as before task 009 (the whole race scene blooms); implies `PURE_NO_STENCIL_BUFFER=1` |
+| `PURE_NO_STENCIL_BUFFER=1` | (patch 0006) no Vulkan stencil attachment, as with patch 0004 alone: every stencil test is drawn as ALWAYS and only the zpass REPLACE/ZERO reach the alpha, so the ship shadows (stencil volumes) are missing |
+| `PURE_NO_DUAL_SOURCE=1` | (patch 0006) no dual-source blending: a stencil REPLACE under a colour blend that reads the source alpha is stored through the blend constant (exact only where the fragment is opaque); with the stencil attachment on, the alpha is then copied from the stencil before anything reads it |
+| `PURE_TRACE_STENCIL_COPY=1` | (patch 0006) a `[render] stencil copied into the alpha of 0x... in frame N (reason)` line for each copy of the stencil into a target's alpha (one per race frame, at the end of the back buffer's pass) |
 | `PURE_WATCH_MOVIE=1` | once per flip, while they change: the game's movie object (`DAT_08ab45bc`) and its fields `active`, `ended`, `paused`, reader state, picture-queue capacity, `queued`, `shown` (pictures handed to the renderer), slots (`[pure] movie frame N ...`) |
 | `PURE_WATCH_SHIP=1` | (task 007) once per flip during a race, while it changes: the player's race record (`.bss` array of 0x1C0-byte entries, position of entry k at `0x08B72010 + k*0x1C0`): race clock, position, velocity, km/h, track distance, lap (`[pure] ship frame N t=... clock=... pos=... vel=... kmh=... dist=... lap=...`). PPSSPP reads the same addresses |
 

@@ -88,5 +88,60 @@ Open questions:
 - Should `cmake/PortableKit.cmake` compile a second fragment shader (`GE_DUAL_SOURCE@ge.frag`) instead of editing the SPIR-V at runtime? That file is outside "May touch".
 - Stencil on 5551/4444 targets uses the alpha path's 8-bit expansion of the reference for both the test and the write. INCR/DECR step by 1, not by one format step. This game only uses 8888 for stencil.
 
+## Result (continued)
+Status: DONE. Patch 0006 is finished, built and run. Verify passes. Frame 6016 is 0.069 against the reference at tol 32 (0.304 with the patch switched off). The ship shadows draw where the PPSSPP frame has them, and the title capture is unchanged.
+
+Changed:
+- patches/0006-shadow-volumes-and-dual-source.patch: re-exported over 0001-0005. It touches vendor host/gpu/vulkan_renderer.cpp and host/gpu/shaders/ge.frag.
+- patches/README.md: row 0006 rewritten for the finished change.
+- docs/ge-effects.md: new section "The stencil attachment and the copy rule", plus task 011 commands under "Reproducing".
+- README.md: new rows for `PURE_NO_STENCIL_BUFFER`, `PURE_NO_DUAL_SOURCE` and `PURE_TRACE_STENCIL_COPY`. The `PURE_NO_STENCIL_ALPHA` row now says it implies the first.
+- This file.
+
+What this session added to 0006:
+- `submit()` wiring, as the first Result planned:
+  - Non-clear draws with the stencil on and a target that is not 5650 put `stencil_key(function, fail, zfail, pass)` in the key. `stencil_values` holds `stored_reference`, the 0xDC mask and `~0xE9`.
+  - Clear-mode draws that clear the alpha use ALWAYS/REPLACE with the clear colour's alpha.
+  - A non-zero REPLACE under a colour blend that reads SA uses `kAlphaDual` with `stored_alpha` set to the value. ZERO keeps `kAlphaZero`. The constant-alpha fallback (no `dualSrcBlend`) marks the alpha stale.
+  - After the pass is set up, a stale alpha is copied before a blend that reads DA. A draw that fails `alpha_follows_stencil` then marks the alpha stale, and `begin_pass` resets the flag.
+- A bug in the unbuilt design: `resolve_stencil_alpha` wrote its quad at `vertex_offset`. During `submit()`, the current draw's vertices are already in the buffer at that offset, because `vertex_offset` only moves once the draw is recorded. Both `end_pass` and the DA-read copy run at that point, so the copy would have overwritten the draw being submitted. The quad now has a fixed 256-byte slot at the end of each frame's vertex region (`kResolveQuadBytes`), and `vertex_limit` stops short of it.
+- `create_pipeline` refuses stencil keys when the attachment is off. Such keys come from the prewarm list of an earlier run.
+- A clear decoded on the GPU (raw vertices, so its alpha is unknown) logs once and leaves the stencil as it was. It does not mark the alpha stale. The game never hits this path.
+- `PURE_TRACE_STENCIL_COPY=1` logs each copy.
+
+Device (the escalation check): Apple M4 Pro under MoltenVK. The renderer logs "depth format 130 (D32_SFLOAT_S8_UINT), stencil buffer on, dual-source blending on". Pipelines built from the edited SPIR-V, and the dual-source ones, create without errors (99 new pipelines in the final race run). No escalation.
+
+Numbers. Frame 6016 of the race route with bloom on: the 960x544 capture is downscaled to 480x272, and brightness is mean luma (0.299 R + 0.587 G + 0.114 B). "0004 path" means `PURE_NO_STENCIL_BUFFER=1 PURE_NO_DUAL_SOURCE=1`.
+- Frame 6016 against ref/vineta_k_start.png at tol 32:
+  - out/011/hud.png: 0.0688.
+  - 0004 path: 0.3041 (the brief had 0.303).
+  - Three earlier runs of the same code: 0.075, 0.086 and 0.063.
+- out/011/title.png against ref/title.png at tol 24: 0.0302, the same as tasks 006 and 010.
+- How the shadow regions were chosen: a throwaway rasteriser simulated the dump's shadow volumes. It applied the `ppdmp.py cover` rules, back-face culling and the zfail INCR/DECR counts. In the reference frame, 1046 pixels end below 4: under the player's ship, the left-row ship, the middle ship and one far ship. The two regions lie inside that mask.
+
+| Region (480x272 px) | ref | out/011/hud.png | 0004 path |
+|---|---|---|---|
+| Player ship's shadow (222,250, 16x22) | 30.0 | 32.0 | 32.0 |
+| Left-row ship's shadow (53,197, 26x3) | 38.1 | 40.7 | 39.6 |
+| Middle ship's shadow (231,171, 15x2), extra | 85.5 | 94.1 | 89.5 |
+| Unshadowed track for contrast (160,205, 40x8) | 173.3 | 181.2 | 120.0 |
+
+  Both chosen regions are within 20 of the reference. The shadow regions alone cannot tell the new path from the 0004 path, because the 0004 path darkens the whole track: plain track is 120 there against 173 in the reference.
+- Our own shadows: a throwaway build drew 357 without blending, which makes the pixels that pass its stencil test black. 308 pixels in rows 140-271 came out below luma 10, all inside the reference's mask (the player's shadow). There was also a ship-shaped dark patch under the left-row ship.
+- Copies: one per race frame, 338 copies for frames 5707-6044. Each comes at the end of the back buffer's pass, alternating between 0x04000000 and 0x04088000. None came before a destination-alpha read, and none in the frontend.
+
+Verify output (`tools/patches.sh check && python3 tools/imgdiff.py out/011/hud.png ref/vineta_k_start.png --tol 32 --max-frac 0.30 && python3 tools/imgdiff.py out/011/title.png ref/title.png --tol 24 --max-frac 0.05`; exit 0):
+```
+ok: 6 patch(es) reproduce vendor/portablekit at 8b0c3fe
+PASS fraction 0.068819 (8985/130560 pixels differ by more than 32, limit 0.3) at 480x272 (resized from 960x544 and 480x272)
+PASS fraction 0.030201 (3943/130560 pixels differ by more than 24, limit 0.05) at 480x272 (resized from 960x544 and 480x272)
+```
+
+Open questions:
+- The AI ships on the grid change from run to run, so the left and middle shadow regions vary too. The four captures show different ships in those slots. Our frame 5977 (from `PURE_TRACE_GE_LIST`) has volume pairs of 312, 108, 252, 168, 240, 156, 144, 540 and 432 vertices; the dump has 420, 456, 180, 252, 312, 156, 108, 240 and 168. The middle region measured 107.6, 98.2, 94.2 and 94.1 across the four runs, so one run was more than 20 from the reference's 85.5. The player's shadow stays at 32-34. Is the AI field seeded from something the port supplies differently, such as the RTC or the save? That would be a separate task.
+- Two of the six race runs hung at shutdown after the frame exit; run_boot killed them and still exited 0. The first of them also printed "malloc: Heap corruption detected ... Incorrect guard value: 16" (the other one's log had hit its line cap). The other runs shut down cleanly. This predates 0006: the same message is in the main checkout's out/full.log and in task 014's out/014/probe2.log.
+- Some writes reach a target's colour image without touching its stencil: the movie upload blit, the blit from a replaced target, and frame-interpolation replays, which draw with the stencil pipelines but make no copies. A later copy in the same pass would then write the old stencil over that alpha. Wipeout Pure never does this, as far as these runs show.
+- Carried over from the first Result: should cmake compile a second fragment shader instead of editing the SPIR-V at runtime? On 5551/4444 targets, the stencil uses the 8-bit expansion of the reference.
+
 ## Review
 (Fable fills)

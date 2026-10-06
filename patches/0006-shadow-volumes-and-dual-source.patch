@@ -31,10 +31,23 @@ index c401885..2de9e7a 100644
      out_color = stored(color);
  }
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index db1d0a3..48ed951 100644
+index db1d0a3..27e6eee 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -280,6 +280,13 @@ struct PipelineKey {
+@@ -96,6 +96,12 @@ constexpr std::uint32_t kFrameRegions = 3u;
+ constexpr VkDeviceSize kPresentScratchBytes = 6u * 1024u * 1024u;
+ constexpr VkDeviceSize kVertexBufferTotal = kFrameRegions * kVertexBufferBytes + 2u * kPresentScratchBytes;
+ constexpr VkDeviceSize kIndexBufferTotal = kFrameRegions * kIndexBufferBytes;
++// The last bytes of each frame region hold the quad resolve_stencil_alpha()
++// draws, the same six vertices every time. It can then be written while a
++// draw's vertices sit in the buffer past vertex_offset (submit() moves
++// vertex_offset only once the draw is recorded), and no draw's vertices
++// reach it (vertex_limit stops short of it).
++constexpr VkDeviceSize kResolveQuadBytes = 256u;
+ 
+ // Says, once in a while, that a frame's geometry did not fit and some of its
+ // draws were left out, instead of dropping them silently.
+@@ -280,6 +286,13 @@ struct PipelineKey {
      bool raw{};
      // How a blended draw's alpha, the PSP's stencil, is stored (kAlpha*).
      std::uint32_t alpha_blend{};
@@ -48,7 +61,7 @@ index db1d0a3..48ed951 100644
  
      auto operator<=>(const PipelineKey &) const = default;
  };
-@@ -287,9 +294,34 @@ struct PipelineKey {
+@@ -287,9 +300,34 @@ struct PipelineKey {
  // The alpha blend factors: the fragment's alpha (ONE, ZERO), zero (ZERO,
  // ZERO), or the blend constant's alpha where the fragment is opaque and the
  // destination's where it is transparent (CONSTANT_ALPHA, ONE_MINUS_SRC_ALPHA).
@@ -83,7 +96,7 @@ index db1d0a3..48ed951 100644
  
  // Says once per value which stencil or write-mask state is not emulated.
  void report_not_emulated(const char *what, std::uint32_t value) {
-@@ -298,32 +330,102 @@ void report_not_emulated(const char *what, std::uint32_t value) {
+@@ -298,32 +336,102 @@ void report_not_emulated(const char *what, std::uint32_t value) {
      std::cout << "[render] " << what << " 0x" << std::hex << value << std::dec << " is not emulated\n" << std::flush;
  }
  
@@ -198,7 +211,7 @@ index db1d0a3..48ed951 100644
  // Whether the colour blend reads the fragment's alpha (SA, 1-SA and the
  // doubled forms), so the fragment cannot hand over the stencil value as its
  // alpha instead.
-@@ -690,7 +792,35 @@ struct VulkanRenderer::Impl {
+@@ -690,7 +798,36 @@ struct VulkanRenderer::Impl {
                     ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
                     : VK_IMAGE_ASPECT_DEPTH_BIT;
      }
@@ -213,7 +226,8 @@ index db1d0a3..48ed951 100644
 +    // from its stencil; resolve_stencil_alpha() copies the stencil over it
 +    // before a draw reads the destination's alpha and before the pass ends.
 +    bool alpha_stale{};
-+    void resolve_stencil_alpha();
++    // `reason` is for <prefix>_TRACE_STENCIL_COPY, which logs every copy.
++    void resolve_stencil_alpha(const char *reason);
 +    // Dual-source blending (the dualSrcBlend feature; <prefix>_NO_DUAL_SOURCE
 +    // turns it off): the fragment shader as compiled, for kAlphaDual.
 +    bool dual_source{};
@@ -234,7 +248,25 @@ index db1d0a3..48ed951 100644
          const VkFormat candidates[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT,
                                         VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D16_UNORM,
                                         VK_FORMAT_D32_SFLOAT_S8_UINT};
-@@ -2251,6 +2381,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -1300,7 +1437,7 @@ struct VulkanRenderer::Impl {
+     // turn with it (see kFrameRegions).
+     std::uint32_t frame_region{};
+     std::uint32_t next_region{};
+-    VkDeviceSize vertex_limit{kVertexBufferBytes};
++    VkDeviceSize vertex_limit{kVertexBufferBytes - kResolveQuadBytes};
+     VkDeviceSize index_limit{kIndexBufferBytes};
+     void enter_region(std::uint32_t index) {
+         // How much of its region the frame being left used, for the perf line.
+@@ -1308,7 +1445,7 @@ struct VulkanRenderer::Impl {
+                                index_offset - static_cast<VkDeviceSize>(frame_region) * kIndexBufferBytes);
+         frame_region = index;
+         vertex_offset = static_cast<VkDeviceSize>(index) * kVertexBufferBytes;
+-        vertex_limit = vertex_offset + kVertexBufferBytes;
++        vertex_limit = vertex_offset + kVertexBufferBytes - kResolveQuadBytes;
+         index_offset = static_cast<VkDeviceSize>(index) * kIndexBufferBytes;
+         index_limit = index_offset + kIndexBufferBytes;
+     }
+@@ -2251,6 +2388,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      // fault or hang. <prefix>_NO_ROBUST_BUFFERS leaves it off, as before.
      if (supported_features.robustBufferAccess == VK_TRUE && portablekit::env("NO_ROBUST_BUFFERS") == nullptr)
          enabled_features.robustBufferAccess = VK_TRUE;
@@ -247,7 +279,7 @@ index db1d0a3..48ed951 100644
      std::cout << "[render] robust buffer access " << (enabled_features.robustBufferAccess ? "on" : "off") << "\n";
      VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
      device_info.pEnabledFeatures = &enabled_features;
-@@ -2329,6 +2465,10 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2329,6 +2472,10 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      attachments[1] = attachments[0];
      impl.choose_depth_format();
      attachments[1].format = impl.depth_format;
@@ -258,7 +290,7 @@ index db1d0a3..48ed951 100644
      attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
      attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
      VkAttachmentReference color_reference{0u, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-@@ -2349,7 +2489,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2349,7 +2496,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      if (portablekit::env("NO_CLEAR_LOAD") == nullptr) {
          for (std::uint32_t variant = 1u; variant < 4u; ++variant) {
              std::array<VkAttachmentDescription, 2> skipped = attachments;
@@ -268,7 +300,7 @@ index db1d0a3..48ed951 100644
              if ((variant & 2u) != 0u) skipped[1].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
              VkRenderPassCreateInfo variant_info = render_pass_info;
              variant_info.pAttachments = skipped.data();
-@@ -2371,7 +2512,11 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2371,7 +2519,11 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      } else if (!create_shader(kGeRawVertexShader, sizeof(kGeRawVertexShader), impl.raw_vertex_shader)) {
          return false;
      }
@@ -281,7 +313,7 @@ index db1d0a3..48ed951 100644
  
      VkDescriptorSetLayoutBinding binding{};
      binding.binding = 0u;
-@@ -2673,7 +2818,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2673,7 +2825,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
                    << (kVertexBufferTotal >> 20u) << " MiB in memory type " << vertex_type << " ("
                    << ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0u ? "device local, " : "")
                    << ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0u ? "cached" : "uncached")
@@ -292,13 +324,19 @@ index db1d0a3..48ed951 100644
      }
      std::cout << "Renderer: Vulkan on " << properties.deviceName << ", target " << impl.target_extent.width << "x"
                << impl.target_extent.height << "\n";
-@@ -3560,10 +3707,72 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
+@@ -3555,15 +3709,78 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
+     current_target = address;
+     last_drawn_target = address;
+     pass_active = true;
++    alpha_stale = false;
+ }
+ 
  void VulkanRenderer::Impl::end_pass() {
      flush_group();
      if (!pass_active) return;
 +    // Whatever reads the target next (a texture, the display, guest memory)
 +    // reads its alpha.
-+    if (alpha_stale) resolve_stencil_alpha();
++    if (alpha_stale) resolve_stencil_alpha("end of pass");
      vkCmdEndRenderPass(command_buffer);
      pass_active = false;
  }
@@ -310,11 +348,15 @@ index db1d0a3..48ed951 100644
 +// that bit) where the bit is set and adds the bit's value to the alpha
 +// (ONE + ONE, alpha written alone). Sums of multiples of 1/255 stay exact in
 +// an 8-bit target.
-+void VulkanRenderer::Impl::resolve_stencil_alpha() {
++void VulkanRenderer::Impl::resolve_stencil_alpha(const char *reason) {
 +    alpha_stale = false;
 +    if (!pass_active) return;
++    static const bool trace = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
++    if (trace)
++        std::cout << "[render] stencil copied into the alpha of 0x" << std::hex << current_target << std::dec
++                  << " in frame " << frames << " (" << reason << ")\n";
 +    flush_group();
-+    const VkDeviceSize start = (vertex_offset + 15u) & ~VkDeviceSize{15u};
++    const VkDeviceSize start = vertex_limit;  // the region's quad slot (kResolveQuadBytes)
 +    std::array<GpuVertex, 6> quad{};
 +    const float w = static_cast<float>(kPspWidth);
 +    const float h = static_cast<float>(kPspHeight);
@@ -324,12 +366,8 @@ index db1d0a3..48ed951 100644
 +        quad[i].y = corners[i][1];
 +        quad[i].color = 0xFFFFFFFFu;
 +    }
-+    if (start + sizeof(quad) > vertex_limit) {
-+        report_frame_space_full("vertex");
-+        return;
-+    }
++    static_assert(sizeof(quad) <= kResolveQuadBytes, "the resolve quad must fit its slot");
 +    std::memcpy(static_cast<std::uint8_t *>(vertex_mapped) + start, quad.data(), sizeof(quad));
-+    vertex_offset = start + sizeof(quad);
 +
 +    DrawState state{};
 +    state.texture = white_texture.descriptor;
@@ -365,7 +403,7 @@ index db1d0a3..48ed951 100644
  VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture(std::uint32_t width, std::uint32_t height,
                                                                     const std::uint32_t *pixels) {
      Texture texture = create_texture_image(width, height);
-@@ -4443,15 +4652,15 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+@@ -4443,15 +4660,15 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
  namespace {
  
  constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
@@ -384,7 +422,7 @@ index db1d0a3..48ed951 100644
  }
  
  PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
-@@ -4468,7 +4677,9 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+@@ -4468,7 +4685,9 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
      key.color_mask = words[9] & 0xFu;
      key.alpha_test = words[10] != 0u;
      key.raw = words[11] != 0u;
@@ -395,7 +433,7 @@ index db1d0a3..48ed951 100644
      return key;
  }
  
-@@ -4514,7 +4725,9 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
+@@ -4514,7 +4733,9 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
          if (!in) return;
          in.seekg(0, std::ios::end);
          const std::streamoff size = in.tellg();
@@ -406,18 +444,19 @@ index db1d0a3..48ed951 100644
          in.seekg(0);
          data.resize(static_cast<std::size_t>(size / 4));
          in.read(reinterpret_cast<char *>(data.data()), size);
-@@ -4623,7 +4836,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4623,7 +4844,10 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      stages[0].pName = "main";
      stages[1] = stages[0];
      stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 -    stages[1].module = fragment_shader;
 +    stages[1].module = key.alpha_blend == kAlphaDual ? dual_fragment_shader : fragment_shader;
-+    // A key saved by a run with dual-source blending (prewarm_pipelines).
-+    if (stages[1].module == VK_NULL_HANDLE) return VK_NULL_HANDLE;
++    // A key saved by a run with dual-source blending or the stencil
++    // attachment, prewarmed in a run without it (prewarm_pipelines).
++    if (stages[1].module == VK_NULL_HANDLE || (key.stencil != 0u && !stencil_buffer)) return VK_NULL_HANDLE;
  
      VkVertexInputBindingDescription binding{0u, sizeof(GpuVertex), VK_VERTEX_INPUT_RATE_VERTEX};
      std::array<VkVertexInputAttributeDescription, 4> attributes{
-@@ -4667,17 +4882,41 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4667,17 +4891,41 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      depth.depthTestEnable = key.depth_test ? VK_TRUE : VK_FALSE;
      depth.depthWriteEnable = key.depth_write ? VK_TRUE : VK_FALSE;
      depth.depthCompareOp = to_compare_op(key.depth_function);
@@ -464,7 +503,86 @@ index db1d0a3..48ed951 100644
      blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
      blend_attachment.colorWriteMask = key.color_mask;
      VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-@@ -6976,7 +7215,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+@@ -6115,28 +6363,61 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // The target's alpha is the PSP's stencil: only the stencil operations
+     // write it (stencil_alpha), and the write masks leave whole channels
+     // alone. A value the colour blend leaves the fragment's alpha free for is
+-    // stored by the fragment shader; otherwise the alpha blend factors store
+-    // it, exactly for zero and, for any other value, only where the fragment
+-    // is opaque. <prefix>_NO_STENCIL_ALPHA stores the fragment's alpha and
+-    // every channel, as before.
++    // stored by the fragment shader. When the blend reads the source alpha,
++    // dual-source blending hands it the fragment's own alpha and the shader
++    // still stores the value (kAlphaDual); without it the alpha blend factors
++    // store it, exactly for zero and, for any other value, only where the
++    // fragment is opaque. <prefix>_NO_STENCIL_ALPHA stores the fragment's
++    // alpha and every channel, as before.
++    //
++    // With the stencil attachment the draw's stencil test, operations and
++    // masks go to it as they are (a clear of the alpha is a REPLACE of the
++    // clear colour's alpha), and `follows` says whether the alpha still
++    // equals the stencil afterwards (alpha_follows_stencil); when it does not,
++    // the alpha is copied from the stencil before it is read
++    // (resolve_stencil_alpha, below and in end_pass).
+     static const bool no_stencil_alpha = portablekit::env("NO_STENCIL_ALPHA") != nullptr;
+     int stored_alpha = -1;
+     float blend_alpha = 1.0f;
+-    if (!call.clear_mode && !no_stencil_alpha) {
++    bool follows = true;
++    if (call.clear_mode) {
++        if (impl.stencil_buffer && (call.clear_flags & 2u) != 0u && call.target.color_format != 0u) {
++            if (!call.vertices.empty()) {
++                const std::uint32_t color = use_material_color ? call.material_color : call.vertices.back().color;
++                key.stencil = stencil_key(1u, 2u, 2u, 2u);  // ALWAYS, REPLACE
++                key.stencil_values = (color >> 24u) | 0xFFu << 8u | 0xFFu << 16u;
++            } else {
++                // A clear decoded on the GPU: its alpha is not known here, so
++                // the stencil keeps its old value while the alpha is cleared.
++                report_not_emulated("stencil clear of a raw draw, vertex type", call.vertex_type);
++            }
++        }
++    } else if (!no_stencil_alpha) {
+         std::uint32_t color_mask = 0u;
+         for (std::uint32_t channel = 0; channel < 3u; ++channel) {
+             const std::uint32_t bits = (call.color_write_mask >> (8u * channel)) & 0xFFu;
+             if (bits != 0xFFu) color_mask |= 1u << channel;  // VK_COLOR_COMPONENT_R/G/B_BIT
+             if (bits != 0u && bits != 0xFFu) report_not_emulated("partial colour write mask", call.color_write_mask);
+         }
+-        const int stencil = stencil_alpha(call);
++        const int stencil = stencil_alpha(call, impl.stencil_buffer);
+         key.color_mask = color_mask | (stencil >= 0 ? VK_COLOR_COMPONENT_A_BIT : 0u);
+-        if (stencil >= 0 && blend_reads_source_alpha(key)) {
++        if (impl.stencil_buffer && call.stencil.enabled && call.target.color_format != 0u) {
++            key.stencil = stencil_key(call.stencil.function, call.stencil.fail_op, call.stencil.depth_fail_op,
++                                      call.stencil.pass_op);
++            key.stencil_values = stored_reference(call) | (call.stencil.mask & 0xFFu) << 8u |
++                                 (~call.alpha_write_mask & 0xFFu) << 16u;
++        }
++        if (stencil > 0 && impl.dual_source && blend_reads_source_alpha(key)) {
++            key.alpha_blend = kAlphaDual;
++            stored_alpha = stencil;
++        } else if (stencil >= 0 && blend_reads_source_alpha(key)) {
+             key.alpha_blend = stencil == 0 ? kAlphaZero : kAlphaConstant;
+             blend_alpha = static_cast<float>(stencil) / 255.0f;
++            if (stencil != 0) follows = false;  // the constant blend is exact only for opaque fragments
+         } else {
+             stored_alpha = stencil;
+         }
++        if (key.stencil != 0u && !alpha_follows_stencil(call, key)) follows = false;
+     }
+     // Matches texture_params.w below: without an alpha test, or with ALWAYS
+     // (GE function 1; 0 is NEVER), the pipeline's shader has no discard. <prefix>_NO_ALPHA_VARIANTS keeps the one shader
+@@ -6233,6 +6514,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         impl.begin_pass(call.target.color_address, overwritten);
+         if (!impl.pass_active) return;
+     }
++    // A blend that reads the destination's alpha reads the PSP's stencil.
++    if (impl.alpha_stale && blend_reads_destination_alpha(key)) impl.resolve_stencil_alpha("destination alpha read");
++    if (impl.stencil_buffer && !follows) impl.alpha_stale = true;
+     {
+         Impl::Target &drawn = impl.targets.at(call.target.color_address);
+         const bool layout_changed =
+@@ -6976,7 +7260,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
      clears[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
      clears[0].colorAttachment = 0u;
      clears[0].clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
@@ -473,7 +591,7 @@ index db1d0a3..48ed951 100644
      clears[1].clearValue.depthStencil = {0.0f, 0u};
      const VkClearRect whole{{{0, 0}, target_extent}, 0u, 1u};
      vkCmdClearAttachments(commands, static_cast<std::uint32_t>(clears.size()), clears.data(), 1u, &whole);
-@@ -7782,6 +8021,8 @@ void VulkanRenderer::shutdown() {
+@@ -7782,6 +8066,8 @@ void VulkanRenderer::shutdown() {
      vkDestroyBuffer(impl.device, impl.check_buffer, nullptr);
      vkFreeMemory(impl.device, impl.check_memory, nullptr);
      vkDestroyShaderModule(impl.device, impl.fragment_shader, nullptr);
