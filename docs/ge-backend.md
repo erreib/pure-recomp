@@ -167,3 +167,136 @@ the same run. Frame 6016's recorded image is pixel-identical to the suite's `rac
 (the lens-flare SIGNAL); frame 6016 has 12 block transfers (small 16-bit rectangles from RAM into VRAM at
 0x041C9700 and up), the other two none. Memory: 4.8 MB in the first frame (VRAM included), 1.6 MB in each of the
 others, mostly the 1 MB back buffer and the two 256 KB bloom buffers the bloom chain samples.
+
+## 7. ge_replay (task 022, 2026-10-06)
+
+`PureNative --replay FILE.gerec` feeds a recording (section 6) to any registered backend outside the game and compares
+what it presents. It is part of the game's executable, because the host layer is compiled into it and into nothing
+else: our own `main()` (`src/host/pure_main.cpp`) hands `--replay` to `src/tools/ge_replay.cpp` and everything else
+to the framework's main, which `CMakeLists.txt` compiles as `portablekit_main` (`HOST_MAIN_NAME`). Without
+`--replay` the game starts as before.
+
+```
+build/arm64/bin/PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--compare] [--tol T] [--max-frac F]
+                                              [--frames A[-B]] [--a NAME --b NAME [--first-diff]] [--quiet]
+```
+
+| Option | Meaning |
+|---|---|
+| `--backend NAME` | the backend to replay into, by its registered name (default `null`) |
+| `--out DIR` | each replayed frame's capture as `DIR/frame_N.bmp` (`DIR/a/` and `DIR/b/` with `--a`/`--b`); without it, captures go to a temporary file, and only when they are compared |
+| `--compare` | each frame against the image its FrameEnd record holds |
+| `--tol T`, `--max-frac F` | a pixel differs when any channel differs by more than T (default 0); a frame passes when at most F of its pixels differ (default 0) |
+| `--frames A[-B]` | report and compare frames A to B only (A alone: that frame). Earlier frames are still replayed, silently, because they build the memory and targets the later ones use; later frames are not replayed |
+| `--a NAME --b NAME` | replay into two backends at once and compare their captures per frame |
+| `--first-diff` | with `--a`/`--b`: bisect the first failing frame to the first draw after which the two pictures differ |
+| `--quiet` | only failures and the summary |
+
+Per frame it prints `[replay] frame N: D draws, R records, X ms`, then, when comparing,
+`diff F (tol T, P/N px at WxH) PASS|FAIL`. R counts the frame's records without its FrameEnd, the count the FrameEnd
+states (`gerec_dump.py`'s table counts the FrameEnd too). X is the time spent in the backend from the frame's first
+record through the flip and the capture, one figure per backend with `--a`/`--b`. A summary line ends the run. Exit 0
+when every compared frame passed (or nothing was compared), 1 when one failed, 2 for bad arguments, a file that is not
+a recording, is cut short or holds a record that does not parse, or a backend that does not exist or cannot be made.
+
+The comparison is `tools/imgdiff.py`'s: both pictures read as RGB (24- and 32-bit BMP, as `tools/png.py` reads them),
+resized to 480x272 by nearest neighbour when their sizes differ (a 960x544 Vulkan capture against null's 480x272) and
+compared as they are when they agree, with the same tolerance and fraction. The numbers agree: imgdiff.py on the
+replayed and recorded race frames gives 0.036493, 0.025461 and 0.001955, as the replay does.
+
+`--first-diff` replays the file from its Begin into two fresh backends for each step, since memory and targets must be
+rebuilt: every frame before the failing one whole, then the failing frame's records up to and including its Nth Draw,
+then a flip. It searches for the smallest N whose pictures differ, about log2(draws) replays, and prints each step,
+then `[replay] first difference in frame F: draw N of D (record R in gerec_dump.py's listing)` and the draw's state:
+primitive, vertex and index counts, through mode, vertex type, target and depth buffer, texture (address, format,
+size, swizzle, palette, function, filters, wraps), blend, alpha test, stencil, clear mode with its flags, depth test
+and write masks. The search assumes that a prefix that differs stays different with more draws, which holds when a
+backend gets a draw wrong. When the pictures agree after the frame's last draw, it says the difference comes from the
+records after it.
+
+### What the replay guarantees
+
+- **Order.** Records are applied in file order, each as the call the shell made: DisplayList `begin_display_list()`,
+  Draw `submit()`, Transfer `block_transfer()`, ReadBack `read_back_framebuffer()`, WriteBackFrame
+  `write_back_frame()`, WriteBackDepth `write_back_depth()` with the recorded addresses, stride and reason, Upload
+  `upload_frame()` (rows of the recorded width). A Transfer's row copy is made as `hle_media.cpp`'s `block_transfer`
+  makes it, after the backend has seen the transfer and after the Memory records that follow it (the source rows as
+  the game's copy read them), that is, at the next record of another kind. Unknown kinds are skipped by their size,
+  and fields a later format adds at the end of a known record are ignored.
+- **The flip.** A FrameEnd is a flip in `present_frame`'s order: `present_image(display address)`, then for a backend
+  that needs the window the shell's `VulkanRenderer::present` (where the Vulkan backend's frame ends), then
+  `capture_frame()`, `begin_frame()` and the shell's `pump_events()`. `begin_frame()` is also called once after
+  `initialize`, as `ensure_backend` does.
+- **Memory.** Each backend gets its own `psprecomp::GuestMemory` of the profile's size (32 MiB), zero at the start.
+  Memory records are written into it before the call that reads them: the whole of VRAM first, then texels, palettes
+  and transfer sources whenever they changed. What the backend itself writes back (the frame, depth, read-backs before
+  transfers) lands there, as it did in the game's memory.
+- **Words.** Words records are written into guest memory too, before their draw. So the snapshot a backend takes at a
+  target's first draw of the frame, and the comparison patch 0003's lookup makes when the target is sampled, see the
+  game's words.
+- **The shell.** A backend that needs the window (`needs_window()`, the Vulkan one) gets a `VulkanRenderer`
+  initialised as `ensure_backend` initialises the game's, passed as `BackendConfig::vulkan_shell`. Its window is titled
+  `... ge_replay (NAME)`, and two Vulkan backends get a window each. The replay draws at the recording's internal scale,
+  read from the first image's size (it calls the shell's `set_internal_scale` when the settings differ). The other
+  settings (sharp textures, texture pack, frame rate, present mode) come from `settings.ini` and the environment, as
+  in the game. null, and later metal, need no shell.
+- **Determinism.** Two Vulkan replays of the race recording (`--a vulkan --b vulkan`) give identical pictures, which
+  are also identical to a single replay of the same file.
+
+### What it cannot replay
+
+- **What the shell did outside the backend**: the interface drawn over the frame (`ui::draw_over_game`), frame
+  interpolation's presents between flips, fast-forward, frame pacing, the pad, the window's blit and aspect. Captures,
+  recorded and replayed alike, are taken from the target before the window blit, so none of this enters a comparison.
+- **Guest memory no call read.** Only what a backend call read is recorded. CPU writes that no draw, transfer or
+  upload read are not in the file.
+- **GPU-only state from before the first recorded frame**: render targets with their depth and stencil, and anything a
+  backend caches. A replay starts with no targets, and a new Vulkan target is undefined until drawn (its attachments
+  are loaded, not cleared). A frame that reads pixels an earlier frame drew therefore differs near the start of a
+  recording.
+
+The race reads such pixels. Its bloom chain (gerec_dump's draws #868 to #873 of frame 6014) blurs into the two bloom
+targets 0x04110000 and 0x04132000 additively beyond the rectangles the frame clears: the clears (#869, #871) cover
+240x136, while the blurs draw to x 245 and y 141, and the bilinear samples reach the bottom edge. So the bottom rows of
+the bloom carry pixels from frame to frame, and the composite (#873) spreads them over PSP rows 260 to 270. Every
+differing pixel of a cold race replay lies in those rows. Recordings that start at different frames decay the same way:
+
+| Frames after the recording starts | 0 | 1 | 2 | 3 | 4 to 8 |
+|---|---|---|---|---|---|
+| `race.gerec` (starts at 6014): pixels differing at tol 0 | 19058 (0.0365), up to 16 levels | 13297 (0.0255), up to 3 | 1021 (0.0020), up to 1 | | |
+| `race_warm.gerec` (starts at 6008): pixels differing at tol 0 | 19160 (0.0367) | 13627 (0.0261) | 1186 (0.0023), up to 1 | 32 (0.00006), up to 1 | 14 to 23, up to 1 |
+
+From the fourth frame on, 14 to 32 pixels of the strip stay one level off: the accumulated rows settle on rounding
+fixed points that depend on where they started. So a recording meant to be compared with its own images needs warm-up
+frames before the frames that count. `race_warm.gerec` (frames 6008-6016) gives frames 6014-6016 within one level
+(`--tol 1` passes; the check uses the brief's `--tol 4 --max-frac 0.001`), while `race.gerec` cannot pass frame 6014
+from a cold start at any tolerance below 16. Comparing two backends with each other (`--a`/`--b`) does not need
+warm-up, as both start equally empty. The frontend and title recordings, 2D screens without such state, replay exactly
+(tol 0) from a cold start.
+
+### The check and its numbers
+
+`tools/gerec/replay_check.sh` (the Verify of task 022) records `out/gerec/race.gerec` (frames 6014-6016, 23.4 MB),
+`out/gerec/race_warm.gerec` (6008-6016, 63.6 MB), `out/gerec/frontend.gerec` (690-691) and `out/gerec/title.gerec`
+(1750-1751) when they are missing, each by one windowed run of its route on an empty stick (197, 197, 24 and 59 s),
+and checks each with `gerec_dump.py --summary`. Then it replays:
+
+- `race.gerec` into vulkan with `--compare` from a cold start: reported, not a pass condition (the table above);
+- `race_warm.gerec` frames 6014-6016 into vulkan at `--tol 4 --max-frac 0.001`: pass, no pixel over the tolerance;
+- `race.gerec` into null with `--out out/gerec/null`: three black 480x272 frames, exit 0;
+- `race.gerec` into vulkan and null with `--first-diff --frames 6014`: the frame fails, as null draws nothing, and the
+  bisection names draw 1 of 906, the full-screen clear sprite that clears the back buffer 0x04088000 to white, in 10
+  steps of about 50 ms each;
+- `frontend.gerec` and `title.gerec` into vulkan at tol 0: pass.
+
+It takes 8 minutes when every recording has to be made, and a few seconds when none has.
+
+Time a frame in the Verify run (Apple M4 Pro). The first frame of a Vulkan replay also makes its targets and
+pipelines:
+
+| Recording | Backend | First frame | Later frames |
+|---|---|---|---|
+| race (906 draws a frame) | vulkan | 47 ms | 5.5 to 13 ms |
+| race | null | 2.2 ms | 0.6 to 1.1 ms |
+| frontend (11 draws) | vulkan | 27 ms | 5.1 ms |
+| title (28 draws) | vulkan | 26 ms | 5.0 ms |
