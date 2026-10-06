@@ -1,0 +1,104 @@
+diff --git a/host/shell/shell.hpp b/host/shell/shell.hpp
+index c43ff4e..66f9a3e 100644
+--- a/host/shell/shell.hpp
++++ b/host/shell/shell.hpp
+@@ -188,7 +188,10 @@ public:
+     [[nodiscard]] virtual std::string device_name() const = 0;
+ 
+     // Interface (Dear ImGui), on a shell with a window. The caller has made the
+-    // ImGui context and its SDL3 platform backend.
++    // ImGui context and loaded its fonts; initialize_ui starts ImGui's SDL3
++    // platform backend for the window (the ImGui_ImplSDL3_InitFor... of the API
++    // the shell draws with) and the renderer backend, and on failure leaves
++    // neither running. shutdown_ui stops both.
+     virtual bool initialize_ui(std::string &error) = 0;
+     virtual void shutdown_ui() = 0;
+     // The renderer backend's NewFrame, before ImGui::NewFrame.
+diff --git a/host/shell/vulkan_shell.cpp b/host/shell/vulkan_shell.cpp
+index 308b2a5..ca3824a 100644
+--- a/host/shell/vulkan_shell.cpp
++++ b/host/shell/vulkan_shell.cpp
+@@ -10,10 +10,16 @@
+ // display address's target first (VulkanRenderer::upload_frame), then shown by
+ // the same present: how a non-Vulkan backend's picture reaches the window, at
+ // the cost of a copy a frame.
++//
++// initialize_ui(): ImGui's SDL3 platform backend for the renderer's window
++// (ImGui_ImplSDL3_InitForVulkan, which the interface layer called itself before
++// each shell chose its own), then the renderer's ImGui Vulkan backend.
+ #include "shell/vulkan_shell.hpp"
+ 
+ #include "gpu/vulkan_renderer.hpp"
+ 
++#include "backends/imgui_impl_sdl3.h"
++
+ #include <memory>
+ #include <utility>
+ 
+@@ -85,8 +91,25 @@ public:
+     void set_perf_overlay(bool visible) override { renderer_->set_perf_overlay(visible); }
+     std::string device_name() const override { return renderer_->device_name(); }
+ 
+-    bool initialize_ui(std::string &error) override { return renderer_->initialize_ui(error); }
+-    void shutdown_ui() override { renderer_->shutdown_ui(); }
++    bool initialize_ui(std::string &error) override {
++        if (!ui_platform_) {
++            if (!ImGui_ImplSDL3_InitForVulkan(renderer_->window())) {
++                error = "ImGui_ImplSDL3_InitForVulkan failed";
++                return false;
++            }
++            ui_platform_ = true;
++        }
++        if (renderer_->initialize_ui(error)) return true;
++        ImGui_ImplSDL3_Shutdown();
++        ui_platform_ = false;
++        return false;
++    }
++    void shutdown_ui() override {
++        renderer_->shutdown_ui();
++        if (!ui_platform_) return;
++        ImGui_ImplSDL3_Shutdown();
++        ui_platform_ = false;
++    }
+     void begin_ui_frame() override { renderer_->begin_ui_frame(); }
+     void set_ui_draw_data(ImDrawData *draw_data) override { renderer_->set_ui_draw_data(draw_data); }
+     void present_ui(bool show_game) override { renderer_->present_ui(show_game); }
+@@ -95,6 +118,8 @@ private:
+     // Destroyed with the shell; ~VulkanRenderer shuts it down, as it did when
+     // the HLE owned it.
+     std::unique_ptr<gpu::VulkanRenderer> renderer_;
++    // ImGui's SDL3 platform backend runs for this shell's window.
++    bool ui_platform_{};
+ };
+ 
+ const ShellRegistration registration("vulkan", "an SDL window drawn with Vulkan (the VulkanRenderer)",
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index ce2a642..ed6b500 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -146,21 +146,17 @@ bool Layer::attach(host::Shell &shell) {
+     // Keep the focused row highlighted: on a gamepad there is no pointer.
+     io.ConfigNavCursorVisibleAlways = true;
+     io.ConfigNavEscapeClearFocusItem = false;
+-    if (!ImGui_ImplSDL3_InitForVulkan(shell.window())) {
+-        std::cout << "[ui] ImGui_ImplSDL3_InitForVulkan failed; no menu\n";
+-        ImGui::DestroyContext();
+-        return false;
+-    }
+-    // Any connected pad drives the interface, not only the one the game reads.
+-    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
+     load_fonts();
++    // The shell starts ImGui's SDL3 platform backend for its window, with the
++    // InitFor... call of the API it draws with, then its renderer backend.
+     std::string error;
+     if (!shell.initialize_ui(error)) {
+         std::cout << "[ui] cannot draw the interface (" << error << "); no menu\n";
+-        ImGui_ImplSDL3_Shutdown();
+         ImGui::DestroyContext();
+         return false;
+     }
++    // Any connected pad drives the interface, not only the one the game reads.
++    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
+     shell.set_event_hook([this](const SDL_Event &event) { return handle_event(event); });
+     shell_ = &shell;
+     // While the game runs the pointer may be captured for it, hidden by SDL;
