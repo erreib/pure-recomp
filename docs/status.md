@@ -65,10 +65,11 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
 - Merged 2026-10-06: 022 (ge_replay, in the game executable behind `--replay`; our own `main()` through
   `HOST_MAIN_NAME`), 023 (Metal backend: the 2D frontend scenes within 0.0002 of PPSSPP), 026 (the shell seam, patch
   0010: `host::Shell`, Vulkan shell adapter, headless shell with pad from the input script; D-007), and Fable's patch
-  0011 (headless runs unpaced: thousands of frames a second). Running: 024 (Metal 3D: lighting, fog, sprites,
-  culling; restarted from a WIP commit after the usage limit cut the first worker; the TEAM-screen recording it made
-  is kept at out/024-wip/). Merged: 027 (the Metal shell, patch 0012). Then 025 (Metal stencil, bloom chain, read-backs and write-backs) after 024 lands (both
-  edit metal_backend.mm).
+  0011 (headless runs unpaced: thousands of frames a second), 027 (the Metal shell, patch 0012), 024 (Metal 3D:
+  lighting, fog, screen-space sprites, culling; the race frame at internal scale 1 matches Vulkan to its first
+  stencil draw; merged fda9d9d, Verify rerun on the main checkout in progress). Running: 025 (Metal effects: stencil
+  as alpha, the bloom chain, read-backs and write-backs, ge_replay `--cut`). M6's exit after 025:
+  `tools/frame_regress.sh --shell metal --backend metal` 5/5 and the recordings replayed vulkan against metal.
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
   (`tools/pad_record.py`), the save-list dialog for multiple profiles.
