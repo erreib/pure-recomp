@@ -2,25 +2,30 @@
 //
 // A GeBackend (vendor/portablekit/host/gpu/ge_backend.hpp, docs/ge-backend.md) in our own sources, so its
 // registration below is linked into the program directly. Task 023 built what the 2D frontend needs, task
-// 024 the 3D draws:
+// 024 the 3D draws, task 025 the effects:
 //
 //   targets    keyed by (colour address, stride, format), each a 480x272 RGBA8 colour texture (5650, 5551
 //              and 4444 targets too, for now) and a Depth32Float_Stencil8 texture (internal scale 1,
 //              D-002). A pass draws into one target; switching targets ends it.
+//   stencil    the GE's stencil test and operations on the attachment; the colour target's alpha kept as
+//              the PSP's stencil by patch 0006's rule: written by the zpass REPLACE/ZERO where the colour
+//              path can (dual-source blending under a source-alpha blend), copied from the attachment where
+//              it cannot, before a destination-alpha read and at the end of the pass.
 //   textures   a bind that lies in a target samples that target, the one starting at the address first
 //              (patch 0003), while guest memory under it is what it was when the target was first drawn
 //              in the frame; anything else is decoded from guest memory with the framework's
 //              decode_texture() and cached by its contents (texels and the palette entries it can reach).
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
-//              blend, the write masks, the alpha test, the depth test and (carried for task 025) the
-//              stencil; clears; scissor; the GE viewport folded into clip space; back-face culling.
+//              blend, the write masks, the alpha test, the depth test and the stencil; clears; scissor;
+//              the GE viewport folded into clip space; back-face culling.
 //              Transformed draws get the GE's per-vertex lighting and fog (ge.vert's, in the shaders), and
 //              transformed sprites are expanded on the screen after projection, as the GE draws them.
 //   frames     one command buffer a frame, committed at the flip. present_image() names the display
 //              target's texture; capture_frame() reads it back synchronously.
-//
-// Not yet (task 025): the stencil and the alpha it keeps, block transfers and read-backs into guest
-// memory, the depth write-back. Those calls are counted and logged once.
+//   guest      block transfers from a target, read_back_framebuffer() and the frame write-back store a
+//   memory     target's pixels in guest VRAM in its own format; write_back_depth() stores the depth as the
+//              GE's 16-bit z at a SIGNAL (the lens flare reads it). Each waits for the GPU; counted, with
+//              the time waited.
 //
 // Under the Vulkan shell (BackendConfig::vulkan_shell), whose present shows its own targets and whose
 // window the input script's `shot` steps read, every presented picture is also read back and handed to it
@@ -40,6 +45,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -131,9 +137,10 @@ struct FragmentUniforms {
     std::array<float, 4> fix{};
     std::array<std::uint32_t, 4> texture{};
     std::array<std::uint32_t, 4> alpha_test{};
-    std::array<float, 4> fog{};  // rgb: the fog colour; w: 1 when fogged
+    std::array<float, 4> fog{};               // rgb: the fog colour; w: 1 when fogged
+    std::array<std::uint32_t, 4> stencil{};  // x: 1 when the alpha stored is y (the PSP's stencil), not the fragment's
 };
-static_assert(sizeof(FragmentUniforms) == 64u, "FragmentUniforms must match metal_shaders.h");
+static_assert(sizeof(FragmentUniforms) == 80u, "FragmentUniforms must match metal_shaders.h");
 
 // A GE colour register (0x00BBGGRR) as 0..1 floats, with an explicit fourth value.
 std::array<float, 4> unpack_color(std::uint32_t color, float fourth = 1.0f) {
@@ -181,6 +188,57 @@ MTLCompareFunction to_compare(std::uint32_t function) {
     case 6u: return MTLCompareFunctionGreater;
     default: return MTLCompareFunctionGreaterEqual;
     }
+}
+
+// The GE's stencil operations: 0 KEEP, 1 ZERO, 2 REPLACE, 3 INVERT, 4 INCR, 5 DECR (both clamping).
+MTLStencilOperation to_stencil_operation(std::uint32_t op) {
+    switch (op & 7u) {
+    case 1u: return MTLStencilOperationZero;
+    case 2u: return MTLStencilOperationReplace;
+    case 3u: return MTLStencilOperationInvert;
+    case 4u: return MTLStencilOperationIncrementClamp;
+    case 5u: return MTLStencilOperationDecrementClamp;
+    default: return MTLStencilOperationKeep;
+    }
+}
+
+// The stencil reference as the target's alpha holds it: the top bit of a 5551 target, the top nibble of a
+// 4444 one, all of 8888 (patch 0006's stored_reference).
+std::uint32_t stored_reference(const DrawCall &call) {
+    const std::uint32_t reference = call.stencil.reference & 0xFFu;
+    if (call.target.color_format == 1u) return (reference & 0x80u) != 0u ? 0xFFu : 0u;
+    if (call.target.color_format == 2u) return (reference >> 4u) * 17u;
+    return reference;
+}
+
+// The value a draw leaves in its target's alpha, which on the PSP is the stencil (patches 0004 and 0006's
+// stencil_alpha): -1 keeps the destination's alpha (no stencil test, a 5650 target, which has none, alpha bits
+// masked, a zpass KEEP, or INVERT, INCR and DECR, which read the destination and are done by the attachment).
+// Only fragments that pass every test write it, as the attachment's zpass operation does.
+int stencil_alpha(const DrawCall &call) {
+    const pk::StencilState &stencil = call.stencil;
+    if (!stencil.enabled || call.target.color_format == 0u || call.alpha_write_mask != 0u) return -1;
+    switch (stencil.pass_op) {
+    case 1u: return 0;                                               // zero
+    case 2u: return static_cast<int>(stored_reference(call));       // replace
+    default: return -1;                                              // keep, invert, increment, decrement
+    }
+}
+
+// Whether the draw leaves its target's alpha equal to the stencil (patch 0006's alpha_follows_stencil). The
+// alpha is written only by fragments that pass every test, with stencil_alpha()'s value, so it cannot follow an
+// sfail operation where the stencil test can fail, a zfail operation where the depth test can fail, INVERT,
+// INCR or DECR on pass, or a write mask that keeps some bits.
+bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail) {
+    const pk::StencilState &stencil = call.stencil;
+    if (!stencil.enabled || call.target.color_format == 0u || call.alpha_write_mask == 0xFFu) return true;
+    const auto writes = [](std::uint32_t op) { return op >= 1u && op <= 5u; };
+    const bool fail = stencil.function != 1u && writes(stencil.fail_op);
+    const bool depth_fail = depth_can_fail && writes(stencil.depth_fail_op);
+    const bool pass = stencil.pass_op >= 3u && stencil.pass_op <= 5u;
+    const bool partial = call.alpha_write_mask != 0u &&
+                         (writes(stencil.fail_op) || writes(stencil.depth_fail_op) || writes(stencil.pass_op));
+    return !fail && !depth_fail && !pass && !partial;
 }
 
 const char *format_name(TextureFormat format) {
@@ -248,7 +306,7 @@ struct TargetKey {
 struct Target {
     TargetKey key;
     id<MTLTexture> color;
-    id<MTLTexture> depth;  // depth and the stencil (task 025)
+    id<MTLTexture> depth;  // depth and the stencil, whose copy the colour's alpha is
     id<MTLTexture> copy;   // what a draw samples when it reads the target it draws into
     bool color_defined{};  // drawn or uploaded: a pass loads it rather than clearing it
     bool depth_defined{};
@@ -269,24 +327,27 @@ struct RenderKey {
     std::uint8_t destination{MTLBlendFactorZero};
     std::uint8_t operation{MTLBlendOperationAdd};   // MTLBlendOperation
     std::uint8_t write_mask{MTLColorWriteMaskAll};  // MTLColorWriteMask
+    // The alpha's destination factor: ZERO stores the fragment's alpha (the stencil value, or a clear's
+    // alpha); ONE adds it (the copy of the stencil into the alpha, resolve_stencil_alpha()).
+    std::uint8_t alpha_destination{MTLBlendFactorZero};
+    // The colour blend reads the fragment's own alpha from ge_fragment_dual's second output (Source1).
+    bool dual_source{};
     bool textured{};
     bool alpha_test{};
     auto operator<=>(const RenderKey &) const = default;
 };
 
-// The depth-stencil state's part.
+// The depth-stencil state's part. The stencil test and operations are the GE's (DrawCall::stencil) on a
+// 5551, 4444 or 8888 target, with the bits the alpha write mask leaves writable; the reference is the
+// encoder's (setStencilReferenceValue), not the state's.
 struct DepthStencilKey {
     std::uint8_t compare{MTLCompareFunctionAlways};  // MTLCompareFunction
     bool write{};
-    // The stencil test and operations as the GE gives them (DrawCall::stencil) and the bits the alpha
-    // write mask leaves writable. Carried here so that task 025 turns them into the state's stencil
-    // descriptors; this task draws with the stencil attachment untouched.
     bool stencil{};
-    std::uint8_t stencil_function{};
-    std::uint8_t fail{};
+    std::uint8_t stencil_function{};  // the GE's numbering, as the alpha test's
+    std::uint8_t fail{};              // the GE's operations: KEEP, ZERO, REPLACE, INVERT, INCR, DECR
     std::uint8_t depth_fail{};
     std::uint8_t pass{};
-    std::uint8_t reference{};
     std::uint8_t compare_mask{};
     std::uint8_t write_mask{};
     auto operator<=>(const DepthStencilKey &) const = default;
@@ -321,6 +382,14 @@ struct ChunkPool {
     std::vector<id<MTLBuffer>> free;
 };
 
+// A kind of write into guest memory: how many, how many of them stored something, and the time spent
+// waiting for the GPU for them.
+struct GuestWrites {
+    std::uint64_t calls{};
+    std::uint64_t written{};
+    double wait_ms{};
+};
+
 struct Stats {
     std::uint64_t draws{};
     std::uint64_t passes{};
@@ -330,6 +399,12 @@ struct Stats {
     std::uint64_t uploads{};
     std::uint64_t waits{};
     double wait_ms{};
+    std::uint64_t stencil_draws{};   // draws with the stencil test (a clear of the alpha included)
+    std::uint64_t stencil_copies{};  // copies of the stencil into the alpha (resolve_stencil_alpha)
+    GuestWrites transfers;           // block_transfer() from a target
+    GuestWrites read_backs;          // read_back_framebuffer()
+    GuestWrites frames;              // write_back_frame()
+    GuestWrites depths;              // write_back_depth()
 };
 
 class MetalGeBackend final : public pk::GeBackend {
@@ -365,15 +440,17 @@ public:
                 return false;
             }
             vertex_function_ = [library_ newFunctionWithName:@"ge_vertex"];
-            for (std::uint32_t variant = 0; variant < 4u; ++variant) {
+            // By kTextured | kAlphaTest << 1, then the same with the second output for dual-source blending.
+            for (std::uint32_t variant = 0; variant < fragment_functions_.size(); ++variant) {
                 MTLFunctionConstantValues *values = [MTLFunctionConstantValues new];
                 const bool textured = (variant & 1u) != 0u;
                 const bool alpha_test = (variant & 2u) != 0u;
                 [values setConstantValue:&textured type:MTLDataTypeBool atIndex:0];
                 [values setConstantValue:&alpha_test type:MTLDataTypeBool atIndex:1];
-                fragment_functions_[variant] = [library_ newFunctionWithName:@"ge_fragment"
-                                                              constantValues:values
-                                                                       error:&failure];
+                fragment_functions_[variant] =
+                    [library_ newFunctionWithName:(variant & 4u) != 0u ? @"ge_fragment_dual" : @"ge_fragment"
+                                   constantValues:values
+                                            error:&failure];
                 if (fragment_functions_[variant] == nil) {
                     error = std::string("the fragment function does not specialise: ") +
                             (failure != nil ? failure.localizedDescription.UTF8String : "no message");
@@ -404,6 +481,8 @@ public:
             const std::uint32_t opaque_white = 0xFFFFFFFFu;
             [white_ replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&opaque_white bytesPerRow:4];
             readback_ = [device_ newBufferWithLength:kPictureBytes options:MTLResourceStorageModeShared];
+            frame_writeback_ = [device_ newBufferWithLength:kPictureBytes options:MTLResourceStorageModeShared];
+            guest_readback_ = [device_ newBufferWithLength:kPictureBytes options:MTLResourceStorageModeShared];
             pool_ = std::make_shared<ChunkPool>();
 
             // The hand-over (a read-back a frame) only for the Vulkan shell; any other shell has
@@ -421,6 +500,10 @@ public:
             no_lighting_ = portablekit::env("NO_LIGHTING") != nullptr;
             no_fog_ = no_lighting_ || portablekit::env("NO_FOG") != nullptr;
             no_cull_ = portablekit::env("NO_CULL") != nullptr;
+            // The framework's traces, as the Vulkan backend reads them: a line per copy of the stencil into the
+            // alpha, and per depth write-back.
+            trace_stencil_copy_ = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
+            trace_depth_ = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
             started_ = std::chrono::steady_clock::now();
             report_start_ = started_;
             ready_ = true;
@@ -447,8 +530,9 @@ public:
                       << " passes, " << stats_.decoded << " textures decoded, " << stats_.framebuffer_textures
                       << " framebuffer textures, " << stats_.copies << " target copies, " << stats_.uploads
                       << " uploads, " << targets_.size() << " targets, " << stats_.waits << " GPU waits ("
-                      << stats_.wait_ms << " ms) in " << seconds << " s\n"
-                      << std::flush;
+                      << stats_.wait_ms << " ms) in " << seconds << " s\n";
+            report_guest_writes();
+            std::cout << std::flush;
             // Every target's resources before the device they came from (the contract's order).
             presented_ = nullptr;
             last_drawn_ = nullptr;
@@ -466,6 +550,9 @@ public:
             chunk_ = nil;
             white_ = nil;
             readback_ = nil;
+            frame_writeback_ = nil;
+            guest_readback_ = nil;
+            pending_frame_ = PendingFrame{};
             fragment_functions_.fill(nil);
             vertex_function_ = nil;
             library_ = nil;
@@ -485,17 +572,84 @@ public:
         }
     }
 
-    // Task 025: a rendered source is written to guest memory before the HLE copies it.
-    void block_transfer(const pk::BlockTransfer &, GuestMemory &) override {
-        deferred("block_transfer", block_transfers_);
+    // Before the HLE copies a block transfer's rows: when the source lies in a target this backend drew, the
+    // target's rows the copy reads are stored in guest memory first, in the target's format.
+    void block_transfer(const pk::BlockTransfer &transfer, GuestMemory &memory) override {
+        ++stats_.transfers.calls;
+        if (!ready_ || no_framebuffer_textures_ || transfer.width == 0u || transfer.height == 0u ||
+            transfer.bytes_per_pixel == 0u)
+            return;
+        @autoreleasepool {
+            const std::uint64_t base = GuestMemory::canonical(transfer.source);
+            const std::uint64_t pitch = static_cast<std::uint64_t>(transfer.source_stride) * transfer.bytes_per_pixel;
+            const std::uint64_t first =
+                base + transfer.source_y * pitch + static_cast<std::uint64_t>(transfer.source_x) * transfer.bytes_per_pixel;
+            const std::uint64_t end = first + (transfer.height - 1u) * pitch +
+                                      static_cast<std::uint64_t>(transfer.width) * transfer.bytes_per_pixel;
+            Target *target = drawn_target_containing(static_cast<std::uint32_t>(base), first);
+            if (target == nullptr) return;
+            // The target's rows the copy's bytes fall in.
+            const std::uint64_t row_bytes = static_cast<std::uint64_t>(target->key.stride) * target->bytes_per_pixel();
+            const std::uint64_t from = std::max<std::uint64_t>(first, target->key.address);
+            const auto first_row = static_cast<std::uint32_t>((from - target->key.address) / row_bytes);
+            const auto last_row = static_cast<std::uint32_t>(
+                std::min<std::uint64_t>((end - 1u - target->key.address) / row_bytes, kHeight - 1u));
+            if (first_row > last_row) return;
+            store_target(memory, *target, first_row, last_row - first_row + 1u, stats_.transfers);
+        }
     }
-    void write_back_frame(GuestMemory &) override { deferred("write_back_frame", frame_write_backs_); }
-    void read_back_framebuffer(std::uint32_t, GuestMemory &) override {
-        deferred("read_back_framebuffer", read_backs_);
+
+    // The frame shown at the last flip into guest VRAM, in its format (the Vulkan backend's write-back, which
+    // stores at each flip the target the flip before showed). present_image() copied its pixels into a shared
+    // buffer, or read them back for the Vulkan shell; this waits for that copy and stores them.
+    void write_back_frame(GuestMemory &memory) override {
+        ++stats_.frames.calls;
+        if (!ready_ || pending_frame_.target == nullptr) return;
+        PendingFrame pending = pending_frame_;
+        pending_frame_ = PendingFrame{};
+        @autoreleasepool {
+            const std::uint8_t *pixels = picture_.data();
+            if (!pending.from_picture) {
+                if (pending.commands != nil && pending.commands.status < MTLCommandBufferStatusCompleted) {
+                    const auto start = std::chrono::steady_clock::now();
+                    [pending.commands waitUntilCompleted];
+                    const double ms =
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                    stats_.wait_ms += ms;
+                    stats_.frames.wait_ms += ms;
+                    ++stats_.waits;
+                }
+                pixels = static_cast<const std::uint8_t *>(frame_writeback_.contents);
+            } else if (picture_.size() != kPictureBytes) {
+                return;
+            }
+            if (store_pixels(memory, *pending.target, pixels, 0u, kHeight)) ++stats_.frames.written;
+        }
     }
-    bool write_back_depth(std::uint32_t, std::uint32_t, std::uint32_t, GuestMemory &, const char *) override {
-        deferred("write_back_depth", depth_write_backs_);
-        return false;
+
+    // The target at `address` into guest VRAM, whole (the Vulkan backend's rule: a target in VRAM that the GE
+    // drew, at least as wide as the screen).
+    void read_back_framebuffer(std::uint32_t address, GuestMemory &memory) override {
+        ++stats_.read_backs.calls;
+        if (!ready_ || no_framebuffer_textures_) return;
+        @autoreleasepool {
+            const std::uint32_t wanted = GuestMemory::canonical(address);
+            Target *target = drawn_target_containing(wanted, wanted);
+            if (target == nullptr || target->key.stride < kWidth) return;
+            store_target(memory, *target, 0u, kHeight, stats_.read_backs);
+        }
+    }
+
+    // The depth of the target at `color_address` as the GE keeps it, z = round(depth x 65535) in 16 bits, in
+    // rows of `depth_stride` pixels from `depth_address` (patch 0008): the lens flare's SIGNAL handler reads a
+    // 4x4 block of it around the sun. Screen-wide depth buffers only, as the Vulkan backend writes them.
+    bool write_back_depth(std::uint32_t color_address, std::uint32_t depth_address, std::uint32_t depth_stride,
+                          GuestMemory &memory, const char *why) override {
+        ++stats_.depths.calls;
+        if (!ready_) return false;
+        @autoreleasepool {
+            return store_depth(color_address, depth_address, depth_stride, memory, why);
+        }
     }
 
     void upload_frame(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width,
@@ -515,11 +669,19 @@ public:
             Target *shown = latest_target_at(GuestMemory::canonical(display_address));
             if (shown == nullptr) shown = last_drawn_;
             presented_ = shown;
+            // The next write_back_frame() stores this picture (as the Vulkan backend stores at each flip the
+            // target the flip before showed): read back for the Vulkan shell anyway, else copied into a shared
+            // buffer by this frame's commands.
+            const bool written_back = shown != nullptr && frame_written_back(*shown);
+            pending_frame_ = PendingFrame{};
             if (shown != nullptr && to_shell_) {
                 read_back(*shown);
                 show_in_shell(shell_, display_address, picture_.data(), kWidth, kHeight, shell_scratch_);
+                if (written_back) pending_frame_ = PendingFrame{shown, nil, true};
             } else {
-                commit(false);
+                if (written_back) copy_to_buffer(*shown, frame_writeback_);
+                id<MTLCommandBuffer> committed = commit(false);
+                if (written_back) pending_frame_ = PendingFrame{shown, committed, false};
             }
             if (frames_ % kReportEvery == 0u) report();
             if (shown != nullptr) {
@@ -554,18 +716,23 @@ private:
         frame_buffers_ = [NSMutableArray new];
     }
 
+    // Ends the pass. Whatever reads the target next (a texture, the display, guest memory) reads its alpha,
+    // so a stencil the draws left different from it is copied into it first.
     void end_encoder() {
         if (encoder_ != nil) {
+            if (alpha_stale_) resolve_stencil_alpha("end of pass");
             [encoder_ endEncoding];
             encoder_ = nil;
         }
+        alpha_stale_ = false;
         current_target_ = nullptr;
     }
 
-    // Hands the frame's commands to the GPU; with `wait`, returns once it has drawn them.
-    void commit(bool wait) {
+    // Hands the frame's commands to the GPU; with `wait`, returns once it has drawn them. Returns the command
+    // buffer committed (nil when there was nothing to commit).
+    id<MTLCommandBuffer> commit(bool wait) {
         end_encoder();
-        if (commands_ == nil) return;
+        if (commands_ == nil) return nil;
         const std::shared_ptr<ChunkPool> pool = pool_;
         NSArray<id<MTLBuffer>> *used = frame_buffers_;
         [commands_ addCompletedHandler:^(id<MTLCommandBuffer>) {
@@ -581,10 +748,11 @@ private:
         if (wait) {
             const auto start = std::chrono::steady_clock::now();
             [committed waitUntilCompleted];
-            stats_.wait_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            last_wait_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            stats_.wait_ms += last_wait_ms_;
             ++stats_.waits;
             check(committed);
-            return;
+            return committed;
         }
         in_flight_.push_back(committed);
         while (!in_flight_.empty() && in_flight_.front().status >= MTLCommandBufferStatusCompleted) {
@@ -599,6 +767,7 @@ private:
             check(in_flight_.front());
             in_flight_.pop_front();
         }
+        return committed;
     }
 
     void check(id<MTLCommandBuffer> commands) {
@@ -686,10 +855,176 @@ private:
         picture_frame_ = frames_;
     }
 
-    void deferred(const char *what, std::uint64_t &count) {
-        if (count++ == 0u)
-            std::cout << "[metal] " << what << ": not implemented (task 025); counted, nothing written\n"
-                      << std::flush;
+    // A blit of the target's colour into `buffer` (480x272 RGBA), recorded in the frame's commands.
+    void copy_to_buffer(Target &target, id<MTLBuffer> buffer) {
+        ensure_commands();
+        end_encoder();
+        id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
+        [blit copyFromTexture:target.color
+                         sourceSlice:0
+                         sourceLevel:0
+                        sourceOrigin:MTLOriginMake(0, 0, 0)
+                          sourceSize:MTLSizeMake(kWidth, kHeight, 1)
+                            toBuffer:buffer
+                   destinationOffset:0
+              destinationBytesPerRow:kWidth * 4u
+            destinationBytesPerImage:kPictureBytes];
+        [blit endEncoding];
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // Guest memory: block transfers, read-backs and write-backs
+
+    // The target whose memory holds byte `address` and which the GE drew into (an upload's target holds a
+    // picture the CPU wrote, which is in guest memory already), in VRAM: the one starting at `start` first
+    // (patch 0003's rule), else the one drawn last.
+    Target *drawn_target_containing(std::uint32_t start, std::uint64_t address) {
+        Target *best = nullptr;
+        bool best_exact = false;
+        for (auto &[key, target] : targets_) {
+            if (!target->color_defined || target->guest_words.empty()) continue;
+            if ((key.address & 0x1F000000u) != 0x04000000u) continue;
+            const std::uint64_t bytes = static_cast<std::uint64_t>(key.stride) * kHeight * target->bytes_per_pixel();
+            if (address < key.address || address - key.address >= bytes) continue;
+            const bool exact = key.address == start;
+            if (best == nullptr || (exact && !best_exact) ||
+                (exact == best_exact && target->draw_serial > best->draw_serial)) {
+                best = target.get();
+                best_exact = exact;
+            }
+        }
+        return best;
+    }
+
+    // Whether the frame write-back stores this displayed target: one the GE drew, in VRAM, at least as wide as
+    // the screen (the Vulkan backend's record_writeback rule).
+    static bool frame_written_back(const Target &target) {
+        return target.color_defined && !target.guest_words.empty() &&
+               (target.key.address & 0x1F000000u) == 0x04000000u && target.key.stride >= kWidth;
+    }
+
+    // Rows `first_row` to `first_row + rows - 1` of the target into guest memory, read back now (a blit into a
+    // shared buffer and a wait), counted in `writes`.
+    void store_target(GuestMemory &memory, Target &target, std::uint32_t first_row, std::uint32_t rows,
+                      GuestWrites &writes) {
+        copy_to_buffer(target, guest_readback_);
+        commit(true);
+        writes.wait_ms += last_wait_ms_;
+        if (store_pixels(memory, target, static_cast<const std::uint8_t *>(guest_readback_.contents), first_row, rows))
+            ++writes.written;
+    }
+
+    // 480x272 RGBA pixels (red in the low byte) of `target` into its guest memory, rows `first_row` onward, in
+    // its format and stride (min(stride, 480) pixels a row): 8888 as they are, 5650, 5551 and 4444 packed with
+    // red in the low bits, as texture_decode reads them and the Vulkan backend's store_frame writes them. The
+    // target's guest-word snapshot is taken again, since memory now holds what it shows.
+    bool store_pixels(GuestMemory &memory, Target &target, const std::uint8_t *pixels, std::uint32_t first_row,
+                      std::uint32_t rows) {
+        const std::uint32_t bytes_per_pixel = target.bytes_per_pixel();
+        const std::uint32_t width = std::min(target.key.stride, kWidth);
+        rows = std::min(rows, kHeight - std::min(first_row, kHeight));
+        if (rows == 0u || width == 0u) return false;
+        const std::size_t pitch = static_cast<std::size_t>(target.key.stride) * bytes_per_pixel;
+        const std::uint32_t start = target.key.address + static_cast<std::uint32_t>(first_row * pitch);
+        std::uint8_t *out =
+            memory.raw_pointer(start, (rows - 1u) * pitch + static_cast<std::size_t>(width) * bytes_per_pixel);
+        if (out == nullptr) return false;
+        static_assert(std::endian::native == std::endian::little, "guest memory is little-endian, as the host");
+        std::array<std::uint16_t, kWidth> packed{};
+        for (std::uint32_t y = 0; y < rows; ++y) {
+            const std::uint8_t *row = pixels + static_cast<std::size_t>(first_row + y) * kWidth * 4u;
+            std::uint8_t *line = out + y * pitch;
+            if (target.key.format == 3u) {
+                std::memcpy(line, row, static_cast<std::size_t>(width) * 4u);
+                continue;
+            }
+            for (std::uint32_t x = 0; x < width; ++x) {
+                const std::uint32_t r = row[x * 4u], g = row[x * 4u + 1u], b = row[x * 4u + 2u], a = row[x * 4u + 3u];
+                if (target.key.format == 0u)
+                    packed[x] = static_cast<std::uint16_t>((r >> 3u) | (g >> 2u) << 5u | (b >> 3u) << 11u);
+                else if (target.key.format == 1u)
+                    packed[x] =
+                        static_cast<std::uint16_t>((r >> 3u) | (g >> 3u) << 5u | (b >> 3u) << 10u | (a >> 7u) << 15u);
+                else
+                    packed[x] =
+                        static_cast<std::uint16_t>((r >> 4u) | (g >> 4u) << 4u | (b >> 4u) << 8u | (a >> 4u) << 12u);
+            }
+            std::memcpy(line, packed.data(), static_cast<std::size_t>(width) * 2u);
+        }
+        snapshot_guest_words(memory, target);
+        return true;
+    }
+
+    // write_back_depth(): the depth aspect of the target's Depth32Float_Stencil8 texture into a shared buffer
+    // (a blit and a wait), then z = round(depth x 65535) per pixel. The vertex function and the viewport's depth
+    // range map the GE's z onto depth z / 65535, so this is the GE's own z.
+    bool store_depth(std::uint32_t color_address, std::uint32_t depth_address, std::uint32_t depth_stride,
+                     GuestMemory &memory, const char *why) {
+        Target *target = latest_target_at(GuestMemory::canonical(color_address));
+        if (target == nullptr || !target->depth_defined) return false;
+        // The GE's depth buffer always lies in VRAM. A narrower one, a render-to-texture target's, has no
+        // height the GE states, and 272 rows of it could run over what the game keeps after it.
+        depth_address = 0x04000000u | (depth_address & 0x001FFFF0u);
+        if (depth_stride < kWidth) return false;
+        std::uint8_t *out = memory.raw_pointer(depth_address, static_cast<std::size_t>(depth_stride) * kHeight * 2u);
+        if (out == nullptr) return false;
+        const auto start = std::chrono::steady_clock::now();
+        ensure_commands();
+        end_encoder();
+        id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
+        [blit copyFromTexture:target->depth
+                         sourceSlice:0
+                         sourceLevel:0
+                        sourceOrigin:MTLOriginMake(0, 0, 0)
+                          sourceSize:MTLSizeMake(kWidth, kHeight, 1)
+                            toBuffer:guest_readback_
+                   destinationOffset:0
+              destinationBytesPerRow:kWidth * 4u
+            destinationBytesPerImage:kPictureBytes
+                             options:MTLBlitOptionDepthFromDepthStencil];
+        [blit endEncoding];
+        commit(true);
+        stats_.depths.wait_ms += last_wait_ms_;
+        const auto *depths = static_cast<const float *>(guest_readback_.contents);
+        std::uint32_t lowest = 0xFFFFu, highest = 0u;
+        std::array<std::uint16_t, kWidth> row{};
+        for (std::uint32_t y = 0; y < kHeight; ++y) {
+            for (std::uint32_t x = 0; x < kWidth; ++x) {
+                const float depth = depths[static_cast<std::size_t>(y) * kWidth + x];
+                const auto z = static_cast<std::uint32_t>(std::clamp(depth, 0.0f, 1.0f) * 65535.0f + 0.5f);
+                lowest = std::min(lowest, z);
+                highest = std::max(highest, z);
+                row[x] = static_cast<std::uint16_t>(z);
+            }
+            std::memcpy(out + static_cast<std::size_t>(y) * depth_stride * 2u, row.data(), sizeof(row));
+        }
+        ++stats_.depths.written;
+        if (!std::exchange(depth_announced_, true))
+            std::cout << "[metal] depth written back to guest memory at 0x" << std::hex << depth_address << std::dec
+                      << " for " << why << " (PURE_NO_DEPTH_READBACK turns it off)\n";
+        if (trace_depth_) {
+            const double total =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            std::cout << "[metal] frame " << frames_ + 1u << " " << why << ": depth of 0x" << std::hex
+                      << target->key.address << " written back to 0x" << depth_address << std::dec << " stride "
+                      << depth_stride << ", z " << lowest << "-" << highest << ", " << total << " ms (GPU wait "
+                      << last_wait_ms_ << " ms)\n";
+        }
+        return true;
+    }
+
+    void report_guest_writes() {
+        const auto line = [](const char *what, const GuestWrites &writes) {
+            std::cout << " " << what << " " << writes.written << "/" << writes.calls << " (" << writes.wait_ms
+                      << " ms waited)";
+        };
+        std::cout << "[metal] stencil: " << stats_.stencil_draws << " draws, " << stats_.stencil_copies
+                  << " copies into the alpha; guest memory written/asked:";
+        line("transfers", stats_.transfers);
+        line("read-backs", stats_.read_backs);
+        line("frames", stats_.frames);
+        line("depths", stats_.depths);
+        std::cout << "\n";
     }
 
     void report() {
@@ -1147,6 +1482,91 @@ private:
         key.destination = static_cast<std::uint8_t>(out_destination);
     }
 
+    // Whether a blend reads the fragment's alpha (SA or 1-SA on either side, the doubled forms drawn single),
+    // so the fragment cannot hand over the stencil value as its alpha without dual-source blending.
+    static bool blend_reads_source_alpha(const RenderKey &key, std::uint8_t write_mask) {
+        const auto reads = [](std::uint8_t factor) {
+            return factor == MTLBlendFactorSourceAlpha || factor == MTLBlendFactorOneMinusSourceAlpha;
+        };
+        return key.blend && key.operation != MTLBlendOperationMin && key.operation != MTLBlendOperationMax &&
+               (write_mask & (MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue)) != 0u &&
+               (reads(key.source) || reads(key.destination));
+    }
+
+    // Whether a blend reads the destination's alpha (DA or 1-DA), which is the PSP's stencil.
+    static bool blend_reads_destination_alpha(const RenderKey &key) {
+        const auto reads = [](std::uint8_t factor) {
+            return factor == MTLBlendFactorDestinationAlpha || factor == MTLBlendFactorOneMinusDestinationAlpha;
+        };
+        return key.blend && key.operation != MTLBlendOperationMin && key.operation != MTLBlendOperationMax &&
+               (key.write_mask & (MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue)) != 0u &&
+               (reads(key.source) || reads(key.destination));
+    }
+
+    // Copies the stencil into the open pass's target alpha, which draws since the last copy left different
+    // from it (patch 0006's resolve_stencil_alpha), inside the pass and without reading the stencil in a
+    // shader: a quad over the whole target writes alpha 0, then one quad per stencil bit passes the stencil
+    // test (EQUAL under a compare mask of that bit) where the bit is set and adds the bit's value to the alpha
+    // (ONE + ONE, alpha written alone, stencil write mask 0). Sums of multiples of 1/255 are exact in an 8-bit
+    // target.
+    void resolve_stencil_alpha(const char *reason) {
+        alpha_stale_ = false;
+        if (encoder_ == nil || current_target_ == nullptr) return;
+        ++stats_.stencil_copies;
+        if (trace_stencil_copy_)
+            std::cout << "[metal] stencil copied into the alpha of 0x" << std::hex << current_target_->key.address
+                      << std::dec << " in frame " << frames_ + 1u << " (" << reason << ")\n";
+        std::array<GpuVertex, 6> quad{};
+        const float w = static_cast<float>(kWidth);
+        const float h = static_cast<float>(kHeight);
+        const std::array<std::array<float, 2>, 6> corners{{{0.0f, 0.0f}, {w, 0.0f}, {0.0f, h}, {0.0f, h}, {w, 0.0f}, {w, h}}};
+        for (std::size_t i = 0; i < quad.size(); ++i) {
+            quad[i].x = corners[i][0];
+            quad[i].y = corners[i][1];
+            quad[i].color = 0xFFFFFFFFu;
+        }
+        const auto [buffer, offset] = allocate(sizeof(quad));
+        std::memcpy(static_cast<std::uint8_t *>(buffer.contents) + offset, quad.data(), sizeof(quad));
+        VertexUniforms vertex{};
+        vertex.mode = {1u, 0u, 0u, 0u};  // through mode
+        FragmentUniforms fragment{};
+        fragment.alpha_test = {1u, 0u, 0xFFu, 0u};
+        [encoder_ setVertexBuffer:buffer offset:offset atIndex:0];
+        [encoder_ setVertexBytes:&vertex length:sizeof(vertex) atIndex:1];
+        if (!lighting_bound_) {
+            [encoder_ setVertexBytes:&lighting_ length:sizeof(lighting_) atIndex:2];
+            lighting_bound_ = true;
+            lighting_changed_ = false;
+        }
+        [encoder_ setViewport:MTLViewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0}];
+        [encoder_ setScissorRect:MTLScissorRect{0u, 0u, kWidth, kHeight}];
+        [encoder_ setCullMode:MTLCullModeNone];
+        RenderKey render;
+        render.write_mask = MTLColorWriteMaskAlpha;
+        DepthStencilKey depth;
+        for (std::uint32_t step = 0; step <= 8u; ++step) {
+            const std::uint32_t bit = step == 0u ? 0u : 1u << (step - 1u);
+            if (step != 0u) {
+                render.blend = true;
+                render.alpha_destination = MTLBlendFactorOne;  // add
+                depth.stencil = true;
+                depth.stencil_function = 2u;  // EQUAL, every operation KEEP
+                depth.compare_mask = static_cast<std::uint8_t>(bit);
+                depth.write_mask = 0u;
+            }
+            id<MTLRenderPipelineState> pipeline = render_pipeline(render);
+            if (pipeline == nil) break;
+            [encoder_ setRenderPipelineState:pipeline];
+            [encoder_ setDepthStencilState:depth_state(depth)];
+            if (step != 0u) [encoder_ setStencilReferenceValue:bit];
+            fragment.stencil = {1u, bit, 0u, 0u};
+            [encoder_ setFragmentBytes:&fragment length:sizeof(fragment) atIndex:0];
+            [encoder_ drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:quad.size()];
+        }
+        // The next draw sets its own state again.
+        bound_ = Bound{};
+    }
+
     // The lights, the material and the fog of a lit or fogged draw into lighting_ (ge.vert's Environment
     // and Object blocks, filled as vulkan_renderer.cpp fills them).
     void fill_lighting(const DrawCall &call, bool lit, bool fogged) {
@@ -1186,18 +1606,29 @@ private:
         if (const auto found = render_pipelines_.find(key); found != render_pipelines_.end()) return found->second;
         MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
         descriptor.vertexFunction = vertex_function_;
-        descriptor.fragmentFunction = fragment_functions_[(key.textured ? 1u : 0u) | (key.alpha_test ? 2u : 0u)];
+        descriptor.fragmentFunction = fragment_functions_[(key.textured ? 1u : 0u) | (key.alpha_test ? 2u : 0u) |
+                                                          (key.dual_source ? 4u : 0u)];
+        // With dual-source blending the colour blend's source alpha is the fragment's own, from the second
+        // output, while the first output's alpha is the stencil value the target stores.
+        const auto colour_factor = [&](std::uint8_t factor) {
+            const auto metal = static_cast<MTLBlendFactor>(factor);
+            if (!key.dual_source) return metal;
+            if (metal == MTLBlendFactorSourceAlpha) return MTLBlendFactorSource1Alpha;
+            if (metal == MTLBlendFactorOneMinusSourceAlpha) return MTLBlendFactorOneMinusSource1Alpha;
+            return metal;
+        };
         MTLRenderPipelineColorAttachmentDescriptor *colour = descriptor.colorAttachments[0];
         colour.pixelFormat = MTLPixelFormatRGBA8Unorm;
         colour.writeMask = key.write_mask;
         colour.blendingEnabled = key.blend;
         colour.rgbBlendOperation = static_cast<MTLBlendOperation>(key.operation);
-        colour.sourceRGBBlendFactor = static_cast<MTLBlendFactor>(key.source);
-        colour.destinationRGBBlendFactor = static_cast<MTLBlendFactor>(key.destination);
-        // The alpha is the PSP's stencil, which only clears write here (task 025 adds the rest).
+        colour.sourceRGBBlendFactor = colour_factor(key.source);
+        colour.destinationRGBBlendFactor = colour_factor(key.destination);
+        // The alpha is the PSP's stencil: the fragment's value (the stencil value or a clear's alpha) is stored
+        // as it is, or added for the copy of the stencil into the alpha.
         colour.alphaBlendOperation = MTLBlendOperationAdd;
         colour.sourceAlphaBlendFactor = MTLBlendFactorOne;
-        colour.destinationAlphaBlendFactor = MTLBlendFactorZero;
+        colour.destinationAlphaBlendFactor = static_cast<MTLBlendFactor>(key.alpha_destination);
         descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
         descriptor.stencilAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
         NSError *failure = nil;
@@ -1214,7 +1645,19 @@ private:
         MTLDepthStencilDescriptor *descriptor = [MTLDepthStencilDescriptor new];
         descriptor.depthCompareFunction = static_cast<MTLCompareFunction>(key.compare);
         descriptor.depthWriteEnabled = key.write;
-        // key.stencil and the fields after it: task 025 sets frontFaceStencil and backFaceStencil here.
+        if (key.stencil) {
+            // The GE compares the reference with the stored stencil (reference OP stencil, both under the
+            // compare mask) as Metal does, with the alpha test's function numbers; both faces alike.
+            MTLStencilDescriptor *stencil = [MTLStencilDescriptor new];
+            stencil.stencilCompareFunction = to_compare(key.stencil_function);
+            stencil.stencilFailureOperation = to_stencil_operation(key.fail);
+            stencil.depthFailureOperation = to_stencil_operation(key.depth_fail);
+            stencil.depthStencilPassOperation = to_stencil_operation(key.pass);
+            stencil.readMask = key.compare_mask;
+            stencil.writeMask = key.write_mask;
+            descriptor.frontFaceStencil = stencil;
+            descriptor.backFaceStencil = stencil;
+        }
         id<MTLDepthStencilState> state = [device_ newDepthStencilStateWithDescriptor:descriptor];
         depth_states_.emplace(key, state);
         return state;
@@ -1278,20 +1721,36 @@ private:
                                 source != nullptr && state.format == TextureFormat::Rgba5650 ? 1u : 0u, 0u};
         }
 
-        // Pipeline state.
+        // Pipeline state. The target's alpha is the PSP's stencil (patches 0004 and 0006): the stencil
+        // attachment does the GE's test and operations, and the alpha is kept equal to it, written by the
+        // fragment where the zpass operation is REPLACE or ZERO and copied from the attachment where the draw
+        // leaves it behind (`follows`).
         key.render.textured = textured;
+        std::uint32_t stencil_reference = 0u;
+        bool follows = true;
         if (call.clear_mode) {
-            // CLEARMODE: no blend, texture or tests; bits 8..10 say what it writes.
+            // CLEARMODE: no blend, texture or tests; bits 8..10 say what it writes. A clear of the alpha writes
+            // the stencil too: ALWAYS, REPLACE with the clear colour's alpha.
             std::uint8_t mask = MTLColorWriteMaskNone;
             if ((call.clear_flags & 1u) != 0u) mask |= MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue;
             if ((call.clear_flags & 2u) != 0u) mask |= MTLColorWriteMaskAlpha;
             key.render.write_mask = mask;
             key.depth.compare = MTLCompareFunctionAlways;
             key.depth.write = (call.clear_flags & 4u) != 0u;
+            if ((call.clear_flags & 2u) != 0u && call.target.color_format != 0u) {
+                const std::uint32_t color =
+                    !call.has_vertex_color && !call.lighting_enabled ? call.material_color : call.vertices.back().color;
+                key.depth.stencil = true;
+                key.depth.stencil_function = 1u;  // ALWAYS
+                key.depth.fail = key.depth.depth_fail = key.depth.pass = 2u;  // REPLACE
+                key.depth.compare_mask = 0xFFu;
+                key.depth.write_mask = 0xFFu;
+                stencil_reference = color >> 24u;
+            }
         } else {
             translate_blend(call.blend, key.render, fragment, blend_color);
-            // Whole colour channels the write mask keeps are not written; the alpha, the PSP's
-            // stencil, is left to the stencil operations (task 025).
+            // Whole colour channels the write mask keeps are not written; the alpha, the PSP's stencil, only
+            // by the stencil operations.
             std::uint8_t mask = MTLColorWriteMaskNone;
             static constexpr MTLColorWriteMask kChannels[] = {MTLColorWriteMaskRed, MTLColorWriteMaskGreen,
                                                               MTLColorWriteMaskBlue};
@@ -1299,6 +1758,13 @@ private:
                 const std::uint32_t bits = (call.color_write_mask >> (8u * channel)) & 0xFFu;
                 if (bits != 0xFFu) mask |= kChannels[channel];
                 if (bits != 0u && bits != 0xFFu) not_emulated("partial colour write mask", call.color_write_mask);
+            }
+            const int stored = stencil_alpha(call);
+            if (stored >= 0) {
+                mask |= MTLColorWriteMaskAlpha;
+                fragment.stencil = {1u, static_cast<std::uint32_t>(stored), 0u, 0u};
+                // A colour blend that reads the source alpha reads the fragment's own from the second output.
+                key.render.dual_source = blend_reads_source_alpha(key.render, mask);
             }
             key.render.write_mask = mask;
             key.render.alpha_test = call.alpha_test.enabled && call.alpha_test.function != 1u;
@@ -1314,9 +1780,10 @@ private:
                 key.depth.fail = static_cast<std::uint8_t>(call.stencil.fail_op & 7u);
                 key.depth.depth_fail = static_cast<std::uint8_t>(call.stencil.depth_fail_op & 7u);
                 key.depth.pass = static_cast<std::uint8_t>(call.stencil.pass_op & 7u);
-                key.depth.reference = static_cast<std::uint8_t>(call.stencil.reference);
                 key.depth.compare_mask = static_cast<std::uint8_t>(call.stencil.mask);
                 key.depth.write_mask = static_cast<std::uint8_t>(~call.alpha_write_mask);
+                stencil_reference = stored_reference(call);
+                follows = alpha_follows_stencil(call, key.depth.compare != MTLCompareFunctionAlways);
             }
         }
         id<MTLRenderPipelineState> pipeline = render_pipeline(key.render);
@@ -1360,6 +1827,10 @@ private:
 
         // Into the target's pass (after the texture, whose copy may have ended it).
         begin_pass(target);
+        // A blend that reads the destination's alpha reads the PSP's stencil.
+        if (alpha_stale_ && blend_reads_destination_alpha(key.render)) resolve_stencil_alpha("destination alpha read");
+        if (!follows) alpha_stale_ = true;
+        if (key.depth.stencil) ++stats_.stencil_draws;
         if (target.guest_words.empty() || target.last_drawn_frame != frames_) snapshot_guest_words(memory, target);
         target.last_drawn_frame = frames_;
         target.draw_serial = ++draw_counter_;
@@ -1375,6 +1846,11 @@ private:
         if (bound_.depth != depth) {
             [encoder_ setDepthStencilState:depth];
             bound_.depth = depth;
+        }
+        if (key.depth.stencil && (!bound_.stencil_reference_set || bound_.stencil_reference != stencil_reference)) {
+            [encoder_ setStencilReferenceValue:stencil_reference];
+            bound_.stencil_reference = stencil_reference;
+            bound_.stencil_reference_set = true;
         }
         if (!bound_.viewport_set || bound_.viewport.znear != viewport.znear || bound_.viewport.zfar != viewport.zfar) {
             [encoder_ setViewport:viewport];
@@ -1552,6 +2028,8 @@ private:
         bool cull_set{};
         std::uint32_t blend_color{};
         bool blend_color_set{};
+        std::uint32_t stencil_reference{};
+        bool stencil_reference_set{};
     };
 
     bool ready_{};
@@ -1559,10 +2037,12 @@ private:
     id<MTLCommandQueue> queue_;
     id<MTLLibrary> library_;
     id<MTLFunction> vertex_function_;
-    std::array<id<MTLFunction>, 4> fragment_functions_{};  // by kTextured | kAlphaTest << 1
+    std::array<id<MTLFunction>, 8> fragment_functions_{};  // by kTextured | kAlphaTest << 1 | dual source << 2
     std::array<id<MTLSamplerState>, 16> samplers_{};
     id<MTLTexture> white_;
-    id<MTLBuffer> readback_;
+    id<MTLBuffer> readback_;          // the presented picture, read back (picture_)
+    id<MTLBuffer> frame_writeback_;   // the presented picture, copied at the flip for write_back_frame()
+    id<MTLBuffer> guest_readback_;    // a target's colour or depth for guest memory
     std::map<RenderKey, id<MTLRenderPipelineState>> render_pipelines_;
     std::map<DepthStencilKey, id<MTLDepthStencilState>> depth_states_;
 
@@ -1580,6 +2060,9 @@ private:
     Target *last_drawn_{};
     Target *presented_{};
     std::uint64_t draw_counter_{};
+    // A draw in the open pass left the target's alpha different from its stencil: resolve_stencil_alpha()
+    // copies the stencil over it before a draw reads the destination's alpha and before the pass ends.
+    bool alpha_stale_{};
 
     std::unordered_map<std::uint64_t, CachedTexture> textures_;
     std::map<TextureIdentity, std::uint64_t> list_keys_;  // this display list's binds, hashed once
@@ -1594,6 +2077,15 @@ private:
 
     std::vector<std::uint8_t> picture_;  // the last picture read back
     std::uint64_t picture_frame_{~0ull};
+    // The picture the next write_back_frame() stores: the target shown at the last flip, with its pixels in
+    // picture_ (read back for the Vulkan shell) or in frame_writeback_ once `commands` has run.
+    struct PendingFrame {
+        Target *target{};
+        id<MTLCommandBuffer> commands;
+        bool from_picture{};
+    };
+    PendingFrame pending_frame_;
+    double last_wait_ms_{};  // of the last commit(true)
     portablekit::gpu::VulkanRenderer *shell_{};
     std::vector<std::uint8_t> shell_scratch_;
     bool to_shell_{};
@@ -1603,21 +2095,22 @@ private:
     bool no_lighting_{};
     bool no_fog_{};
     bool no_cull_{};
+    bool trace_stencil_copy_{};
+    bool trace_depth_{};
+    bool depth_announced_{};
 
     std::uint64_t frames_{};
     std::uint64_t frame_draws_{};
     Stats stats_;
-    std::uint64_t block_transfers_{};
-    std::uint64_t frame_write_backs_{};
-    std::uint64_t read_backs_{};
-    std::uint64_t depth_write_backs_{};
     std::chrono::steady_clock::time_point started_{};
     std::chrono::steady_clock::time_point report_start_{};
     std::uint64_t report_frames_{};
     std::uint64_t report_draws_{};
 };
 
-const pk::BackendRegistration registration("metal", "native Metal (tasks 023-024: targets, textures, 2D and 3D draws)",
+const pk::BackendRegistration registration("metal",
+                                           "native Metal (tasks 023-025: targets, textures, 2D and 3D draws, the "
+                                           "stencil, read-backs and write-backs)",
                                            [] { return std::unique_ptr<pk::GeBackend>(new MetalGeBackend()); });
 
 } // namespace

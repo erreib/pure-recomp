@@ -6,8 +6,10 @@
 // and the update bits, ambient, diffuse, specular with the material's power, reverse normals) and fog
 // (tasks 023 and 024), transformed sprites as rectangles already projected (their lighting and fog taken
 // from the second vertex), the five texture functions, the alpha test by the GE's numbering (0 NEVER,
-// 1 ALWAYS: patch 0005) and the FIX source factor. The stencil kept as alpha is task 025's; the colour
-// test, logic ops and colour doubling are not in the draw state.
+// 1 ALWAYS: patch 0005) and the FIX source factor; the stencil value stored as the target's alpha instead of
+// the fragment's, with the fragment's own alpha handed to a source-alpha blend as a second output (dual-source
+// blending, ge_fragment_dual) as patches 0004 and 0006 do (task 025). The colour test, logic ops and colour
+// doubling are not in the draw state.
 //
 // The structs below are laid out exactly as their C++ twins in metal_backend.mm (static_asserts there).
 #pragma once
@@ -72,6 +74,15 @@ struct FragmentUniforms {
     uint4 texture;        // x: texture function (TFX), y: 1 alpha from the texture (TCC), z: 1 texel alpha is one
     uint4 alpha_test;     // x: GE function, y: reference, z: mask
     float4 fog;           // rgb: the fog colour; w: 1 when the draw is fogged
+    uint4 stencil;        // x: 1 when the target's alpha, the PSP's stencil, receives y (0..255) instead of the
+                          // fragment's alpha (the zpass REPLACE or ZERO the stencil attachment does too)
+};
+
+// What ge_fragment_dual hands the blend: the colour with the stored alpha, and the fragment's own alpha as the
+// second source (MTLBlendFactorSource1Alpha), which a source-alpha blend reads instead.
+struct DualOutput {
+    float4 color [[color(0), index(0)]];
+    float4 source [[color(0), index(1)]];
 };
 
 // Specialisation: a pipeline without a texture or an alpha test has neither in its fragment function.
@@ -185,10 +196,10 @@ vertex Varyings ge_vertex(uint vid [[vertex_id]],
     return out;
 }
 
-fragment float4 ge_fragment(Varyings in [[stage_in]],
-                            constant FragmentUniforms &u [[buffer(0)]],
-                            texture2d<float> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+// The fragment's colour and alpha as the GE computes them: texture function, separate specular, fog, alpha
+// test (which discards), FIX source factor. The alpha is the fragment's own; the entry points below decide what
+// the target's alpha receives.
+float4 shade(Varyings in, constant FragmentUniforms &u, texture2d<float> image, sampler image_sampler) {
     float4 color = in.color;
     if (kTextured) {
         float4 texel = image.sample(image_sampler, in.uv);
@@ -238,6 +249,34 @@ fragment float4 ge_fragment(Varyings in [[stage_in]],
     // A FIX source factor: the colour arrives multiplied, and the blend takes it ONE.
     if (u.fix.w != 0.0f) color.rgb *= u.fix.rgb;
     return color;
+}
+
+// The PSP never stores a fragment's own alpha: the target's alpha is the stencil, which a draw writes only
+// through its stencil operations (patch 0004). With u.stencil.x the value replaces the alpha; otherwise the
+// pipeline does not write alpha at all (or the draw is a clear, which writes its colour's alpha).
+float4 stored(float4 color, constant FragmentUniforms &u) {
+    if (u.stencil.x != 0u) color.a = float(u.stencil.y) / 255.0f;
+    return color;
+}
+
+fragment float4 ge_fragment(Varyings in [[stage_in]],
+                            constant FragmentUniforms &u [[buffer(0)]],
+                            texture2d<float> image [[texture(0)]],
+                            sampler image_sampler [[sampler(0)]]) {
+    return stored(shade(in, u, image, image_sampler), u);
+}
+
+// A draw that stores a stencil value under a blend that reads the source alpha (patch 0006's kAlphaDual): the
+// blend reads the fragment's own alpha from the second output.
+fragment DualOutput ge_fragment_dual(Varyings in [[stage_in]],
+                                     constant FragmentUniforms &u [[buffer(0)]],
+                                     texture2d<float> image [[texture(0)]],
+                                     sampler image_sampler [[sampler(0)]]) {
+    const float4 color = shade(in, u, image, image_sampler);
+    DualOutput out;
+    out.color = stored(color, u);
+    out.source = float4(color.a);
+    return out;
 }
 )metal";
 

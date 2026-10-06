@@ -1,5 +1,6 @@
 #!/bin/bash
-# The Metal GE backend against the Vulkan one through ge_replay (task 024; docs/metal-backend.md, "The 3D check").
+# The Metal GE backend against the Vulkan one through ge_replay (tasks 024 and 025; docs/metal-backend.md, "The 3D
+# check" and "The race check").
 #   tools/gerec/metal_check.sh [TEAM_FRAME]        TEAM_FRAME defaults to 5650
 # Recordings are made only when missing, each by one windowed run of main_menu.txt + single_race.txt (`shot` steps
 # dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend, as
@@ -15,13 +16,17 @@
 # is drawn minified and filtered, which at 2x against 1x puts 5% of its pixels over tol 24 by construction.
 # The steps:
 # 1. The team frames' draws, from gerec_dump.py: none may draw into the bloom targets (0x04110000, 0x04132000) or
-#    use the stencil, so that the comparison holds nothing task 025 has still to do. Lit and fogged draws are counted
-#    and reported; the frontend has none (docs/metal-backend.md says how that was checked).
+#    use the stencil, so that they check the transformed path alone (the race checks the rest). Lit and fogged draws
+#    are counted and reported; the frontend has none (docs/metal-backend.md says how that was checked).
 # 2. team.gerec into vulkan and metal at once, --tol 24 --max-frac 0.02: must pass.
-# 3. For the record, not a pass condition: race frame 6016 into vulkan and metal, bisected with --first-diff at
-#    tol 24 (the first draw after which any pixel differs by more than 24): (a) race_1x.gerec, where it names the
-#    first draw that differs for a reason other than the scale; (b) race_warm.gerec, at 2x against 1x.
-# Exit 0 when steps 1 and 2 pass. Logs are in out/gerec/metal_*.log. Needs the screen (Vulkan opens a window).
+# 3. race_1x.gerec frame 6016 into vulkan and metal, --tol 24 --max-frac 0.02 (task 025: the stencil kept as alpha,
+#    the shadow volumes, the bloom chain, the depth and frame write-backs): must pass. When it fails, --first-diff
+#    names the first draw after which the pictures differ, and the recording cut after that draw (ge_replay --cut)
+#    leaves both pictures in out/gerec/metal_race_cut/a and b.
+# 4. For the record, not a pass condition: race frame 6016 bisected with --first-diff at tol 24 and no fraction
+#    allowed (the first draw after which any pixel differs by more than 24): (a) race_1x.gerec; (b) race_warm.gerec,
+#    at 2x against 1x, where the 2x-to-1x reduction moves edges from the first alpha-tested draws on.
+# Exit 0 when steps 1 to 3 pass. Logs are in out/gerec/metal_*.log. Needs the screen (Vulkan opens a window).
 set -u
 cd "$(dirname "$0")/../.."
 export PURE_ROOT="$PWD"
@@ -142,9 +147,27 @@ if [ -s "$OUT/team.gerec" ]; then
   [ $rc -eq 0 ] || fail "team.gerec: vulkan against metal exit $rc (log $OUT/metal_team.log)"
 fi
 
+if [ -s "$OUT/race_1x.gerec" ]; then
+  step "3. race_1x.gerec frame 6016 into vulkan and metal, tol 24, max-frac 0.02"
+  replay "$OUT/metal_race.log" "$OUT/race_1x.gerec" --a vulkan --b metal --frames 6016 --tol 24 --max-frac 0.02 \
+    --first-diff --out "$OUT/metal_race"
+  if [ $rc -ne 0 ]; then
+    fail "race_1x.gerec frame 6016: vulkan against metal exit $rc (log $OUT/metal_race.log)"
+    cut=$(sed -n 's/^\[replay\] first difference in frame [0-9]*: draw \([0-9]*\) of.*/\1/p' "$OUT/metal_race.log")
+    if [ -n "$cut" ]; then
+      rm -rf "$OUT/metal_race_cut"
+      replay "$OUT/metal_race_cut.log" "$OUT/race_1x.gerec" --a vulkan --b metal --frames 6016 --cut "$cut" \
+        --tol 24 --out "$OUT/metal_race_cut"
+      echo "both pictures after draw $cut: $OUT/metal_race_cut/a/frame_6016.bmp (vulkan), $OUT/metal_race_cut/b/frame_6016.bmp (metal)"
+    fi
+  fi
+else
+  fail "no out/gerec/race_1x.gerec"
+fi
+
 for name in race_1x race_warm; do
   [ -s "$OUT/$name.gerec" ] || continue
-  [ $name = race_1x ] && label="3a" || label="3b"
+  [ $name = race_1x ] && label="4a" || label="4b"
   step "$label. $name.gerec frame 6016 into vulkan and metal, bisected at tol 24 (reported, not a pass condition)"
   replay "$OUT/metal_${name}_first_diff.log" "$OUT/$name.gerec" --a vulkan --b metal --frames 6016 --tol 24 --first-diff
   [ $rc -le 1 ] || fail "$name.gerec: vulkan against metal exit $rc (log $OUT/metal_${name}_first_diff.log)"

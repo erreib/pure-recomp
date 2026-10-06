@@ -181,7 +181,7 @@ to the framework's main, which `CMakeLists.txt` compiles as `portablekit_main` (
 
 ```
 build/arm64/bin/PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--compare] [--tol T] [--max-frac F]
-                                              [--frames A[-B]] [--a NAME --b NAME [--first-diff]] [--quiet]
+                                              [--frames A[-B]] [--cut N] [--a NAME --b NAME [--first-diff]] [--quiet]
 ```
 
 | Option | Meaning |
@@ -192,6 +192,7 @@ build/arm64/bin/PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--c
 | `--tol T`, `--max-frac F` | a pixel differs when any channel differs by more than T (default 0); a frame passes when at most F of its pixels differ (default 0) |
 | `--frames A[-B]` | report and compare frames A to B only (A alone: that frame). Earlier frames are still replayed, silently, because they build the memory and targets the later ones use; later frames are not replayed |
 | `--a NAME --b NAME` | replay into two backends at once and compare their captures per frame |
+| `--cut N` | (task 025) the last frame replayed (B of `--frames`, or the recording's last) only up to and including its Nth draw, counted from 1 as `--first-diff` counts, then flipped and captured; earlier frames whole. With `--out` the pictures stay (`DIR/a/frame_B.bmp` and `DIR/b/frame_B.bmp` with `--a`/`--b`), and with `--a`/`--b` or `--compare` they are compared as a whole frame would be (against the recorded image, which shows the whole frame, a cut frame mostly fails). The frame's line says `cut after draw N (R records)`; an N past its last draw replays it whole. `--first-diff` on a cut frame bisects within its first N draws |
 | `--first-diff` | with `--a`/`--b`: bisect the first failing frame to the first draw after which the two pictures differ |
 | `--quiet` | only failures and the summary |
 
@@ -209,13 +210,13 @@ replayed and recorded race frames gives 0.036493, 0.025461 and 0.001955, as the 
 
 `--first-diff` replays the file from its Begin into two fresh backends for each step, since memory and targets must be
 rebuilt: every frame before the failing one whole, then the failing frame's records up to and including its Nth Draw,
-then a flip. It searches for the smallest N whose pictures differ, about log2(draws) replays, and prints each step,
-then `[replay] first difference in frame F: draw N of D (record R in gerec_dump.py's listing)` and the draw's state:
-primitive, vertex and index counts, through mode, vertex type, target and depth buffer, texture (address, format,
-size, swizzle, palette, function, filters, wraps), blend, alpha test, stencil, clear mode with its flags, depth test
-and write masks. The search assumes that a prefix that differs stays different with more draws, which holds when a
-backend gets a draw wrong. When the pictures agree after the frame's last draw, it says the difference comes from the
-records after it.
+then a flip (what `--cut N` does for one N). It searches for the smallest N whose pictures differ, about log2(draws)
+replays, and prints each step, then `[replay] first difference in frame F: draw N of D (record R in gerec_dump.py's
+listing)` and the draw's state: primitive, vertex and index counts, through mode, vertex type, target and depth
+buffer, texture (address, format, size, swizzle, palette, function, filters, wraps), blend, alpha test, stencil, clear
+mode with its flags, depth test and write masks. The search assumes that a prefix that differs stays different with
+more draws, which holds when a backend gets a draw wrong. When the pictures agree after the frame's last draw, it says
+the difference comes from the records after it.
 
 ### What the replay guarantees
 
