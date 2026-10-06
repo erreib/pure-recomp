@@ -1,6 +1,6 @@
 # 014: Save round trip (M5)
 
-Milestone: M5 | Branch: task/014-save-roundtrip | Status: OPEN
+Milestone: M5 | Branch: task/014-save-roundtrip | Status: MERGED
 
 ## Goal
 Profile creation wrote `game/ms0/PSP/SAVEDATA/UCUS98612P0000` through the framework's savedata dialog. Prove the
@@ -111,4 +111,7 @@ Open questions:
 - The game's savedata parameter block is 0x5DC bytes, the firmware 1.x layout with no key, so its saves are plain, as on a PSP. `SAVEDATA_FILE_LIST` is empty for that reason, not because of a missing console key.
 
 ## Review
-(Fable fills)
+Accepted (Fable): the departures are the framework's, not the worker's (no save-list dialog exists, so LOAD takes
+the first save; the capture that proves the name is SET NAME). `kSaveFolders` corrected to P0000-P0004 in the
+profile. Follow-ups: a finished-race leg once task 016's follower is reliable (profile autosave after a race);
+multiple profiles need a save-list dialog in the framework or an override (M7/UI). Merged into batch/m2.

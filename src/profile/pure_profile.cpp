@@ -25,10 +25,11 @@ namespace {
 // Save folders the executable itself names: profiles are "UCUS98612P%04d" (PROFILE.BIN + PARAM.SFO + ICON0.PNG),
 // ghosts "UCUS98612G%x", and download packs "UCUS98612D<PACK>" (PI.WAD), which is the door DLC walks through later.
 constexpr SaveFolder kSaveFolders[] = {
-    {"UCUS98612P0001", "Profile 1", true},
-    {"UCUS98612P0002", "Profile 2", true},
-    {"UCUS98612P0003", "Profile 3", true},
-    {"UCUS98612P0004", "Profile 4", true},
+    {"UCUS98612P0000", "Profile 1", true},   // the game's list starts at P0000 (task 014)
+    {"UCUS98612P0001", "Profile 2", true},
+    {"UCUS98612P0002", "Profile 3", true},
+    {"UCUS98612P0003", "Profile 4", true},
+    {"UCUS98612P0004", "Profile 5", true},
 };
 
 void return_zero(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 0u); }
