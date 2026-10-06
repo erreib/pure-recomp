@@ -54,6 +54,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | (resolved 2026-10-05) bloom chain | Patch 0003 (framebuffer-texture lookup) + patch 0004 (stencil ops as alpha writes, task 009): the bloom lights strips, screens and engines; race frame 6016 vs PPSSPP 0.631 (no bloom 0.663). Open follow-ups: shadow volumes (stencil zfail INCR/DECR, test GREATER) so ship shadows are missing; exact REPLACE under source-alpha blends needs dual-source blending |
 | (resolved 2026-10-05) movies never ended, profile screen blank | Patch 0002: `sceMpegRingbufferAvailableSize` reported the ring empty while 16 pictures were still queued in the demuxer (the audio fetch runs ahead). The game ends a movie on an empty ring, so it dropped the end of every clip and never tore the instance down. With the patch all three movies (SCEA clip, `WoFMVNew_US.PMF`, `Profile_part1.PMF`) play and delete, the game autosaves `PPCD00001DLS001`, and the Profile screen (Load/New/Delete) appears (`out/milestones/03-profile-screen.png`). The 52-picture stop before the language confirm is by design (task 005) |
 | (resolved 2026-10-06) Headless input | Patch 0010 (task 026): the headless shell reads the input script at pad level, so every `pad`/`axis`/`shot`/`quit` route runs without a window (`PURE_SHELL=headless PURE_GE_BACKEND=null`); mouse, key and text steps still need a window |
+| Metal window drops the race HUD (default path) | Found by task 028's probe: 10 of 59 race shots on the Metal shell's window have the HUD, against 61 of 61 on the Vulkan window and in the backend's own captures; the shell samples the backend's target from its own command queue before the frame's last command buffer (the HUD, drawn after the mid-frame depth write-back) has run. Task 031 (running) puts both on one queue and adds `tools/hud_check.sh`. Until then the campaign sweep pins the Vulkan path and the app bundle (029) waits |
 | (resolved 2026-10-06) Headless pace | Patch 0011: the kernel's host-wait sleep applies only to waits bound to real time (the adhoc network waits), and pacing follows the shell (`Kernel::set_paced`). Headless runs: the null backend to frame 2000 in 0.5 s (was 106 s), the headless frontend route to frame 2200 in 1.1 s (was 115 s), same draws and events |
 | Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
@@ -88,11 +89,11 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   0011 (headless runs unpaced: thousands of frames a second), 027 (the Metal shell, patch 0012), 024 (Metal 3D:
   lighting, fog, screen-space sprites, culling; the race frame at internal scale 1 matches Vulkan to its first
   stencil draw), 025 (Metal effects: stencil as alpha, bloom chain, read-backs and write-backs, ge_replay `--cut`).
-  **M6 complete.** D-008: Metal by default on macOS. Running: 028 (the default switch in our entry point, per-backend
-  measured values in the suite, `run_boot.py --shell`), 030 merged (controls: docs/controls.md from the code, the menu's
-  binding editor and the virtual gamepad checked under the Metal shell). Briefed, waiting for 028: 029 (the app
-  bundle through the framework's release packer, the first-run installer, `tools/bundle.sh`). Next: M7's remainder and the M5 breadth items in Follow-ups; then the enhancements (E1 controls, E2 widescreen, E3 internal
-  resolution, E4 60 fps in the 30-fps modes, E5 filtering) per the plan.
+  **M6 complete.** D-008: Metal by default on macOS. Merged: 028 (the default in our entry point, per-backend
+  measured columns in the suite, `run_boot.py --shell/--backend`; Verify rerun on the main checkout pending), 030
+  (controls doc + checker). Running: 031 (the Metal window's missing race HUD: one command queue for the backend
+  and the shell, `tools/hud_check.sh`). Briefed, waiting for 031: 029 (the app bundle through the framework's
+  release packer, the first-run installer, `tools/bundle.sh`). Next: M7's remainder
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
   (`tools/pad_record.py`), the save-list dialog for multiple profiles.
