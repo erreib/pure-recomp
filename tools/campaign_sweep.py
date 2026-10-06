@@ -156,10 +156,11 @@ ZONES = ["zone_1", "zone_2", "zone_3", "zone_4"]   # PRO TOZO, MALLAVOL, CORIDON
 
 
 def lap_budget(track, laps=3, fps=60):
-    """A race budget from the track's length (task 032): `laps` laps at 45 m/s (162 km/h; the follower averaged
-    about 52 to 60 m/s on Modesto Heights, Chenghou Project and Blue Ridge, task 017) and 15 s for the countdown and
-    the results panel, in flips, rounded up to 500."""
-    seconds = laps * LENGTHS[track] / 45.0 + 15.0
+    """A race budget from the track's length (task 032): `laps` laps at 40 m/s (144 km/h) and 15 s for the countdown
+    and the results panel, in flips, rounded up to 500. The follower averaged about 52 to 60 m/s on Modesto
+    Heights, Chenghou Project and Blue Ridge (task 017), but 43 m/s on Citta Nuova (laps of 116 to 119 s, 2026-10-06),
+    which a first rule of 45 m/s left 1650 flips of slack."""
+    seconds = laps * LENGTHS[track] / 40.0 + 15.0
     return int(math.ceil(seconds * fps / 500.0) * 500)
 
 
