@@ -1284,12 +1284,13 @@ private:
             double presented_s = 0.0, latency_ms = 0.0;
             const bool known = pure::metal::take_presented(row.flip, presented_s, latency_ms);
             if (!known && shell_seen_ && !all && frames_ + 1u - row.flip < kTraceDelay) break;
-            write_trace_row(row, known && presented_s > 0.0, presented_s, latency_ms);
+            write_trace_row(row, known, presented_s, latency_ms);
             pending_rows_.pop_front();
         }
     }
 
-    void write_trace_row(const TraceRow &row, bool presented, double presented_s, double latency_ms) {
+    // `known`: the shell reported on the flip's picture; it reached the screen at presented_s, or never (0).
+    void write_trace_row(const TraceRow &row, bool known, double presented_s, double latency_ms) {
         const FrameTimes &t = row.times;
         const Stats &c = row.counts;
         const double waits = t.wait_depth + t.wait_frame + t.wait_guest + t.wait_capture + t.wait_ring;
@@ -1306,14 +1307,20 @@ private:
         // The shell's columns are empty where no Metal shell presents.
         if (shell_seen_) std::fprintf(trace_file_, "%.3f,%.3f,%u,", row.shell_ms, row.drawable_ms, row.occluded);
         else std::fprintf(trace_file_, ",,,");
+        // shown_ms: since the last picture that reached the screen, 0 for one that never did, empty when unknown.
+        const bool presented = known && presented_s > 0.0;
         if (presented && last_presented_s_ > 0.0)
             std::fprintf(trace_file_, "%.3f,", (presented_s - last_presented_s_) * 1000.0);
+        else if (known && !presented)
+            std::fprintf(trace_file_, "0,");
         else std::fprintf(trace_file_, ",");
         if (presented) {
             std::fprintf(trace_file_, "%.3f,", latency_ms);
             last_presented_s_ = presented_s;
+            ++trace_shown_;
         } else {
             std::fprintf(trace_file_, ",");
+            if (known) ++trace_not_shown_;
         }
         std::fprintf(trace_file_, "%.3f\n", other);
         if (++trace_rows_ % 60u == 0u) std::fflush(trace_file_);
@@ -1324,7 +1331,11 @@ private:
         flush_trace(true);
         std::fclose(trace_file_);
         trace_file_ = nullptr;
-        std::cout << "[metal] frame trace: " << trace_rows_ << " rows -> " << trace_path_ << "\n";
+        std::cout << "[metal] frame trace: " << trace_rows_ << " rows -> " << trace_path_;
+        if (shell_seen_)
+            std::cout << "; the shell's pictures: " << trace_shown_ << " reached the screen, " << trace_not_shown_
+                      << " never did, " << trace_rows_ - trace_shown_ - trace_not_shown_ << " not reported";
+        std::cout << "\n";
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -2563,6 +2574,8 @@ private:
     std::string trace_path_;
     std::deque<TraceRow> pending_rows_;
     std::uint64_t trace_rows_{};
+    std::uint64_t trace_shown_{};      // rows whose picture reached the screen
+    std::uint64_t trace_not_shown_{};  // rows whose picture the shell says never did
     std::chrono::steady_clock::time_point trace_last_flip_{};
     bool trace_has_flip_{};
     bool shell_seen_{};           // a Metal shell reports its presents

@@ -18,7 +18,8 @@ went. The columns, in milliseconds unless they are counts:
                  occluded: how many of the interval's presents found the window occluded (macOS shows none of them,
                  and may hold nextDrawable back for up to a second)
   shown_ms       when this flip's picture reached the screen after the previous picture shown did (the drawable's
-                 presentedTime), latency_ms after the shell's present() began; empty when it never reached it
+                 presentedTime), latency_ms after the shell's present() began; shown_ms 0 when the shell reported that
+                 it never reached the screen, both empty when nothing was reported
   other_ms       the rest: the game's own code, the HLE, the kernel's pacing sleep (frame_ms minus the parts above)
 A long frame's cause is the part that exceeds its median over the rows read by the most: pipeline, texture, draws
 (the rest of submit), wait depth/frame/guest/capture/ring, backend (present and memory CPU besides their waits),
@@ -209,10 +210,13 @@ def main(argv=None):
           + f"; in all {sum(int(r['pipelines']) for r in rows)} pipelines and {sum(int(r['depth_states']) for r in rows)} "
           f"depth-stencil states made by draws, {sum(int(r['decoded']) for r in rows)} textures decoded "
           f"({sum(r['decoded_kb'] for r in rows) / 1024.0:.1f} MiB)")
-    shown = [r["shown_ms"] for r in rows if r["has_shown"]]
+    shown = [r["shown_ms"] for r in rows if r["has_shown"] and r["shown_ms"] > 0]
+    never = sum(1 for r in rows if r["has_shown"] and r["shown_ms"] == 0)
+    unreported = sum(1 for r in rows if r["has_shell"] and not r["has_shown"])
+    if any(r["has_shell"] for r in rows) and not shown:
+        print(f"  on screen: no picture reached the screen ({never} reported never shown, {unreported} not reported)")
     if shown:
-        latency = [r["latency_ms"] for r in rows if r["has_shown"]]
-        never = sum(1 for r in rows if r["has_shell"] and not r["has_shown"])
+        latency = [r["latency_ms"] for r in rows if r["has_shown"] and r["shown_ms"] > 0]
         occluded = [r["flip"] for r in rows if r.get("occluded", 0.0) > 0]
         if occluded:
             print(f"  window occluded at {len(occluded)} presents, flips {occluded[0]}-{occluded[-1]}: what macOS "
@@ -220,7 +224,8 @@ def main(argv=None):
         print(f"  on screen (the drawables' presented times, {len(shown)} pictures): interval mean "
               f"{sum(shown) / len(shown):.2f} ms, 99th percentile {percentile(shown, 99):.2f}, longest {max(shown):.2f}, "
               f"over {opts.long:g} ms {sum(1 for s in shown if s > opts.long)}; latency from the shell's present "
-              f"mean {sum(latency) / len(latency):.1f} ms, longest {max(latency):.1f}; pictures never shown {never}")
+              f"mean {sum(latency) / len(latency):.1f} ms, longest {max(latency):.1f}; pictures never shown {never}, not "
+              f"reported {unreported}")
 
     edges = [4, 8, 12, 16, 17, 18, 20, 25, 33, 50, 100]
     print_histogram("frame_ms histogram", times, edges)
