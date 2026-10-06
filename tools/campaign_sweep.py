@@ -345,11 +345,13 @@ class Tuner:
                    pickup, SQ absorb, L1/R1 airbrakes) for `hold` frames every S s of race, meant to turn a weapon
                    picked up from a pad into shield (0: never). A ship whose shield runs out is destroyed ("SHIP
                    DESTROYED"). No shield gain was seen in task 016's shots, held 4 or 40 frames
+      use S        press Circle (`pad b`, "Use pickup") every S s of race: fires a weapon, or raises a shield
+                   or engages the autopilot when the pickup is one of those (0: never)
       recover K    below K km/h after the first 5 s (the ship against a wall, its velocity no guide to where its nose
                    points) steer full lock towards the line, Cross held, until the speed is back (0: never)"""
     ZETA = 0.7
     PARAMS = {"yaw": 0.8, "deadzone": 0.3, "koff": 1.0, "kpsi": 1.0, "airbrake": 0.0, "lift": 0.0, "ahead": 1.5,
-              "lag": 0.0, "recover": 0.0, "vmax": 0.0, "absorb": 0.0, "hold": 4.0}
+              "lag": 0.0, "recover": 0.0, "vmax": 0.0, "absorb": 0.0, "hold": 4.0, "use": 0.0}
 
     def __init__(self, line, wn, preview, **params):
         self.line, self.wn, self.preview = line, wn, preview
@@ -796,6 +798,10 @@ def run_cell(mode, track, opts):
                 and race.total - state.get("absorbed", 0.0) >= tuner.absorb):
             send(f"0:pad x {int(tuner.hold)}")   # Square: "Absorb pickup" in the default controls
             state["absorbed"] = race.total
+        if (tuner is not None and tuner.use > 0.0 and race.finished_frame is None
+                and race.total - state.get("used", 0.0) >= tuner.use):
+            send("0:pad b 4")                     # Circle: "Use pickup" in the default controls
+            state["used"] = race.total
         if not state["ref"] and race.frame - race.start_frame >= REF_SHOT_FLIPS:
             send("0:shot ref")
             state["ref"] = True
