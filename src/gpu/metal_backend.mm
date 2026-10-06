@@ -530,6 +530,7 @@ struct TraceRow {
     double shell_ms{};
     double drawable_ms{};
     std::uint32_t shell_presents{};
+    std::uint32_t occluded{};  // of those presents, made while the window was occluded
 };
 
 // The pre-warm (task 033): render pipelines made asynchronously at start from config/metal_pipelines.txt. The
@@ -1218,7 +1219,7 @@ private:
     static constexpr const char *kTraceHeader =
         "flip,t_ms,frame_ms,submit_ms,pipeline_ms,texture_ms,present_ms,memory_ms,wait_ms,wait_depth_ms,"
         "wait_frame_ms,wait_guest_ms,wait_capture_ms,wait_ring_ms,pipelines,depth_states,decoded,decoded_kb,"
-        "stencil_copies,draws,passes,copies,shell_ms,drawable_ms,shown_ms,latency_ms,other_ms";
+        "stencil_copies,draws,passes,copies,shell_ms,drawable_ms,occluded,shown_ms,latency_ms,other_ms";
     // How many flips a row waits for the shell to say when its picture reached the screen.
     static constexpr std::uint64_t kTraceDelay = 30u;
 
@@ -1255,6 +1256,7 @@ private:
         row.shell_ms = shell.cpu_ms;
         row.drawable_ms = shell.drawable_ms;
         row.shell_presents = shell.count;
+        row.occluded = shell.occluded;
         if (shell.count != 0u) shell_seen_ = true;
         pending_rows_.push_back(row);
         flush_trace(false);
@@ -1302,8 +1304,8 @@ private:
                      static_cast<unsigned long long>(c.stencil_copies), static_cast<unsigned long long>(c.draws),
                      static_cast<unsigned long long>(c.passes), static_cast<unsigned long long>(c.copies));
         // The shell's columns are empty where no Metal shell presents.
-        if (shell_seen_) std::fprintf(trace_file_, "%.3f,%.3f,", row.shell_ms, row.drawable_ms);
-        else std::fprintf(trace_file_, ",,");
+        if (shell_seen_) std::fprintf(trace_file_, "%.3f,%.3f,%u,", row.shell_ms, row.drawable_ms, row.occluded);
+        else std::fprintf(trace_file_, ",,,");
         if (presented && last_presented_s_ > 0.0)
             std::fprintf(trace_file_, "%.3f,", (presented_s - last_presented_s_) * 1000.0);
         else std::fprintf(trace_file_, ",");

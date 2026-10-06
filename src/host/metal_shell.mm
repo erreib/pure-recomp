@@ -503,10 +503,10 @@ private:
 
     // Hands the trace this present's CPU time, and, for a flip not shown (a skipped fast-forward flip, no drawable),
     // that its picture never reached the screen.
-    static void report(const Trace &trace, bool shown) {
+    void report(const Trace &trace, bool shown) const {
         if (!trace.on) return;
         pure::metal::trace_shell_present(std::chrono::duration<double, std::milli>(Clock::now() - trace.entered).count(),
-                                         trace.drawable_ms);
+                                         trace.drawable_ms, (SDL_GetWindowFlags(window_) & SDL_WINDOW_OCCLUDED) != 0u);
         if (!shown) pure::metal::trace_presented(trace.flip, 0.0, 0.0);
     }
 

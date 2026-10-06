@@ -14,13 +14,16 @@ went. The columns, in milliseconds unless they are counts:
                  wait_capture_ms and wait_ring_ms (more than two frames in flight) split
   pipelines, depth_states   made by a draw in the interval; decoded, decoded_kb: textures decoded; stencil_copies,
                  draws, passes, copies
-  shell_ms       the Metal shell's present() (empty under another shell), drawable_ms of it waiting in nextDrawable
+  shell_ms       the Metal shell's present() (empty under another shell), drawable_ms of it waiting in nextDrawable;
+                 occluded: how many of the interval's presents found the window occluded (macOS shows none of them,
+                 and may hold nextDrawable back for up to a second)
   shown_ms       when this flip's picture reached the screen after the previous picture shown did (the drawable's
                  presentedTime), latency_ms after the shell's present() began; empty when it never reached it
   other_ms       the rest: the game's own code, the HLE, the kernel's pacing sleep (frame_ms minus the parts above)
 A long frame's cause is the part that exceeds its median over the rows read by the most: pipeline, texture, draws
 (the rest of submit), wait depth/frame/guest/capture/ring, backend (present and memory CPU besides their waits),
-shell (its CPU besides the drawable), drawable, outside (other_ms: the game, the HLE, pacing).
+shell (its CPU besides the drawable), drawable (`drawable, occluded` when the window was occluded), outside
+(other_ms: the game, the HLE, pacing).
 
 Prints the frame count, the mean, median, 99th percentile and longest frame time, the frames over --long (default 20
 ms) and over 1.5 frames at --fps (default 60), the on-screen intervals when the trace has them, a histogram, the
@@ -99,6 +102,8 @@ def cause_of(row, median):
         e = get(row) - median[name]
         if e > excess:
             best, excess = name, e
+    if best == "drawable" and row.get("occluded", 0.0) > 0:
+        best = "drawable, occluded"
     return best, excess
 
 
@@ -141,6 +146,7 @@ def plot(path, rows, median, budget, long_ms):
 
     n = len(rows)
     colours = {name: colour for name, colour, _ in CAUSES}
+    colours["drawable, occluded"] = colours["drawable"]
     for x in range(width):
         lo, hi = x * n // width, max(x * n // width + 1, (x + 1) * n // width)
         chunk = rows[lo:hi]
@@ -207,6 +213,10 @@ def main(argv=None):
     if shown:
         latency = [r["latency_ms"] for r in rows if r["has_shown"]]
         never = sum(1 for r in rows if r["has_shell"] and not r["has_shown"])
+        occluded = [r["flip"] for r in rows if r.get("occluded", 0.0) > 0]
+        if occluded:
+            print(f"  window occluded at {len(occluded)} presents, flips {occluded[0]}-{occluded[-1]}: what macOS "
+                  f"shows and the drawable waits of those frames are not a player's")
         print(f"  on screen (the drawables' presented times, {len(shown)} pictures): interval mean "
               f"{sum(shown) / len(shown):.2f} ms, 99th percentile {percentile(shown, 99):.2f}, longest {max(shown):.2f}, "
               f"over {opts.long:g} ms {sum(1 for s in shown if s > opts.long)}; latency from the shell's present "
@@ -220,15 +230,15 @@ def main(argv=None):
     print(f"\nmedians: " + ", ".join(f"{name} {median[name]:.2f}" for name, _, _ in CAUSES))
     top = sorted(rows, key=lambda r: r["frame_ms"], reverse=True)[:opts.top]
     print(f"\nlongest {len(top)} frames:")
-    print(f"  {'flip':>6} {'t_s':>8} {'frame':>7}  {'cause':<12} {'excess':>7}  " +
+    print(f"  {'flip':>6} {'t_s':>8} {'frame':>7}  {'cause':<18} {'excess':>7}  " +
           " ".join(f"{c:>8}" for c in ("submit", "pipeline", "texture", "present", "memory", "wait", "shell", "drawable",
-                                       "other")) + "  " + " ".join(f"{c:>6}" for c in SHOWN_LABELS))
+                                       "other")) + "  " + " ".join(f"{c:>6}" for c in SHOWN_LABELS) + "  occl")
     for r in top:
         cause, excess = cause_of(r, median)
-        print(f"  {r['flip']:>6} {r['t_ms'] / 1000.0:>8.2f} {r['frame_ms']:>7.2f}  {cause:<12} {excess:>7.2f}  " +
+        print(f"  {r['flip']:>6} {r['t_ms'] / 1000.0:>8.2f} {r['frame_ms']:>7.2f}  {cause:<18} {excess:>7.2f}  " +
               " ".join(f"{r[c]:>8.2f}" for c in ("submit_ms", "pipeline_ms", "texture_ms", "present_ms", "memory_ms",
                                                  "wait_ms", "shell_ms", "drawable_ms", "other_ms")) + "  " +
-              " ".join(f"{r[c]:>6g}" for c in SHOWN))
+              " ".join(f"{r[c]:>6g}" for c in SHOWN) + f"  {r.get('occluded', 0.0):>4g}")
 
     if long_rows:
         tally = {}
@@ -239,7 +249,7 @@ def main(argv=None):
         print(f"\nframes over {opts.long:g} ms by cause:")
         for cause, (count, total, flips) in sorted(tally.items(), key=lambda kv: -kv[1][0]):
             shown_flips = ", ".join(str(f) for f in flips[:12]) + (", ..." if len(flips) > 12 else "")
-            print(f"  {cause:<12} {count:5d}  excess mean {total / count:6.2f} ms  flips {shown_flips}")
+            print(f"  {cause:<18} {count:5d}  excess mean {total / count:6.2f} ms  flips {shown_flips}")
         with_pipelines = [r for r in long_rows if r["pipelines"] + r["depth_states"] > 0]
         print(f"  with a pipeline or depth-stencil state made: {len(with_pipelines)}"
               + (f" (flips {', '.join(str(r['flip']) for r in with_pipelines[:12])}"

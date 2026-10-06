@@ -29,8 +29,9 @@ bool trace_on();
 // The backend, in present_image(): the flip whose picture the shell presents next.
 void trace_flip(std::uint64_t flip);
 std::uint64_t trace_current_flip();
-// The shell, after its commit of a game picture: the CPU time of present() and, of it, the wait in nextDrawable.
-void trace_shell_present(double cpu_ms, double drawable_ms);
+// The shell, after its commit of a game picture: the CPU time of present() and, of it, the wait in nextDrawable, and
+// whether the window was occluded (macOS shows nothing of it then, and may hold nextDrawable back).
+void trace_shell_present(double cpu_ms, double drawable_ms, bool occluded);
 // The shell's presented handler (any thread): when the drawable of `flip` reached the screen (CACurrentMediaTime's
 // seconds; 0 when it never did) and how long after the start of present() that was.
 void trace_presented(std::uint64_t flip, double presented_s, double latency_ms);
@@ -40,6 +41,7 @@ struct ShellPresents {
     double cpu_ms{};
     double drawable_ms{};
     std::uint32_t count{};
+    std::uint32_t occluded{};
 };
 ShellPresents take_shell_presents();
 // The presented time and latency of `flip`'s drawable, once the shell's handler has reported it (then forgotten).

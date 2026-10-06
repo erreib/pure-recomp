@@ -30,9 +30,12 @@ struct Trace {
     std::map<std::uint64_t, std::pair<double, double>> presented;  // flip -> (presented time, latency)
 };
 
+// Never destroyed: the backend's shutdown, which writes the trace's last rows, can run during the program's exit after
+// a function-local static made later than its owner would already be gone, and the drawables' presented handlers
+// may still run on Metal's threads then.
 Trace &trace() {
-    static Trace value;
-    return value;
+    static Trace *const value = new Trace;
+    return *value;
 }
 
 } // namespace
@@ -49,12 +52,13 @@ void trace_flip(std::uint64_t flip) { trace().flip.store(flip, std::memory_order
 
 std::uint64_t trace_current_flip() { return trace().flip.load(std::memory_order_relaxed); }
 
-void trace_shell_present(double cpu_ms, double drawable_ms) {
+void trace_shell_present(double cpu_ms, double drawable_ms, bool occluded) {
     Trace &t = trace();
     std::lock_guard<std::mutex> guard(t.lock);
     t.presents.cpu_ms += cpu_ms;
     t.presents.drawable_ms += drawable_ms;
     ++t.presents.count;
+    if (occluded) ++t.presents.occluded;
 }
 
 void trace_presented(std::uint64_t flip, double presented_s, double latency_ms) {
