@@ -807,12 +807,17 @@ def title_columns(path, region=TITLE_REGION):
 
 def title_match(path, region, runs):
     """True when a shot's lit columns in region are within TITLE_MAX_MISMATCH of runs (positive lit, negative
-    dark), None when the shot cannot be read."""
+    dark), None when the shot cannot be read. A column whose value runs has next door (an edge moved by one
+    column) is not counted: on MALLAVOL (zone_2, task 032) the SHIP DESTROYED title lit every glyph one column
+    narrower, 13 columns off in all, 0 so counted; race views, the results panel and the other titles stay 23 or
+    more columns off."""
     cols = title_columns(path, region)
     if cols is None:
         return None
     want = "".join(("#" if n > 0 else ".") * abs(n) for n in runs)
-    return sum(a != b for a, b in zip(cols, want)) <= TITLE_MAX_MISMATCH
+    off = sum(1 for i, (a, b) in enumerate(zip(cols, want))
+              if a != b and not ((i > 0 and want[i - 1] == a) or (i + 1 < len(want) and want[i + 1] == a)))
+    return off <= TITLE_MAX_MISMATCH
 
 
 def destroyed_title(path):
@@ -823,10 +828,12 @@ def destroyed_title(path):
 
 # The end panels' digits are drawn like a seven-segment display: the segments each digit lights (a top, b top
 # right, c bottom right, d bottom, e bottom left, f top left, g middle, h a centre stroke in the upper half). This
-# font's middle bar sits below the centre, its 6 has no top bar, its 9 no bottom bar, and its 1 is a centre stroke
-# with a flag at the top left, a foot and a tick at the right.
+# font's middle bar sits below the centre, its 6 has no top bar, its 9 no bottom bar, its 1 is a centre stroke
+# with a flag at the top left, a foot and a tick at the right, and its 7 a top bar, a short stroke down the right
+# and a centre stroke from there to the bottom, which lights a, b, g and d (zone_2's TOTAL ZONES CLEAR 7, task 032;
+# a digit may have several signatures, and the nearest one counts).
 DIGIT_SEGMENTS = {"0": "abcdef", "1": "acdgh", "2": "abdeg", "3": "abcdg", "4": "bcfg", "5": "acdfg", "6": "cdefg",
-                  "7": "abc", "8": "abcdefg", "9": "abcfg"}
+                  "7": ("abc", "abdg"), "8": "abcdefg", "9": "abcfg"}
 SEGMENT_BOXES = {"a": (0.35, 0.65, 0.0, 0.1), "b": (0.62, 1.0, 0.2, 0.4), "c": (0.75, 1.0, 0.72, 0.85),
                  "d": (0.35, 0.65, 0.9, 1.0), "e": (0.0, 0.25, 0.72, 0.85), "f": (0.0, 0.38, 0.2, 0.4),
                  "g": (0.35, 0.65, 0.45, 0.62), "h": (0.4, 0.6, 0.2, 0.4)}
@@ -872,7 +879,8 @@ def read_digits(path, region):
             ys = range(gy0 + int(v0 * gh), gy0 + max(int(v0 * gh) + 1, int(v1 * gh)))
             if any(lit(x, y) for x in xs for y in ys):
                 segs += s
-        dist = {d: len(set(segs) ^ set(want)) for d, want in DIGIT_SEGMENTS.items()}
+        dist = {d: min(len(set(segs) ^ set(w)) for w in ((want,) if isinstance(want, str) else want))
+                for d, want in DIGIT_SEGMENTS.items()}
         best = min(dist, key=dist.get)
         out += best if dist[best] <= 1 and list(dist.values()).count(dist[best]) == 1 else "?"
     return out or None
