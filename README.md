@@ -66,6 +66,7 @@ runs under a pty, so a deadline kill loses no output, and the log always ends wi
 | `PURE_SKIP_FMV=1` | (task 003) skip the intro movie |
 | `PURE_NO_STENCIL_ALPHA=1` | (patch 0004) the renderer stores each draw's fragment alpha and ignores the stencil ops and write masks, as before task 009 (the whole race scene blooms) |
 | `PURE_WATCH_MOVIE=1` | once per flip, while they change: the game's movie object (`DAT_08ab45bc`) and its fields `active`, `ended`, `paused`, reader state, picture-queue capacity, `queued`, `shown` (pictures handed to the renderer), slots (`[pure] movie frame N ...`) |
+| `PURE_AUDIO_WAV=<file>` | (task 013) WAV capture of what the game hands to sceAudio (`sceAudioOutputPannedBlocking`, `sceAudioOutputBlocking`, `sceAudioOutputPanned`): each buffer as stereo 16-bit 44.1 kHz with the call's volumes applied, to `<file>.ch<N>.wav` per channel and the clipped sum to `<file>`. Every file is on the virtual clock (sample 0 at time 0; a late or idle channel gets zeros). Read with `tools/wavstats.py` (docs/verification.md, "Audio") |
 | `PURE_WATCH_SHIP=1` | (task 007) once per flip during a race, while it changes: the player's race record (`.bss` array of 0x1C0-byte entries, position of entry k at `0x08B72010 + k*0x1C0`): race clock, position, velocity, km/h, track distance, lap (`[pure] ship frame N t=... clock=... pos=... vel=... kmh=... dist=... lap=...`). PPSSPP reads the same addresses |
 
 Routes that reach known screens, as input scripts in `config/pad_scripts/` (frames from a cold start at the default

@@ -53,3 +53,63 @@ differing pixels red; a mask over that quadrant and a region on another quadrant
 bitfields with alpha); PNG rows written with each of the filter types 0-4 at 1 to 4 channels; a 16-bit PNG is
 rejected with its IHDR fields; the variance check fails on a flat region and passes on a drawn one; the CLI's
 `--json` keys and exit code. It prints PASS and exits 0 in under 2 s (0.15 s on this Mac, about 0.7 s on a first run while Python compiles the modules).
+
+# Audio (task 013, 2026-10-05)
+
+## PURE_AUDIO_WAV
+
+`PURE_AUDIO_WAV=<file>` (src/hle/audio_capture.cpp) wraps the bound `sceAudioOutputPannedBlocking`,
+`sceAudioOutputBlocking` and `sceAudioOutputPanned` and writes what the game submits: each buffer as stereo 16-bit
+44.1 kHz with the call's volumes applied the way the sink applies them (`sample * min(volume, 0x8000) >> 15`), to
+`<file>.ch<N>.wav` per channel and the clipped sum to `<file>`. It also follows `sceAudioChReserve`,
+`sceAudioSetChannelDataLen` and `sceAudioChangeChannelConfig`, because the frame count of an output call is the
+channel's data length and format bit 0x10 makes it mono. Every file is on the kernel's virtual clock, sample 0 at
+time 0: a buffer starts where the channel's previous one ended, or at the call's virtual time when it came late, and
+the gap is zeros. A gap under 2 s on a playing channel is logged as an underrun
+(`[pure] audio capture: channel N underrun of F frames (M ms) at t=US`), and the exit line counts them per channel.
+The headers are rewritten after every write, so a killed run still leaves readable files.
+
+What the channels are in this game (all stereo):
+
+| Channel | Frames per call | Carries |
+|---|---|---|
+| 1 | 768 | the sceSas mix: interface sounds, engine, weapons, speech |
+| 2 | 2944 | music (sceAtrac): the frontend loop from the main menu, the race tracks |
+| 3 | 2048 | movie audio (sceMpeg): the clip after the language confirm, the intro movie |
+
+The capture is the sink's input bit for bit: on the loop run below, 16-frame windows of the capture at 146.5 s and
+175.5 s occur exactly in the framework's `PURE_AUDIO_DUMP` of the same run, 0.816 s earlier (the sink drops the
+silence a fast load produces), and the total energy of the two files agrees within 0.3%.
+
+Times: the frontend flips at 30 a second (two vblanks), so flip N of a route is at about N/30 s of virtual time
+there (the language confirm at flip 700 is at ~23 s); a race flips at 60.
+
+## tools/wavstats.py
+
+```
+tools/wavstats.py <wav> [--from S] [--to S] [--floor RMS] [--gap-ms G] [--min-active-frac F] [--max-clip-frac C] [--quiet]
+```
+
+One row per second (RMS and peak over both sides, clipped samples, `silent` below the floor), then the window, the
+silent seconds, the longest silent run, the active fraction (whole seconds with RMS above `--floor`, default 100,
+about -50 dBFS) and the clipping fraction (samples at -32768 or 32767). A dropout too short to silence a whole
+second shows in the zero runs: every stretch of at least `--gap-ms` (default 50) where all samples are exactly 0, not
+touching either end of the window. They are information only (between interface sounds they are normal, inside
+music they are dropouts). With `--min-active-frac` and/or
+`--max-clip-frac` the last line is PASS (exit 0) or FAIL (exit 1); without either it is INFO. Pure Python
+(`array` and `math.sumprod`), about a second per minute of audio.
+
+## The M4 checks (2026-10-05)
+
+| Check | Run | Result |
+|---|---|---|
+| (a) frontend music | `main_menu.txt`, `--frames 4700` | the game plays no music between the language confirm and the main menu, only movie audio and interface sounds (PPSSPP's `ref/boot-hle.log` creates its only sceAtrac context at about vblank 5400, also at the main menu). Music starts at t=145.5 s (flip ~4370); from 146 s to the end (157.5 s) active 11/11, no clipping. From 15 s: active 0.25, so the brief's `--from 15` check fails |
+| (b) loop boundary | `main_menu.txt` plus DOWN/UP on the main menu every 300 flips (left idle, the attract demo starts about 30 s after the music and releases it), `--frames 7700` | the frontend track is 1,764,236 samples (40.0 s) with a whole-track loop (`PURE_TRACE_ATRAC`: `at=1762188 count=2048 next=0` twice); the music repeats bit for bit at +1,764,236 frames, boundaries at 185.49 s and 225.49 s; 146-257.6 s active 111/111, no zero run of 50 ms, no clipping |
+| (c) race | `out/race/route.txt` + Cross held 1500 flips from 6100, `--frames 7700` | race 209-232 s: mix, effects (ch1) and music (ch2) each active 23/23, no clipping, 0 underruns on ch1 over the run, no zero run in ch1; effects RMS median 2185 vs music 1106, effects above the music in 22 of 23 s; mix peak 6.3 to 18.4 times the music RMS every second |
+
+Dropouts seen once each, not reproduced: in the first race run the frontend music held 7,547 zero frames (171 ms) at
+183.9 s, right after the TRACK SELECTION confirm (flip 5500), and the music then repeated at +1,771,742 frames instead
+of +1,764,236, so the zeros were inserted, not skipped; in the idle main-menu run, 8,902 zero frames (202 ms) at
+164.1 s. Both runs predate the underrun log. Each run of zeros starts inside a buffer the game submitted (1,792 and
+768 frames into a 2944-frame buffer), so at least its start is silence the game handed to sceAudio (its music feed
+starved), not a late output call; the reruns logged no underrun on the music channel.
