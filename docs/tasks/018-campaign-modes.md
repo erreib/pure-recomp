@@ -1,6 +1,6 @@
 # 018: The other campaign modes in the sweep (Time Trial, Free Play, Zone, Tournament)
 
-Milestone: M5 | Branch: task/018-campaign-modes | Status: OPEN (after task 017)
+Milestone: M5 | Branch: task/018-campaign-modes | Status: MERGED 2026-10-06 (e5dcb77)
 
 ## Goal
 The sweep runs Single Race only. The campaign milestone covers every single-player mode. Add menu routes and cell
@@ -189,4 +189,11 @@ own quit ("window closed").
      worker's run. Its captures are gone, and these runs never reached that ending.
 
 ## Review
-(Fable fills)
+Verify rerun: PASS from the main checkout, 2026-10-06 (`tools/verify_task.sh 018`): time_trial/vineta_k PASS at
+flip 12110 (3 laps: 64.3, 58.4, 72.7 s; 46.5 shield left, no switch), zone/zone_1 PASS at flip 7390 (TOTAL ZONES
+CLEAR 6, destroyed at 59.2 s), `grep -c PASS` 2. Spot-read: tools/campaign_sweep.py (the Leg class, on_results,
+next_race, analyse, the STANDING_TITLE rule, the shield-0 end for Zone, Free Play's pause leg, --no-damage forced off
+for Zone), the four route files. Merged: e5dcb77 into batch/m2.
+Notes: Zone has no racing line, so the ship runs out of shield against the first barrier (zone 6); a recorded lap of
+PRO TOZO is a follow-up. The 30-fps modes read the live file every 10 flips (a third of a second), so the other
+tracks will want --no-damage there. Free Play's no-lap ending and the other tracks' 11000 budgets are untested.
