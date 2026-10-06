@@ -18,7 +18,14 @@
 //              uploaded first, no image clears to black. The interface over it, then presentDrawable and commit.
 //              Vsync is the layer's displaySyncEnabled. No frame interpolation: present_due and present_until do
 //              nothing.
+//   pacing     while the game is held to real time, each picture is presented at the real time of the PSP vblank
+//              after the one its frame began from (presentDrawable:atTime:), as the PSP shows a flip at the next
+//              vblank: a flip a millisecond late or early then no longer shows one picture for three refreshes of a
+//              120 Hz display and the next for one (task 033).
 //   captures   capture_window: the next presented drawable, interface included, read back as a BMP.
+//   trace      with PURE_METAL_TRACE (task 033), each present of a game picture tells the backend's frame trace its
+//              CPU time, the wait in nextDrawable, and (from the drawable's presented handler) when the picture
+//              reached the screen, through the hook in metal_device.hpp.
 //   interface  ImGui's SDL3 platform backend (InitForMetal) and its Metal renderer backend (third_party/imgui_metal,
 //              Dear ImGui 1.92.9b), drawn into the drawable after the game's picture.
 //
@@ -44,6 +51,7 @@
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <QuartzCore/CABase.h>
 #import <QuartzCore/CAMetalLayer.h>
 
 #include <algorithm>
@@ -69,6 +77,8 @@ using Clock = std::chrono::steady_clock;
 
 constexpr std::uint32_t kPspWidth = pk::gpu::kScreenWidth;
 constexpr std::uint32_t kPspHeight = pk::gpu::kScreenHeight;
+// The PSP's display: a vblank every 1001/60000 s (59.94 Hz), the shortest a game frame lasts.
+constexpr double kPspFrameSeconds = 1001.0 / 60000.0;
 // A load running faster than real time shows a flip only when the window has not had one for this long, about 30
 // times a second (the Vulkan renderer's kFastForwardPresentInterval), so vsync never holds the load back.
 constexpr auto kFastForwardInterval = std::chrono::milliseconds(33);
@@ -321,9 +331,17 @@ public:
     // Presenting
 
     bool present(const pk::gpu::PresentedImage &image, std::uint32_t,
-                 std::optional<Clock::time_point>) override {
+                 std::optional<Clock::time_point> moment) override {
         if (!ready_) return false;
         @autoreleasepool {
+            // The frame trace (task 033): this present's part of the flip the backend just handed over.
+            Trace trace{};
+            trace.on = pure::metal::trace_on();
+            if (trace.on) {
+                trace.flip = pure::metal::trace_current_flip();
+                trace.entered = Clock::now();
+                trace.entered_media = CACurrentMediaTime();
+            }
             id<MTLTexture> game = nil;
             if (image.api == pk::gpu::ImageApi::Metal && image.image != 0u)
                 game = (__bridge id<MTLTexture>)reinterpret_cast<void *>(image.image);
@@ -335,11 +353,14 @@ public:
             if (fast_forward_ && capture_path_.empty()) {
                 if (now - fast_forward_shown_ < kFastForwardInterval) {
                     ui_draw_data_ = nullptr;
+                    report(trace, false);
                     return false;
                 }
                 fast_forward_shown_ = now;
             }
-            const bool shown = draw(holding_ ? held_ : game, kBlack);
+            // The frame's moment is known only while the game is held to real time; then its pictures are paced.
+            const bool shown = draw(holding_ ? held_ : game, kBlack, trace.on ? &trace : nullptr, present_time(moment));
+            report(trace, shown);
             if (shown) {
                 presents_.push_back(now);
                 while (!presents_.empty() && now - presents_.front() > std::chrono::seconds(1)) presents_.pop_front();
@@ -477,6 +498,25 @@ public:
 private:
     static constexpr double kBlack[3] = {0.0, 0.0, 0.0};
 
+    // A present's part in the frame trace (PURE_METAL_TRACE): the flip it shows, when present() began (both clocks),
+    // and the time draw() waited for a drawable.
+    struct Trace {
+        bool on{};
+        std::uint64_t flip{};
+        Clock::time_point entered{};
+        double entered_media{};
+        double drawable_ms{};
+    };
+
+    // Hands the trace this present's CPU time, and, for a flip not shown (a skipped fast-forward flip, no drawable),
+    // that its picture never reached the screen.
+    void report(const Trace &trace, bool shown) const {
+        if (!trace.on) return;
+        pure::metal::trace_shell_present(std::chrono::duration<double, std::milli>(Clock::now() - trace.entered).count(),
+                                         trace.drawable_ms, (SDL_GetWindowFlags(window_) & SDL_WINDOW_OCCLUDED) != 0u);
+        if (!shown) pure::metal::trace_presented(trace.flip, 0.0, 0.0);
+    }
+
     void sample(bool focused) {
         input_.sample(focused, mouse_captured_, mouse_buttons_, nullptr, flips_);
     }
@@ -568,12 +608,48 @@ private:
         return whole ? nearest_ : linear_;
     }
 
+    // When a game picture is to reach the screen, in CACurrentMediaTime's seconds, or 0 for as soon as it can.
+    //
+    // The game flips at the PSP's 59.94 Hz, held to real time by the kernel's sleeps, which wake a millisecond or two
+    // early or late. Shown at the first refresh after its flip, on a 120 Hz display a picture whose flip's phase lies
+    // near a refresh boundary alternately catches and misses it: one stays three refreshes (25 ms), the next one
+    // (8.3 ms). The trace of a race counted that for 9% of its pictures (task 033, docs/metal-backend.md "Frame
+    // times"). The PSP shows a frame at the vblank after the one the frame began from (sceDisplaySetFrameBuf's next
+    // frame), so each picture is asked for at that vblank's real time: the frame's moment (the real time of the vblank
+    // it began from, which the HLE passes while emulated time is held to real time) plus one PSP frame. Those times
+    // carry no host jitter. Without a moment (a load running fast, an unpaced run), without vsync, or when the time
+    // has passed, the picture is shown at once.
+    double present_time(const std::optional<Clock::time_point> &moment) const {
+        if (!moment || fast_forward_ || !pace_pictures_ || layer_ == nil || !layer_.displaySyncEnabled) return 0.0;
+        const Clock::time_point due =
+            *moment + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(kPspFrameSeconds));
+        const double ahead = std::chrono::duration<double>(due - Clock::now()).count();
+        // Late, or further ahead than a frame and a half: shown at once.
+        if (ahead <= 0.0 || ahead > 1.5 * kPspFrameSeconds) return 0.0;
+        return CACurrentMediaTime() + ahead;
+    }
+
     // One present: `picture` letterboxed over `clear` (or `clear` alone without one), the interface over it, a
-    // window capture when one is pending, then presentDrawable and commit. False when there was no drawable.
-    bool draw(id<MTLTexture> picture, const double (&clear)[3]) {
+    // window capture when one is pending, then presentDrawable and commit. False when there was no drawable. With `at`
+    // above 0 the drawable is shown at that time (CACurrentMediaTime's seconds), else as soon as it can be. With
+    // `trace`, the wait for the drawable is timed and the drawable's presented handler reports when it reached the
+    // screen.
+    bool draw(id<MTLTexture> picture, const double (&clear)[3], Trace *trace = nullptr, double at = 0.0) {
         ImDrawData *ui = ui_ready_ ? ui_draw_data_ : nullptr;
         ui_draw_data_ = nullptr;
+        const Clock::time_point asked = trace != nullptr ? Clock::now() : Clock::time_point{};
         id<CAMetalDrawable> drawable = [layer_ nextDrawable];
+        if (trace != nullptr) {
+            trace->drawable_ms = std::chrono::duration<double, std::milli>(Clock::now() - asked).count();
+            if (drawable != nil) {
+                const std::uint64_t flip = trace->flip;
+                const double entered = trace->entered_media;
+                [drawable addPresentedHandler:^(id<MTLDrawable> shown) {
+                    const double when = shown.presentedTime;
+                    pure::metal::trace_presented(flip, when, when > 0.0 ? (when - entered) * 1000.0 : 0.0);
+                }];
+            }
+        }
         if (drawable == nil) return false;
         id<MTLTexture> target = drawable.texture;
         id<MTLCommandBuffer> commands = [queue_ commandBuffer];
@@ -615,7 +691,8 @@ private:
                 destinationBytesPerImage:bytes];
             [blit endEncoding];
         }
-        [commands presentDrawable:drawable];
+        if (at > 0.0) [commands presentDrawable:drawable atTime:at];
+        else [commands presentDrawable:drawable];
         [commands commit];
         last_commands_ = commands;
         if (!capture.empty()) write_capture(commands, capture, static_cast<std::uint32_t>(target.width),
@@ -686,6 +763,11 @@ private:
     pk::settings::Aspect aspect_{pk::settings::Aspect::Original};
     bool sharp_{};
     float display_hz_{};
+    // PURE_METAL_PACE=0 shows every picture as soon as it can be, as before task 033.
+    bool pace_pictures_{[] {
+        const char *value = pk::env("METAL_PACE");
+        return value == nullptr || std::strcmp(value, "0") != 0;
+    }()};
 
     std::string capture_path_;
     id<MTLBuffer> capture_buffer_{};

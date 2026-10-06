@@ -33,6 +33,12 @@
 // (metal_shell.hpp); PURE_METAL_SHELL=0 leaves that window black. Under any other shell nothing is handed
 // over and nothing is read back: the Metal shell (src/host/metal_shell.mm) samples the presented texture
 // itself, and the headless one captures through capture_frame(). PURE_METAL_LOG=1 prints a line per draw.
+//
+// Frame times (task 033, docs/metal-backend.md "Frame times"): PURE_METAL_TRACE=FILE writes a CSV row per flip with
+// where the time between two flips went (submit, pipeline creation, texture decodes, each kind of GPU wait, the
+// Metal shell's present through the hook in metal_device.hpp); tools/frame_times.py summarises it. The render
+// pipelines and depth-stencil states of config/metal_pipelines.txt are made at start, the pipelines asynchronously
+// (pre-warming), so no draw compiles one on first use; PURE_METAL_PIPELINES_OUT=FILE writes the keys a run used.
 #include "metal_device.hpp"
 #include "metal_shaders.h"
 #include "metal_shell.hpp"
@@ -50,14 +56,19 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -361,6 +372,67 @@ struct PipelineKey {
     DepthStencilKey depth;
 };
 
+// The pre-warm list's text (config/metal_pipelines.txt, PURE_METAL_PIPELINES_OUT): a line per key, `render` or
+// `depth` and the key's fields as name=value, the numbers the key holds (Metal's values for the blend factors and
+// operations, the write masks and the depth compare; the GE's for the stencil function and operations).
+std::string to_text(const RenderKey &key) {
+    std::ostringstream out;
+    out << "render blend=" << unsigned{key.blend} << " source=" << unsigned{key.source}
+        << " destination=" << unsigned{key.destination} << " operation=" << unsigned{key.operation}
+        << " write_mask=" << unsigned{key.write_mask} << " alpha_destination=" << unsigned{key.alpha_destination}
+        << " dual_source=" << unsigned{key.dual_source} << " textured=" << unsigned{key.textured}
+        << " alpha_test=" << unsigned{key.alpha_test};
+    return out.str();
+}
+
+std::string to_text(const DepthStencilKey &key) {
+    std::ostringstream out;
+    out << "depth compare=" << unsigned{key.compare} << " write=" << unsigned{key.write}
+        << " stencil=" << unsigned{key.stencil} << " function=" << unsigned{key.stencil_function}
+        << " fail=" << unsigned{key.fail} << " depth_fail=" << unsigned{key.depth_fail} << " pass=" << unsigned{key.pass}
+        << " compare_mask=" << unsigned{key.compare_mask} << " write_mask=" << unsigned{key.write_mask};
+    return out.str();
+}
+
+// A line of the list as its kind and fields; false for a blank line or a comment (`#`).
+bool parse_key_line(const std::string &line, std::string &kind, std::map<std::string, unsigned> &fields) {
+    std::istringstream in(line);
+    if (!(in >> kind) || kind.front() == '#') return false;
+    fields.clear();
+    for (std::string field; in >> field;) {
+        const std::size_t equals = field.find('=');
+        if (equals == std::string::npos) return false;
+        fields[field.substr(0, equals)] = static_cast<unsigned>(std::strtoul(field.c_str() + equals + 1, nullptr, 10));
+    }
+    return true;
+}
+
+// The field `name` into `out` when present and it fits; false otherwise.
+template <typename T>
+bool take_field(const std::map<std::string, unsigned> &fields, const char *name, T &out, unsigned largest = 255u) {
+    const auto found = fields.find(name);
+    if (found == fields.end() || found->second > largest) return false;
+    out = static_cast<T>(found->second);
+    return true;
+}
+
+bool from_fields(const std::map<std::string, unsigned> &fields, RenderKey &key) {
+    return take_field(fields, "blend", key.blend, 1u) && take_field(fields, "source", key.source) &&
+           take_field(fields, "destination", key.destination) && take_field(fields, "operation", key.operation) &&
+           take_field(fields, "write_mask", key.write_mask) &&
+           take_field(fields, "alpha_destination", key.alpha_destination) &&
+           take_field(fields, "dual_source", key.dual_source, 1u) && take_field(fields, "textured", key.textured, 1u) &&
+           take_field(fields, "alpha_test", key.alpha_test, 1u);
+}
+
+bool from_fields(const std::map<std::string, unsigned> &fields, DepthStencilKey &key) {
+    return take_field(fields, "compare", key.compare, 7u) && take_field(fields, "write", key.write, 1u) &&
+           take_field(fields, "stencil", key.stencil, 1u) && take_field(fields, "function", key.stencil_function, 7u) &&
+           take_field(fields, "fail", key.fail, 7u) && take_field(fields, "depth_fail", key.depth_fail, 7u) &&
+           take_field(fields, "pass", key.pass, 7u) && take_field(fields, "compare_mask", key.compare_mask) &&
+           take_field(fields, "write_mask", key.write_mask);
+}
+
 // What a texture bind looks up while its display list runs, before its contents are hashed.
 struct TextureIdentity {
     std::uint32_t address{};
@@ -407,6 +479,71 @@ struct Stats {
     GuestWrites read_backs;          // read_back_framebuffer()
     GuestWrites frames;              // write_back_frame()
     GuestWrites depths;              // write_back_depth()
+    std::uint64_t decoded_bytes{};   // of the decoded textures, as uploaded (RGBA8)
+    std::uint64_t pipelines_made{};  // render pipelines a draw made, or waited for while pre-warming made them
+    std::uint64_t depth_states_made{};
+};
+
+// PURE_METAL_TRACE (task 033): what the time between two flips went to, accumulated from one flip's
+// present_image() to the next one's. Times in milliseconds.
+struct FrameTimes {
+    double submit{};        // CPU time in submit()
+    double pipeline{};      // of submit: making render pipelines and depth-stencil states (or waiting for the pre-warm)
+    double texture{};       // of submit: finding (hashing) and decoding textures from guest memory
+    double present{};       // CPU time in present_image(), its waits included
+    double memory{};        // CPU time in the calls between guest memory and the GPU, their waits included:
+                            // write_back_depth, write_back_frame, block_transfer, read_back_framebuffer,
+                            // upload_frame, capture_frame
+    double wait_depth{};    // GPU waits: the SIGNAL's depth write-back
+    double wait_frame{};    // the frame write-back
+    double wait_guest{};    // block transfers and read-backs from a target
+    double wait_capture{};  // captures and the Vulkan shell's hand-over
+    double wait_ring{};     // more than kFramesInFlight frames in flight
+};
+
+// Adds the time from its making to its end to `total` (milliseconds) when `on`; costs nothing more than the test
+// when off.
+class TraceClock {
+public:
+    TraceClock(bool on, double &total) : total_(on ? &total : nullptr) {
+        if (on) start_ = std::chrono::steady_clock::now();
+    }
+    ~TraceClock() {
+        if (total_ != nullptr)
+            *total_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start_).count();
+    }
+    TraceClock(const TraceClock &) = delete;
+    TraceClock &operator=(const TraceClock &) = delete;
+
+private:
+    double *total_;
+    std::chrono::steady_clock::time_point start_{};
+};
+
+// A row of the trace, kept until the Metal shell has said when its picture reached the screen.
+struct TraceRow {
+    std::uint64_t flip{};
+    double t_ms{};
+    double frame_ms{};
+    FrameTimes times;
+    Stats counts;  // this interval's (a difference of two snapshots)
+    double shell_ms{};
+    double drawable_ms{};
+    std::uint32_t shell_presents{};
+    std::uint32_t occluded{};  // of those presents, made while the window was occluded
+};
+
+// The pre-warm (task 033): render pipelines made asynchronously at start from config/metal_pipelines.txt. The
+// completion handlers run on Metal's threads and fill `ready`; a draw that needs a key still `pending` waits for it.
+struct Prewarm {
+    std::mutex lock;
+    std::condition_variable changed;
+    std::map<RenderKey, id<MTLRenderPipelineState>> ready;
+    std::set<RenderKey> pending;
+    std::uint32_t asked{};
+    std::uint32_t failed{};
+    std::chrono::steady_clock::time_point started{};
+    double done_ms{};  // from the start to the last completion
 };
 
 class MetalGeBackend final : public pk::GeBackend {
@@ -518,6 +655,11 @@ public:
                                     : (shell_ != nullptr ? "window left black (PURE_METAL_SHELL=0)"
                                                          : "pictures shown by the shell, not read back"))
                       << "\n";
+            // Task 033: the frame trace, the list of keys a run used, and the pre-warm.
+            if (pure::metal::trace_on()) open_trace(portablekit::env("METAL_TRACE"));
+            if (const char *out = portablekit::env("METAL_PIPELINES_OUT"); out != nullptr && *out != '\0')
+                pipelines_out_ = out;
+            start_prewarm();
             return true;
         }
     }
@@ -536,6 +678,9 @@ public:
                       << " uploads, " << targets_.size() << " targets, " << stats_.waits << " GPU waits ("
                       << stats_.wait_ms << " ms) in " << seconds << " s\n";
             report_guest_writes();
+            report_pipelines();
+            close_trace();
+            write_pipeline_list();
             std::cout << std::flush;
             // Every target's resources before the device they came from (the contract's order).
             presented_ = nullptr;
@@ -546,6 +691,12 @@ public:
             list_keys_.clear();
             render_pipelines_.clear();
             depth_states_.clear();
+            if (prewarm_) {
+                // Pipelines still compiling finish into the shared state their handlers hold, not into this.
+                std::lock_guard<std::mutex> guard(prewarm_->lock);
+                prewarm_->ready.clear();
+            }
+            prewarm_.reset();
             samplers_.fill(nil);
             if (pool_) {
                 std::lock_guard<std::mutex> guard(pool_->lock);
@@ -571,6 +722,7 @@ public:
 
     void submit(const DrawCall &call, const GuestMemory &memory) override {
         if (!ready_) return;
+        const TraceClock clock(trace_file_ != nullptr, times_.submit);
         @autoreleasepool {
             draw(call, memory);
         }
@@ -580,6 +732,7 @@ public:
     // target's rows the copy reads are stored in guest memory first, in the target's format.
     void block_transfer(const pk::BlockTransfer &transfer, GuestMemory &memory) override {
         ++stats_.transfers.calls;
+        const TraceClock clock(trace_file_ != nullptr, times_.memory);
         if (!ready_ || no_framebuffer_textures_ || transfer.width == 0u || transfer.height == 0u ||
             transfer.bytes_per_pixel == 0u)
             return;
@@ -608,6 +761,7 @@ public:
     // buffer, or read them back for the Vulkan shell; this waits for that copy and stores them.
     void write_back_frame(GuestMemory &memory) override {
         ++stats_.frames.calls;
+        const TraceClock clock(trace_file_ != nullptr, times_.memory);
         if (!ready_ || pending_frame_.target == nullptr) return;
         PendingFrame pending = pending_frame_;
         pending_frame_ = PendingFrame{};
@@ -621,6 +775,7 @@ public:
                         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
                     stats_.wait_ms += ms;
                     stats_.frames.wait_ms += ms;
+                    times_.wait_frame += ms;
                     ++stats_.waits;
                 }
                 pixels = static_cast<const std::uint8_t *>(frame_writeback_.contents);
@@ -635,6 +790,7 @@ public:
     // drew, at least as wide as the screen).
     void read_back_framebuffer(std::uint32_t address, GuestMemory &memory) override {
         ++stats_.read_backs.calls;
+        const TraceClock clock(trace_file_ != nullptr, times_.memory);
         if (!ready_ || no_framebuffer_textures_) return;
         @autoreleasepool {
             const std::uint32_t wanted = GuestMemory::canonical(address);
@@ -650,6 +806,7 @@ public:
     bool write_back_depth(std::uint32_t color_address, std::uint32_t depth_address, std::uint32_t depth_stride,
                           GuestMemory &memory, const char *why) override {
         ++stats_.depths.calls;
+        const TraceClock clock(trace_file_ != nullptr, times_.memory);
         if (!ready_) return false;
         @autoreleasepool {
             return store_depth(color_address, depth_address, depth_stride, memory, why);
@@ -659,6 +816,7 @@ public:
     void upload_frame(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width,
                       std::uint32_t height, std::uint32_t stride) override {
         if (!ready_ || pixels == nullptr || width == 0u || height == 0u || stride < width) return;
+        const TraceClock clock(trace_file_ != nullptr, times_.memory);
         @autoreleasepool {
             upload(display_address, pixels, width, height, stride);
         }
@@ -667,8 +825,12 @@ public:
     pk::PresentedImage present_image(std::uint32_t display_address) override {
         pk::PresentedImage image;
         if (!ready_) return image;
+        // The trace's row of the interval this flip ends, before this call's own time, which starts the next one.
+        if (trace_file_ != nullptr) end_trace_interval();
+        const TraceClock clock(trace_file_ != nullptr, times_.present);
         @autoreleasepool {
             ++frames_;
+            if (trace_file_ != nullptr) pure::metal::trace_flip(frames_);
             frame_draws_ = 0u;
             Target *shown = latest_target_at(GuestMemory::canonical(display_address));
             if (shown == nullptr) shown = last_drawn_;
@@ -688,6 +850,7 @@ public:
                 if (written_back) pending_frame_ = PendingFrame{shown, committed, false};
             }
             if (frames_ % kReportEvery == 0u) report();
+            if (prewarm_ && !prewarm_reported_) report_prewarm_done();
             if (shown != nullptr) {
                 image.api = pk::ImageApi::Metal;
                 image.address = shown->key.address;
@@ -701,6 +864,7 @@ public:
 
     bool capture_frame(const std::string &path) override {
         if (!ready_ || presented_ == nullptr) return false;
+        const TraceClock clock(trace_file_ != nullptr, times_.memory);
         @autoreleasepool {
             if (picture_frame_ != frames_) read_back(*presented_);
             return pk::write_bmp_file(path, picture_.data(), kWidth, kHeight);
@@ -766,7 +930,9 @@ private:
         while (in_flight_.size() > kFramesInFlight) {
             const auto start = std::chrono::steady_clock::now();
             [in_flight_.front() waitUntilCompleted];
-            stats_.wait_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            stats_.wait_ms += ms;
+            times_.wait_ring += ms;
             ++stats_.waits;
             check(in_flight_.front());
             in_flight_.pop_front();
@@ -854,6 +1020,7 @@ private:
             destinationBytesPerImage:kPictureBytes];
         [blit endEncoding];
         commit(true);
+        times_.wait_capture += last_wait_ms_;
         picture_.assign(static_cast<const std::uint8_t *>(readback_.contents),
                         static_cast<const std::uint8_t *>(readback_.contents) + kPictureBytes);
         picture_frame_ = frames_;
@@ -914,6 +1081,7 @@ private:
         copy_to_buffer(target, guest_readback_);
         commit(true);
         writes.wait_ms += last_wait_ms_;
+        times_.wait_guest += last_wait_ms_;
         if (store_pixels(memory, target, static_cast<const std::uint8_t *>(guest_readback_.contents), first_row, rows))
             ++writes.written;
     }
@@ -989,6 +1157,7 @@ private:
         [blit endEncoding];
         commit(true);
         stats_.depths.wait_ms += last_wait_ms_;
+        times_.wait_depth += last_wait_ms_;
         const auto *depths = static_cast<const float *>(guest_readback_.contents);
         std::uint32_t lowest = 0xFFFFu, highest = 0u;
         std::array<std::uint16_t, kWidth> row{};
@@ -1042,6 +1211,255 @@ private:
         report_start_ = now;
         report_frames_ = frames_;
         report_draws_ = stats_.draws;
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // The frame trace (PURE_METAL_TRACE, task 033)
+
+    static constexpr const char *kTraceHeader =
+        "flip,t_ms,frame_ms,submit_ms,pipeline_ms,texture_ms,present_ms,memory_ms,wait_ms,wait_depth_ms,"
+        "wait_frame_ms,wait_guest_ms,wait_capture_ms,wait_ring_ms,pipelines,depth_states,decoded,decoded_kb,"
+        "stencil_copies,draws,passes,copies,shell_ms,drawable_ms,occluded,shown_ms,latency_ms,other_ms";
+    // How many flips a row waits for the shell to say when its picture reached the screen.
+    static constexpr std::uint64_t kTraceDelay = 30u;
+
+    void open_trace(const char *path) {
+        std::error_code ignored;
+        const std::filesystem::path file(path);
+        if (file.has_parent_path()) std::filesystem::create_directories(file.parent_path(), ignored);
+        trace_file_ = std::fopen(path, "w");
+        if (trace_file_ == nullptr) {
+            std::cout << "[metal] cannot write the frame trace to " << path << "\n";
+            return;
+        }
+        trace_path_ = path;
+        std::fprintf(trace_file_, "%s\n", kTraceHeader);
+        trace_stats_ = stats_;
+        times_ = FrameTimes{};
+        std::cout << "[metal] frame trace: a row per flip -> " << path << "\n";
+    }
+
+    // At a flip: the row of the interval since the previous flip, and the rows whose pictures the shell has
+    // reported on written out.
+    void end_trace_interval() {
+        const auto now = std::chrono::steady_clock::now();
+        TraceRow row;
+        row.flip = frames_ + 1u;
+        row.t_ms = std::chrono::duration<double, std::milli>(now - started_).count();
+        row.frame_ms = std::chrono::duration<double, std::milli>(now - (trace_has_flip_ ? trace_last_flip_ : started_)).count();
+        trace_last_flip_ = now;
+        trace_has_flip_ = true;
+        row.times = std::exchange(times_, FrameTimes{});
+        row.counts = since(trace_stats_);
+        trace_stats_ = stats_;
+        const pure::metal::ShellPresents shell = pure::metal::take_shell_presents();
+        row.shell_ms = shell.cpu_ms;
+        row.drawable_ms = shell.drawable_ms;
+        row.shell_presents = shell.count;
+        row.occluded = shell.occluded;
+        if (shell.count != 0u) shell_seen_ = true;
+        pending_rows_.push_back(row);
+        flush_trace(false);
+    }
+
+    // The counts of stats_ since `before`.
+    Stats since(const Stats &before) const {
+        Stats d;
+        d.draws = stats_.draws - before.draws;
+        d.passes = stats_.passes - before.passes;
+        d.decoded = stats_.decoded - before.decoded;
+        d.decoded_bytes = stats_.decoded_bytes - before.decoded_bytes;
+        d.copies = stats_.copies - before.copies;
+        d.stencil_copies = stats_.stencil_copies - before.stencil_copies;
+        d.pipelines_made = stats_.pipelines_made - before.pipelines_made;
+        d.depth_states_made = stats_.depth_states_made - before.depth_states_made;
+        return d;
+    }
+
+    // Writes the rows in order, each once the shell has reported when its picture reached the screen (under the
+    // Metal shell; at once under any other), or kTraceDelay flips later, or with `all` at the end.
+    void flush_trace(bool all) {
+        while (!pending_rows_.empty()) {
+            const TraceRow &row = pending_rows_.front();
+            double presented_s = 0.0, latency_ms = 0.0;
+            const bool known = pure::metal::take_presented(row.flip, presented_s, latency_ms);
+            if (!known && shell_seen_ && !all && frames_ + 1u - row.flip < kTraceDelay) break;
+            write_trace_row(row, known, presented_s, latency_ms);
+            pending_rows_.pop_front();
+        }
+    }
+
+    // `known`: the shell reported on the flip's picture; it reached the screen at presented_s, or never (0).
+    void write_trace_row(const TraceRow &row, bool known, double presented_s, double latency_ms) {
+        const FrameTimes &t = row.times;
+        const Stats &c = row.counts;
+        const double waits = t.wait_depth + t.wait_frame + t.wait_guest + t.wait_capture + t.wait_ring;
+        const double other = row.frame_ms - t.submit - t.present - t.memory - row.shell_ms;
+        std::fprintf(trace_file_,
+                     "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%llu,%llu,%llu,%.1f,%llu,"
+                     "%llu,%llu,%llu,",
+                     static_cast<unsigned long long>(row.flip), row.t_ms, row.frame_ms, t.submit, t.pipeline, t.texture,
+                     t.present, t.memory, waits, t.wait_depth, t.wait_frame, t.wait_guest, t.wait_capture, t.wait_ring,
+                     static_cast<unsigned long long>(c.pipelines_made), static_cast<unsigned long long>(c.depth_states_made),
+                     static_cast<unsigned long long>(c.decoded), static_cast<double>(c.decoded_bytes) / 1024.0,
+                     static_cast<unsigned long long>(c.stencil_copies), static_cast<unsigned long long>(c.draws),
+                     static_cast<unsigned long long>(c.passes), static_cast<unsigned long long>(c.copies));
+        // The shell's columns are empty where no Metal shell presents.
+        if (shell_seen_) std::fprintf(trace_file_, "%.3f,%.3f,%u,", row.shell_ms, row.drawable_ms, row.occluded);
+        else std::fprintf(trace_file_, ",,,");
+        // shown_ms: since the last picture that reached the screen, 0 for one that never did, empty when unknown.
+        const bool presented = known && presented_s > 0.0;
+        if (presented && last_presented_s_ > 0.0)
+            std::fprintf(trace_file_, "%.3f,", (presented_s - last_presented_s_) * 1000.0);
+        else if (known && !presented)
+            std::fprintf(trace_file_, "0,");
+        else std::fprintf(trace_file_, ",");
+        if (presented) {
+            std::fprintf(trace_file_, "%.3f,", latency_ms);
+            last_presented_s_ = presented_s;
+            ++trace_shown_;
+        } else {
+            std::fprintf(trace_file_, ",");
+            if (known) ++trace_not_shown_;
+        }
+        std::fprintf(trace_file_, "%.3f\n", other);
+        if (++trace_rows_ % 60u == 0u) std::fflush(trace_file_);
+    }
+
+    void close_trace() {
+        if (trace_file_ == nullptr) return;
+        flush_trace(true);
+        std::fclose(trace_file_);
+        trace_file_ = nullptr;
+        std::cout << "[metal] frame trace: " << trace_rows_ << " rows -> " << trace_path_;
+        if (shell_seen_)
+            std::cout << "; the shell's pictures: " << trace_shown_ << " reached the screen, " << trace_not_shown_
+                      << " never did, " << trace_rows_ - trace_shown_ - trace_not_shown_ << " not reported";
+        std::cout << "\n";
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // Pipelines: the pre-warm and the list of keys a run used (task 033)
+
+    // The pre-warm list: PURE_METAL_PIPELINES names it (0 or empty turns the pre-warm off); otherwise
+    // metal_pipelines.txt in an app's Resources, config/metal_pipelines.txt three levels above the executable
+    // (build/<preset>/bin in a checkout), or config/metal_pipelines.txt under the working directory.
+    static std::string find_pipeline_list() {
+        if (const char *named = portablekit::env("METAL_PIPELINES"); named != nullptr)
+            return *named == '\0' || std::strcmp(named, "0") == 0 ? std::string{} : std::string(named);
+        std::vector<std::filesystem::path> candidates;
+        if (NSString *resources = NSBundle.mainBundle.resourcePath; resources != nil)
+            candidates.emplace_back(std::filesystem::path(resources.UTF8String) / "metal_pipelines.txt");
+        if (NSString *executable = NSBundle.mainBundle.executablePath; executable != nil)
+            candidates.emplace_back(std::filesystem::path(executable.UTF8String).parent_path() / "../../../config" /
+                                    "metal_pipelines.txt");
+        candidates.emplace_back(std::filesystem::path("config") / "metal_pipelines.txt");
+        for (const std::filesystem::path &candidate : candidates) {
+            std::error_code ignored;
+            if (std::filesystem::is_regular_file(candidate, ignored)) return candidate.lexically_normal().string();
+        }
+        return {};
+    }
+
+    // The depth-stencil states of the list made now (each a few microseconds), and its render pipelines asked of
+    // Metal asynchronously: they compile on Metal's threads while the game boots, and a draw takes each from
+    // prewarm_ on first use (render_pipeline()), waiting only for one not done yet.
+    void start_prewarm() {
+        const std::string path = find_pipeline_list();
+        if (path.empty()) return;
+        std::ifstream in(path);
+        if (!in) {
+            std::cout << "[metal] cannot read the pipeline list " << path << "; pipelines are made on first use\n";
+            return;
+        }
+        const auto start = std::chrono::steady_clock::now();
+        std::vector<RenderKey> renders;
+        std::vector<DepthStencilKey> depths;
+        std::uint32_t unread = 0u;
+        std::string kind;
+        std::map<std::string, unsigned> fields;
+        for (std::string line; std::getline(in, line);) {
+            if (!parse_key_line(line, kind, fields)) continue;
+            RenderKey render;
+            DepthStencilKey depth;
+            if (kind == "render" && from_fields(fields, render)) renders.push_back(render);
+            else if (kind == "depth" && from_fields(fields, depth)) depths.push_back(depth);
+            else ++unread;
+        }
+        for (const DepthStencilKey &key : depths)
+            if (depth_states_.find(key) == depth_states_.end()) depth_states_.emplace(key, make_depth_state(key));
+        prewarm_ = std::make_shared<Prewarm>();
+        prewarm_->started = start;
+        {
+            std::lock_guard<std::mutex> guard(prewarm_->lock);
+            prewarm_->pending.insert(renders.begin(), renders.end());
+            prewarm_->asked = static_cast<std::uint32_t>(prewarm_->pending.size());
+        }
+        for (const RenderKey &key : std::set<RenderKey>(renders.begin(), renders.end())) {
+            const std::shared_ptr<Prewarm> shared = prewarm_;
+            const RenderKey made = key;
+            [device_ newRenderPipelineStateWithDescriptor:pipeline_descriptor(key)
+                                        completionHandler:^(id<MTLRenderPipelineState> state, NSError *) {
+                                            std::lock_guard<std::mutex> guard(shared->lock);
+                                            if (state != nil) shared->ready[made] = state;
+                                            else ++shared->failed;
+                                            shared->pending.erase(made);
+                                            if (shared->pending.empty())
+                                                shared->done_ms = std::chrono::duration<double, std::milli>(
+                                                                      std::chrono::steady_clock::now() - shared->started)
+                                                                      .count();
+                                            shared->changed.notify_all();
+                                        }];
+        }
+        prewarm_path_ = path;
+        prewarm_depth_states_ = depths.size();
+        prewarm_start_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        std::cout << "[metal] pre-warm: " << prewarm_->asked << " render pipelines (made asynchronously) and "
+                  << depths.size() << " depth-stencil states from " << path << ", " << prewarm_start_ms_
+                  << " ms at start" << (unread != 0u ? " (" + std::to_string(unread) + " lines not read)" : "")
+                  << "\n";
+    }
+
+    // Once every pipeline the pre-warm asked for is made: how long that took.
+    void report_prewarm_done() {
+        std::lock_guard<std::mutex> guard(prewarm_->lock);
+        if (!prewarm_->pending.empty()) return;
+        prewarm_reported_ = true;
+        std::cout << "[metal] pre-warm done: " << prewarm_->asked - prewarm_->failed << " render pipelines made in "
+                  << prewarm_->done_ms << " ms" << (prewarm_->failed != 0u ? ", " + std::to_string(prewarm_->failed) + " failed" : "")
+                  << " (frame " << frames_ << ")\n";
+    }
+
+    void report_pipelines() {
+        std::cout << "[metal] pipelines: " << render_pipelines_.size() << " render pipelines used, "
+                  << stats_.pipelines_made << " made by a draw";
+        if (prewarm_) {
+            std::cout << " (" << prewarm_waits_ << " of them waited for the pre-warm, " << prewarm_missed_
+                      << " not in the list), " << prewarm_used_ << " taken from the pre-warm of " << prewarm_->asked;
+        }
+        std::cout << "; " << depth_states_.size() << " depth-stencil states, " << stats_.depth_states_made
+                  << " made by a draw" << (prewarm_ ? ", " + std::to_string(prewarm_depth_states_) + " pre-warmed" : "")
+                  << "\n";
+    }
+
+    // PURE_METAL_PIPELINES_OUT: every key the run's draws used, as config/metal_pipelines.txt holds them.
+    void write_pipeline_list() {
+        if (pipelines_out_.empty()) return;
+        std::error_code ignored;
+        const std::filesystem::path file(pipelines_out_);
+        if (file.has_parent_path()) std::filesystem::create_directories(file.parent_path(), ignored);
+        std::ofstream out(pipelines_out_);
+        if (!out) {
+            std::cout << "[metal] cannot write the pipeline list to " << pipelines_out_ << "\n";
+            return;
+        }
+        out << "# The Metal backend's render pipelines and depth-stencil states made at start (task 033,\n"
+               "# docs/metal-backend.md \"Frame times\"): written by PURE_METAL_PIPELINES_OUT=FILE, every key a run's\n"
+               "# draws used. A key not listed is still made on first use.\n";
+        for (const RenderKey &key : render_seen_) out << to_text(key) << "\n";
+        for (const DepthStencilKey &key : depth_seen_) out << to_text(key) << "\n";
+        std::cout << "[metal] " << render_seen_.size() << " render pipeline keys and " << depth_seen_.size()
+                  << " depth-stencil keys -> " << pipelines_out_ << "\n";
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -1197,6 +1615,7 @@ private:
     }
 
     id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state) {
+        const TraceClock clock(trace_file_ != nullptr, times_.texture);
         const TextureIdentity identity{state.address,
                                        state.buffer_width,
                                        static_cast<std::uint32_t>(state.width) << 16u | state.height,
@@ -1240,6 +1659,7 @@ private:
                    bytesPerRow:static_cast<NSUInteger>(state.width) * 4u];
         textures_.emplace(key, CachedTexture{texture, ++texture_clock_});
         ++stats_.decoded;
+        stats_.decoded_bytes += static_cast<std::uint64_t>(state.width) * state.height * 4u;
         return texture;
     }
 
@@ -1606,8 +2026,8 @@ private:
         }
     }
 
-    id<MTLRenderPipelineState> render_pipeline(const RenderKey &key) {
-        if (const auto found = render_pipelines_.find(key); found != render_pipelines_.end()) return found->second;
+    // The descriptor of a render pipeline: what render_pipeline() makes on first use and the pre-warm ahead of it.
+    MTLRenderPipelineDescriptor *pipeline_descriptor(const RenderKey &key) {
         MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
         descriptor.vertexFunction = vertex_function_;
         descriptor.fragmentFunction = fragment_functions_[(key.textured ? 1u : 0u) | (key.alpha_test ? 2u : 0u) |
@@ -1635,17 +2055,63 @@ private:
         colour.destinationAlphaBlendFactor = static_cast<MTLBlendFactor>(key.alpha_destination);
         descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
         descriptor.stencilAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
+        return descriptor;
+    }
+
+    id<MTLRenderPipelineState> render_pipeline(const RenderKey &key) {
+        if (const auto found = render_pipelines_.find(key); found != render_pipelines_.end()) return found->second;
+        const TraceClock clock(trace_file_ != nullptr, times_.pipeline);
+        render_seen_.insert(key);
+        bool waited = false;
+        if (prewarm_) {
+            // Made at start, or still being made: then this draw waits for it, which is still quicker than
+            // compiling it a second time.
+            std::unique_lock<std::mutex> lock(prewarm_->lock);
+            if (prewarm_->pending.count(key) != 0u) {
+                waited = true;
+                ++prewarm_waits_;
+                prewarm_->changed.wait(lock, [&] { return prewarm_->pending.count(key) == 0u; });
+            }
+            if (const auto ready = prewarm_->ready.find(key); ready != prewarm_->ready.end()) {
+                id<MTLRenderPipelineState> state = ready->second;
+                prewarm_->ready.erase(ready);
+                lock.unlock();
+                // A draw that had to wait for the pre-warm counts as one that made its pipeline.
+                if (waited) ++stats_.pipelines_made;
+                ++prewarm_used_;
+                render_pipelines_.emplace(key, state);
+                return state;
+            }
+        }
         NSError *failure = nil;
-        id<MTLRenderPipelineState> state = [device_ newRenderPipelineStateWithDescriptor:descriptor error:&failure];
+        id<MTLRenderPipelineState> state = [device_ newRenderPipelineStateWithDescriptor:pipeline_descriptor(key)
+                                                                                    error:&failure];
         if (state == nil)
             std::cout << "[metal] cannot make a pipeline: "
                       << (failure != nil ? failure.localizedDescription.UTF8String : "no message") << "\n";
+        ++stats_.pipelines_made;
+        if (prewarm_) ++prewarm_missed_;
+        if (log_draws_) std::cout << "[metal] frame " << frames_ + 1u << " new pipeline " << to_text(key) << "\n";
         render_pipelines_.emplace(key, state);
         return state;
     }
 
+    // A depth-stencil state, made on first use unless the pre-warm made it at start.
     id<MTLDepthStencilState> depth_state(const DepthStencilKey &key) {
-        if (const auto found = depth_states_.find(key); found != depth_states_.end()) return found->second;
+        if (const auto found = depth_states_.find(key); found != depth_states_.end()) {
+            if (!pipelines_out_.empty()) depth_seen_.insert(key);
+            return found->second;
+        }
+        const TraceClock clock(trace_file_ != nullptr, times_.pipeline);
+        depth_seen_.insert(key);
+        ++stats_.depth_states_made;
+        if (log_draws_) std::cout << "[metal] frame " << frames_ + 1u << " new depth state " << to_text(key) << "\n";
+        id<MTLDepthStencilState> state = make_depth_state(key);
+        depth_states_.emplace(key, state);
+        return state;
+    }
+
+    id<MTLDepthStencilState> make_depth_state(const DepthStencilKey &key) {
         MTLDepthStencilDescriptor *descriptor = [MTLDepthStencilDescriptor new];
         descriptor.depthCompareFunction = static_cast<MTLCompareFunction>(key.compare);
         descriptor.depthWriteEnabled = key.write;
@@ -1662,9 +2128,7 @@ private:
             descriptor.frontFaceStencil = stencil;
             descriptor.backFaceStencil = stencil;
         }
-        id<MTLDepthStencilState> state = [device_ newDepthStencilStateWithDescriptor:descriptor];
-        depth_states_.emplace(key, state);
-        return state;
+        return [device_ newDepthStencilStateWithDescriptor:descriptor];
     }
 
     void draw(const DrawCall &call, const GuestMemory &memory) {
@@ -2102,6 +2566,32 @@ private:
     bool trace_stencil_copy_{};
     bool trace_depth_{};
     bool depth_announced_{};
+
+    // PURE_METAL_TRACE (task 033): the interval's times, the counts at the last flip, the rows not written yet.
+    FrameTimes times_;
+    Stats trace_stats_;
+    std::FILE *trace_file_{};
+    std::string trace_path_;
+    std::deque<TraceRow> pending_rows_;
+    std::uint64_t trace_rows_{};
+    std::uint64_t trace_shown_{};      // rows whose picture reached the screen
+    std::uint64_t trace_not_shown_{};  // rows whose picture the shell says never did
+    std::chrono::steady_clock::time_point trace_last_flip_{};
+    bool trace_has_flip_{};
+    bool shell_seen_{};           // a Metal shell reports its presents
+    double last_presented_s_{};   // when the last picture shown reached the screen
+    // The keys the draws used (PURE_METAL_PIPELINES_OUT) and the pre-warm.
+    std::string pipelines_out_;
+    std::set<RenderKey> render_seen_;
+    std::set<DepthStencilKey> depth_seen_;
+    std::shared_ptr<Prewarm> prewarm_;
+    std::string prewarm_path_;
+    std::size_t prewarm_depth_states_{};
+    double prewarm_start_ms_{};
+    bool prewarm_reported_{};
+    std::uint64_t prewarm_used_{};
+    std::uint64_t prewarm_waits_{};
+    std::uint64_t prewarm_missed_{};
 
     std::uint64_t frames_{};
     std::uint64_t frame_draws_{};

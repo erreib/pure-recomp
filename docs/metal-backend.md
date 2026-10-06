@@ -38,6 +38,10 @@ tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile  
 | `PURE_NO_FB_TEXTURES=1` | every texture decoded from guest memory, none read from a target (the framework's switch, as for Vulkan) |
 | `PURE_NO_DEPTH_READBACK=1` | the framework's switch (patch 0008): the HLE does not ask for the depth write-back at a SIGNAL, so the lens flare is never occluded. ge_replay replays a recording's WriteBackDepth records regardless |
 | `PURE_TRACE_STENCIL_COPY=1`, `PURE_TRACE_DEPTH_READBACK=1` | the framework's traces, as the Vulkan backend prints them: `[metal] stencil copied into the alpha of 0x... in frame N (reason)` for each copy of the stencil into the alpha, and `[metal] frame N signal 0x200: depth of 0x... written back to 0x4110000 stride 512, z MIN-MAX, T ms (GPU wait W ms)` for each depth write-back |
+| `PURE_METAL_TRACE=FILE` | (task 033) a CSV row per flip with where the time between two flips went: submit, pipeline creation, texture decodes, each kind of GPU wait, the Metal shell's present and when the picture reached the screen ("Frame times"); `tools/frame_times.py FILE` summarises it |
+| `PURE_METAL_PIPELINES=FILE` or `0` | (task 033) the pipeline list made at start instead of `config/metal_pipelines.txt`; `0` turns the pre-warm off ("Frame times", "The pre-warm list") |
+| `PURE_METAL_PIPELINES_OUT=FILE` | (task 033) at exit, every render pipeline and depth-stencil key the run's draws used, in the list's form |
+| `PURE_METAL_PACE=0` | (task 033) the Metal shell shows each picture as soon as it can, instead of at the real time of the PSP vblank after its frame began |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -54,7 +58,9 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
-| `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below). Objective-C++ with ARC |
+| `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), and the frame trace's hook through which the shell reports its presents (task 033, "Frame times"). Objective-C++ with ARC |
+| `config/metal_pipelines.txt` | the render pipelines and depth-stencil states made at start (task 033, "The pre-warm list") |
+| `tools/frame_times.py` | the frame trace's summary (task 033, "Frame times") |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
 | `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the four `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
 
@@ -94,6 +100,9 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 |---|---|---|
 | `RenderKey` | blend on/off, Metal source and destination factors, blend operation, colour write mask (alpha included when the draw stores a stencil value), the alpha's destination factor (ZERO, or ONE for the copy of the stencil into the alpha), dual source, textured, alpha test | `MTLRenderPipelineState` (vertex function `ge_vertex`, fragment function `ge_fragment`, or `ge_fragment_dual` with dual source, specialised by the function constants `kTextured` and `kAlphaTest`; the eight specialisations are made at start). With dual source the colour factors SA and 1-SA become `Source1Alpha` and `OneMinusSource1Alpha` |
 | `DepthStencilKey` | depth compare, depth write; the stencil test as the GE gives it: enabled (on a 5551, 4444 or 8888 target), function, fail, depth-fail and pass operations, compare mask, write mask (~0xE9) | `MTLDepthStencilState`, with the same `MTLStencilDescriptor` for both faces. The reference is the encoder's, not the state's |
+
+The keys of `config/metal_pipelines.txt` are made at start, the render pipelines asynchronously, and any other key on
+first use (task 033, "Frame times").
 
 Per draw, the vertex uniforms (matrix, folded viewport, uv transform, the row of view x world that gives view-space
 z, and the mode: through, sprite corners in clip space, fog, lighting), the fragment uniforms (FIX colour, texture
@@ -259,7 +268,7 @@ black); the Vulkan backend needs the Vulkan shell and draws nothing here, as in 
 |---|---|
 | Window | an SDL window (`SDL_WINDOW_METAL \| SDL_WINDOW_RESIZABLE`, 480x272 times the window-size setting, full screen by the setting), titled as the Vulkan shell's (`PURE_WINDOW_TITLE`, else the program's name and build label); `SDL_Metal_CreateView` and its `CAMetalLayer`: BGRA8, tagged sRGB (as MoltenVK tags its swapchain, so the colours look the same), `framebufferOnly` off for the captures, the program's one device and command queue (`src/gpu/metal_device.hpp`, the backend's; "One command queue" below). Prints `[shell] metal: Apple M4 Pro, window 960x544, vsync` |
 | Events and input | `pump_events` handles the window's events as the Vulkan renderer's pump does: close, gamepads arriving and leaving, a display change, the mouse while it is captured for the game (only the script's mouse under scripted input), then the interface's event hook. The pad is a `host::SdlPad` the shell holds, the code the Vulkan shell uses: the keyboard through the player's bindings, the first gamepad or the input script's virtual one, the script's keys (`set_scripted_key`), the neutral pad while an interface screen is up (`set_game_input`). The pointer is captured by the Vulkan renderer's rule. `sample_pad` pumps SDL and samples without handling events |
-| Present | the backend's `Metal` image (its target's `id<MTLTexture>`) is drawn into the layer's next drawable by one triangle over the letterboxed rectangle, placed as the Vulkan renderer's `record_game_blit` places it (Original), or over the whole drawable (Stretch); a `Cpu` image is uploaded to a texture first; no image clears to black. The interface is drawn in the same pass, then `presentDrawable` and commit. A fast-forwarding load presents a flip only when none was shown for 33 ms, as the Vulkan shell does. Vsync is the layer's `displaySyncEnabled`, off for Immediate; there is no Mailbox (`supports_present_mode`) |
+| Present | the backend's `Metal` image (its target's `id<MTLTexture>`) is drawn into the layer's next drawable by one triangle over the letterboxed rectangle, placed as the Vulkan renderer's `record_game_blit` places it (Original), or over the whole drawable (Stretch); a `Cpu` image is uploaded to a texture first; no image clears to black. The interface is drawn in the same pass, then `presentDrawable` and commit; while the game is held to real time the drawable is presented at the real time of the PSP vblank after the one its frame began from (`presentDrawable:atTime:`, task 033, "Frame times"; `PURE_METAL_PACE=0` presents at once). A fast-forwarding load presents a flip only when none was shown for 33 ms, as the Vulkan shell does. Vsync is the layer's `displaySyncEnabled`, off for Immediate; there is no Mailbox (`supports_present_mode`) |
 | Scaling filter | nearest when the sharp-screen setting is on, and whenever the picture covers a whole multiple of 480x272 (the default 2x window); linear otherwise (below) |
 | Captures | `capture_window` (the input script's `shot`): the next present also copies the drawable, interface included, into a shared buffer, waits for it and writes the BMP (`[render] window 960x544 -> PATH`), as the Vulkan shell's window captures are written. `ShellConfig::capture_frame` is not used |
 | Interface | `initialize_ui`: `ImGui_ImplSDL3_InitForMetal` and `ImGui_ImplMetal_Init` (patch 0012 moved the SDL3 platform init from `Layer::attach` into the shells); `begin_ui_frame`: `ImGui_ImplMetal_NewFrame` with a render pass descriptor that has the drawable's attachments (one BGRA8 colour attachment, no depth: a 1x1 stand-in texture, since the drawable itself is taken at the present); `set_ui_draw_data` keeps the draw data, drawn by the next `present` or `present_ui` over the picture; `present_ui(show_game)` presents the last game picture (behind the paused menu) or the setup screens' brown, with the interface; `shutdown_ui` waits for the GPU and shuts both ImGui backends down |
@@ -337,6 +346,212 @@ identical to the 2x one: nearest at 3x as at 2x.
 
 The menu opens over the game with Esc (the interface's key) and closes with Esc again: `out/027/menu_shots/menu_open.png`
 of task 027's check shows it over the paused language page.
+
+## Frame times (task 033, 2026-10-06)
+
+Erik's first race on the app dipped "here and there", while the scripted race's one-second `[perf]` lines held 59.7 to
+60.1 fps: a second's average hides single long frames. Task 033 gave the backend a trace with a row per flip, measured
+the Vineta K race cell with it, and removed what the backend and the shell could remove without changing a pixel: the
+render pipelines compiled on first use (pre-warmed now) and the Metal shell's uneven presents on a 120 Hz display
+(timed to the PSP's vblank now). Most of what remains is the game's own: stretches of frames that wait two vblanks.
+
+### The trace
+
+`PURE_METAL_TRACE=FILE` writes a CSV row per flip, from the backend's `present_image()`, for the interval since the
+previous flip: everything the backend and the shell did between two flips is in the row of the second. The Metal shell
+presents each picture right after `present_image()` and hands its own part to the trace through a small hook in
+`src/gpu/metal_device.hpp` (`trace_shell_present`, `trace_presented`; the brief's hook rather than a second file),
+including when each drawable reached the screen, from its presented handler's `presentedTime`. A row is therefore
+written a few flips late (at most 30), and the last ones at exit. Off, the trace costs one test of a pointer per call;
+the counts it reports are the backend's own.
+
+| Column | What |
+|---|---|
+| `flip`, `t_ms`, `frame_ms` | the flip's number (as `[render] frame N` numbers them), its time since the backend started, the time since the previous flip |
+| `submit_ms` | CPU time in `submit()`, the draws |
+| `pipeline_ms`, `texture_ms` | of `submit_ms`: making render pipelines and depth-stencil states (or waiting for the pre-warm to); hashing and decoding textures from guest memory |
+| `present_ms` | `present_image()` at the previous flip, its waits included |
+| `memory_ms` | `write_back_depth`, `write_back_frame`, `block_transfer`, `read_back_framebuffer`, `upload_frame` and `capture_frame`, their waits included |
+| `wait_ms`; `wait_depth_ms`, `wait_frame_ms`, `wait_guest_ms`, `wait_capture_ms`, `wait_ring_ms` | GPU waits in all (within `present_ms` and `memory_ms`), and by where: the SIGNAL's depth write-back, the frame write-back, transfers and read-backs from a target, captures and the Vulkan shell's hand-over, more than two frames in flight |
+| `pipelines`, `depth_states` | made by a draw in the interval; a draw that waited for the pre-warm counts |
+| `decoded`, `decoded_kb` | textures decoded from guest memory, and their size as uploaded (RGBA8) |
+| `stencil_copies`, `draws`, `passes`, `copies` | copies of the stencil into the alpha, draws, render passes, copies of a target a draw samples while drawing into it |
+| `shell_ms`, `drawable_ms`, `occluded` | the Metal shell's `present()` in the interval, of it the wait in `nextDrawable`, and how many of its presents found the window occluded (SDL's flag, which lags the window by a few flips); empty under another shell |
+| `shown_ms`, `latency_ms` | when this flip's picture reached the screen after the previous picture shown did, and after the shell's `present()` began; `shown_ms` 0 when the shell reported that it never reached the screen, both empty when nothing was reported |
+| `other_ms` | `frame_ms` less `submit_ms`, `present_ms`, `memory_ms` and `shell_ms`: the game's own code, the HLE, the kernel's pacing sleep |
+
+`tools/frame_times.py TRACE [--long MS] [--fps N] [--from FLIP] [--to FLIP] [--top N] [--plot OUT.png]
+[--check-no-pipeline-stalls-after N]` prints the frame count, the mean, median, 99th percentile and longest frame time,
+the frames over `--long` (default 20 ms) and over 1.5 frames at `--fps` (default 60), the on-screen intervals when the
+trace has them, histograms, the longest `--top` frames with their columns, and the long frames counted by cause. A
+long frame's cause is the part of it that exceeds its own median over the rows read by the most: `pipeline`,
+`texture`, `draws` (the rest of submit), `wait depth`, `wait frame`, `wait guest`, `wait capture`, `wait ring`,
+`backend` (present and memory besides their waits), `shell` (besides the drawable), `drawable` (`drawable, occluded`
+with the window occluded) or `outside` (`other_ms`). The medians take the pacing sleep out of `outside`: a long frame
+whose excess is there spent its time in the game, the HLE or the kernel. `--plot` draws `frame_ms` per flip with the
+long frames coloured by cause (`tools/png.py`). `--check-no-pipeline-stalls-after N` exits 1 when a frame after flip N
+takes over 25 ms with a render pipeline made in it, or 5 ms of pipeline work; a depth-stencil state alone does not
+count (Metal makes one in microseconds, and one made in a frame that was long for another reason is not its cause).
+
+### Method
+
+The Vineta K Single Race cell (the menus, a three-lap race in which the follower presses Square, use pickup, every 120
+flips, the results screen), under the Metal shell in a window, since the dips are what a player sees:
+
+```sh
+PURE_METAL_TRACE=out/033/race.csv python3 tools/campaign_sweep.py single_race vineta_k --no-damage --shell metal
+python3 tools/frame_times.py out/033/race.csv --long 20 --fps 60 --from 6250 --to RESULTS-300
+```
+
+The sweep takes no `--env` (task 034's argument list): the environment reaches the game. The race is read from flip
+6250, where the race clock starts, to 300 flips before the results screen. M4 Pro with its built-in display at 120 Hz;
+the machine was in use during the runs (a browser at full load on one core, a VM, video), which shows as scattered
+frames whose `draws` or `outside` grow with no more work in them. The window was not always visible: in three runs (A, C and D
+below) the pictures stopped reaching the screen part of the way through or never did (the `shown_ms` and `occluded`
+columns), and while it is occluded macOS holds `nextDrawable` back for up to a second. A cold shader cache, as on a machine's first start of the
+app (Erik's first race), was made with a throwaway build, not committed: the shader source got an unused varying holding
+a number from the environment, new for each run, so Metal's cache missed every library and pipeline.
+
+### The runs
+
+| Run | Shell | Window | Shader cache | Pre-warm | Pictures | Race window (flips) | Frames | Over 20 ms | Over 25 ms | 99th pct |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A | Metal | shown until flip 7184, then occluded | warm | off | at once | 6250-17070 | 10821 | 236 | 227 | 33.4 ms |
+| B | headless | none | warm | off | | 6250-17110 | 10861 | 244 | 188 | 33.3 ms |
+| C | Metal | never shown | cold | off | at once | 6250-17610 | 11361 | 124 | 119 | 31.0 ms |
+| D | Metal | occluded from flip 7769 | cold | on | at once | 6250-17990 | 11741 | 113 | 106 | 19.6 ms |
+| E | Metal | shown | warm | on | at once | 6250-16890 | 10641 | 61 | 52 | 18.6 ms |
+| F | Metal | shown | warm | on | at the PSP's vblank | 6250-17310 | 11061 | 73 | 72 | 18.9 ms |
+
+The race's frames over 20 ms by cause (the tool's rule; a two-vblank stretch is three or more frames in a row over 25
+ms whose cause is `outside`):
+
+| Cause | A | B | C | D | E | F | What it is |
+|---|---|---|---|---|---|---|---|
+| two-vblank stretches (outside) | 211 in 11 | 116 in 8 | 108 in 6 | 94 in 3 | 48 in 2 | 71 in 3 | mostly runs of 13 to 39 frames of 31 to 35 ms, `other_ms` 28 to 32 ms and nothing else above its median: the game's own 30 fps (below) |
+| outside, single frames | 11 | 80 | 6 | 8 | 8 | 1 | host contention: `other_ms` alone grows to 40 to 75 ms |
+| draws, texture, backend | 3 | 45 | 4 | 5 | 1 | 1 | host contention: `submit_ms` 10 to 110 ms over the usual draws, `texture_ms` up to 34 ms with nothing decoded (the thread descheduled while hashing) |
+| wait depth | 7 | 3 | 6 | 4 | 4 | 0 | the SIGNAL's depth write-back waiting 13 to 40 ms for the GPU (median 0.6 ms) |
+| drawable, shell | 4 | 0 | 0 | 2 | 0 | 0 | the window occluded: `nextDrawable` held for 104 to 973 ms |
+| pipeline | 0 | 0 | 0 | 0 | 0 | 0 | no render pipeline was made in any race; on a cold cache they all came before it (below) |
+
+Before the race the cold cache mattered: in C the race's load (flip 5708) took 134.7 ms making 18 pipelines (122.9 ms
+of it), flip 5745 27.6 ms making 3 (21.5 ms), and flips 3 and 5 at boot 26.9 and 26.4 ms; with the pre-warm (D) flips
+5708 and 5745 took 15.0 and 7.2 ms, flip 5 10.1 ms, flip 3 waited 11 ms for the pre-warm's first pipeline (27.9 ms),
+and no draw made a pipeline after it. On a warm cache a pipeline takes 0.2 to 2 ms on first use, and A and B made all 26
+before the race, none in a frame over 25 ms. `--check-no-pipeline-stalls-after 600` fails on C (flips 5708 and 5745)
+and passes on every other run.
+
+On screen, run E (the window shown throughout, pictures shown at once) had what the flip times do not show: of 10641
+pictures, 476 stayed 25 ms and 470 only 8.3 ms, in pairs, in most five-second stretches of the race (up to 28 pairs in
+five seconds). The flips come every 16.68 ms with a standard deviation of 1.4 ms (the kernel's sleeps), and at 120 Hz a
+picture is shown at the first refresh after its flip: while the flips' phase lies near a refresh boundary they
+alternately catch and miss it. That stutter is the other "dip here and there" a player sees besides the game's own 30
+fps stretches; F removes it (After).
+
+### The two-vblank stretches (outside the backend and the shell)
+
+In every run most of the race's long frames come in runs of frames at two vblanks each (about 33 ms; most runs 13 to 39
+frames long), with no time above its median in any backend or shell column, 2 to 11 runs a race (E: 7082-7105 and
+12280-12303; A: eleven). The emulated clock does not advance while guest code runs (it
+jumps to the next event when every thread waits, `Kernel::schedule`), so a frame of two vblanks is the guest waiting
+across two vblanks, which `[perf]` confirms ("game" 35 to 49 fps at speed 100% in those seconds). docs/timing.md
+describes the game's end-of-frame routine: in a locked mode, or while a countdown at the frame object's `+0x117c` runs,
+it waits two vblanks a frame (30 fps). What starts these stretches in the race, and whether the PSP has them in the same
+places, is a question for the HLE and the game, outside this task (the brief's escalation): see the pacing trace below
+and the Result of docs/tasks/033-frame-time-dips.md.
+
+A headless run of the cell with the framework's pacing trace beside the frame trace (`PURE_TRACE_PACING=900000
+PURE_METAL_TRACE=FILE python3 tools/campaign_sweep.py single_race vineta_k --no-damage --max-lines 1500000`; the n-th
+`sceDisplaySetFrameBuf` line is flip n) shows the switch. In the race's ordinary frames the main thread calls no vblank wait: it reads the pad
+(`sceCtrlReadBufferPositive`, which blocks until the next vblank's sample) and flips 250 us after each vblank, a frame
+a vblank. In its stretch at flips 9261-9276 it calls `sceDisplayWaitVblankStart` twice a frame and flips on every
+second vblank, the end-of-frame routine's locked path of docs/timing.md (step 5: `n = 2 - (vcount - lastVcount)` waits
+when `+0x116c` is 0 or the countdown at `+0x117c` runs), then returns to the free-running path at flip 9277. The
+stretches come back at about the same flips in different runs (7082-7105 in D and E; 16252-16290 in D, 16259-16283 in
+F), so something in the race sets the lock. Finding what (a watch on `+0x116c` and `+0x117c` of the frame object, and
+PPSSPP's frame rate at the same place on the track) is the follow-up the task reports.
+
+### What changed
+
+| Change | Where | What it does |
+|---|---|---|
+| Pipeline pre-warm | `metal_backend.mm` `start_prewarm`, `config/metal_pipelines.txt` | at `initialize`, the depth-stencil states of the list are made at once and its render pipelines are asked of Metal asynchronously (`newRenderPipelineStateWithDescriptor:completionHandler:`); a draw takes its pipeline from them on first use, waiting only for one not made yet; a key not in the list is still made on first use |
+| Pictures at the PSP's vblank | `metal_shell.mm` `present_time` | while emulated time is held to real time (the HLE passes the frame's moment, the real time of the vblank it began from), each game picture is presented at that moment plus one PSP frame (`presentDrawable:atTime:`), when the PSP shows a flip; otherwise, or when that time has passed, at once. `PURE_METAL_PACE=0` turns it off |
+| The trace, the tool, the occlusion column | `metal_backend.mm`, `metal_device.hpp`, `metal_shell.mm`, `tools/frame_times.py` | above |
+
+Neither changes a pixel: the pipelines are the ones the draws made before, and the pictures are the same, shown at other
+moments. `tools/frame_regress.sh` (both window paths and headless) and `tools/hud_check.sh` pass as before (the Result
+of the task file has the runs).
+
+### After
+
+The long frames left in the race with both changes (F, the window shown): 71 in three two-vblank stretches (14720-14752,
+15226-15238, 16259-16283) and two of host contention, none with a pipeline made in it, before or after the race's
+first 10 seconds. The stretches are the game's; the two others, frames whose `outside` and `draws` grew with no more
+work in them, the machine's.
+
+On screen (the drawables' presented times, the window shown):
+
+| Run | Pictures | Shown 16.7 ms | 25 ms | 8.3 ms | 33 ms (the game's two-vblank frames) | Latency, present to screen |
+|---|---|---|---|---|---|---|
+| E, pictures shown at once | 10641 | 90.6% | 476 | 470 | 51 | 21.5 ms mean, 37.3 longest |
+| a minimum duration of two refreshes (`presentDrawable:afterMinimumDuration:`, tried, not kept) | 11091 | 99.4% | 19 | 0 | 49 | 34.0 ms mean, 67.6 longest; `nextDrawable` held the game 4 to 22 ms in 1217 frames |
+| F, pictures at the PSP's vblank | 11059 | 98.6% | 47 | 28 | 72 | 27.0 ms mean, 46.9 longest; `nextDrawable` never waited |
+
+The minimum duration evens the pictures out further, but each late flip moves the whole schedule a refresh later and
+only the game's slightly slower rate (59.94 against 60) brings it back, so the queue of drawables filled and held the
+game back: two to three frames of latency. Times from the game's own vblank grid carry no host jitter and keep the
+queue empty, for 5.5 ms more latency than showing each picture at once.
+
+### The pre-warm list
+
+`config/metal_pipelines.txt` holds the 26 render pipelines and 28 depth-stencil states the race cell's draws used, a
+key a line (`render blend=1 source=4 destination=5 ...`, `depth compare=4 write=1 stencil=1 ...`: the fields of
+`RenderKey` and `DepthStencilKey`, Metal's values for the blend factors, operations, write masks and depth compare, the
+GE's for the stencil function and operations). The backend looks for it at `PURE_METAL_PIPELINES` (`0` turns the
+pre-warm off), then as `metal_pipelines.txt` in an app's `Contents/Resources`, then as `config/metal_pipelines.txt`
+three directories above the executable (`build/<preset>/bin` in a checkout or a worktree), then under the working
+directory. At start it prints `[metal] pre-warm: 26 render pipelines (made asynchronously) and 28 depth-stencil states
+from PATH, T ms at start`, then `[metal] pre-warm done: ...`, and at exit `[metal] pipelines: N render pipelines used, M
+made by a draw (W of them waited for the pre-warm, X not in the list), ...`.
+
+To refresh it, run what should be covered with `PURE_METAL_PIPELINES_OUT=FILE`, which writes every key the run's draws
+used at exit, and merge the files into the list (the lines are canonical, so the union of the files is the new list):
+
+```sh
+PURE_METAL_PIPELINES_OUT=out/keys_race.txt python3 tools/campaign_sweep.py single_race vineta_k --no-damage
+PURE_METAL_PIPELINES_OUT=out/keys_zone.txt python3 tools/campaign_sweep.py zone zone_1
+( grep '^#' config/metal_pipelines.txt; cat config/metal_pipelines.txt out/keys_*.txt | grep -v '^#' | sort -u ) > out/list.txt
+mv out/list.txt config/metal_pipelines.txt
+```
+
+(`sort -u` puts the `depth` lines before the `render` lines; the order does not matter.) A run's exit line counts the
+keys "not in the list"; each was made on first use, about 1 ms on a warm shader cache and 10 to 95 ms on a cold one.
+Only the Vineta K cell is in the list today: other tracks, Zone and the weapons this follower never fired may need more.
+
+### Not changed
+
+- The two-vblank stretches: the game's, outside the backend and the shell (above).
+- The SIGNAL's depth write-back waits for the GPU each race frame (0.6 ms median; 13 to 40 ms a few times a race, with
+  nothing in the frame's own columns to explain it: the GPU busy with other work). Reading the depth a frame late would remove the wait and move the lens flare's occlusion
+  a frame: a change to the picture, left alone.
+- Hashing the textures a display list binds costs about 0.5 ms a frame (`texture_ms`). Caching by address alone would
+  miss a texture rewritten in place, a change to the picture; it is no long frame's cause.
+- The app (`tools/bundle.sh`) does not carry `config/metal_pipelines.txt` yet; the backend looks for it in the app's
+  `Contents/Resources`. Until the bundle copies it there, the app makes pipelines on first use, which costs only its
+  first race after an install (the shader cache is warm afterwards).
+- With the window occluded macOS shows nothing and may hold `nextDrawable` back for up to a second; not a player's case.
+
+### The Vulkan path, for comparison
+
+`PURE_PERF=log PURE_TRACE_STALLS=1 PURE_TRACE_STALLS_MS=20 python3 tools/campaign_sweep.py single_race vineta_k
+--no-damage --shell vulkan` (the Vulkan shell and backend, which have no trace: the framework's `[slow-frame]` line for
+each frame over 20 ms, its guest, render and wait split and its stalls): 61 of the race's frames (6250-17540) were over
+20 ms. 41 of them are two two-vblank stretches (12510-12527 and 14494-14516; the `[perf]` seconds over them read "game"
+43 to 51 fps at speed 100%), the game's own as on Metal; the other 20 are 20 to 31 ms, a pacing sleep that woke late
+beside the frame's read-backs (1 to 37 ms through MoltenVK) or a submit that waited (3 to 13 ms). The game's stretches
+are the same on both paths; Metal's frames have no read-back of the picture to wait for.
 
 ## What is not done yet
 
