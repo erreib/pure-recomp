@@ -24,6 +24,7 @@ See [docs/status.md](docs/status.md). Decisions: [docs/decisions.md](docs/decisi
 | `tools/` | extraction, build, run, measurement, Ghidra and PPSSPP drivers |
 | `tools/patches.sh` | `check`: the vendor tree is `vendor/PIN` plus `patches/` exactly; `export NNNN-slug`: the vendor change beyond the series as a new patch |
 | `tools/worktree_init.sh` | first thing in a git worktree: vendor tree, links to the main checkout's `disc/`, `generated/`, `disc.iso`, its own `game/`, build from the shared ccache (about 35 s) |
+| `tools/controls_check.py` | checks the tables of [docs/controls.md](docs/controls.md) (both keyboard layouts, the gamepad buttons, the pad tuning defaults) against the framework's sources; exit 1 on a difference (task 030) |
 | `tools/save_roundtrip.sh` | M5 save round trip on its own stick (`out/014/game/ms0`): profile NEW (`main_menu.txt`), LOAD (`profile_load.txt`), LOAD beside an empty DLC folder; exit 0 when all three hold (about 7 min, windowed; `docs/savedata.md`) |
 | `tools/frame_regress.sh` | frame regression suite: boots the frontend, main-menu and race routes on an empty stick, captures `lang`, `title`, `profile`, `main_menu` and `race_hud` (race frame 6016), compares each with its `ref/` capture at the limits in the script's table, prints PASS/FAIL per scene to `out/regress/summary.txt`; exit 0 when all pass. Run before merging a renderer change (about 7 min, windowed; `docs/verification.md`). `--backend vulkan\|metal` and `--shell vulkan\|metal\|headless` set `PURE_GE_BACKEND` and `PURE_SHELL` for the runs (both vulkan by default) and are recorded in the summary: `--shell metal --backend metal --only lang,title,profile` is the Metal path with no Vulkan at all |
 | `tools/gerec/gerec_dump.py` | lists a GE backend recording (`.gerec`, `PURE_GE_BACKEND=record`): one line per record, a per-frame table whose draw counts are checked against the recorded backend's own counter, `--images DIR` for the presented frames; exit 1 on a mismatch or a cut file (docs/ge-backend.md) |
@@ -50,6 +51,8 @@ Details and machine traps: [docs/setup.md](docs/setup.md). Ghidra: `tools/ghidra
 generates the corpus into `generated/` (85 s) and `tools/build.sh profile` compiles it (8 min cold, seconds after).
 `build/arm64/bin/PureNative` runs the game; `tools/run_boot.py` wraps it with a deadline and a folded log. The game
 runs under a pty, so a deadline kill loses no output, and the log always ends with the `[run_boot] exit` line.
+What a player presses (the keyboard's two layouts, the mouse, the gamepad, rebinding in the Esc menu and in
+settings.ini) is in [docs/controls.md](docs/controls.md).
 
 | `tools/run_boot.py` flag | Meaning |
 |---|---|
@@ -69,9 +72,9 @@ runs under a pty, so a deadline kill loses no output, and the log always ends wi
 | `PSPRECOMP_NO_INTERPRETER=1` | stop at the first address with no recompiled code instead of interpreting it |
 | `PURE_EXIT_AT_FRAME=N`, `PURE_FRAME_LOG=N` | stop at the Nth flip; log every Nth flip (`[pure] frame N`) |
 | `PURE_SCREENSHOT_DIR=dir PURE_SCREENSHOT_EVERY=N` | BMP of every Nth frame, and where the script's `shot` steps write (`tools/run_boot.py --shots` converts them to PNG); needs a GE backend that runs, so windowed, or headless with `PURE_GE_BACKEND=null` |
-| `PURE_INPUT_SCRIPT="700:pad a;1350:pad start;1500:shot name"` | scripted input, frame-indexed; actions `pad a/b/x/y/start/select/dpup/...` (a = Cross), `key NAME`, `shot NAME`, `quit`. In a window it drives a virtual gamepad; in the headless shell (`PURE_SHELL` below) the same file drives the pad directly: `pad`, `axis`, `shot` (the GE backend's picture) and `quit` work, `key`/`mouse`/`click`/`text`/`drop` are reported once and ignored. `PURE_INPUT_LIVE=<file>` (appended lines, read as they come) works in both |
+| `PURE_INPUT_SCRIPT="700:pad a;1350:pad start;1500:shot name"` | scripted input, frame-indexed; actions `pad a/b/x/y/start/back/dpup/...` (SDL's names: a = Cross, back = Select), `axis NAME VALUE`, `key NAME` (SDL's key names: `Escape`, `Return`, `Down`), `shot NAME`, `quit`; every name and the PSP button it presses are in [docs/controls.md](docs/controls.md) (keyboard layouts, gamepad mapping, dead zone, rebinding in the menu and in settings.ini). In a window it drives a virtual gamepad; in the headless shell (`PURE_SHELL` below) the same file drives the pad directly: `pad`, `axis`, `shot` (the GE backend's picture) and `quit` work, `key`/`mouse`/`click`/`text`/`drop` are reported once and ignored. `PURE_INPUT_LIVE=<file>` (appended lines, read as they come) works in both |
 | `PURE_LIST_STUBS=1`, `PURE_STRICT_HLE=1` | list unimplemented imports at start; stop at the first one called |
-| `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | framework traces, one subsystem each |
+| `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | framework traces, one subsystem each; `PAD` prints `[pad] buttons 0x... analog X,Y right X,Y` on each change of the pad (the bits and values: [docs/controls.md](docs/controls.md)) |
 | `PURE_MALLOC_DEBUG=1` (in `tools/env.sh`) | macOS malloc checks for a single run (task 015): `( export PURE_MALLOC_DEBUG=1; . tools/env.sh; python3 tools/run_boot.py ... )` |
 | `PURE_NO_STENCIL_ALPHA=1` | (patch 0004) the renderer stores each draw's fragment alpha and ignores the stencil ops and write masks, as before task 009 (the whole race scene blooms); implies `PURE_NO_STENCIL_BUFFER=1` |
 | `PURE_NO_STENCIL_BUFFER=1` | (patch 0006) no Vulkan stencil attachment, as with patch 0004 alone: every stencil test is drawn as ALWAYS and only the zpass REPLACE/ZERO reach the alpha, so the ship shadows (stencil volumes) are missing |
