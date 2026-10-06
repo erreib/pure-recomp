@@ -57,10 +57,12 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
   003 (diagnosis record) merged, D-003, briefs 022 and 023, `tools/verify_task.sh` (base-10 fix: `018` works).
 - Merge gate: `tools/frame_regress.sh` (5 scenes, 7 min) after any renderer change; `tools/verify_task.sh NNN` reruns a
   brief's Verify from this checkout.
-- Next: dispatch 022 (ge_replay, in the game executable behind `--replay`; our own `main()` through `HOST_MAIN_NAME`)
-  and 023 (Metal backend, 2D frontend scenes) in parallel; both edit CMakeLists.txt, resolve by hand at merge. Then 024
-  (Metal 3D), 025 (Metal stencil/bloom/depth write-back), 026 (Metal presenter + UI, the shell split that also gives
-  headless input). `out/gerec/race.gerec` (23 MB, frames 6014 to 6016, Vulkan inner) is the first recording.
+- Running (dispatched 2026-10-06): 022 (ge_replay, in the game executable behind `--replay`; our own `main()`
+  through `HOST_MAIN_NAME`), 023 (Metal backend, 2D frontend scenes), 026 (the shell seam, patch 0010: `host::Shell`,
+  Vulkan shell adapter, headless shell with pad from the input script; D-007, docs/ge-backend.md section 8). 022 and
+  023 both edit CMakeLists.txt: resolve by hand at merge. Then 024 (Metal 3D), 025 (Metal stencil/bloom/depth
+  write-back), 027 (Metal presenter + UI against the shell seam), and Fable's patch 0011 (the kernel's host-wait
+  sleep, so headless runs stop holding at 19 fps) after 026 lands. `out/gerec/race.gerec` (23 MB, frames 6014 to 6016, Vulkan inner) is the first recording.
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
   (`tools/pad_record.py`), the save-list dialog for multiple profiles.
