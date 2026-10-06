@@ -212,6 +212,8 @@ SHOT_EVERY = 30                # flips between the live shots once the race is f
 PROGRESS_M = 5.0                # metres along the track that count as progress for the stall rule
 NO_RACE_FLIPS = 1800            # flips after the Cross-hold step with no race clock: the route broke
 WRAP_M = 1000.0                 # a drop in the distance this big is the once-a-lap wrap, not a step back
+PUTBACK_M = 30.0                # a drop from one ship line to the next of more than this (and under WRAP_M) is the
+                                # game setting the ship back on the track (task 032: 200 to 450 m after a fall)
 LX_STEP = 0.04                  # --tune sends a new lx when it moves this much
 # Contacts (walls, other ships, weapon hits): the speed falling by CONTACT_KMH within CONTACT_WINDOW s of race clock
 # from at least CONTACT_MIN_KMH; a drop within CONTACT_GAP s of the last one is the same contact.
@@ -355,6 +357,7 @@ class Race:
         self.finished_frame = None    # first flip after the last lap was completed
         self.hist = []                # (race time, km/h) of the last CONTACT_WINDOW s
         self.contacts = []            # (race time, laps done, distance, km/h lost)
+        self.putbacks = []            # (race time, distance before, distance after): the game set the ship back
 
     def feed(self, m, line):
         self.frame = int(m[1])
@@ -381,6 +384,8 @@ class Race:
             self.lap_times.append(self.clock)
         self.clock, self.dist, self.lap = clock, dist, lap
         self.total = self.base + clock
+        if self.prev_dist is not None and PUTBACK_M < self.prev_dist - dist < WRAP_M:
+            self.putbacks.append((self.total, self.prev_dist, dist))
         # The distance is a track coordinate that wraps to 0 once a lap (docs/tracks.md): a big drop is progress.
         if self.started and (self.laps_done > self.best[0] or dist > self.best[1] + PROGRESS_M
                              or dist < self.best[1] - WRAP_M):
@@ -878,6 +883,8 @@ def classify_stall(race, tail, shield, destroyed=None):
     the last TAIL_S s of the trace:
       eliminated by damage  the shot shows the "SHIP DESTROYED" title, or the probe's shield is 0 or less (the
                             shield bar alone does not decide: it reads 0% whenever the HUD is hidden)
+      put back by the game  the game set the ship back along the track (PUTBACK_M or more) from 3 s before the
+                            last progress on: it left the track there and fell (Sinucit and Manor Top, task 032)
       stuck on geometry     a contact from 3 s before the last progress on (the stall began there)
       off the line          more than 25 m from the AI line, or moving more than 90 degrees off it
       stopped               none of these (the speed ran down without a contact)
@@ -894,6 +901,11 @@ def classify_stall(race, tail, shield, destroyed=None):
         why = (['"SHIP DESTROYED" title'] if destroyed else []) + (
             [f"probe shield {race.shield:.1f}"] if race.shield is not None else [])
         return f"eliminated by damage ({', '.join(why)}; {sh}; {moving})"
+    backs = [b for b in race.putbacks if b[0] >= since]
+    if backs:
+        return (f"put back by the game {len(backs)} times since the last progress (it left the track at "
+                f"{', '.join(f'{b[1]:.0f}' for b in backs)} m and was set down at about {backs[-1][2]:.0f} m; "
+                f"{moving}; {sh})")
     if hits:
         t, _lp, d, lost, off = hits[0]
         return (f"stuck on geometry (contact at {d:.0f} m, {t:.1f} s, {lost:.0f} km/h lost, {off:+.0f} m off the "
