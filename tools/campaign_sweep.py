@@ -2,7 +2,7 @@
 """Campaign sweep: each (mode, track) cell from a cold boot to the race's results screen under scripted driving.
 
   tools/campaign_sweep.py [MODE [TRACK ...]] [--frames N] [--stall S] [--drive FILE] [--shots-every N] [--list]
-                          [--set KEY=VALUE ...] [--out DIR]
+                          [--set KEY=VALUE ...] [--out DIR] [--no-damage]
   tools/campaign_sweep.py MODE TRACK --tune [--line CSV] [--wn W] [--preview S]
   tools/campaign_sweep.py MODE TRACK --export-line OUT [--line CSV]
 
@@ -49,7 +49,13 @@ time, lap and distance. The summary's detail counts them a lap. A `ref` shot 600
 HUD's shield bar (SHIELD_BAR, full) to check the reading.
 
 --frames N is the race budget: the run stops at flip THROTTLE + N, THROTTLE being the race route's Cross-hold step
-(6100), since the menu route alone takes that long (a three-lap race at Vector is 150 s, 9000 flips, more).
+(6100), since the menu route alone takes that long (a three-lap race at Vector is 150 s, 9000 flips, more). Without
+--frames each track gets its budget from MODES (`frames`): the follower's laps take about 60 s on Vineta K and 75 to
+95 s on the other Alpha tracks.
+
+--no-damage sets PURE_TEST_NO_DAMAGE=1, the port's test switch that refills the player's shield every flip, so
+contacts cannot destroy the ship: the sweep's job is to reach every results screen and find halts, not to race
+well. The summary marks such a row's outcome `(no damage)`. Never a default.
 
 While the run goes the tool reads the `[pure] ship` lines (race clock, distance along the track, lap):
   - finished: the lap clock has restarted `laps` times (the player crossed the line at the end of the last lap; see
@@ -60,8 +66,9 @@ While the run goes the tool reads the `[pure] ship` lines (race clock, distance 
     closes the window (`quit`).
   - stalled: no progress along the track (distance up by 5 m, or a new lap) for --stall seconds of race clock (a
     wall stop shows as speed 0 with the distance constant): STALL. The tool takes a `stall` shot, then closes the
-    window. The detail classifies the stop from the shot's shield bar and the trace (classify_stall: eliminated by
-    damage, off the line, stuck on geometry, or stopped) and lists the last 5 s of the trace one row a second;
+    window. The detail classifies the stop from the shot ("SHIP DESTROYED" title, shield bar), the probe's
+    shield and the trace (classify_stall: eliminated by damage, off the line, stuck on geometry, or stopped)
+    and lists the last 5 s of the trace one row a second;
     out/sweep/<mode>-<track>.stall.csv holds those 5 s in full.
   - halted: a `[hle-stub]`, `unsupported` or `Runtime stopped` line other than the frame exit and our own quit.
   - no race: no race clock 1800 flips after the Cross-hold step means the menu route broke; the sweep stops there.
@@ -89,14 +96,20 @@ OUT = "out/sweep"
 # The modes and their race routes. `throttle` is the frame of the route's Cross-hold step (the budget counts from
 # it); `downs_at` is where the DOWN presses that pick the track go, `downs_gap` apart; `tracks` lists the track menu
 # in order (the index is the number of DOWN presses; docs/tracks.md).
+# `frames` is each track's race budget (flips from the Cross hold): three laps at the follower's pace, the results
+# panel and some slack (task 016: laps of 57 to 70 s on Vineta K, 75 to 95 s on the other three; the race clock runs
+# at about 58 flips a second).
 ALPHA = ["vineta_k", "modesto_heights", "chenghou_project", "blue_ridge"]
+DEFAULT_FRAMES = 13000
 MODES = {
     "single_race": {"route": "config/pad_scripts/single_race.txt", "laps": 3, "throttle": 6100,
-                    "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA},
+                    "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
+                    "frames": {"vineta_k": 13000, "modesto_heights": 17000, "chenghou_project": 17000,
+                               "blue_ridge": 17000}},
 }
 
 SHIP_RE = re.compile(r"\[pure\] ship frame (\d+) t=\d+ clock=(\S+) pos=(\S+),(\S+),(\S+) vel=(\S+),(\S+),(\S+) "
-                     r"kmh=(\S+) dist=(\S+) lap=(\d+)")
+                     r"kmh=(\S+) dist=(\S+) lap=(\d+)(?: shield=(\S+))?")
 FRAME_RE = re.compile(r"\[pure\] frame (\d+)")
 SCRIPT_RE = re.compile(r"\[script\] frame (\d+): shot (\S+)")
 HALT_RE = re.compile(r"\[hle-stub\]|unsupported|Runtime stopped")
@@ -124,6 +137,16 @@ TAIL_S = 5.0                    # seconds of trace a STALL reports
 # 2026-10-05). It fills from the left, cyan to white; a column counts as filled when a pixel of it is.
 SHIELD_BAR = (310, 254, 143, 11)
 REF_SHOT_FLIPS = 600            # the `ref` shot (a full shield bar) this many flips after the race clock starts
+# The "SHIP DESTROYED" panel the game puts up about 5 s after the shield runs out (task 017, out/017/destroyed: a
+# Vineta K race on a local build that held the shield at 1, destroyed at the first wall at 6.2 s), checked in a
+# shot's title row, in 480x272 PSP pixels; the results panel has its place there ("BAD LUCK... 8TH"). A column is
+# lit when a pixel of it is white (every channel 0xC0 or more). DESTROYED_TITLE is the title's columns from the
+# left, as runs: positive lit, negative dark. Shots of the panel differ from it by 0 or 1 column, the panel fading
+# in by 14, "BAD LUCK... 8TH" by 40, a bright race view by 35 or more.
+TITLE_REGION = (16, 22, 170, 14)
+DESTROYED_TITLE = (-4, 11, -1, 11, -1, 2, -1, 11, -7, 12, -1, 11, -1, 11, -2, 10, -1, 11, -1, 11, -1, 11, -2, 11, -1,
+                   12, -11)
+TITLE_MAX_MISMATCH = 8          # columns
 
 
 def parse_drive(path, drop_shots=True):
@@ -171,8 +194,9 @@ class Race:
     (PPSSPP, out/lines/vineta_k.csv, 2026-10-05). So a completed lap shows as the clock dropping back, and the race
     is over after `laps` such drops. `total` is the race time, the sum of the lap clocks."""
 
-    def __init__(self, laps):
+    def __init__(self, laps, refilled=False):
         self.laps = laps
+        self.refilled = refilled      # PURE_TEST_NO_DAMAGE: the port refills the shield after every probe line
         self.started = False
         self.frame = self.start_frame = 0
         self.clock = 0.0
@@ -184,6 +208,9 @@ class Race:
         self.dist = 0.0
         self.prev_dist = None         # the distance of the previous ship line of the race (None on its first)
         self.x = self.z = self.vx = self.vz = self.kmh = 0.0
+        self.shield = None            # the ship object's shield (+0xF8; 100 full), from builds whose probe prints it
+        self.full = 0.0               # the highest shield seen
+        self.damage = 0.0             # shield lost in the race (with the switch: what the refills put back)
         self.line = ""
         self.best = (0, 0.0)          # (laps done, distance) of the last progress
         self.best_total = 0.0         # race time at the last progress
@@ -195,6 +222,15 @@ class Race:
         self.frame = int(m[1])
         clock, dist, lap = float(m[2]), float(m[10]), int(m[11])
         self.x, self.z, self.vx, self.vz, self.kmh = float(m[3]), float(m[5]), float(m[6]), float(m[8]), float(m[9])
+        shield = float(m[12]) if m[12] is not None else None
+        if shield is not None and self.started and self.finished_frame is None:
+            # The probe prints the shield before the switch refills it, so with the switch each line shows what
+            # that frame took; without it, the shield only falls.
+            lost = self.full - shield if self.refilled else (self.shield - shield if self.shield is not None else 0.0)
+            self.damage += max(0.0, lost)
+        if shield is not None:
+            self.full = max(self.full, shield)
+        self.shield = shield
         self.line = line
         self.prev_dist = self.dist if self.started else None
         if clock > 0.0 and not self.started:
@@ -229,6 +265,15 @@ class Race:
         for _t, lp, _d, _k, _o in self.contacts:
             per[min(lp, laps - 1)] += 1
         return f"{len(self.contacts)} contacts ({', '.join(map(str, per))} a lap)"
+
+    def damage_text(self):
+        """`; shield S at the end, D taken` (with the switch: `; D shield taken and refilled (no damage)`); empty
+        when the probe does not print the shield."""
+        if self.shield is None:
+            return ""
+        if self.refilled:
+            return f"; {self.damage:.0f} shield taken and refilled (no damage)"
+        return f"; shield {self.shield:.1f} at the end, {self.damage:.0f} taken"
 
     def stalled_for(self):
         return self.total - self.best_total if self.started else 0.0
@@ -592,9 +637,38 @@ def shield_text(path):
     return "unreadable" if f is None else f"{f:.0%}"
 
 
-def classify_stall(race, tail, shield):
-    """Why the ship stopped, from the stall shot's shield bar, the contacts and the last TAIL_S s of the trace:
-      eliminated by damage  the shield bar is empty (5% or less)
+def title_columns(path):
+    """The lit columns of a shot's title row (TITLE_REGION) as a string of '#' and '.', one per PSP pixel column;
+    None when the shot cannot be read."""
+    try:
+        w, h, c, data = png.read_bmp(path)
+    except (OSError, ValueError):
+        return None
+    _x0, y0, _x1, y1 = imgdiff.scale_region(TITLE_REGION, w, h)
+    sx = w / 480.0
+    cols = []
+    for px in range(TITLE_REGION[0], TITLE_REGION[0] + TITLE_REGION[2]):
+        lit = any(all(data[(y * w + x) * c + k] >= 0xc0 for k in range(3))
+                  for x in range(int(px * sx), max(int(px * sx) + 1, int((px + 1) * sx))) for y in range(y0, y1))
+        cols.append("#" if lit else ".")
+    return "".join(cols)
+
+
+def destroyed_title(path):
+    """True when a shot shows the "SHIP DESTROYED" title (within TITLE_MAX_MISMATCH columns of DESTROYED_TITLE),
+    None when the shot cannot be read."""
+    cols = title_columns(path)
+    if cols is None:
+        return None
+    want = "".join(("#" if n > 0 else ".") * abs(n) for n in DESTROYED_TITLE)
+    return sum(a != b for a, b in zip(cols, want)) <= TITLE_MAX_MISMATCH
+
+
+def classify_stall(race, tail, shield, destroyed=None):
+    """Why the ship stopped, from the stall shot (its title and shield bar), the probe's shield, the contacts and
+    the last TAIL_S s of the trace:
+      eliminated by damage  the shot shows the "SHIP DESTROYED" title, or the probe's shield is 0 or less (the
+                            shield bar alone does not decide: it reads 0% whenever the HUD is hidden)
       stuck on geometry     a contact from 3 s before the last progress on (the stall began there)
       off the line          more than 25 m from the AI line, or moving more than 90 degrees off it
       stopped               none of these (the speed ran down without a contact)
@@ -606,8 +680,11 @@ def classify_stall(race, tail, shield):
     kmh = sum(r[4] for r in tail) / len(tail) if tail else 0.0
     moving = (f"{'at rest' if kmh < 2.0 else f'crawling at {kmh:.0f} km/h'} with Cross "
               f"{'held' if last and last[8] else 'up'}")
-    if shield is not None and shield <= 0.05:
-        return f"eliminated by damage ({sh}; {moving})"
+    probe = race.shield is not None and race.shield <= 0.0
+    if destroyed or probe:
+        why = (['"SHIP DESTROYED" title'] if destroyed else []) + (
+            [f"probe shield {race.shield:.1f}"] if race.shield is not None else [])
+        return f"eliminated by damage ({', '.join(why)}; {sh}; {moving})"
     if hits:
         t, _lp, d, lost, off = hits[0]
         return (f"stuck on geometry (contact at {d:.0f} m, {t:.1f} s, {lost:.0f} km/h lost, {off:+.0f} m off the "
@@ -692,26 +769,31 @@ def run_cell(mode, track, opts):
     shots = os.path.join(out, cell)
     shutil.rmtree(shots, ignore_errors=True)
     os.makedirs(shots)
-    steps = build_script(mode, track, drive_steps, opts.frames)
+    frames = opts.frames or m["frames"].get(track, DEFAULT_FRAMES)
+    steps = build_script(mode, track, drive_steps, frames)
     with open(script, "w") as f:
         f.write("".join(f"{fr}:{a}\n" for fr, a in steps))
     open(live, "w").close()
-    exit_frame = m["throttle"] + opts.frames
+    exit_frame = m["throttle"] + frames
     game = prepare_game_dir(cell)
     env = dict(os.environ)
     env.update({"PURE_GAME_DIR": game, "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
                 "PURE_EXIT_AT_FRAME": str(exit_frame), "PURE_INPUT_SCRIPT": ";".join(f"{fr}:{a}" for fr, a in steps),
                 "PURE_SCREENSHOT_DIR": shots, "PURE_SCREENSHOT_EVERY": "0", "PURE_WATCH_SHIP": "1",
                 "PSPRECOMP_NO_INTERPRETER": "1", "PURE_INPUT_LIVE": live, "PURE_FRAME_LOG": "60"})
+    env.pop("PURE_TEST_NO_DAMAGE", None)
+    if opts.no_damage:
+        env["PURE_TEST_NO_DAMAGE"] = "1"      # a test switch: the player's shield refilled every flip
     how = (f"{'tune' if opts.tune else 'follow'} {line_path} (coverage {ai_line.covered:.0%}, "
            f"{ai_line.length:.0f} m, {tuner.describe()})" if tuner else
            f"drive {drive} ({len(drive_steps)} frame steps, {len(dist_steps)} distance steps)")
-    print(f"[sweep] {cell}: {how}, exit at flip {exit_frame}", flush=True)
+    print(f"[sweep] {cell}: {how}, exit at flip {exit_frame}{', no damage (test switch)' if opts.no_damage else ''}",
+          flush=True)
     port = Port(env, log, max(60.0, exit_frame / 15.0), opts.max_lines)
     trace = open(os.path.join(out, f"{cell}.trace.csv"), "w", buffering=1)
-    trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake\n")
+    trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake,shield\n")
 
-    race = Race(m["laps"])
+    race = Race(m["laps"], refilled=opts.no_damage)
     state = {"outcome": None, "detail": "", "quit": False, "quit_at": None, "halt": None, "lx": 0.0,
              "steering": True, "thrust": 1, "airbrake": 0, "frame": 0, "steady": 0, "prev_shot": None,
              "results": None, "last_shot": None, "ref": False, "slow_shots": 0, "slow_at": -10**9}
@@ -754,7 +836,7 @@ def run_cell(mode, track, opts):
             # The hold goes 2 frames after the line is read: the port reads the live file every 10 flips, and a
             # release and a hold read together would otherwise run in the same frame, the release of the 1-frame
             # press then lifting Cross for good (task 016: a ship left coasting to a stop at 266 m).
-            send("0:pad a 1" if not thrust else f"2:pad a {opts.frames + 1000}")
+            send("0:pad a 1" if not thrust else f"2:pad a {frames + 1000}")
             state["thrust"] = thrust
 
     def on_ship(s, text):
@@ -818,13 +900,15 @@ def run_cell(mode, track, opts):
             state["slow_at"] = race.frame
         psi = (wrap_angle(geo.line_heading(race.dist) - math.atan2(race.vz, race.vx))
                if geo and race.kmh > 10.0 else float("nan"))
+        shield = race.shield if race.shield is not None else float("nan")
         row = (race.frame, race.total, race.laps_done, race.dist, race.kmh, state["lx"], off, psi, state["thrust"],
-               state["airbrake"])
+               state["airbrake"], shield)
         tail.append(row)
         while tail[0][1] < race.total - TAIL_S:
             tail.pop(0)
         trace.write(f"{race.frame},{race.total:.3f},{race.laps_done},{race.dist:.2f},{race.x:.2f},{race.z:.2f},"
-                    f"{race.kmh:.1f},{state['lx']:.2f},{off:.2f},{psi:.3f},{state['thrust']},{state['airbrake']}\n")
+                    f"{race.kmh:.1f},{state['lx']:.2f},{off:.2f},{psi:.3f},{state['thrust']},{state['airbrake']},"
+                    f"{shield:.1f}\n")
 
     def handle(text):
         s = SHIP_RE.search(text)
@@ -910,7 +994,7 @@ def run_cell(mode, track, opts):
         elif port.timed_out:
             outcome, detail = "TIMEOUT", f"wall-clock deadline reached (exit {code})"
         else:
-            outcome, detail = "TIMEOUT", f"flip budget {opts.frames} used up"
+            outcome, detail = "TIMEOUT", f"flip budget {frames} used up"
     # Convert the live shots, and keep the cell's picture: the results screen, else the last shot taken.
     for name in sorted(os.listdir(shots)):
         if name.endswith(".bmp"):
@@ -928,12 +1012,13 @@ def run_cell(mode, track, opts):
         lap, n = write_tuned(tuned, cell, sent, race.laps_done, opts)
         print(f"[sweep] {cell}: {n} steps of lap {lap + 1} -> {tuned}", flush=True)
     if race.started:
-        detail += f"; {race.contact_text()}"
+        detail += f"; {race.contact_text()}{race.damage_text()}"
     if outcome == "STALL":
         shield = shield_fraction(stall_shot) if os.path.exists(stall_shot) else None
-        detail = f"{classify_stall(race, tail, shield)}; {detail}; {tail_text(tail)}"
+        destroyed = destroyed_title(stall_shot) if os.path.exists(stall_shot) else None
+        detail = f"{classify_stall(race, tail, shield, destroyed)}; {detail}; {tail_text(tail)}"
         with open(os.path.join(out, f"{cell}.stall.csv"), "w") as f:
-            f.write("frame,clock,lap,dist,kmh,lx,offset,psi,thrust,airbrake\n")
+            f.write("frame,clock,lap,dist,kmh,lx,offset,psi,thrust,airbrake,shield\n")
             for r in tail:
                 f.write(",".join(f"{v:.3f}" if isinstance(v, float) else str(v) for v in r) + "\n")
     with open(os.path.join(out, f"{cell}.contacts.csv"), "w") as f:
@@ -942,8 +1027,9 @@ def run_cell(mode, track, opts):
             f.write(f"{t:.2f},{lp},{d:.1f},{k:.0f},{o:.1f}\n")
     row = {"mode": mode, "track": track, "outcome": outcome, "frame": race.frame, "laps": race.laps_done,
            "clock": race.total, "detail": detail if outcome == "PASS" else f"{detail}; last: {race.line.strip()}",
-           "seconds": elapsed, "tune": opts.tune}
-    print(f"[sweep] {cell}: {outcome} at flip {race.frame}, {race.laps_done} laps, race time {race.total:.1f} s, "
+           "seconds": elapsed, "tune": opts.tune, "no_damage": opts.no_damage}
+    print(f"[sweep] {cell}: {outcome}{' (no damage)' if opts.no_damage else ''} at flip {race.frame}, "
+          f"{race.laps_done} laps, race time {race.total:.1f} s, "
           f"{elapsed:.0f} s: {row['detail']}", flush=True)
     return row
 
@@ -970,7 +1056,8 @@ def _write_summary(rows):
     for r in rows:
         if r.get("tune"):
             continue
-        kept[(r["mode"], r["track"])] = (f"| {r['mode']} | {r['track']} | {r['outcome']} | {r['frame']} | "
+        outcome = r["outcome"] + (" (no damage)" if r.get("no_damage") else "")
+        kept[(r["mode"], r["track"])] = (f"| {r['mode']} | {r['track']} | {outcome} | {r['frame']} | "
                                          f"{r['laps']} | {r['clock']:.1f} | {r['seconds']:.0f} | {stamp} | "
                                          f"{r['detail']} |")
     order = [(m, t) for m in MODES for t in MODES[m]["tracks"]]
@@ -987,7 +1074,7 @@ def parse(argv):
     p = argparse.ArgumentParser(prog="campaign_sweep.py", usage=__doc__.split("\n\n")[1].strip())
     p.add_argument("mode", nargs="?", default="single_race")
     p.add_argument("tracks", nargs="*")
-    p.add_argument("--frames", type=int, default=13000)
+    p.add_argument("--frames", type=int, default=None)
     p.add_argument("--stall", type=float, default=20.0)
     p.add_argument("--drive")
     p.add_argument("--shots-every", type=int, default=0)
@@ -1000,6 +1087,7 @@ def parse(argv):
     p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
     p.add_argument("--out", default=OUT)
     p.add_argument("--list", action="store_true")
+    p.add_argument("--no-damage", action="store_true")
     opts = p.parse_args(argv)
     bad = [kv for kv in opts.set if "=" not in kv]
     if bad:
