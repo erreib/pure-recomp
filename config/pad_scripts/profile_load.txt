@@ -1,0 +1,25 @@
+# boot -> title -> profile LOAD -> MAIN MENU -> PROFILE > SAVE -> PROFILE > NEW > YES -> SET NAME. Measured 2026-10-05
+# (task 014) on a memory stick that holds the profile main_menu.txt creates (UCUS98612P0000, name NAME0000).
+# The profile list on a PSP is the system's sceUtilitySavedata LISTLOAD dialog. The framework draws no dialog and
+# confirms the first listed save that exists, so there is no list on screen and no Cross to press on it: an extra
+# Cross there lands on MAIN MENU > SINGLE PLAYER. The loaded name shows instead on SET NAME, which the game fills
+# with the current profile's name ("NAME0000"; a fresh stick shows "NAME"). The run ends there, before any NEW save.
+# Screens: LISTLOAD at 2100, MAIN MENU by 2300, PROFILE menu by 2750 (focus NEW), LISTSAVE at 2900 (focus stays on
+# SAVE), WARNING by 3350, SET NAME by 3650.
+700:pad a
+1600:pad a
+1650:pad a
+1800:pad start
+2100:pad a
+2350:shot menu-loaded
+2400:pad dpdown
+2450:pad dpdown
+2500:pad a
+2800:pad dpdown
+2840:pad dpdown
+2900:pad a
+3200:pad dpup
+3240:pad dpup
+3300:pad a
+3600:pad a
+3850:shot name-loaded
