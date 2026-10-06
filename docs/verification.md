@@ -63,7 +63,8 @@ tools/frame_regress.sh [--backend metal|vulkan] [--shell metal|vulkan|headless] 
 
 One command that checks the port still renders the known screens like PPSSPP. By default it runs the Metal path
 (`--shell metal --backend metal`, the macOS default since D-008, task 028); `--shell vulkan --backend vulkan` runs the
-Vulkan path. Every renderer change runs it on both paths before merging (D-008). It boots the game three times, once
+Vulkan path. Every renderer change runs it on both paths before merging (D-008), and the race HUD check beside it
+("The race HUD check" below), which covers the race after the suite's last scene. It boots the game three times, once
 per route, captures five scenes, and compares each capture with its reference in `ref/` using `tools/imgdiff.py`. It
 prints a table with PASS or FAIL per scene and writes the same text to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one fails, and
 2 on a usage error or a missing build, game or reference. The full suite takes about 7 minutes, and `--only race_hud`
@@ -88,10 +89,11 @@ by both backends.
   The main menu capture catches the help text partway through typing.
 - `race_hud` is frame 6016 of the race route, with bloom and shadows on (the defaults). It is the first frame where
   the HUD has fully faded in, and the same game moment as the PPSSPP frame 7155. The AI ships on the grid change from
-  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086 on the Vulkan path, and 0.0366 to
-  0.0383 on the Metal path (task 025's 0.0379 and four runs of task 028), plus one of 0.0823 whose capture most
-  likely lacked the HUD: the Metal shell's window drops the race HUD in many frames once the race runs
-  (docs/tasks/028-metal-by-default.md, Result), which adds about 0.04 to a frame.
+  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086 on the Vulkan path, and 0.0344 to
+  0.0384 on the Metal path (task 025's 0.0379, four runs of task 028 and five of task 031, every capture with its
+  HUD), plus one of 0.0823 in task 028 whose capture most likely lacked the HUD, which adds about 0.04 to a frame:
+  until task 031 the Metal shell's window dropped the race HUD in most frames once the race ran ("The race HUD check"
+  below).
 
 How the runs are made:
 - Each route's input script is written to `<out>/<route>.route.txt`. The route files are joined in order with their
@@ -146,6 +148,38 @@ PPSSPP is one. New references are another. Never raise a limit to get a regressi
 
 If the references themselves are regenerated (`ref/README.md`, "Regenerate"), check the new SHA-256 values against
 that README. New references mean a new baseline for every scene, following the steps above.
+
+## The race HUD check (task 031, 2026-10-06)
+
+```
+tools/hud_check.sh [--shell metal|vulkan|headless] [--backend NAME] [--out DIR] [--env KEY=VAL ...]
+```
+
+Runs beside the suite on every renderer or shell change, on both paths. The suite's `race_hud` is flip 6016, before
+the race clock starts, and a frame there usually has its HUD even when the race's frames do not: in task 028 the
+Metal shell's window showed the race without its HUD in 49 of 61 probe shots while the suite passed (the shell
+sampled the backend's target from a command queue of its own; docs/metal-backend.md, "One command queue"). This
+check covers the race itself.
+
+- The route: `main_menu.txt` + `single_race.txt` (Vineta K, Cross held from flip 6100, no steering), their own `shot`
+  steps dropped, on an empty memory stick (`<out>/game`), with a `shot` every 25 flips from 6200 to 7700: 61 shots,
+  the race starting at about 6250. The run ends at flip 7710.
+- `tools/hud_check.py` reads each shot for the HUD's two yellow labels, in PSP pixels scaled to the shot's size: the
+  CURRENT label (x 2, y 2, 52 x 10, the lap clock's) and the LAP label (x 2, y 232, 26 x 10). A pixel is yellow
+  when red > 180, green > 130 and blue < 90 (task 028's probe's thresholds). A shot has the HUD when both labels have
+  yellow pixels.
+- It prints the shots as `FLIP:H` (both labels), `h` (one) or `-` (none), then `hud_check: N of M shots have the
+  HUD`, and exits 0 when all 61 shots were taken and have it. `<out>/summary.txt` holds the yellow counts per label.
+- `--shell metal` (the default) checks the Metal shell's window shots, about 4 minutes paced to real time; `--shell
+  vulkan` the Vulkan shell's, with the Vulkan backend; `--shell headless` the Metal backend's own 480x272 captures
+  (`capture_frame`), unpaced, about 15 s. `--backend` names another backend. Outputs go to `--out`, by default
+  `out/hud/<shell>` (the route, the run's log, the shots and the summary), removed first.
+
+| Path | Before task 031 | After |
+|---|---|---|
+| Metal shell and backend (the default) | 11 of 61 (task 028's probe: 12) | 61 of 61 |
+| Vulkan shell and backend | 61 of 61 (task 028's probe) | 61 of 61 |
+| headless, Metal backend | 61 of 61 (task 028's probe) | 61 of 61 |
 
 # Audio (task 013, 2026-10-05)
 

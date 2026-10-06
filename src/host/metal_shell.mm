@@ -5,8 +5,9 @@
 // the game runs with no Vulkan or MoltenVK at all:
 //
 //   window     an SDL window (SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE) with SDL's Metal view, whose CAMetalLayer
-//              draws with the system default device (MTLCreateSystemDefaultDevice: the device the Metal backend
-//              draws with, so its textures are ours to sample) and a command queue of the shell's own.
+//              draws with the program's one Metal device and command queue (src/gpu/metal_device.hpp), the ones
+//              the Metal backend draws with: its textures are ours to sample, and our presents are ordered after
+//              its frames.
 //   input      the window's events as the Vulkan renderer's pump handles them (close, gamepads coming and going,
 //              the captured mouse, the interface's event hook); the pad from host::SdlPad, which the Vulkan
 //              shell shares, so the keyboard, the gamepad, the input script's keys and its virtual gamepad reach
@@ -21,8 +22,11 @@
 //   interface  ImGui's SDL3 platform backend (InitForMetal) and its Metal renderer backend (third_party/imgui_metal,
 //              Dear ImGui 1.92.9b), drawn into the drawable after the game's picture.
 //
-// The backend commits each frame's command buffer at present_image(), before present() is called, and its targets
-// are tracked resources of the same device: Metal orders the shell's sampling after the frame's draws.
+// The backend commits each frame's command buffer at present_image(), before present() is called, on the queue this
+// shell commits its presents to: Metal runs one queue's command buffers in commit order, and its targets are tracked
+// resources, so the shell's sampling comes after every draw of the frame, and the next frame's draws after the
+// sampling. (On a queue of the shell's own nothing ordered them, and the window dropped the race HUD: task 031.)
+#include "../gpu/metal_device.hpp"
 #include "shell/sdl_pad.hpp"
 #include "shell/shell.hpp"
 
@@ -140,12 +144,13 @@ public:
                 return false;
             }
             layer_ = (__bridge CAMetalLayer *)SDL_Metal_GetLayer(view_);
-            device_ = MTLCreateSystemDefaultDevice();
+            device_ = pure::metal::device();
             if (layer_ == nil || device_ == nil) {
                 error = layer_ == nil ? "SDL's Metal view has no CAMetalLayer" : "there is no Metal device";
                 return false;
             }
-            queue_ = [device_ newCommandQueue];
+            // The Metal backend's queue (metal_device.hpp): a present is committed after the frame it shows.
+            queue_ = pure::metal::queue();
             layer_.device = device_;
             layer_.pixelFormat = MTLPixelFormatBGRA8Unorm;
             // The window captures read the drawable back.
