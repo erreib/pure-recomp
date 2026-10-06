@@ -76,8 +76,8 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | Erik's recorded lap (`tools/pad_record.py`) to replace the AI-line follower where it struggles | session 2 | the command and keys are in the Resume notes |
 
 ## Resume (session 4, 2026-10-06)
-- `main` = ad219ee (Erik's third fast-forward, 2026-10-05). `batch/m2` is ahead with tasks 016, 017, 018, 019, 020, 021 and
-  003 (diagnosis record) merged, D-003, briefs 022 and 023, `tools/verify_task.sh` (base-10 fix: `018` works).
+- `main` = 5594b0e (Erik's fourth fast-forward, 2026-10-06, at M6's close): tasks 003, 016 to 027 merged, patches
+  0001 to 0012, D-003, D-007, D-008, briefs 028 to 030. `batch/m2` continues from there.
 - Merge gate: `tools/frame_regress.sh` (5 scenes, 7 min) after any renderer change; `tools/verify_task.sh NNN` reruns a
   brief's Verify from this checkout.
 - Merged 2026-10-06: 022 (ge_replay, in the game executable behind `--replay`; our own `main()` through
