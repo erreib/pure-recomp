@@ -284,12 +284,14 @@ const GameProfile &game() {
         .disc_id = "UCUS98612",
         .disc_id_display = "UCUS-98612",
         .game_title = "Wipeout Pure",
-        .executable_path_on_disc = "PSP_GAME/SYSDIR/EBOOT.BIN",
+        // The plain executable the disc carries beside the encrypted EBOOT.BIN: the installer takes it as it is
+        // (its SHA-256 is executable_sha256 below), so no decryption key is needed (task 029).
+        .executable_path_on_disc = "PSP_GAME/SYSDIR/BOOT.BIN",
         .param_sfo_path_on_disc = "PSP_GAME/PARAM.SFO",
         .release_name = "the US Greatest Hits release (v2.00)",
-        // SHA-256 of PSP_GAME/SYSDIR/EBOOT.BIN (encrypted) and of PSP_GAME/SYSDIR/BOOT.BIN, the plain executable the
-        // disc also carries and the corpus is generated from. The developer layout (game/EBOOT.ELF = BOOT.BIN)
-        // never decrypts; the installer path needs the key for tag 0x08000000, which is not filled in yet.
+        // SHA-256 of PSP_GAME/SYSDIR/EBOOT.BIN (encrypted; kept for the record) and of PSP_GAME/SYSDIR/BOOT.BIN, the
+        // plain executable the corpus is generated from and both the developer layout (game/EBOOT.ELF) and the
+        // installer use. Nothing decrypts, so the key for tag 0x08000000 stays empty.
         .encrypted_executable_sha256 = "0228768504ea79edf5c2c5301e0c3fd3c4f1bfc32b6e59e2dd0de5fef8028453",
         .executable_sha256 = "9033e4dd3433116eee2fd309f9c775e332e54da292d7a85075d3b4ccdb9b5750",
         .decryption_tag = 0x08000000u,
