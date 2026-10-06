@@ -52,7 +52,15 @@ costs once the menus are unpaced, and adds a cached-profile LOAD route only if i
    If that part still costs more than 5 s per run, add a cached profile: a memory stick made once per out/ (the first
    run's `ms0/` after the save), and a `main_menu_load.txt` route (LOAD, first slot) the suite and the sweep use when
    the cache exists; otherwise say it is not worth it and leave the routes alone.
-6. `tools/hud_check.sh` keeps its windowed default (it tests the window); `tools/verify_task.sh` unchanged.
+6. Silent runs: every scripted run the tools start is silent by default (`PURE_NO_AUDIO=1` unless the environment
+   sets `PURE_NO_AUDIO` or `PURE_AUDIO_WAV`, which task 013's audio checks use: confirm the WAV capture still
+   works, since it wraps the sceAudio calls in our HLE rather than the device; if `NO_AUDIO` disables those
+   calls, use `audio.mute=1` in the scratch data directory's settings.ini instead). `run_boot.py --sound` and the
+   sweep's `--sound` turn the sound on for watching a cell. Erik muted the shared settings by hand on 2026-10-06
+   (`audio.mute=1` in `~/Library/Application Support/pure-recomp/PureNative/settings.ini`) to silence the running
+   worker's windows: once the tools no longer read that file (item 4), set that line back to `audio.mute=0` so
+   the app plays sound again, and say so in Result.
+7. `tools/hud_check.sh` keeps its windowed default (it tests the window); `tools/verify_task.sh` unchanged.
    docs/verification.md: the new defaults, the wall times before and after, which path to run for which change.
 
 ## Acceptance criteria
@@ -62,7 +70,7 @@ costs once the menus are unpaced, and adds a cached-profile LOAD route only if i
 - [ ] `tools/frame_regress.sh --shell metal --backend metal` and `--shell vulkan --backend vulkan` still pass 5/5
       at their columns; `tools/hud_check.sh` 61 of 61.
 - [ ] No tool reads or writes the player's data directory (`ls -l` its mtimes before and after a suite and a sweep
-      cell: unchanged).
+      cell: unchanged), and no scripted run makes a sound unless `--sound` is given.
 
 ## Verify
 `tools/build.sh profile && tools/frame_regress.sh && python3 tools/campaign_sweep.py single_race vineta_k --no-damage && grep -c PASS out/sweep/summary.txt`
