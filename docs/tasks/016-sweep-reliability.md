@@ -1,6 +1,6 @@
 # 016: Sweep reliability and the Alpha league
 
-Milestone: M5 | Branch: task/016-sweep-reliability | Status: OPEN
+Milestone: M5 | Branch: task/016-sweep-reliability | Status: MERGED (partial)
 
 ## Goal
 Task 012's follower finishes Vineta K once in two tries. Make the Vineta K cell pass three times in a row, then add
@@ -217,4 +217,8 @@ their PASS lines above it (in the table at the top).
    be firmer.
 
 ## Review
-(Fable fills)
+Merged (Fable). Vineta K 3/3 is the acceptance that matters; not rerun by Fable (three seven-minute races) since the
+worker's three runs and their traces are recorded. The other tracks fail by shield depletion, which is the game's
+own rule; a test-only no-damage switch for the sweep (task 017) and the user's recorded laps for faithful driving
+are the two ways forward. Decisions: per-track budgets in MODES, yes; a "SHIP DESTROYED" title check, yes; a per-flip
+live-file read is a vendor change and waits.
