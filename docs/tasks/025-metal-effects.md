@@ -49,9 +49,12 @@ passes 5/5 with `--backend metal`.
 5. Whatever `--first-diff` against Vulkan on `race_warm.gerec` frames 6014-6016 still turns up after items 1 to 4,
    fixed if it is this backend's, recorded if it is a Vulkan difference against the GE's documented rule (do not
    match a Vulkan bug; report both pictures).
-6. `tools/gerec/metal_check.sh`: a `race` check beside the team one: `--replay out/gerec/race_warm.gerec --a vulkan
-   --b metal --frames 6014-6016 --tol 24 --max-frac 0.05` as a pass condition, with the first differing draw printed
-   when it fails.
+6. `tools/gerec/metal_check.sh`: its race check (task 024 records `race_1x.gerec`, the race at internal scale 1, and
+   bisects frame 6016 against Vulkan) becomes a pass condition: `--a vulkan --b metal --frames 6016 --tol 24
+   --max-frac 0.02` on `race_1x.gerec` (both backends at 480x272, so no resize edges), with the first differing draw
+   printed when it fails. Task 024's bisection tools (cutting a recording after draw N and diffing both pictures)
+   were scratch files; add `--cut N` to ge_replay (`src/tools/ge_replay.cpp`: replay the frame's records up to and
+   including its Nth Draw, then present and capture, with `--out`) so the same is done in-tree.
 7. docs/metal-backend.md: the stencil and alpha rule, the bloom chain, the read-backs and write-backs, the numbers
    (race frames against Vulkan and PPSSPP, the wait time a frame), "What is not done yet" reduced to the Metal shell
    (027) and the enhancements. README.md if a switch is added.
@@ -59,7 +62,7 @@ passes 5/5 with `--backend metal`.
 ## Acceptance criteria
 - [ ] `tools/frame_regress.sh --backend metal` passes 5/5: race_hud at or under the suite's limit (0.10 at tol 32)
       with bloom, shadows and the lens flare's occlusion in; the four frontend scenes keep tasks 023/024's fractions.
-- [ ] `race_warm.gerec` frames 6014-6016 replayed into vulkan and metal pass at tol 24, max-frac 0.05.
+- [ ] `race_1x.gerec` frame 6016 replayed into vulkan and metal passes at tol 24, max-frac 0.02 (both at 480x272).
 - [ ] `tools/frame_regress.sh` (Vulkan) still passes 5/5 unchanged.
 - [ ] A race route runs to its end on Metal (`PURE_GE_BACKEND=metal` with `main_menu.txt` + `single_race.txt` to
       frame 6046, as task 023 did) with no Metal validation error and no `[metal] ... not implemented` line.
@@ -68,11 +71,12 @@ passes 5/5 with `--backend metal`.
 `tools/build.sh profile && tools/gerec/metal_check.sh && tools/frame_regress.sh --backend metal`
 
 ## May touch
-- src/gpu/, tools/gerec/metal_check.sh, docs/metal-backend.md, README.md
+- src/gpu/, tools/gerec/metal_check.sh, src/tools/ge_replay.cpp (the `--cut` option only), docs/metal-backend.md
+  (and docs/ge-backend.md section 7 for `--cut`), README.md
 
 ## Must not touch
-- vendor/, patches/, src/profile/, src/hle/, src/host/, src/tools/, tools/frame_regress.sh, tools/gerec/replay_check.sh,
-  config/, ref/, CMakeLists.txt
+- vendor/, patches/, src/profile/, src/hle/, src/host/, src/tools/ apart from `--cut`, tools/frame_regress.sh,
+  tools/gerec/replay_check.sh, config/, ref/, CMakeLists.txt
 
 ## Estimated turns
 80
@@ -80,7 +84,7 @@ passes 5/5 with `--backend metal`.
 ## Escalate when
 A GE behaviour the race needs cannot be expressed with Metal's stencil, blending or framebuffer fetch (say which draw
 and state), the lens-flare depth read needs a hook outside the backend (it should not: `write_back_depth` is called
-by the HLE at the SIGNAL), or ge_replay or the recording lacks something (report it; do not change src/tools/). If
+by the HLE at the SIGNAL), or ge_replay or the recording lacks something beyond `--cut` (report it). If
 race_hud stays above 0.10 after items 1 to 5 for a reason outside this backend (an AI-grid difference between the
 capture and the reference, as docs/verification.md notes for Vulkan's 0.063 to 0.086), report the number and the
 cause and stop with PARTIAL.
