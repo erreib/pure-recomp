@@ -97,8 +97,8 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   measured columns in the suite, `run_boot.py --shell/--backend`; Verify rerun PASS on both paths), 030
   (controls doc + checker), 031 (the Metal window's race HUD: one command queue, `tools/hud_check.sh`), 029 (the app
   bundle; the profile names the plain BOOT.BIN so the installer works). **The app at `out/release-macos/stage/Wipeout
-  Pure.app` is built from the merged tree with the HUD fix and passes its checks.** No worker is running. Next:
-  Erik's playtest; then the enhancements (E1 controls, E2 widescreen, E3 internal resolution, E4 60 fps in the
+  Pure.app` is built from the merged tree with the HUD fix and passes its checks.** Running: 032 (the test-only
+  unlock-all switch, racing lines from the port's own AI, every track in the sweep). Next: Erik's playtest; then the enhancements (E1 controls, E2 widescreen, E3 internal resolution, E4 60 fps in the
   30-fps modes, E5 filtering) and the M5 breadth items in Follow-ups (the v2.00 unlock routine first).
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
