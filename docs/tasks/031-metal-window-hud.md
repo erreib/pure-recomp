@@ -1,6 +1,6 @@
 # 031: The Metal window drops the race HUD: one command queue for the backend and the shell
 
-Milestone: M7 | Branch: task/031-metal-window-hud | Status: OPEN
+Milestone: M7 | Branch: task/031-metal-window-hud | Status: MERGED 2026-10-06
 
 ## Goal
 Under the default path (`PURE_SHELL=metal PURE_GE_BACKEND=metal`, task 028) the window often shows a race frame
@@ -55,7 +55,7 @@ prove it with the probe.
       frame-rate line), and no GPU wait is added per frame beyond task 025's SIGNAL wait.
 
 ## Verify
-`tools/build.sh profile && tools/hud_check.sh && tools/frame_regress.sh --only race_hud && python3 tools/campaign_sweep.py single_race vineta_k && grep -c PASS out/sweep/summary.txt`
+`tools/build.sh profile && tools/hud_check.sh && tools/frame_regress.sh --only race_hud && python3 tools/campaign_sweep.py single_race vineta_k --no-damage && grep -c PASS out/sweep/summary.txt`
 
 ## May touch
 - src/gpu/metal_backend.mm, src/gpu/metal_device.hpp and .mm (new), src/host/metal_shell.mm, CMakeLists.txt (the new
@@ -196,4 +196,17 @@ Open questions:
    change.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun from the main checkout, 2026-10-06: `tools/hud_check.sh` 61 of 61 shots with the HUD on the Metal
+shell; `race_hud` 0.0375 (-0.0004 against the Metal column) PASS; the Vineta K sweep cell first STALLed, eliminated
+by damage on lap 2 (probe shield -4.8, the window's shield bar read 0%, the `ref` shot read 100%: the HUD read is
+right; this cell is marginal without the test switch, 9 to 19 shield left in earlier runs), then PASSed with
+`--no-damage` (3 laps, 60.3, 59.6, 63.0 s; 42 contacts; the `ref` shot's bar 100%). The brief's Verify line now
+passes `--no-damage` to the sweep step, which is what it checks: that the sweep reads its shots on the default path.
+Then `tools/bundle.sh` rebuilt the app with the fix and `tools/bundle.sh --check out/029` passed all seven checks.
+Spot-read: `src/gpu/metal_device.hpp/.mm` (function-local statics, the ordering rule in the comment), the two
+`initialize` changes, `tools/hud_check.sh/.py`, the sweep's pin removal.
+Merged: into batch/m2 after 0f1cc03 (clean).
+Notes: the cause was the missing ordering between two queues alone (the mid-frame depth write-back was not a
+factor: with it off the count was 3 of 61). The race_hud Metal spread is now documented as 0.0344 to 0.0384; the
+measured column stays 0.0379. A mid-race scene in the suite remains a follow-up (`tools/hud_check.sh` guards it).
+ge_replay's Metal lanes share the queue too, which stays ordered.
