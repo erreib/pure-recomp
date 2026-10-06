@@ -167,8 +167,10 @@ next draw.
 
 On the race the shadow volumes (zfail INCR and DECR, colour masked) leave the alpha stale and the full-screen
 darkening quad (stencil test GREATER ref 4, REPLACE) darkens only where the volumes left the stencil below 4. The
-stencil is copied into the alpha once a race frame, at the end of the back buffer's pass: {{COPIES}}, as patch 0006
-measured for Vulkan (338 for frames 5707-6044). None in the frontend.
+stencil is copied into the alpha once a race frame, at the end of the back buffer's pass: 339 copies for the
+route's 339 race frames (5707-6045), as patch 0006 measured for Vulkan (338 for frames 5707-6044). None in the
+frontend. With `PURE_TRACE_STENCIL_COPY=1` the replay of `race_1x.gerec` shows one copy a frame, at the end of a
+pass, never before a destination-alpha read, alternating between 0x04000000 and 0x04088000.
 
 ## The bloom chain (task 025)
 
@@ -414,6 +416,73 @@ end 5001 and scale 1 towards grey). No point or spot light, no specular, no powe
 are ported from `ge.vert` as they are and checked by nothing but the port.
 
 In the replays Metal takes 4 to 6 ms a race frame and Vulkan 5 to 10 (each including its capture).
+
+## The race check (task 025)
+
+`tools/gerec/metal_check.sh` step 3 replays `out/gerec/race_1x.gerec` (frames 6008-6016 at internal scale 1, both
+backends at 480x272) into vulkan and metal and requires frame 6016 within `--tol 24 --max-frac 0.02`; when it
+fails it bisects with `--first-diff`, prints the first differing draw's state and keeps both pictures after that
+draw (`--cut`, in `out/gerec/metal_race_cut/a` and `b`). Step 4 bisects the frame for the record at tol 24 with no
+fraction allowed, at 1x and at 2x (`race_warm.gerec`). The recording used here was made on 2026-10-06 by the main
+checkout's metal_check run (frame 6016: 864 draws; task 024's had 906: the AI field differs from run to run).
+
+### Numbers (2026-10-06, M4 Pro)
+
+| Comparison | Result |
+|---|---|
+| `race_1x.gerec` frames 6008-6016, vulkan against metal | each within 2 pixels over tol 24 (0 to 0.000015): PASS |
+| frame 6016, pixels over tol 0, 1, 4, 8, 16, 24 | 553, 77, 24, 18, 3, 2 (of 130560) |
+| frame 6016 after draw 393 (`--cut 393`), task 024's first stencil draw | 0 pixels over tol 24 |
+| frame 6016 with task 024's backend | 0.3246 at tol 24 (42380 pixels): no shadows, the darkening over the whole screen, no bloom |
+| `--first-diff --tol 24` (no fraction) | draw 508 of 864, one pixel: an alpha-tested crowd strip (below) |
+| `race_warm.gerec` (2x) frames 6014, 6015, 6016 | 0.0777, 0.0788, 0.0804 at tol 24 (task 024: 0.3768 for 6016): edges and the crowds' texture detail moved by the 2x-to-1x reduction, accumulating from the first alpha-tested draws (`--first-diff --max-frac 0.02` passes 2% at draw 261 of 906, an opaque strip) |
+| race frame 6016 against PPSSPP (`tools/frame_regress.sh --backend metal --only race_hud`) | {{RACE_HUD_LINE}} |
+
+Metal draws the race with the effects in: shadows under the ships, the bloom on the light strips and the screens,
+the lens flare. The pictures of frame 6016 after the whole frame differ in
+three places, all small, which item 5 of the brief asked to classify:
+
+| Pixels | Levels | First draw (ge_replay numbering) | What it is | Whose |
+|---|---|---|---|---|
+| column 0, rows 244-263 (20) | 5-11 | 837 (gerec_dump #836): the HUD's LAP panel, a transformed sprite from x -2 to 12, blended add(SA, 1-SA) | the HUD is drawn with a GE viewport whose offsets are 2048 - 1807 and 2048 - 1911, one pixel right and down of the world's (1808, 1912), so on the screen it covers x -1 to 13. The Vulkan backend makes the GE viewport its `VkViewport`, which then starts at x 1, and clips everything left of it: column 0 keeps the scene, 9 to 11 levels brighter. The GE clips x and y only at the scissor (0,0)-(479,271) (it clips on z = -w and drops triangles outside its 4096-pixel space: the coverage rules of `tools/ppsspp/ppdmp.py cover`, docs/ge-effects.md task 010) and draws column 0, as Metal does. PPSSPP's dump of frame 7155 draws the same sprite (its #843 and #844, x -2 to 12) | a Vulkan difference against the GE's rule; not matched. Both pictures after the draw: `--frames 6016 --cut 837 --out DIR` (in the task's run, rows 244-263 of column 0 are 149-162 in Vulkan's, the scene unchanged, and 142-158 in Metal's, the panel over it) |
+| (342,131), (464,115), (439,125) | 20-36 | 508, and later crowd strips | crowd strips alpha-tested GREATER 0x7F on bilinear-filtered CLUT4 texels: a texel alpha at the threshold falls on either side in the two backends (their texture coordinates and filtering are computed by different instruction sequences), so one pixel passes in one and not the other | neither: rounding at a test's threshold |
+| 24 pixels over tol 4 in all, the two rows above included | 5 or less elsewhere | from draw 299 on | interpolation and blending rounding | neither |
+
+Nothing else differs by more than 4 levels, so nothing in the race is drawn by another rule in Metal than in Vulkan
+except the viewport clipping above. The 2x recording adds no other finding: its differences are the reduction's.
+
+### The lens flare
+
+The depth write-back is asked for at every race frame's SIGNAL 0x200 (339 in the route, frames 5707-6045) and
+writes the back buffer's z into 0x04110000. The race route holds Cross from frame 6100, so the player's ship runs
+along the first straight's left wall, and at frame 6690 the sun is behind the left pillar (docs/ge-effects.md, the
+depth write-back). Two windowed runs of the route to frame 6700 with `PURE_TRACE_DEPTH_READBACK=1`, one per backend,
+put the ship in the same place and give:
+
+| Frame | Metal: z written, mean luma around the sun | Vulkan: the same | Task 019 (Vulkan) |
+|---|---|---|---|
+| 6016, open sky: the flare drawn | 23-13433, 225.8 | 23-13443, 225.9 | 225.7 |
+| 6690, sun behind the pillar: no flare | 22-13415, 111.2 | 22-13431, 111.6 | 105.2 with the write-back, 176.5 without |
+
+(Mean luma 0.299 R + 0.587 G + 0.114 B over PSP (100,40) 90x100, the region task 019 measured.) So the game's
+4x4 depth test sees the pillar in Metal's depth as in Vulkan's, and drops the flare.
+
+### Cost
+
+Over the race route to frame 6046 (339 race frames), counted by the backend's exit line:
+
+| Run | GPU waits (ms) | Frame write-backs: stored/asked, waited | Depth write-backs: stored/asked, waited | Stencil copies |
+|---|---|---|---|---|
+| Vulkan shell (`frame_regress.sh --backend metal --only race_hud`) | 6383 (3134) | 6043/6046, 0 ms (the hand-over's read-back reused) | 339/339, 236 ms (0.70 ms each) | 339 |
+| Vulkan shell, `MTL_DEBUG_LAYER=1` (the acceptance run) | 6383 (3325) | 6043/6046, 0 ms | 339/339, 283 ms (0.83 ms) | 339 |
+| Metal shell (`PURE_SHELL=metal`, `PURE_PERF=log`) | 353 (254) | 6043/6046, 46 ms in 14 waits, the rest already drawn | 339/339, 209 ms (0.62 ms) | 339 |
+
+So a race frame waits for the GPU once, at its SIGNAL, for about 0.6 to 0.8 ms (the flare's depth; the Vulkan
+backend's write-back takes 0.8 to 1.4 ms on the same frames), plus, under the Vulkan shell, the hand-over's read-back
+at the flip (0.48 ms on average). Under the Metal shell the race runs at 59.9 to 60.0 fps, frame 16.7 ms (guest 2.1 to
+2.6, render 3.2 to 3.4, pacing wait 10.7 to 11.3 ms). None of the runs printed a `[metal] ... not implemented` line,
+and the one with Metal's API validation (`Metal API Validation Enabled`) reached frame 6046 with no validation
+error. The race's 570 to 589 block transfers come from main memory, so none is written back.
 
 ## Verify numbers
 
