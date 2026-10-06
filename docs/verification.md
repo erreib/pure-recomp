@@ -57,20 +57,22 @@ rejected with its IHDR fields; the variance check fails on a flat region and pas
 # Frame regression suite (task 020, 2026-10-06)
 
 ```
-tools/frame_regress.sh [--backend metal|vulkan] [--shell metal|vulkan|headless] [--out DIR] [--only SCENE[,SCENE...]]
-                       [--env KEY=VAL ...]
+tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]]
+                       [--env KEY=VAL ...] [--allow-parallel]
 ```
 
-One command that checks the port still renders the known screens like PPSSPP. By default it runs the Metal path
-(`--shell metal --backend metal`, the macOS default since D-008, task 028); `--shell vulkan --backend vulkan` runs the
-Vulkan path. Every renderer change runs it on both paths before merging (D-008), and the race HUD check beside it
-("The race HUD check" below), which covers the race after the suite's last scene. It boots the game three times, once
-per route, captures five scenes, and compares each capture with its reference in `ref/` using `tools/imgdiff.py`. It
-prints a table with PASS or FAIL per scene and writes the same text to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one fails, and
-2 on a usage error or a missing build, game or reference. The full suite takes about 7 minutes, and `--only race_hud`
-about 3.5.
+One command that checks the port still renders the known screens like PPSSPP. By default (task 034) it runs headless
+on the Metal backend (`--shell headless --backend metal`): no window, unpaced, the scenes the backend's own 480x272
+pictures, about 10 s in all. `--shell metal --backend metal` runs the same backend in the Metal shell's window (the
+macOS default for players since D-008, task 028) and `--shell vulkan --backend vulkan` the Vulkan path; in a window
+each run is paced to real time and the suite takes about 7 minutes, and `--only race_hud` about 3.5. Which path to
+run for which change: "Which path for which change" below. The race HUD check ("The race HUD check" below) covers
+the race after the suite's last scene. The suite boots the game three times, once per route, captures five scenes,
+and compares each capture with its reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL
+per scene and writes the same text to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one
+fails, and 2 on a usage error, a missing build, game or reference, or another PureNative running (below).
 
-| Scene | Route (`config/pad_scripts/`) | Frame | Reference | Tol | Limit | Vulkan measured | Metal measured |
+| Scene | Route (`config/pad_scripts/`) | Frame | Reference | Tol | Limit | Vulkan measured | Metal measured (window and headless) |
 |---|---|---|---|---|---|---|---|
 | `lang` | `frontend.txt` | 690 | `ref/frontend.png` | 24 | 0.07 | 0.054 (task 006; 0.0544) | 0.0002 (task 023) |
 | `title` | `frontend.txt` | 1750 | `ref/title.png` | 24 | 0.05 | 0.030 (tasks 006, 009-011; 0.0302) | 0.0002 (task 023) |
@@ -80,8 +82,11 @@ about 3.5.
 
 The table lives at the top of the script (`SCENES`), with a measured column per backend and the source of each value
 as a comment. A scene's fraction is the share of pixels that differ by more than Tol in any channel, with both frames
-at 480x272 (the 960x544 capture is reduced by nearest neighbour). The scene passes at or below Limit, which is shared
-by both backends.
+at 480x272 (a window's 960x544 capture is reduced by nearest neighbour; a headless capture is 480x272 already). The
+scene passes at or below Limit, which is shared by both backends. The Metal column serves the Metal window and the
+headless shell alike (task 034): the headless captures of all five scenes equal the Metal window's reduced to
+480x272, pixel for pixel (tol 0), and three headless runs scored race_hud 0.0374, 0.0374 and 0.0371 and the other
+four scenes at the column exactly, all within 0.001 of it.
 
 - On the Vulkan path lang and profile score 0.054 because of one-pixel edges of lines and glyphs, which the 2x-to-1x
   reduction moves. The Metal backend draws at 480x272 and its shell scales by exactly 2x with nearest sampling, so no
@@ -111,9 +116,14 @@ How the runs are made:
   - the runner's stdout: `<out>/<route>.stdout`
   - diff images for failing scenes only: `<out>/<scene>.diff.png`, the capture dimmed with differing pixels in red
 - `--backend` (default `metal`) sets `PURE_GE_BACKEND` for the runs, records it in the summary and picks the
-  measured column. `--shell` (default `metal`) sets `PURE_SHELL`: the captures are the Metal shell's window, the
-  Vulkan shell's, or, with `headless`, the backend's own 480x272 pictures (unpaced: the frontend scenes take
-  seconds, and on the Metal backend they score as in its window, docs/metal-backend.md "The Metal shell").
+  measured column. `--shell` (default `headless` since task 034) sets `PURE_SHELL`: the captures are the backend's
+  own 480x272 pictures (unpaced: each route takes seconds), the Metal shell's window or the Vulkan shell's.
+- The runs are silent (`PURE_NO_AUDIO=1`, `tools/run_boot.py`) and use the data directory `out/data/frame_regress`
+  (settings.ini, the Vulkan pipeline caches), kept between runs, unless the environment sets `PURE_NO_AUDIO` or
+  `PURE_DATA_DIR`; the player's `~/Library/Application Support/pure-recomp/PureNative/` is never read or written, so
+  a setting changed while playing cannot move a scene. The summary names the data directory.
+- One game at a time: the suite refuses to start while another PureNative runs (`pgrep -f build/.*/bin/PureNative`,
+  kept when the process is PureNative itself), names it and exits 2, unless `--allow-parallel` is given.
 - `--env KEY=VAL` passes extra environment to every run, through `tools/run_boot.py --env`. The summary records it.
 - The summary's first lines give the date, the commit (`+changes` when tracked files differ from it), the shell, the
   backend and so the measured column, the extra environment, and each run's exit code, whether it reached its last
@@ -170,16 +180,79 @@ check covers the race itself.
   yellow pixels.
 - It prints the shots as `FLIP:H` (both labels), `h` (one) or `-` (none), then `hud_check: N of M shots have the
   HUD`, and exits 0 when all 61 shots were taken and have it. `<out>/summary.txt` holds the yellow counts per label.
-- `--shell metal` (the default) checks the Metal shell's window shots, about 4 minutes paced to real time; `--shell
-  vulkan` the Vulkan shell's, with the Vulkan backend; `--shell headless` the Metal backend's own 480x272 captures
-  (`capture_frame`), unpaced, about 15 s. `--backend` names another backend. Outputs go to `--out`, by default
-  `out/hud/<shell>` (the route, the run's log, the shots and the summary), removed first.
+- `--shell metal` (the default, kept by task 034: the check tests the window) checks the Metal shell's window
+  shots, about 4 minutes paced to real time; `--shell vulkan` the Vulkan shell's, with the Vulkan backend; `--shell
+  headless` the Metal backend's own 480x272 captures (`capture_frame`), unpaced, about 15 s. The run is silent and
+  uses the data directory `out/data/hud_check` (task 034). `--backend` names another backend. Outputs go to `--out`,
+  by default `out/hud/<shell>` (the route, the run's log, the shots and the summary), removed first.
 
 | Path | Before task 031 | After |
 |---|---|---|
 | Metal shell and backend (the default) | 11 of 61 (task 028's probe: 12) | 61 of 61 |
 | Vulkan shell and backend | 61 of 61 (task 028's probe) | 61 of 61 |
 | headless, Metal backend | 61 of 61 (task 028's probe) | 61 of 61 |
+
+# Fast, silent test runs (task 034, 2026-10-06)
+
+Every scripted run used to be held to real time from its first frame, so the 4,450 flips of movies and menus before
+MAIN MENU cost about 150 s a run, and a windowed run touched the player's data directory and played its sound. Since
+task 034:
+
+| Tool | Shell by default | Pacing | Sound | Data directory |
+|---|---|---|---|---|
+| `tools/frame_regress.sh` | headless, Metal backend | unpaced (the headless shell) | off | `out/data/frame_regress` |
+| `tools/campaign_sweep.py` | headless, Metal backend | `PURE_PACED_FROM=<the mode's Cross-hold flip>`: menus unpaced, the race paced | off; `--sound` turns it on and paces the whole run | `out/data/campaign_sweep` |
+| `tools/hud_check.sh` | the Metal window (it tests the window) | paced (the window) | off | `out/data/hud_check` |
+| `tools/save_roundtrip.sh` | the Metal window | paced | off | `out/data/save_roundtrip` |
+| `tools/run_boot.py` | headless unless `--window`, `--shell`, `--script` or `--shots` | the shell's | off; `--sound` | `out/data/run_boot` (`--data-dir`) |
+
+- `PURE_PACED_FROM=N` (`src/profile/pure_profile.cpp`): the kernel runs unpaced from start-up until flip N and is
+  held to real time from flip N on, in any shell (patch 0011's `Kernel::set_paced`, set every flip). Headless, the
+  menus take seconds and the race keeps real time. In a window the shell still presents at the display's rate (the
+  Metal shell waits for a drawable at vsync), so there the menus go at most at the display's rate instead of 30
+  flips a second. `0` paces from the start in any shell; unset leaves it to the shell.
+- Sound: `PURE_NO_AUDIO=1` unless `--sound`, or the environment sets `PURE_NO_AUDIO`, or sets `PURE_AUDIO_WAV` for
+  a run with a window. It turns off the audio device only: the game's sceAudio calls still run on the virtual clock,
+  so the `PURE_AUDIO_WAV` capture works without the device (checked: `main_menu.txt` headless with
+  `PURE_NO_AUDIO=1`, the music channel from t=145.48 s, as in check (a) above, `wavstats.py --from 146` active
+  12/12, no clipping).
+- Data directory: `PURE_DATA_DIR=out/data/<tool>` unless the environment names one, made on first use with a
+  settings.ini holding `ui.menu_hint_seen=1` (the menu hint would sit over a window's first 12 s) and kept between
+  runs, so pipeline caches persist. The game comes from `PURE_GAME_DIR` as before (`game/`, or the suite's and the
+  sweep's own memory sticks). A suite and a sweep cell left the player's directory's mtimes unchanged.
+- One game at a time: the suite and the sweep refuse to start while another PureNative runs (task 032 saw a headless
+  recording beside a windowed cell delay the cell's boot and break its menu route), naming the process, unless
+  `--allow-parallel` is given. No tool passes it on its own; the headless suite's own results do not depend on timing
+  (unpaced, flip-indexed), so it is the run that can take `--allow-parallel` safely, while a sweep cell (its race
+  paced and steered closed loop) and the window paths should not. `run_boot.py`, `hud_check.sh` and
+  `save_roundtrip.sh` do not check.
+
+Wall times on this Mac (Apple M4 Pro), before (the windowed Metal default, on b5cb152 and 8364dc0) and after:
+
+| Run | Before | After |
+|---|---|---|
+| `tools/frame_regress.sh` (default) | 7m 9s (Metal window: frontend 72 s, main_menu 159 s, race 197 s) | 9 to 10 s (three runs; headless: 2, 2 and 4 s a route) |
+| `tools/frame_regress.sh --shell metal --backend metal` | 7m 9s | 7m 9s (5/5; a window is paced) |
+| `tools/frame_regress.sh --shell vulkan --backend vulkan` | 7m 10s to 7m 16s (tasks 028, 031) | 7m 10s (5/5) |
+| `tools/campaign_sweep.py single_race vineta_k --no-damage` | 402 s (Metal window) | 197 s (headless, the race paced: 188.6 s of race clock) |
+| `tools/campaign_sweep.py time_trial vineta_k --no-damage` (30 flips a second) | 404 s (a windowed run of 2026-10-06 in the main checkout's summary) | 228 s, PASS, the `ref` shot's bar 100% |
+| `tools/campaign_sweep.py zone zone_1` | 247 s (likewise) | 75 s, PASS, SHIP DESTROYED read, TOTAL ZONES CLEAR 6 as before |
+| `tools/hud_check.sh` (Metal window) / `--shell headless` | about 4 min / about 15 s (task 031) | 229 s / 13 s, 61 of 61 each |
+| `main_menu.txt` from boot to MAIN MENU (flip 4380) | about 146 s (paced, 30 flips a second) | 1.8 to 2.05 s (three runs) headless unpaced |
+| the NEW-profile leg: the profile screen (flip 2100) to MAIN MENU | about 76 s | 0.65 s (three runs) |
+
+The NEW-profile leg (name, tag, save question) costs well under the brief's 5 s once the menus are unpaced, so the
+routes keep it: a cached profile and a LOAD route would save under a second a run.
+
+## Which path for which change
+
+| Change | Run before merging |
+|---|---|
+| tools, routes, the profile's probes, HLE outside the GE | `tools/frame_regress.sh` (headless, seconds) |
+| the Metal backend (`src/gpu/`), shaders, the GE side of the HLE, a vendor patch under the GE | `tools/frame_regress.sh` while working; before merging `--shell metal --backend metal` and `--shell vulkan --backend vulkan` (D-008: both paths) and `tools/hud_check.sh` |
+| the Metal shell (`src/host/metal_shell.mm`), presenting, the window, the interface | `--shell metal --backend metal` and `tools/hud_check.sh`: the headless default never draws through a shell |
+| the Vulkan backend or shell (vendor renderer patches) | `--shell vulkan --backend vulkan` and `tools/hud_check.sh --shell vulkan` |
+| pacing, the kernel's clock, the input script, the follower | the headless suite, one window path (`--shell metal`), and a sweep cell (`campaign_sweep.py single_race vineta_k --no-damage`) |
 
 # Audio (task 013, 2026-10-05)
 
