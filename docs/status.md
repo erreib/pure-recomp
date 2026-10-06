@@ -80,6 +80,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | The app's Info.plist says "MIT License" (the framework's template), and the first-run setup screen says the image is what "the PlayStation 3 release carries" (`ui/setup_screens.cpp`, written for another game) | task 029 | two small vendor patches, or an Info.plist field in release.env upstream; cosmetic |
 | The bundle is marked for macOS 13.0 after the packer's import check, but the Metal shell and backend have only run on macOS 15 | task 029 | try on an older Mac if one is ever at hand |
 | Distributing the app beyond this Mac needs a public URL for the source (GPL v2 section 3); the notices point at the repository and the commit in the app's version | task 029 | only if Erik publishes |
+| Frame-rate dips in play (Erik, first race, 2026-10-06; the scripted race holds 59.7 to 60.1 fps) | playtest | a frame-time trace under the Metal shell with the cause of each long frame: first-use pipeline compiles (new blend/texture states: weapons, effects), CPU texture decodes on first bind, the SIGNAL depth read's GPU wait, stencil copies; then pre-warm pipelines and cache decodes. Brief after 032 |
 | Erik's recorded lap (`tools/pad_record.py`) to replace the AI-line follower where it struggles | session 2 | the command and keys are in the Resume notes |
 
 ## Resume (session 4, 2026-10-06)
