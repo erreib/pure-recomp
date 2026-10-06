@@ -12,4 +12,12 @@ add_subdirectory(vendor/portablekit portablekit)
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
-    SOURCES src/profile/pure_profile.cpp src/hle/audio_capture.cpp src/host/pure_main.cpp src/tools/ge_replay.cpp)
+    SOURCES src/profile/pure_profile.cpp src/hle/audio_capture.cpp
+            src/host/pure_main.cpp src/tools/ge_replay.cpp
+            src/gpu/metal_backend.mm src/gpu/metal_shell.cpp)
+
+# The Metal GE backend (PURE_GE_BACKEND=metal, docs/metal-backend.md): Objective-C++ with ARC, compiled by the
+# same clang as everything else. Its shaders are MSL source compiled at run time, so no Xcode is needed.
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal_backend.mm"
+    PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-x;objective-c++;-fobjc-arc")
+target_link_libraries(PureNative PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore")

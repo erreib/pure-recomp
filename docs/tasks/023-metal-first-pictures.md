@@ -104,7 +104,82 @@ widening the scope. Also stop if the interface in `ge_backend.hpp` lacks somethi
 `.mm` cannot be built through `tools/build.sh profile`.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+All eight deliverables are in. `PURE_GE_BACKEND=metal` passes the three frontend scenes at 0.0002 (lang), 0.0002
+(title) and 0.0000 (profile), against limits of 0.07, 0.05 and 0.07. The pixels over tolerance are the blinking
+cursors (22 and 31). The Vulkan suite passes 5/5 with the same fractions as before, and its five captures are
+pixel-identical to the main checkout's run of 2026-10-06 03:35. The 300-frame headless boot prints `[render] GE
+backend metal (...), without a window`. Its only `[metal] ... not implemented` line is `write_back_frame`, one of
+item 5's deferred calls (below). The design, numbers and deferred items are in `docs/metal-backend.md`.
+
+One thing in the brief did not hold, and I worked around it inside "May touch". The brief says suite captures
+come from `MetalGeBackend::capture_frame`. They do not. The suite's `shot` steps call
+`VulkanRenderer::capture_window` (`ui/input_script.cpp`), which reads the Vulkan window, and the HLE calls
+`capture_frame` only for `PURE_SCREENSHOT_EVERY`, which the suite sets to 0. With nothing in the shell's targets,
+a `shot` writes no file: `--only lang --env PURE_METAL_SHELL=0` ends `FAIL (no capture)`. So when a window
+exists, the backend reads each presented picture back and hands it to the shell. It scales the picture by nearest
+neighbour to the shell's target size and calls the public `VulkanRenderer::upload_frame`, in
+`src/gpu/metal_shell.cpp`. The window then shows Metal's picture instead of black, and a `shot` reduced to 480x272
+gives Metal's pixels back exactly. The backend's own `capture_frame` of `lang` is identical to the suite's shot.
+The cost is one GPU wait a frame, 0.42 ms on average (892 ms over 2128 frames). `PURE_METAL_SHELL=0` turns the
+hand-over off. Task 026's presenter replaces it.
+
+Measured beyond the Verify line (not acceptance items): `main_menu` with Metal scores 0.0106 (limit 0.05). `race_hud`
+scores 0.2977 (limit 0.10), with no lighting, shadows or bloom yet, and the race route runs to frame 6046 without
+errors. Metal's front-face winding was checked with a standalone test triangle: Metal counts winding in window
+coordinates (y down), as Vulkan does in framebuffer space, so the GE's clockwise maps to `MTLWindingClockwise`.
+
+Changed:
+- `src/gpu/metal_backend.mm` (new): `MetalGeBackend`, registered as `metal`
+- `src/gpu/metal_shaders.h` (new): the MSL, compiled at run time
+- `src/gpu/metal_shell.hpp`, `src/gpu/metal_shell.cpp` (new): the hand-over to the window shell
+- `CMakeLists.txt`: the sources, Objective-C++ with ARC for the `.mm`, and the Metal, Foundation and QuartzCore
+  frameworks
+- `docs/metal-backend.md` (new)
+- `README.md`: `metal` in the `PURE_GE_BACKEND` row, `PURE_METAL_LOG`, `PURE_METAL_SHELL`, and a Layout row for
+  `src/gpu/`
+
+Verify output (last 20 lines):
+```
+verify 023: tools/build.sh profile && tools/frame_regress.sh --backend metal --only lang,title,profile
+[0/2] Re-checking globbed directories...
+[1/4] Checking the build version
+frame regression 2026-10-06 04:20, commit cb9c2c0+changes, backend metal (PURE_GE_BACKEND: recorded, not enforced)
+extra environment: none
+run frontend: 2130 flips ...
+run frontend: run_boot exit 0, frame 2130 reached: yes, 72 s, log /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-a4bffb82572406c2f/out/regress/frontend.log
+
+scene       frame  fraction  limit  tol  measured   delta  result
+lang          690    0.0002   0.07   24     0.054  -0.054  PASS
+title        1750    0.0002   0.05   24     0.030  -0.030  PASS
+profile      2100    0.0000   0.07   24     0.054  -0.054  PASS
+
+moved more than 0.03 from the measured value: lang profile (something changed; docs/verification.md)
+frame regression: PASS, 3/3 scenes pass (1m 12s)
+verify 023: PASS
+```
+`tools/frame_regress.sh` (Vulkan, final build): `frame regression: PASS, 5/5 scenes pass (7m 7s)`, at lang 0.0544,
+title 0.0302, profile 0.0543, main_menu 0.0331 and race_hud 0.0672, each with delta +0.000.
+
+Open questions:
+1. The hand-over to the window costs one synchronous read-back a frame. Should it stay until task 026? The
+   alternative is a vendor change in which `shot` steps call the backend's `capture_frame` when the backend is not
+   `vulkan`. That needs a patch, so I did not make it here.
+2. Acceptance 1 says "no `[metal] ... not implemented` line for anything in items 4 to 6", but item 5 asks the four
+   deferred calls to log exactly that. I read the criterion as covering what items 4 to 6 ask to implement. The
+   boot prints one such line, for `write_back_frame`, which the HLE calls every flip, and none for anything
+   implemented.
+3. The suite's `measured` column is the Vulkan backend's, so a Metal run reports "moved more than 0.03" for lang and
+   profile because it improved. Per-backend measured values would need a change in `tools/`, which was outside this
+   task.
+4. The backend differs from Vulkan on purpose in a few places (`docs/metal-backend.md`, "Where it differs"). It
+   draws at native 480x272 instead of 2x. It honours the GE's filter bits instead of always sampling bilinear. It
+   depth-tests through-mode draws when the GE enables the test, and draws points and lines. In the frontend scenes
+   only the resolution and the filter bits come into play, so task 024 should confirm the rest against PPSSPP on
+   the race.
+5. Transformed sprites are expanded in object space, as the Vulkan backend does. That is right for the frontend's
+   orthographic projection, but task 024 should check it on 3D sprites.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
