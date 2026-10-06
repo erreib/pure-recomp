@@ -31,8 +31,10 @@ ms) and over 1.5 frames at --fps (default 60), the on-screen intervals when the 
 longest --top (default 10) frames with their columns and cause, and the long frames counted by cause. --from and
 --to keep the rows of those flips only (both included). --plot OUT.png draws frame_ms per flip (tools/png.py): the
 long frames coloured by cause, lines at the frame time of --fps and at --long.
---check-no-pipeline-stalls-after N exits 1 when a frame after flip N takes over 25 ms with a render pipeline or a
-depth-stencil state made in it (the acceptance rule of task 033); without it the exit is 0 unless the trace cannot
+--check-no-pipeline-stalls-after N exits 1 when a frame after flip N takes over 25 ms with a render pipeline made
+in it (or waited for while the pre-warm made it), or with 5 ms or more spent making pipeline state (the acceptance
+rule of task 033). A depth-stencil state alone does not count: Metal makes one in microseconds, and one made in a
+frame that was long for another reason is not its cause. Without the option the exit is 0 unless the trace cannot
 be read (2).
 """
 import argparse, csv, os, sys
@@ -41,6 +43,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 STALL_MS = 25.0      # --check-no-pipeline-stalls-after: a frame this long with a pipeline made in it fails
+STALL_STATE_MS = 5.0  # ... or with this much time spent making pipeline state
 
 # Each cause: its name, the colour it is plotted in, and how it is read from a row (milliseconds).
 CAUSES = [
@@ -256,7 +259,7 @@ def main(argv=None):
             shown_flips = ", ".join(str(f) for f in flips[:12]) + (", ..." if len(flips) > 12 else "")
             print(f"  {cause:<18} {count:5d}  excess mean {total / count:6.2f} ms  flips {shown_flips}")
         with_pipelines = [r for r in long_rows if r["pipelines"] + r["depth_states"] > 0]
-        print(f"  with a pipeline or depth-stencil state made: {len(with_pipelines)}"
+        print(f"  with a render pipeline or depth-stencil state made: {len(with_pipelines)}"
               + (f" (flips {', '.join(str(r['flip']) for r in with_pipelines[:12])}"
                  f"{', ...' if len(with_pipelines) > 12 else ''})" if with_pipelines else ""))
 
@@ -265,11 +268,12 @@ def main(argv=None):
 
     if opts.check is not None:
         stalls = [r for r in every if r["flip"] > opts.check and r["frame_ms"] > STALL_MS
-                  and r["pipelines"] + r["depth_states"] > 0]
+                  and (r["pipelines"] > 0 or r["pipeline_ms"] >= STALL_STATE_MS)]
         if stalls:
             print(f"\ncheck: FAIL: {len(stalls)} frames after flip {opts.check} over {STALL_MS:g} ms with a pipeline "
                   f"made in them: " + ", ".join(f"{r['flip']} ({r['frame_ms']:.1f} ms, {int(r['pipelines'])} "
-                                                f"pipelines, {int(r['depth_states'])} depth states)" for r in stalls[:20]))
+                                                f"pipelines, {int(r['depth_states'])} depth states, "
+                                                f"{r['pipeline_ms']:.1f} ms)" for r in stalls[:20]))
             return 1
         print(f"\ncheck: PASS: no frame after flip {opts.check} over {STALL_MS:g} ms with a pipeline made in it "
               f"({sum(1 for r in every if r['flip'] > opts.check)} frames checked)")
