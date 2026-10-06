@@ -1,6 +1,6 @@
 # 022: ge_replay: feed a .gerec recording to any GE backend and compare the pictures
 
-Milestone: M6 | Branch: task/022-ge-replay | Status: OPEN
+Milestone: M6 | Branch: task/022-ge-replay | Status: MERGED 2026-10-06 (eabdacc)
 
 ## Goal
 The record backend (task 021, patch 0009) writes what the shell asked a GE backend to do, with the guest memory each
@@ -209,4 +209,17 @@ Open questions:
    recordings last; only the order differs.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout, 2026-10-06 (`tools/verify_task.sh 022`, 283 s with `race.gerec` already
+present): cold `race.gerec` into vulkan 0.0365 / 0.0255 / 0.0020 at tol 0 (reported, the bloom rows' history);
+`race_warm.gerec` frames 6014-6016 into vulkan 0.000000 x3 PASS; null writes three black frames; `--a vulkan --b null
+--first-diff` bisects frame 6014 to draw 1 in ten steps; frontend and title recordings replay exactly at tol 0.
+Spot-read: `src/host/pure_main.cpp` (dispatch only), the CMake change (`HOST_MAIN_NAME`, two sources), `Lane::open`
+(the Vulkan shell made as `ensure_backend` does, the recording's internal scale applied), `apply` (Memory and Words
+written before the call; a Transfer's rows copied after the backend's read-back, deferred to the next non-Memory
+record, as the HLE orders it), `Lane::flip` (present_image, the shell's present, capture, begin_frame).
+Merged: eabdacc into batch/m2 (docs/ge-backend.md: section 7 placed before section 8 by hand).
+Notes: PARTIAL accepted as done. The miss on criterion 2 is the recording's, not the replay's: a .gerec starts with
+empty targets and the bloom targets carry rows from earlier frames, so a backend against its own recording is exact
+only after warm-up frames (`race_warm.gerec`, six of them; three would do). The tool's purpose, backend against
+backend, starts both lanes equally empty and is unaffected. Seeding targets from a Begin record (format version 2 and
+a `GeBackend` method) is deferred until a Metal-against-PPSSPP comparison needs an exact cold start; recorded here.

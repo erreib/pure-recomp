@@ -12,7 +12,7 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
 | M3 | race start on Vineta K, faithful 3D | first full-HUD frame vs `ref/vineta_k_start.png` ≤ 0.30 at tol 32 (2x capture downscaled); 13,200-frame strict run (interpreter off, strict HLE, throttle held; retail has no Autopilot) exits 0 | **race reached**: Single Player > Single Race > Vector > Alpha > Vineta K > Feisar loads, countdown passes, HUD and music run (`out/milestones/05-race-vineta-k-magenta.png`); **done**: track, barriers, arches, sky, bloom, ship shadows and lens-flare occlusion (patches 0003-0006, 0008); frame 6016 vs PPSSPP **0.068** at tol 32; strict 13,200-frame run exits 0; clean shutdown (0007) | 2026-10-06 |
 | M4 | audio and video | `wavstats.py` active ≥ 0.9 from the first music (main menu) and over the race window; movies play (patch 0002) | **done** (task 013): music loops seamlessly, effects over music in the race, no clipping; `PURE_AUDIO_WAV` + `tools/wavstats.py` | 2026-10-05 |
 | M5 | saves and the whole campaign | `tools/campaign_sweep.py` cells PASS; `tools/save_roundtrip.sh` passes | **every single-player mode reaches its end screen** (task 018, 2026-10-06): Single Race on all four Alpha tracks (task 017, `--no-damage` test switch; Vineta K also without it), Time Trial and Free Play on Vineta K, Zone on PRO TOZO (SHIP DESTROYED panel, zone 6: no racing line, the ship runs out of shield against the first barrier), the Alpha Tournament through all four races to the final TOURNAMENT STANDING; save round trip passes (task 014). Open: higher classes and leagues, the other tracks in the 30-fps modes (untested budgets), a Zone line, multiple profiles need a save-list dialog, finished-race autosave leg, the AI grid varies per run (RNG) | 2026-10-06 |
-| M6 | native Metal backend | `ge_replay --backend metal` passes on all recordings; `tools/frame_regress.sh --backend metal` passes | in progress: the seam landed (task 021, patch 0009: `gpu::GeBackend`, Vulkan adapter with pixel-identical captures, `null` and `record` backends, `tools/gerec/gerec_dump.py`); briefs 022 (ge_replay) and 023 (Metal first pictures) written | 2026-10-06 |
+| M6 | native Metal backend | `PureNative --replay <rec> --a vulkan --b metal` passes on all recordings; `tools/frame_regress.sh --backend metal` passes | in progress: the seam landed (task 021, patch 0009: `gpu::GeBackend`, Vulkan adapter with pixel-identical captures, `null` and `record` backends, `tools/gerec/gerec_dump.py`); ge_replay landed (task 022: `PureNative --replay`, compare against recorded images or a second backend, `--first-diff` bisection; `tools/gerec/replay_check.sh`); running: 023 (Metal first pictures), 026 (shell seam, patch 0010) | 2026-10-06 |
 | M7 | v1.0 polish | `tools/bundle.sh` app runs from Finder | open | |
 
 ## Works
@@ -37,6 +37,7 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
 | Regression | `tools/frame_regress.sh` (task 020): five scenes vs the PPSSPP references in 7 min, PASS at the measured values; the merge gate for renderer changes |
 | Sweep modes | `tools/campaign_sweep.py MODE TRACK` for single_race, time_trial, free_play, zone, tournament (task 018): routes in `config/pad_scripts/`, each mode's end screen detected (results TOTAL label, Free Play's END SESSION leg, Zone's SHIP DESTROYED title with the zone count read from the panel, Tournament's TOURNAMENT STANDING title); docs/tracks.md |
 | GE seam | patch 0009 (task 021): every GE call the HLE makes goes through `gpu::GeBackend` (`PURE_GE_BACKEND=vulkan|null|record`); `null` runs headless with `PURE_NO_RENDER=`, `record` writes `.gerec` streams (`PURE_GE_RECORD*`); docs/ge-backend.md section 6 |
+| ge_replay | `build/arm64/bin/PureNative --replay FILE.gerec [--backend N | --a N --b N [--first-diff]] [--compare --tol T --max-frac F] [--out DIR]` (task 022): replays a recording into any backend outside the game, compares pictures per frame as imgdiff.py does, bisects the first differing draw; Vulkan 5-13 ms a frame, null 1 ms. A backend against its own recording is exact only after warm-up frames (the bloom targets carry history); backend against backend starts equal. `tools/gerec/replay_check.sh` makes the recordings (race, race_warm, frontend, title) and runs the checks (5 min) |
 | Decompile | `tools/ghidra_headless.sh script Decompile <out> <addr>...` prints disassembly + C for any function |
 
 ## Blockers
@@ -57,8 +58,8 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
   003 (diagnosis record) merged, D-003, briefs 022 and 023, `tools/verify_task.sh` (base-10 fix: `018` works).
 - Merge gate: `tools/frame_regress.sh` (5 scenes, 7 min) after any renderer change; `tools/verify_task.sh NNN` reruns a
   brief's Verify from this checkout.
-- Running (dispatched 2026-10-06): 022 (ge_replay, in the game executable behind `--replay`; our own `main()`
-  through `HOST_MAIN_NAME`), 023 (Metal backend, 2D frontend scenes), 026 (the shell seam, patch 0010: `host::Shell`,
+- Merged 2026-10-06: 022 (ge_replay, in the game executable behind `--replay`; our own `main()` through
+  `HOST_MAIN_NAME`). Running: 023 (Metal backend, 2D frontend scenes), 026 (the shell seam, patch 0010: `host::Shell`,
   Vulkan shell adapter, headless shell with pad from the input script; D-007, docs/ge-backend.md section 8). 022 and
   023 both edit CMakeLists.txt: resolve by hand at merge. Then 024 (Metal 3D), 025 (Metal stencil/bloom/depth
   write-back), 027 (Metal presenter + UI against the shell seam), and Fable's patch 0011 (the kernel's host-wait
