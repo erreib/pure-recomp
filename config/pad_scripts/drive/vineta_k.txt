@@ -1,6 +1,13 @@
-# Vineta K steering table (Single Race, Vector, Feisar): `frame:axis leftx V` steps, frames of the same run as the
-# menu route (GO at about flip 6252). NOT TUNED YET (task 012 stopped before tuning): with no steps the ship goes
-# straight and stops against the barrier of the first corner at about 6.2 s (task 007).
-# Finding from out/explore/e1 (2026-10-05): the first corner is a RIGHT-hander. `6540:axis leftx -0.6` held to
-# 6700 turned the ship left (towards +z; it was heading -x) into the left barrier at 6.1 s, at dist 1424 m, lap 1.
-# The next attempt should steer right (+lx) from about 6540.
+# Vineta K steering (Single Race, Vector, Feisar). tools/campaign_sweep.py reads this file.
+# `follow LINE WN PREVIEW`: steer closed loop along LINE, a `dist,x,z` racing line (class Tuner: the line's
+# curvature PREVIEW s ahead as a feed-forward, heading and offset feedback at WN rad/s), through PURE_INPUT_LIVE.
+# The line is the AI ships' mean path from a PPSSPP race (`tools/pp_lines.py vineta_k`, 2026-10-05), exported with
+# `tools/campaign_sweep.py single_race vineta_k --export-line config/pad_scripts/drive/vineta_k.line.csv`.
+# The track coordinate wraps at about 4437 m; the grid is at 1079 m and the start line at about 1233 m. The first
+# corner is a right-hander (+lx); negative lx yaws left.
+#
+# Why not a replayed table: the second lap of a --tune run with these settings (laps 59.6, 53.5, 59.2 s, 2:52.3,
+# 8th, about 8 wall contacts a lap, no stop) replayed as 1825 `@DIST:axis leftx V` steps (open loop, keyed by
+# distance) drifted 15 to 25 m off the line within 20 s, spun the ship round at about 2440 m and was still on its
+# first lap after 101 s of race clock (out/sweep/replay1.*, 2026-10-05).
+follow config/pad_scripts/drive/vineta_k.line.csv 1.0 0.3
