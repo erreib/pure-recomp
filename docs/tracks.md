@@ -1,7 +1,9 @@
 # Tracks
 
 The track menus as the port shows them on a new profile (2026-10-05), and how `tools/campaign_sweep.py` reaches
-each track. Only the Alpha league is open on a new profile.
+each track. Only the Alpha league (with the Vector and Venom classes, and Zone's PRO TOZO) is open on a new
+profile; the test switch `PURE_TEST_UNLOCK_ALL=1` opens the Beta and Classic leagues, three more classes and three
+more Zone tracks, and the sweep runs them all (task 032, below).
 
 ## Single Race, Vector class, Alpha league
 
@@ -22,6 +24,161 @@ The wrap, grid and start-line columns come from the AI ships' race records in PP
 recorded 2026-10-05 with `tools/pp_lines.py TRACK --downs N`): the grid is the player's (8th) slot, the AI
 ships stand about 19.5 m apart ahead of it, and the start line is where their lap field turns from 0 to 1. The
 length is the TRACK SELECTION panel's (the sweep's `<cell>-menu` shot).
+
+## Single Race, the Beta and Classic leagues (task 032)
+
+With `PURE_TEST_UNLOCK_ALL=1` (below) LEAGUE SELECTION lists ALPHA, BETA and CLASSIC; each league's panel names its
+four tracks, and its TRACK SELECTION lists them. The sweep reaches a track with the league's DOWN presses at 5180,
+5210 and the track's at 5380, 5410, 5440 (and the class's at 4980 and on, `--class`). Its sweep names, in menu
+order:
+
+| League (DOWN) | Track (DOWN) | Sweep name | Length (menu) | Distance wraps at | Grid (player) | Start line | AI winner's fastest pass | Budget (flips) |
+|---|---|---|---|---|---|---|---|---|
+| Alpha (0) | Vineta K (0) ... Blue Ridge (3) | above | | | | | | 13000, 18000 |
+| Beta (1) | Sinucit (0) | `sinucit` | 6117 m | 5942 m | 144 m | about 300 m | 86.0 s | 28500 |
+| Beta (1) | Citta Nuova (1) | `citta_nuova` | 5408 m | 5051 m | 248 m | about 399 m | 71.3 s | 25500 |
+| Beta (1) | Sebenco Climb (2) | `sebenco_climb` | 4813 m | 4651 m | 10 m | about 155 m | 62.1 s | 23000 |
+| Beta (1) | Sol 2 (3) | `sol_2` | 4400 m | 4252 m | 92 m | about 242 m | 59.4 s | 21000 |
+| Classic (2) | Karbonis (0) | `karbonis` | 3256 m | 3209 m | 729 m | about 876 m | 42.5 s | 16000 |
+| Classic (2) | Sagarmatha (1) | `sagarmatha` | 4544 m | 4508 m | 1017 m | about 1171 m | 52.0 s | 21500 |
+| Classic (2) | Manor Top (2) | `manor_top` | 4199 m | 4193 m | 276 m | about 431 m | 50.0 s | 20000 |
+| Classic (2) | Mandrashee (3) | `mandrashee` | 3901 m | 3835 m | 1115 m | about 1266 m | 47.3 s | 18500 |
+
+The wrap, grid and start-line columns come from the port's own recordings (`--record-line`, below; 2026-10-06), as
+the Alpha ones came from PPSSPP's: the grid is the player's slot (k = 7), the start line where the AI ships' lap
+field turns from 0 to 1. The fastest pass is the race winner's quickest run of the track coordinate from one wrap
+to the next, the pass its line is built round. Each steering table (`config/pad_scripts/drive/<track>.txt`)
+follows its line with Vineta K's settings (`follow ... 0.8 0.8 recover=60 absorb=2`), untuned for the track. The
+budgets come from the lengths (`lap_budget` in the sweep: three laps at 40 m/s, 144 km/h, and 15 s for the countdown
+and the results panel, rounded up to 500 flips). The first rule, 45 m/s (the follower averaged 52 to 60 m/s on the
+long Alpha tracks), left Citta Nuova 1650 flips of slack (laps of 116 to 119 s, 43 m/s), so it was lowered after
+the first three cells, which ran with the 45 m/s budgets (25500, 23000, 20500).
+
+Sinucit forks at about 800 m: in its recording the winner took a branch near x 570 to 600 in laps 1 and 3 and one
+near x 440 to 470 in lap 2, 130 m apart.
+
+The classes (CLASS SELECTION, `--class NAME`): VECTOR (0 DOWN), VENOM (1), FLASH (2), RAPIER (3), PHANTOM (4); a new
+profile has VECTOR and VENOM. Every cell of task 032 ran at Vector; the other classes' routes are proved by the
+menu shot (PHANTOM at 4 DOWN, out/032/h/pclassic) and not raced. Faster classes would need their own budgets.
+
+## Everything unlocked: the test switch (task 032)
+
+A new profile has the Vector and Venom classes, the Alpha league and, in Zone, PRO TOZO. The game has a developer
+switch that opens everything: bit 0 of the PSP's GPI register (`sceKernelGetGPI`). Every frontend lock check reads
+`unlocked = (GPI & 1) ? 1 : profile->0x381`: FUN_088b43d4 (an item's lock), FUN_0894fa5c (the gallery) and
+FUN_089516b8 (the unlock notices). The profile byte at +0x381 is what the main menu's hidden button sequence sets
+(FUN_0894d4c8: the game's button codes 2, 3, 2, 8, 9, 8, 3, 2, 3, 9, 8, 9 show "Everything"). The frame limiter
+reads other GPI bits (0x20, 0x40, 0x80; docs/timing.md), and FUN_08804390 copies GPI to GPO each frame, which the
+framework ignores. Retail reads 0, and so does our HLE.
+
+`PURE_TEST_UNLOCK_ALL=1` makes the profile's `sceKernelGetGPI` return 1 (bit 0 only) and prints `[pure] TEST SWITCH:
+unlock all` at start-up. It is a test switch like `PURE_TEST_NO_DAMAGE` (README.md, "Test switches"): the sweep sets
+it for the cells a new profile cannot reach, never by default. What it opens, from a new profile (headless runs on
+the Metal backend, 2026-10-06, `out/032/h/`):
+
+| Screen | Without the switch | With it |
+|---|---|---|
+| CLASS SELECTION (Single Race) | VECTOR, VENOM | VECTOR, VENOM, FLASH, RAPIER, PHANTOM |
+| LEAGUE SELECTION (Single Race) | ALPHA | ALPHA, BETA, CLASSIC |
+| TRACK SELECTION, Alpha | VINETA K, MODESTO HEIGHTS, CHENGHOU PROJECT, BLUE RIDGE | the same |
+| TRACK SELECTION, Beta | (no Beta league) | SINUCIT, CITTA NUOVA, SEBENCO CLIMB, SOL 2 |
+| TRACK SELECTION, Classic | (no Classic league) | KARBONIS, SAGARMATHA, MANOR TOP, MANDRASHEE |
+| TRACK SELECTION (Zone) | PRO TOZO | PRO TOZO, MALLAVOL, CORIDON 12, SYNCOPIA |
+| TEAM SELECTION | FEISAR, AURICOM, QIREX, AG SYSTEMS, PIRANHA, ASSEGAI, TRIAKIS, HARIMAU | the eight, then ZONE and MEDIEVIL |
+
+The league panel names each league's tracks and the TRACK SELECTION panel gives each track's length, so the lists
+above are the game's own. Nothing else changes: a 2200-flip frontend run (`config/pad_scripts/frontend.txt`, a
+capture every 50 flips) gives 48 captures pixel-identical with and without the switch, and the logs differ only in
+the switch's own line; the MAIN MENU and SINGLE PLAYER screens of the race route are identical too. The CLASS,
+LEAGUE and TEAM screens differ only by their longer lists, and Alpha's TRACK SELECTION not at all, so the Alpha
+cells' routes hold with the switch on.
+
+### Routes through the longer menus
+
+`config/pad_scripts/single_race.txt` confirms each screen 200 flips after the one before (CLASS SELECTION up by
+about 4950, confirmed at 5100; LEAGUE by 5150, confirmed at 5300; TRACK by 5350, confirmed at 5500). The sweep
+writes the picks as DOWN presses 30 flips apart (each held 4 frames): the class from 4980, the league from 5180,
+the track from 5380 (MODES `class_at`, `league_at`, `downs_at`). The longest picks, PHANTOM (4 DOWN, the last at
+5070), CLASSIC (2) and the fourth track (3, the last at 5440), land before their confirms (shots at 5095, 5290 and
+5495). `tools/campaign_sweep.py single_race --list [--class NAME]` prints each cell's presses, budget and whether
+it needs the switch. Zone's route is unchanged: the Nth Zone track is N DOWN from 4980.
+
+| Pick | Entries (DOWN presses) | Open on a new profile |
+|---|---|---|
+| class (`--class`, default vector) | vector 0, venom 1, flash 2, rapier 3, phantom 4 | vector, venom |
+| league | alpha 0, beta 1, classic 2 | alpha |
+| track | the league's four, 0 to 3 | Alpha's |
+| Zone track | zone_1 PRO TOZO 0, zone_2 MALLAVOL 1, zone_3 CORIDON 12 2, zone_4 SYNCOPIA 3 | zone_1 |
+
+A cell whose track or class is not open on a new profile (MODES `fresh`, FRESH_CLASSES) runs with
+`PURE_TEST_UNLOCK_ALL=1`, and its summary row is marked `(unlock all)`; `--unlock-all` sets the switch for any cell.
+A class other than Vector names the cell `<mode>-<track>-<class>` and its summary row `<track>/<class>`. Only
+Single Race takes `--class` so far: Time Trial, Free Play and Tournament have a CLASS screen too, at nearly the same
+flips (by 5000), but their class presses are untested.
+
+## Racing lines from the port (task 032)
+
+PPSSPP recorded the Alpha lines (`tools/pp_lines.py TRACK --downs N`), through a route with no class or league
+picks. For the other tracks the lines come from the port's own AI ships:
+
+- `PURE_WATCH_GRID=1` (README.md) prints, every flip of a race, one line per race record, k = 0 to 7:
+  `[pure] grid frame N k=K clock=C pos=x,y,z vel=vx,vy,vz dist=D lap=L`, the ship probe's race-record fields for
+  each ship, each line when it changes (eight lines a flip).
+- `tools/campaign_sweep.py single_race TRACK --record-line OUT [--line REF]` runs the cell's route headless
+  (`PURE_SHELL=headless`, the Metal backend, unpaced) with Cross held from 6100 and no steering, the grid probe,
+  `PURE_TEST_NO_DAMAGE=1` and the unlock switch where the track needs it, to the end of the cell's budget, then calls
+  `tools/pp_lines.py --port`. The player meets the first barrier and stays there (its shield refilled); the seven
+  AI ships race their three laps by themselves. A recording takes 1 to 2 minutes of wall time.
+- `tools/pp_lines.py --port LOG [--out CSV] [--samples CSV] [--ships leader|ai] [--compare REF]` reads the first
+  race of such a log, drops the player's record and every record whose lap field has bit 16 set (that ship has
+  finished), and writes the samples in the PPSSPP recording's CSV form (`--samples`, the flip in the usec column).
+  The line is made from the AI ship with the most progress: the one furthest along the track (the distance
+  unwrapped at each wrap) at the last flip every AI ship still races, which is the race's winner. Of its samples it
+  keeps those within `--near` metres (default 15) of its fastest whole pass of the track (from one wrap of the
+  distance to the next), over all its laps. Two things decided that: Sinucit forks at about 800 m and the winner took
+  branches 130 m apart in different laps, so the mean of all its laps ran between them, through the wall; and one
+  pass alone wanders (5.8 m from the PPSSPP line on Vineta K, below). `--ships ai` takes the mean of all the AI
+  ships instead, as `--export-line` does with a PPSSPP recording (closest to the PPSSPP line, but it mixes branches
+  too). The line is the follower's own AiLine (2 m bins, gaps interpolated, smoothed over +-3 bins), written as the
+  `dist,x,z` rows `follow` reads.
+  `--compare REF` prints how far it lies from another line: the lateral distance (across REF at the same track
+  distance) and the distance between the points of the same track distance, mean and maximum over the lap.
+
+Headless runs keep the game's own timing: the race clock advances 5.0 s every 300 flips there, as in the window
+(60 flips a second), because the kernel's clock is virtual; only the wall time is shorter (about 200 flips a
+second on the Metal backend). The AI ships differ from run to run in either case (the grid varies, task 018).
+
+A heavy run beside a windowed cell breaks the cell: the first Vineta K cell with the port line ran while the first
+recording ran, and its menu route fell behind (the profile screen came up after the route's DOWN at 2100, so Cross
+picked LOAD; NO RACE, `out/032/vkport` of 12:11). Recordings and windowed cells go one at a time.
+
+### The check on Vineta K
+
+The port's Vineta K recording (`tools/campaign_sweep.py single_race vineta_k --record-line
+out/032/vineta_k.port.line.csv --line config/pad_scripts/drive/vineta_k.line.csv`, 60 s of wall time to flip
+19100): all seven AI ships ran their three laps; the winner, ship 0, finished at flip 15917, and the faster of its
+two whole passes of the track took 56.6 s. Lines made from it, against the PPSSPP line (the mean of PPSSPP's seven
+AI ships, `config/pad_scripts/drive/vineta_k.line.csv`), over the 2219 bins of the lap (`--compare`):
+
+| Line from the port's recording | Lateral distance, mean | Lateral distance, max | Same-distance points, mean |
+|---|---|---|---|
+| the winner's samples within 15 m of its fastest pass (`--port`'s default; `out/032/vineta_k.port.line.csv`) | 3.84 m | 11.42 m (at 1110 m) | 3.93 m |
+| the winner's samples within 20 m (`--near 20`) | 3.12 m | 10.66 m | |
+| all the winner's laps (the first version, which mixes branches where a track forks) | 2.81 m | 10.66 m | 2.88 m |
+| the winner's fastest pass alone | 5.79 m | 16.64 m | 5.91 m |
+| the mean of the seven AI ships (`--ships ai`, also mixes branches) | 1.54 m | 6.96 m | 1.58 m |
+
+The follower drove Vineta K on the port lines (`tools/campaign_sweep.py single_race vineta_k --no-damage --line
+LINE --out out/032/vkport`; the steering table's own settings):
+
+| Line | Outcome | Laps (s) | Contacts (a lap) | Mean distance from the line | Flip |
+|---|---|---|---|---|---|
+| `out/032/vineta_k.port.line.csv` (the 15 m line) | PASS | 63.2, 57.7, 60.3 | 39 (12, 13, 14) | 8.1 m, 28% of the race more than 10 m off | 17290 |
+| the first version (all the winner's laps) | PASS | 60.5, 59.9, 56.1 | 49 (13, 22, 14) | 8.8 m, 35% | 17060 |
+| the PPSSPP line, without the unlock switch (the acceptance run) | PASS | 68.4, 59.6, 63.7 | 43 (15, 13, 15) | | 18240 |
+
+The PPSSPP line's own record is 37 to 47 contacts (task 016), so the port line drives as well. The Alpha tables keep
+their PPSSPP lines.
 
 ## The ship probe on a track
 
@@ -68,7 +225,9 @@ Open-loop tables do not hold a race (task 012):
 
 So the committed tables are `follow` lines. Making one for a new track: `tools/pp_lines.py TRACK --downs N`
 (3.5 min), `tools/campaign_sweep.py single_race TRACK --export-line config/pad_scripts/drive/TRACK.line.csv`, and
-a `follow` line in `config/pad_scripts/drive/TRACK.txt`.
+a `follow` line in `config/pad_scripts/drive/TRACK.txt`. Since task 032 the port records its own line, for any
+track the sweep reaches (PPSSPP's route knows the Alpha league only): `tools/campaign_sweep.py single_race TRACK
+--record-line config/pad_scripts/drive/TRACK.line.csv` (1 to 2 min, headless; "Racing lines from the port" above).
 
 ### What the follower has to work with (Vineta K, task 016, 2026-10-05)
 
@@ -106,6 +265,7 @@ The sweep takes a `stall` shot before it closes the window and classifies the st
 | Class | Seen | What it looks like |
 |---|---|---|
 | eliminated by damage | Chenghou Project, Modesto Heights and Blue Ridge, in lap 2 or 3, after 40 to 67 contacts | "SHIP DESTROYED" panel with the lap times; the HUD and its shield bar are gone (reads 0%); the ship at rest. The sweep decides it from the stall shot's title (`DESTROYED_TITLE`) or the probe's shield at 0 or below |
+| put back by the game | Sinucit at 896 to 980 m, Manor Top at 2198 to 2305 m (task 032) | the ship left the track and fell (on Sinucit the probe's height drops by 30 m and the speed climbs to 700 km/h in under a second), and the game set it back 200 to 500 m along the track, again and again at the same place. The sweep counts every step back of the distance by more than 30 m and under the wrap (`PUTBACK_M`) and names the places in the detail; the first runs, before the class, called these stalls "stuck on geometry" |
 | stuck on geometry | Vineta K at 1914 m (no `recover`) | the ship nosed into a barrier, Cross held, engine lit, at rest or crawling; the shield bar mostly full |
 | off the line | | more than 25 m from the line or moving more than 90 degrees off it |
 | stopped | | no contact since the last progress (task 012's lap-3 stop at 4437 m, speed run down over 6 s with no impact, fits a destroyed ship) |
