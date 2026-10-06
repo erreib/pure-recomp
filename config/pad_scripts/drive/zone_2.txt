@@ -1,0 +1,5 @@
+# Zone track 2 (MALLAVOL; Zone mode, 1 DOWN on its TRACK SELECTION, which lists it only with
+# PURE_TEST_UNLOCK_ALL=1: tools/campaign_sweep.py sets the switch for it). tools/campaign_sweep.py reads this file.
+# No steering, as on zone_1 (config/pad_scripts/drive/zone_1.txt): Zone has no AI ships to record a line from, and
+# the cell's job is to reach Zone's end panel, the SHIP DESTROYED panel with TOTAL ZONES CLEAR, with Cross held and
+# the stick centred (task 032; docs/tracks.md has the run).
