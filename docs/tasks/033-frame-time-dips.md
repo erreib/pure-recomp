@@ -60,7 +60,7 @@ runs the game's code in a fraction of a frame, so a long frame here is the host'
 - [ ] The pre-warm adds under 300 ms to start-up (measured), or is made asynchronous.
 
 ## Verify
-`tools/build.sh profile && python3 tools/campaign_sweep.py single_race vineta_k --no-damage --env PURE_METAL_TRACE=out/033/race.csv && python3 tools/frame_times.py out/033/race.csv --long 20 --fps 60 --check-no-pipeline-stalls-after 600 && tools/frame_regress.sh --only race_hud`
+`tools/build.sh profile && PURE_METAL_TRACE=out/033/race.csv python3 tools/campaign_sweep.py single_race vineta_k --no-damage && python3 tools/frame_times.py out/033/race.csv --long 20 --fps 60 --check-no-pipeline-stalls-after 600 && tools/frame_regress.sh --only race_hud`
 
 (`--check-no-pipeline-stalls-after N` exits 1 when a frame after flip N exceeds 25 ms with a pipeline created in it.)
 
