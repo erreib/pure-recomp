@@ -1,6 +1,6 @@
 # 024: The Metal GE backend, 3D: lighting, fog, sprites, culling
 
-Milestone: M6 | Branch: task/024-metal-3d | Status: OPEN
+Milestone: M6 | Branch: task/024-metal-3d | Status: MERGED 2026-10-06 (fda9d9d)
 
 ## Goal
 Task 023's Metal backend draws transformed (3D) geometry with its vertex colour only. This task makes 3D draws right:
@@ -161,4 +161,22 @@ verify 024: PASS
    would do the same in-tree.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 024`, 393 s with the
+two recordings made fresh): `team.gerec` frames 5650-5651 into vulkan and metal 0.000000 (0 of 130560 px at tol 24);
+`race_1x.gerec` frame 6016 against Vulkan 0.3244 and `race_warm.gerec` 0.3768, reported not passed, bisected to the
+stencil-gated shadow quad (025's); the three Metal frontend scenes 0.0002, 0.0002, 0.0000; then `tools/frame_regress.sh`
+(Vulkan) 5/5 at 0.0544, 0.0302, 0.0543, 0.0331, 0.0681 (race_hud +0.001, within its documented 0.063 to 0.086 run
+spread), 7m 10s.
+Spot-read: `fill_lighting` (the uniform block built from `LightingState` and `DrawCall`, compared by memcmp so the
+encoder rebinds only on change), the `NO_LIGHTING`/`NO_FOG`/`NO_CULL` switches read as the Vulkan backend reads them,
+the `lighting_bound_` reset in `begin_pass`, `metal_check.sh` (recordings at internal scale 1, the team pass
+condition, the race bisection reported).
+Merged: fda9d9d into batch/m2 (README and docs/metal-backend.md rows combined by hand with 027's).
+Notes: PARTIAL accepted as done. The brief's lit TEAM frame does not exist (the "rotating ship" is ten pre-drawn
+pictures; no frontend frame has a lit draw), so the reference is the race at internal scale 1 up to its first stencil
+draw: draws 1 to 393 of frame 6016 (58 lit, 360 fogged, 353 culled) match Vulkan with 0 px over tol 1, and the
+sensitivity runs (NO_LIGHTING 1936 px, NO_FOG 555, NO_CULL 68, winding reversed 63574) show each part is doing work.
+Recordings at scale 1 are accepted: both backends at 480x272 compare without resize edges, which is why the team frame
+is exact and why task 025's race check uses `race_1x.gerec`. Point and spot lights, specular and reversed normals are
+ported but unexercised by this game's recorded frames; the race's later tracks may exercise them (follow-up: a
+recording of a night or tunnel track in M7's sweep). The scratch bisection tools become ge_replay `--cut` in 025.

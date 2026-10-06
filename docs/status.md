@@ -67,7 +67,7 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
   0010: `host::Shell`, Vulkan shell adapter, headless shell with pad from the input script; D-007), and Fable's patch
   0011 (headless runs unpaced: thousands of frames a second), 027 (the Metal shell, patch 0012), 024 (Metal 3D:
   lighting, fog, screen-space sprites, culling; the race frame at internal scale 1 matches Vulkan to its first
-  stencil draw; merged fda9d9d, Verify rerun on the main checkout in progress). Running: 025 (Metal effects: stencil
+  stencil draw; merged fda9d9d, Verify rerun PASS). Running: 025 (Metal effects: stencil
   as alpha, the bloom chain, read-backs and write-backs, ge_replay `--cut`). M6's exit after 025:
   `tools/frame_regress.sh --shell metal --backend metal` 5/5 and the recordings replayed vulkan against metal.
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
