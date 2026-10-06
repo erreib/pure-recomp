@@ -54,8 +54,9 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
+| `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below). Objective-C++ with ARC |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
-| `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the three `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
+| `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the four `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
 
 Built without Xcode, in the shape of the Bouncer's backend (`~/dev/bouncer-recomp/docs/metal-backend.md`): the
 `.mm` goes through the same `/usr/bin/clang++` and ccache as every other source of `tools/build.sh profile`, and
@@ -214,8 +215,9 @@ prints them.
 
 ## Frames, captures and the window
 
-- One command buffer a frame, committed at the flip (`present_image`). Without the window no frame waits for the
-  GPU unless two are already in flight.
+- One command buffer a frame, committed at the flip (`present_image`), on the program's one queue, which the Metal
+  shell presents on too ("One command queue" below). Without the window no frame waits for the GPU unless two are
+  already in flight.
 - `present_image` returns `ImageApi::Metal` with the target's `id<MTLTexture>` as `image`, valid until the next call.
   When the frame write-back will store the shown target at the next flip, the picture is kept for it: the read-back
   the Vulkan shell gets anyway, or else a blit into a shared buffer recorded with the frame's commands.
@@ -255,7 +257,7 @@ black); the Vulkan backend needs the Vulkan shell and draws nothing here, as in 
 
 | Part | What it does |
 |---|---|
-| Window | an SDL window (`SDL_WINDOW_METAL \| SDL_WINDOW_RESIZABLE`, 480x272 times the window-size setting, full screen by the setting), titled as the Vulkan shell's (`PURE_WINDOW_TITLE`, else the program's name and build label); `SDL_Metal_CreateView` and its `CAMetalLayer`: BGRA8, tagged sRGB (as MoltenVK tags its swapchain, so the colours look the same), `framebufferOnly` off for the captures, the system default device (`MTLCreateSystemDefaultDevice`, the backend's) and a command queue of the shell's own. Prints `[shell] metal: Apple M4 Pro, window 960x544, vsync` |
+| Window | an SDL window (`SDL_WINDOW_METAL \| SDL_WINDOW_RESIZABLE`, 480x272 times the window-size setting, full screen by the setting), titled as the Vulkan shell's (`PURE_WINDOW_TITLE`, else the program's name and build label); `SDL_Metal_CreateView` and its `CAMetalLayer`: BGRA8, tagged sRGB (as MoltenVK tags its swapchain, so the colours look the same), `framebufferOnly` off for the captures, the program's one device and command queue (`src/gpu/metal_device.hpp`, the backend's; "One command queue" below). Prints `[shell] metal: Apple M4 Pro, window 960x544, vsync` |
 | Events and input | `pump_events` handles the window's events as the Vulkan renderer's pump does: close, gamepads arriving and leaving, a display change, the mouse while it is captured for the game (only the script's mouse under scripted input), then the interface's event hook. The pad is a `host::SdlPad` the shell holds, the code the Vulkan shell uses: the keyboard through the player's bindings, the first gamepad or the input script's virtual one, the script's keys (`set_scripted_key`), the neutral pad while an interface screen is up (`set_game_input`). The pointer is captured by the Vulkan renderer's rule. `sample_pad` pumps SDL and samples without handling events |
 | Present | the backend's `Metal` image (its target's `id<MTLTexture>`) is drawn into the layer's next drawable by one triangle over the letterboxed rectangle, placed as the Vulkan renderer's `record_game_blit` places it (Original), or over the whole drawable (Stretch); a `Cpu` image is uploaded to a texture first; no image clears to black. The interface is drawn in the same pass, then `presentDrawable` and commit. A fast-forwarding load presents a flip only when none was shown for 33 ms, as the Vulkan shell does. Vsync is the layer's `displaySyncEnabled`, off for Immediate; there is no Mailbox (`supports_present_mode`) |
 | Scaling filter | nearest when the sharp-screen setting is on, and whenever the picture covers a whole multiple of 480x272 (the default 2x window); linear otherwise (below) |
@@ -271,9 +273,42 @@ nothing; `PURE_PERF=log` still prints), and the menu's resolution, texture filte
 Vulkan renderer (`active_renderer()` is null under this shell, and the menu leaves them out). The System tab's
 graphics line still reads "Vulkan on" the device's name: that text is the framework's (`ui/menu.cpp`).
 
-The backend commits each frame's command buffer in `present_image`, before the HLE calls `present`, and its targets
-are tracked resources of the same device, so Metal orders the shell's sampling after the frame's draws and the next
-frame's draws after the sampling.
+### One command queue (task 031, 2026-10-06)
+
+The backend and the shell draw with the program's one device and command queue, `pure::metal::device()` and
+`pure::metal::queue()` (`src/gpu/metal_device.hpp`, `.mm`: made once, on first use, with
+`MTLCreateSystemDefaultDevice`; the framework's `BackendConfig` and `ShellConfig` carry neither). The ordering rule:
+
+- Metal runs the command buffers of one queue in the order they are committed, and tracks the hazards of tracked
+  resources across them: a command buffer that reads a texture runs after an earlier one of the queue that writes it,
+  and the other way round. Every target here is tracked (made by the device with the default hazard tracking).
+- The HLE calls the backend's `present_image` before the shell's `present`, on the same thread. `present_image`
+  commits the frame's last command buffer, and the shell's `draw` then commits the present that samples the target.
+  On one queue the present is therefore ordered after every draw of the frame, the race HUD included, and the
+  backend's next frame, which may draw into the same target, after the present.
+- Nothing waits on the CPU for it. The backend still waits only where it did: at the SIGNAL's depth write-back, for a
+  frame write-back, a read-back or a capture, and when more than `kFramesInFlight` frames are in flight (`in_flight_`
+  holds its own command buffers; the shell's between them change nothing). The shell waits only for its own last
+  command buffer (`wait_idle`, before it uploads a `Cpu` picture again, and at shutdown) and for a window capture,
+  and on one queue those cover the backend's earlier frames too.
+
+Until task 031 the shell had a queue of its own. Metal orders the command buffers of two queues only through an event
+(`MTLSharedEvent`) or a wait, and the backend commits its frame without waiting, so the shell's present could sample
+the target before the end of the frame had run on the GPU. In a race the window then showed the 3D picture without
+the HUD drawn after it, and players saw the HUD flicker or vanish. `tools/hud_check.sh` (docs/verification.md, "The
+race HUD check": 61 shots from flip 6200 to 7700 of the race route) counted 11 of 61 shots with the HUD on two queues
+(task 028's probe: 12), and 61 of 61 on one queue, as on the Vulkan shell and in the backend's own headless captures.
+The SIGNAL's mid-frame commit and wait was not the cause: task 028's probe with `PURE_NO_DEPTH_READBACK=1`, which
+leaves the race one command buffer a frame, had the HUD in 3 of 61 shots.
+
+A shared event was not needed. The backend could signal an `MTLSharedEvent` at its commit and the shell encode a wait
+for it before sampling, which orders two queues the same way; but on one queue such a pair orders nothing the queue
+does not order already, and it would need the event and its value handed from the backend to the shell, for which
+the framework's `PresentedImage` has no field. One queue needs no new interface and no new wait.
+
+The race under the Metal shell still runs at 60 fps: with `PURE_PERF=log`, the 24 one-second lines of the race in the
+check's route read 59.7 to 60.1 fps, render 3.1 ms a frame on average, and the backend waited for the GPU 2009 times in
+7710 flips (2003 of them at the SIGNAL), as many as on two queues.
 
 ### The scaling filter
 
