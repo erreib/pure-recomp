@@ -2,21 +2,25 @@
 # The Metal GE backend against the Vulkan one through ge_replay (task 024; docs/metal-backend.md, "The 3D check").
 #   tools/gerec/metal_check.sh [TEAM_FRAME]        TEAM_FRAME defaults to 5650
 # Recordings are made only when missing, each by one windowed run of main_menu.txt + single_race.txt (`shot` steps
-# dropped) on an empty memory stick of its own, drawn by Vulkan (at the settings' internal scale, 2x by default)
-# through the record backend, as tools/gerec/replay_check.sh makes them, and must pass gerec_dump.py --summary:
-#   out/gerec/team.gerec       frames TEAM_FRAME and TEAM_FRAME+1, the TEAM SELECTION screen (frames 5503-5701 of the
-#                              route; 5650 is in its middle, so a run that drifts by a few tens of frames still lands
-#                              on it). Recorded again when the file holds other frames. About 3 minutes
-#   out/gerec/race_warm.gerec  frames 6008-6016 (AT=6008 FRAMES=9), the race; about 3.5 minutes
+# dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend, as
+# tools/gerec/replay_check.sh makes them, and must pass gerec_dump.py --summary:
+#   out/gerec/team.gerec       frames TEAM_FRAME and TEAM_FRAME+1 at internal scale 1 (PURE_INTERNAL_SCALE=1), the
+#                              TEAM SELECTION screen (frames 5503-5701 of the route: 5650 is in its middle, so a run
+#                              that drifts by a few tens of frames still lands on it). Recorded again when the file
+#                              holds other frames or another scale. About 3 minutes
+#   out/gerec/race_1x.gerec    frames 6008-6016 at internal scale 1, the race; about 3.5 minutes
+#   out/gerec/race_warm.gerec  the same frames at the settings' scale (2x), replay_check.sh's; about 3.5 minutes
+# A replay draws at the scale its recording was made at, so the 1x recordings compare Vulkan at 1x with Metal at 1x
+# (internal scale 1, D-002): the same pixel centres, no edges moved by a 2x-to-1x reduction. The TEAM screen's text
+# is drawn minified and filtered, which at 2x against 1x puts 5% of its pixels over tol 24 by construction.
 # The steps:
 # 1. The team frames' draws, from gerec_dump.py: none may draw into the bloom targets (0x04110000, 0x04132000) or
 #    use the stencil, so that the comparison holds nothing task 025 has still to do. Lit and fogged draws are counted
 #    and reported; the frontend has none (docs/metal-backend.md says how that was checked).
-# 2. team.gerec into vulkan and metal at once, --tol 24 --max-frac 0.02: must pass. The pixels that remain are edges
-#    and texel detail, Vulkan drawing at 2x and Metal at 1x.
-# 3. For the record, not a pass condition: race_warm.gerec into vulkan and metal, frame 6016 bisected with
-#    --first-diff at tol 24 (the first draw after which any pixel differs by more than 24), and again with
-#    --max-frac 0.05 (the first draw after which more than 5% of the pixels do: past the 2x/1x edges).
+# 2. team.gerec into vulkan and metal at once, --tol 24 --max-frac 0.02: must pass.
+# 3. For the record, not a pass condition: race frame 6016 into vulkan and metal, bisected with --first-diff at
+#    tol 24 (the first draw after which any pixel differs by more than 24): (a) race_1x.gerec, where it names the
+#    first draw that differs for a reason other than the scale; (b) race_warm.gerec, at 2x against 1x.
 # Exit 0 when steps 1 and 2 pass. Logs are in out/gerec/metal_*.log. Needs the screen (Vulkan opens a window).
 set -u
 cd "$(dirname "$0")/../.."
@@ -39,24 +43,38 @@ START=$SECONDS
 step() { echo; echo "== $*"; }
 fail() { echo "metal_check: FAIL: $*"; FAILED="$FAILED|$*"; }
 
-# first_frame FILE: the first frame a recording holds (its Begin record), empty when it does not parse.
-first_frame() {
-  python3 tools/gerec/gerec_dump.py --summary "$1" 2>/dev/null | sed -n 's/^Begin: frames \([0-9]*\)-.*/\1/p'
+# held FILE: "FIRST SCALE", the first frame a recording holds (its Begin record) and the scale of its first image
+# (width / 480); empty when the file does not parse that far.
+held() {
+  python3 - "$1" <<'EOF' 2>/dev/null
+import struct, sys
+data = open(sys.argv[1], "rb").read()
+at, first = 12, None
+while at + 5 <= len(data):
+    kind, size = struct.unpack_from("<BI", data, at)
+    if kind == 1:
+        first = struct.unpack_from("<I", data, at + 5)[0]
+    elif kind == 11:  # FrameEnd: frame, display, 2 x u64, draws, records, api, width
+        print(first, struct.unpack_from("<I", data, at + 5 + 33)[0] // 480)
+        break
+    at += 5 + size
+EOF
 }
 
-# record NAME AT FRAMES: frames AT to AT+FRAMES-1 of the route to out/gerec/NAME.gerec, unless that file holds them.
+# record NAME AT FRAMES SCALE: frames AT to AT+FRAMES-1 of the route to out/gerec/NAME.gerec at internal scale SCALE
+# (empty: the settings'), unless that file holds them at that scale.
 record() {
-  local name=$1 at=$2 frames=$3
+  local name=$1 at=$2 frames=$3 scale=$4
   local file="$OUT/$name.gerec" game="$OUT/$name.game" script="$OUT/$name.route.txt"
   local last=$((at + frames + 10))
   if [ -s "$file" ]; then
-    local first
-    first=$(first_frame "$file")
-    if [ "$first" = "$at" ]; then
-      echo "$file exists ($(wc -c < "$file" | tr -d ' ') bytes, from frame $first): not recorded again"
+    local first_scale
+    first_scale=$(held "$file")
+    if [ "${first_scale% *}" = "$at" ] && { [ -z "$scale" ] || [ "${first_scale#* }" = "$scale" ]; }; then
+      echo "$file exists ($(wc -c < "$file" | tr -d ' ') bytes, from frame $at at ${first_scale#* }x): not recorded again"
       return 0
     fi
-    echo "$file holds frames from ${first:-?}, not $at: recording it again"
+    echo "$file holds frames from ${first_scale% *} at ${first_scale#* }x, not $at at ${scale}x: recording it again"
     rm -f "$file"
   fi
   rm -rf "$game"
@@ -67,11 +85,13 @@ record() {
   for part in $(echo "$ROUTE" | tr '+' ' '); do
     grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' "config/pad_scripts/$part" >> "$script"
   done
-  echo "recording $name: $ROUTE, frames $at-$((at + frames - 1)), run to frame $last ..."
+  local scale_env=()
+  [ -n "$scale" ] && scale_env=(--env "PURE_INTERNAL_SCALE=$scale")
+  echo "recording $name: $ROUTE, frames $at-$((at + frames - 1))${scale:+ at internal scale $scale}, run to frame $last ..."
   local t0=$SECONDS
   python3 tools/run_boot.py --script "$script" --frames "$last" \
     --env PURE_GAME_DIR="$ROOT/$game" --env PURE_GE_BACKEND=record --env PURE_GE_RECORD="$ROOT/$file" \
-    --env PURE_GE_RECORD_AT="$at" --env PURE_GE_RECORD_FRAMES="$frames" \
+    --env PURE_GE_RECORD_AT="$at" --env PURE_GE_RECORD_FRAMES="$frames" ${scale_env[@]+"${scale_env[@]}"} \
     "$OUT/$name.record.log" > "$OUT/$name.record.stdout" 2>&1
   local rc=$?
   echo "recording $name: run_boot exit $rc, $((SECONDS - t0)) s, log $OUT/$name.record.log"
@@ -99,8 +119,9 @@ replay() {
 }
 
 step "recordings"
-record team "$TEAM_FRAME" 2
-record race_warm 6008 9
+record team "$TEAM_FRAME" 2 1
+record race_1x 6008 9 1
+record race_warm 6008 9 ""
 
 if [ -s "$OUT/team.gerec" ]; then
   step "1. team.gerec (frames $TEAM_FRAME-$((TEAM_FRAME + 1))): what its draws are"
@@ -121,15 +142,13 @@ if [ -s "$OUT/team.gerec" ]; then
   [ $rc -eq 0 ] || fail "team.gerec: vulkan against metal exit $rc (log $OUT/metal_team.log)"
 fi
 
-if [ -s "$OUT/race_warm.gerec" ]; then
-  step "3a. race_warm.gerec frame 6016 into vulkan and metal, bisected at tol 24 (reported, not a pass condition)"
-  replay "$OUT/metal_race_first_diff.log" "$OUT/race_warm.gerec" --a vulkan --b metal --frames 6016 --tol 24 --first-diff
-  [ $rc -le 1 ] || fail "race_warm.gerec: vulkan against metal exit $rc (log $OUT/metal_race_first_diff.log)"
-  step "3b. the same, bisected to the first draw past 5% of the pixels (reported, not a pass condition)"
-  replay "$OUT/metal_race_first_diff_5.log" "$OUT/race_warm.gerec" --a vulkan --b metal --frames 6016 --tol 24 \
-    --max-frac 0.05 --first-diff
-  [ $rc -le 1 ] || fail "race_warm.gerec at 5%: vulkan against metal exit $rc (log $OUT/metal_race_first_diff_5.log)"
-fi
+for name in race_1x race_warm; do
+  [ -s "$OUT/$name.gerec" ] || continue
+  [ $name = race_1x ] && label="3a" || label="3b"
+  step "$label. $name.gerec frame 6016 into vulkan and metal, bisected at tol 24 (reported, not a pass condition)"
+  replay "$OUT/metal_${name}_first_diff.log" "$OUT/$name.gerec" --a vulkan --b metal --frames 6016 --tol 24 --first-diff
+  [ $rc -le 1 ] || fail "$name.gerec: vulkan against metal exit $rc (log $OUT/metal_${name}_first_diff.log)"
+done
 
 echo
 if [ -n "$FAILED" ]; then
