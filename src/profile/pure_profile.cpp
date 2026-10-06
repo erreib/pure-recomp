@@ -33,6 +33,7 @@ constexpr SaveFolder kSaveFolders[] = {
 };
 
 void return_zero(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 0u); }
+void return_one(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 1u); }
 
 // Frame counter behind PURE_EXIT_AT_FRAME (bounded, deterministic runs for the tools) and PURE_FRAME_LOG (a line
 // every N frames). It wraps the framework's sceDisplaySetFrameBuf handler, the game's flip, so it counts headless too.
@@ -236,7 +237,16 @@ void register_pure_hle(HleRegistrar &hle) {
 
     // The dev-kit switch block. Retail reads 0, which selects display mode 0 and the normal pacing path
     // (docs/timing.md).
-    hle.add("UtilsForUser", "sceKernelGetGPI", return_zero);
+    // PURE_TEST_UNLOCK_ALL=1 (task 032), a test instrument for tools/campaign_sweep.py, never for play: GPI reads 1
+    // (bit 0 only). Every frontend lock check reads `unlocked = (sceKernelGetGPI() & 1) ? 1 : profile->0x381`
+    // (FUN_088b43d4, FUN_0894fa5c, FUN_089516b8; the profile byte is what the main menu's hidden button sequence in
+    // FUN_0894d4c8 sets, "Everything"), so every class, league and track is open on any profile. Bits 0x20/0x40/0x80,
+    // the frame limiter's and the display mode's (FUN_0886511c), stay 0; the game copies GPI to GPO each frame
+    // (FUN_08804390), which the framework ignores.
+    if (env_on("TEST_UNLOCK_ALL"))
+        std::cout << "[pure] TEST SWITCH: unlock all (PURE_TEST_UNLOCK_ALL=1: sceKernelGetGPI returns 1, which the "
+                     "frontend's lock checks read as everything unlocked; a sweep instrument, never for play)\n";
+    hle.add("UtilsForUser", "sceKernelGetGPI", env_on("TEST_UNLOCK_ALL") ? return_one : return_zero);
 
     // sceKernelUSec2SysClock(usec, SceKernelSysClock *clock): the 64-bit clock is just the microsecond count.
     hle.add("ThreadManForUser", "sceKernelUSec2SysClock", [](Runtime &rt, AllegrexContext &ctx) {
