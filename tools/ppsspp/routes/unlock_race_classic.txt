@@ -1,0 +1,12 @@
+# PPSSPP route: after unlock_all.txt, a Single Race on the Classic league at Vector (task 035, 2026-10-06). As
+# unlock_race_beta.txt with two DOWN presses on LEAGUE SELECTION; the first track is KARBONIS, then SAGARMATHA,
+# MANOR TOP and MANDRASHEE with unlock_track_downN.txt.
+5900:CROSS, 5908:                 # the unlock panel -> MAIN MENU
+6200:CROSS, 6208:                 # MAIN MENU: SINGLE PLAYER
+6400:CROSS, 6408:                 # SINGLE RACE
+6600:CROSS, 6608:                 # CLASS SELECTION: VECTOR
+6700:DOWN, 6708:                  # LEAGUE SELECTION: ALPHA -> BETA
+6730:DOWN, 6738:                  # -> CLASSIC
+6800:CROSS, 6808:                 # CLASSIC -> TRACK SELECTION
+7000:CROSS, 7008:                 # the track -> TEAM SELECTION
+7200:CROSS, 7208:                 # FEISAR -> LOADING

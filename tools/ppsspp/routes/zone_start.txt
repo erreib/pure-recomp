@@ -1,0 +1,13 @@
+# PPSSPP route: MAIN MENU to Zone on PRO TOZO with Cross held (task 035, 2026-10-06). Chain it after frontend.txt.
+# Three DOWN presses on SINGLE PLAYER pick ZONE (the port's zone.txt: flips 4800 to 4860); Zone has only TRACK
+# SELECTION (PRO TOZO alone on a new profile, BEST ZONE, BEST SCORE, targets 15/20/25). Cross is held from the
+# countdown for the rest of the run, as the port's zone.txt holds it from flip 5250: the ship meets the first
+# corner's barrier and stays there while the zones count up.
+5700:CROSS, 5708:                 # MAIN MENU: SINGLE PLAYER
+5880:DOWN, 5888:                  # SINGLE RACE -> TOURNAMENT
+5940:DOWN, 5948:                  # -> TIME TRIAL
+6000:DOWN, 6008:                  # -> ZONE
+6100:CROSS, 6108:                 # ZONE -> TRACK SELECTION
+6300:CROSS, 6308:                 # PRO TOZO -> LOADING
+6700:CROSS                        # Cross held from the countdown (released at 12700)
+12700:

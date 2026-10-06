@@ -1,0 +1,4 @@
+# PPSSPP route: two DOWN presses on TRACK SELECTION, so the race of vineta_k_start.txt is Chenghou Project (task
+# 035, 2026-10-06; tools/pp_lines.py's presses for --downs 2). Chain it after frontend.txt and vineta_k_start.txt.
+6400:DOWN, 6408:
+6430:DOWN, 6438:

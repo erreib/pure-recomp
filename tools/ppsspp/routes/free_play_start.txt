@@ -1,0 +1,13 @@
+# PPSSPP route: MAIN MENU to the Free Play race start on Vineta K (task 035, 2026-10-06). Chain it after
+# frontend.txt. Four DOWN presses on SINGLE PLAYER pick FREE PLAY (the port's free_play.txt: flips 4780 to 4870);
+# then VECTOR, ALPHA, VINETA K, FEISAR as in time_trial_start.txt.
+5700:CROSS, 5708:                 # MAIN MENU: SINGLE PLAYER
+5860:DOWN, 5868:                  # SINGLE RACE -> TOURNAMENT
+5920:DOWN, 5928:                  # -> TIME TRIAL
+5980:DOWN, 5988:                  # -> ZONE
+6040:DOWN, 6048:                  # -> FREE PLAY
+6100:CROSS, 6108:                 # FREE PLAY -> CLASS SELECTION
+6300:CROSS, 6308:                 # VECTOR -> LEAGUE SELECTION
+6500:CROSS, 6508:                 # ALPHA -> TRACK SELECTION (records, length, height)
+6700:CROSS, 6708:                 # VINETA K -> TEAM SELECTION
+6900:CROSS, 6908:                 # FEISAR -> LOADING, the race alone at 30 frames a second
