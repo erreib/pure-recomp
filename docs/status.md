@@ -61,6 +61,8 @@ Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
   `PURE_TRACE_PAD=1 PURE_FRAME_LOG=1` into a script; the command and keys are in the chat recap and README) to replace
   hand-tuned steering; M4 audio checks (wavstats); M5 save round trip; then the Metal backend (M6) on top of the five
   vendor patches, which are all upstream candidates.
+- Session 3 (2026-10-05, Erik: "Proceed"): workers dispatched for 011 (continued), 012 (continued), 013 (audio
+  checks), 014 (save round trip); merge whichever finished, from their branches.
 - Earlier resume notes (session 1) follow.
 
 ## Resume (written 2026-10-05 at the first pause)
