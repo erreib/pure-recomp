@@ -140,7 +140,9 @@ zero read is farther than anything the game draws and the flare should never be 
 Our race screenshots (FB textures on or off, `out/008/shotsA/r6000.png`, `out/race-nofb/r6400.png` in the main
 checkout) show bright flare rings and a white haze over the left half of the grid view, where PPSSPP's frame 7155
 of the same grid shows no rings; the read values themselves are untested (the trace counts loads per block, not
-addresses or values), and our flare's vertex alphas were not traced.
+addresses or values), and our flare's vertex alphas were not traced. Task 019 traced both and added the depth
+write-back (patch 0008, last section): the loads go through the 0x04600000 mirror, and with it the samples read the
+sky cube's depth (24) on the grid, as in the dump, and the flare dims and goes as geometry covers the sun.
 
 ## Diagnosis: what the Vulkan renderer samples for each bloom bind
 
@@ -383,6 +385,115 @@ the left and middle slots), so the middle region varies most between runs. The f
 copy (the first one is at the race's first frame), and the title capture is 3.0% against ref/title.png at tol 24, as
 before.
 
+## The depth write-back for the lens flare (patch 0008, task 019, 2026-10-06)
+
+### What the handler reads
+
+A throwaway trace (not committed: a line for every guest load whose address, in any VRAM mirror, falls in the depth
+buffer's bytes, with the value loaded, plus a line per GE signal from the HLE signal sink) on the race route to frame
+6030, and on the driven run below to frame 7500, gives:
+
+- The signal: SIGNAL `0x0E020200` + END (for example at list address 0x08B7EAD8 in frame 6010), behaviour 2, signal
+  id 0x0200, on the list's callback (the one sceGeSetCallback registered at 0x088ED1D4, signal function 0x088ECCAC).
+  One per race frame from the race's first frame (313 in frames 5707-6019), none in the frontend; the only other
+  interrupts are the FINISH callbacks (id 0). Every load of those bytes in the run (874 to frame 6020) comes after a
+  0x0200 signal line and before the next signal, so they are the handler's.
+- From frame 5966, when the fly-by ends, every frame: 16 halfword loads through the 0x04600000 mirror at
+  0x04722902 + 0x800 i + 4 j (i, j = 0..3) on the grid, depth bytes 0x04122902 onward, so with 1024-byte rows
+  (stride 512) rows 74, 76, 78, 80 and columns 129, 131, 133, 135: the 4x4 every-other-pixel block around the sun.
+  The block moves with the sun: (3, 45) at frame 5966, (129, 74) on the grid, (142, 81) at 6566, (199, 88) at 7016
+  and (323, 86) at 7466 in the driven run.
+- From the HUD's fade-in (frame 6010 or 6011) nearly every frame (1490 of the driven run's 1534 frames that read),
+  one more halfword first, at 0x047321E0: depth byte offset 0x221E0, row 136 column 240, the screen centre.
+
+Task 008's `[vram]` lines for 0x04120000-0x0413FFFF were these loads: the trace names a block by the address masked to
+2 MB, so the 0x046 mirror did not show. The framework maps every VRAM mirror onto the same bytes, so a depth buffer
+stored linearly at 0x04110000 (row y at 0x04110000 + 1024 y) is what those loads see. That is also how PPSSPP's dump
+holds it, and the values agree (below).
+
+| Read | PPSSPP frame 7155 (VRAM at draw 833) | Ours, write-back off | Ours, write-back on (frames 6010, 6011) |
+|---|---|---|---|
+| sun block, 16 samples | 23 each (the sky cube) | 0 | 24 each |
+| centre (240, 136) | 1168 | 0 | 1168 |
+| whole buffer | 23-13344, no zero | 0 | 23-13444 |
+
+### What the renderer does
+
+At a SIGNAL with behaviour 1-3 whose callback has a signal function, the HLE signal sink (hle_media.cpp) calls
+`VulkanRenderer::write_back_depth` with the GE's current colour target and depth registers (0x9E/0x9F) before it
+queues the interrupt; the handler runs when the HLE call that executed the list returns, so it reads the depth of
+everything drawn before the SIGNAL (the opaque world and the sky cube). FINISH and list-flow signals (0x10-0x12) do
+nothing. `write_back_depth` ends the render pass, copies the depth aspect of the target's depth image
+(D32_SFLOAT_S8_UINT, 960x544 at the default 2x) into a mapped host-cached buffer, submits what the frame has recorded
+so far and waits for it (the same sequence `read_back_framebuffer` uses for block transfers), then stores
+z = round(d x 65535) from the texel at the centre of each PSP pixel as 480x272 little-endian halfwords in rows of the
+depth stride from the depth address; columns 480 to stride-1 are left alone. The vertex shader and the Vulkan
+viewport map the GE's z onto depth z / 65535 (`minDepth`/`maxDepth` from the viewport z scale and offset), so this
+is the GE's own z; our sky samples read 22-24 where the dump has 23. D24 and D16 depth formats are converted too
+(not exercised here: MoltenVK on the M4 Pro gives D32_SFLOAT_S8_UINT). Only screen-wide depth buffers (stride 480 or
+more) are written, the rule the frame write-back uses: a
+render-to-texture depth buffer has no height the GE states. Depth images now have TRANSFER_SRC usage.
+
+The whole buffer is written, not a region around the sun: the sun's position is the game's, and predicting it from
+the previous frame's loads would need the load trace, which lives in `src/guest_memory.cpp`. The region would not
+make it cheaper either: almost all of the cost is the wait (table below), which is the same for one pixel.
+
+The bloom reuses those bytes (0x04110000 and 0x04132000, 8888 stride 256). Each target's guest-word snapshot is
+taken at its first draw of the frame (833 and 834), after the SIGNAL, so the bloom binds 835, 837 and 838 still find
+their target images, and frame 6016 is unchanged (below). A target that the depth write overwrites between its
+first draw and a bind would be decoded from guest memory instead, which is what the PSP would show there.
+
+`PURE_NO_DEPTH_READBACK=1` turns it off; `PURE_TRACE_DEPTH_READBACK=1` prints one line per write-back with the z
+range and the time. The framework has no per-game hook for this (`GameProfile` would need a field, and the profile
+lives in `src/`), so it is on for every game: a game pays one GPU wait per SIGNAL interrupt that has a handler. Wipeout
+Pure raises one per race frame and none in its frontend.
+
+### The flare with and without it
+
+`out/019/drive.txt` is the race route plus `6100:pad a 3000` (Cross held, no steering: the Feisar runs along the
+first straight's left wall into the pillars). Two runs of it to frame 7500 with the throwaway trace, write-back on and
+`PURE_NO_DEPTH_READBACK=1`; the player's path is the same in both (ship probe at frame 6690: dist 1464.906 and
+1464.895). Frames 6250-7499 (1250), by how many of the 16 sun samples hold geometry (z above 30), with the alpha of
+the flare's first element (the sun glow; the draw is the 60-vertex strip on the CLUT8 64x64 atlas, which the game
+moves between 0x0968A4B0 in RAM and 0x0417B640 or 0x0417DA80 in VRAM):
+
+| Sun samples covered | Frames (on) | Flare drawn (on) | First alpha (on), mean (range) | Off |
+|---|---|---|---|---|
+| 0 (all read 22-24) | 510 | 510 | 128.6 (109-157) | every frame reads 0 |
+| 1-3 | 14 | 14 | 117.7 (98-134) | |
+| 4-7 | 34 | 33 | 96.3 (68-118) | |
+| 8-11 | 22 | 22 | 69.0 (38-79) | |
+| 12-15 | 28 | 24 | 30.0 (9-40) | |
+| 16 | 642 | 6 (alpha 0) | 0 | |
+| all | 1250 | 609 | | 1250 drawn, first alpha 147.9 (109-182) |
+
+So the game scales the flare by the share of samples that see the sky and drops the draw when none do. Without the
+write-back every sample reads 0, which the game takes as sky, and the flare is drawn in every frame.
+
+Frame 6690 (`out/019/drive_on/frame_6690.png`, `out/019/drive_off/...`): the sun is behind the left pillar, all 16
+samples read 3187-3224. With the write-back there is no flare; without it the pillar is washed out by the glow and
+the rings. Mean luma (0.299 R + 0.587 G + 0.114 B) in PSP (100,40 90x100) around the sun: 105.2 on, 176.5 off.
+Frame 6016 (open sky on the grid): the samples read 24 with it on and 0 with it off, the flare is drawn in both
+(first alpha 121, the others 60-108, jittered by the game from frame to frame either way), the same region is 225.7
+on and 225.8 off (PPSSPP 221.1), and `out/019/hud.png` is 0.0676 against ref/vineta_k_start.png at tol 32 (0.0676
+with it off; 0.0740 in another run with it on, where the AI field differed).
+
+Cost, the same drive script to frame 7500 without the throwaway trace, `PURE_PERF=log`, averaged over the 25
+one-second `[perf]` lines between the `[pure] frame 6000` and `[pure] frame 7500` marks, and the 1500
+`PURE_TRACE_DEPTH_READBACK` lines in the same frames:
+
+| | Off | On |
+|---|---|---|
+| fps (game fps) | 59.93 (59.92) | 59.94 (59.93) |
+| frame avg / max ms | 16.70 / 18.74 | 16.70 / 18.72 |
+| guest / render / pacing wait ms | 2.51 / 1.31 / 12.86 | 2.50 / 1.52 / 12.67 |
+| GPU ms a frame | 0.80 | 0.90 |
+| write-back, total (GPU wait) ms | | mean 1.07 (0.90), median 0.95 (0.77), max 15.1 (14.9) |
+
+The race is held to 60 fps by the game's pacing either way; the write-back takes about 1 ms of the 16.7 ms frame
+(6.4%), 0.9 ms of it waiting for the GPU to finish the frame's opaque world, which with the write-back off would
+overlap the CPU's work instead. The copy and the conversion are the other 0.15 ms.
+
 ## Reproducing
 
 ```
@@ -416,4 +527,17 @@ $P tools/run_boot.py --script out/011/route.txt --frames 6045 --shots out/011/co
 $P tools/run_boot.py --script out/011/route.txt --frames 6030 --shots out/011/gel --max-lines 1500000 \
   --env PURE_FRAME_LOG=1 --env PURE_TRACE_GE_LIST=325000:30000 out/011/gelist.log
 # run 325000 is frame 5938 and the log cap ends in frame 5978; frame 5977 replayed with gelist --all
+
+# task 019: the depth write-back. The read addresses and the flare alphas came from a throwaway edit (a line per
+# guest load from the depth buffer's bytes in GuestMemory::aot_load*_slow, and the vertex alphas of 60-vertex draws
+# on a 64x64 texture in VulkanRenderer::submit); the runs below without it give the frames and the timings.
+(grep -v shot ~/dev/pure-recomp/out/race/route.txt; echo "6016:shot hud") > out/019/route.txt
+(cat out/019/route.txt; echo "6100:pad a 3000") > out/019/drive.txt
+$P tools/run_boot.py --script out/019/route.txt --frames 6045 --shots out/019/shots out/019/hud.log
+$P tools/run_boot.py --script out/019/drive.txt --frames 7500 --shots out/019/drive_on --every 30 \
+  --max-lines 400000 --env PURE_FRAME_LOG=1 --env PURE_TRACE_DEPTH_READBACK=1 --env PURE_WATCH_SHIP=1 out/019/drive_on.log
+#   and the same with --env PURE_NO_DEPTH_READBACK=1 into out/019/drive_off
+$P tools/run_boot.py --script out/019/drive.txt --frames 7500 --shots out/019/perf_on --max-lines 400000 \
+  --env PURE_FRAME_LOG=100 --env PURE_PERF=log --env PURE_TRACE_DEPTH_READBACK=1 out/019/perf_on.log
+#   and the same with --env PURE_NO_DEPTH_READBACK=1 into out/019/perf_off.log
 ```
