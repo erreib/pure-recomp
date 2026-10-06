@@ -57,6 +57,24 @@ Last updated: 2026-10-06 (session 4; see "Resume" below)
 | Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
 
+## Follow-ups (collected 2026-10-06; none blocks a milestone)
+
+| Item | Where it came from | Note |
+|---|---|---|
+| Vulkan backend loses column 0 / row 0 of transformed draws whose GE viewport is offset (the race HUD) | task 025 | a vendor patch: viewport into clip space, `VkViewport` the whole target, as Metal does; moves Vulkan's race_hud slightly; upstream candidate |
+| Cross-queue ordering between the Metal backend and the Metal shell relies on Metal's resource tracking | task 027 | an `MTLSharedEvent` the backend signals at the flip would make it explicit |
+| Block transfers and `read_back_framebuffer` from a rendered target are unexercised by any recording | task 025 | the race copies from main memory only; a scene that copies a rendered target (other tracks, Zone) needs a recording |
+| Point and spot lights, specular, reversed normals ported but unexercised | task 024 | a recording of a night or tunnel track |
+| Suite "measured" column is Vulkan's; a Metal run reports every scene as moved | tasks 023, 024 | task 028 |
+| `run_boot.py --script` implies a window and leaves audio on; a `--shell headless` flag | task 026 | task 028 |
+| Menu text "Graphics: Vulkan on ..." and frame-rate rows under the Metal shell | task 027 | cosmetic, `ui/menu.cpp` (vendor) |
+| Format version 2: seed targets from a Begin record so a cold replay matches its recording exactly | task 022 | only if a Metal-against-PPSSPP cold start is ever needed |
+| Zone has no racing line (the ship runs out of shield at the first barrier, zone 6) | task 018 | a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`, or Erik's recorded lap |
+| Time Trial and Free Play on the other Alpha tracks (budgets 11000 untested; the 30-fps modes read the live file every 10 flips) | task 018 | run with `--no-damage` |
+| Higher classes and leagues need unlocks a fresh profile lacks | M5 | a test-only unlock switch (the unlock routine is at 0x08948870, docs/research.md) or a prepared save; then the whole sweep |
+| Multiple profiles need a save-list dialog; the finished-race autosave leg | task 014 | M5 breadth |
+| Erik's recorded lap (`tools/pad_record.py`) to replace the AI-line follower where it struggles | session 2 | the command and keys are in the Resume notes |
+
 ## Resume (session 4, 2026-10-06)
 - `main` = ad219ee (Erik's third fast-forward, 2026-10-05). `batch/m2` is ahead with tasks 016, 017, 018, 019, 020, 021 and
   003 (diagnosis record) merged, D-003, briefs 022 and 023, `tools/verify_task.sh` (base-10 fix: `018` works).

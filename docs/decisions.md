@@ -9,6 +9,7 @@
 | D-005 | pending | Savedata directory layout, DLC-ready | open (M5) |
 | D-006 | 2026-10-05 | Licence of our code: GPL-2.0-or-later | accepted |
 | D-007 | 2026-10-06 | Shell seam: `host::Shell` behind the HLE; Vulkan shell adapted, headless shell added, Metal shell implemented against it | accepted |
+| D-008 | 2026-10-06 | Metal shell and Metal backend are the default on macOS; Vulkan stays the portable path, selectable | accepted |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -77,4 +78,20 @@ Fable). The Metal presenter can show a Metal texture directly rather than throug
 Alternatives: showing Metal pictures through MoltenVK's Metal-object import in the Vulkan shell (keeps one shell, but
 the port would still need Vulkan on macOS, against D-002's "native Metal"); a profile-level pad injection into
 sceCtrl for headless runs only (smaller, but a second input path to keep in step with the script format).
+Status: accepted.
+
+## D-008  2026-10-06  Metal by default
+Context: D-002 bootstrapped on Vulkan through MoltenVK and planned a native Metal backend behind a seam. Tasks 021 to
+027 delivered the seam, the Metal backend (five regression scenes within 0.0002 to 0.038 of PPSSPP, closer than the
+Vulkan path's 0.030 to 0.067, which draws at 2x and loses edges in the reduction), the shell seam and a Metal shell.
+`PURE_SHELL=metal PURE_GE_BACKEND=metal` runs the game with no Vulkan or MoltenVK in the process at 60 fps.
+Decision: on macOS the Metal shell and backend are the default (set by our entry point when the variables are unset;
+task 028). The Vulkan shell and backend stay built and selectable (`PURE_SHELL=vulkan PURE_GE_BACKEND=vulkan`) as the
+portable path and as the A/B reference through ge_replay. The regression suite keeps a measured column per backend
+and runs the Metal path by default; renderer changes are gated on both paths.
+Consequences: MoltenVK is no longer needed to play, only to build and run the Vulkan path; the app bundle (M7) ships
+Metal only unless the Vulkan path is asked for. Vulkan-specific interface rows (resolution, texture packs) are absent
+under the Metal shell until the backend grows them (enhancements E3, E5).
+Alternatives: keep Vulkan the default until the enhancements land (rejected: the Metal path is the more faithful one
+today and is the one Erik asked for); drop Vulkan (rejected: it is the portable path and the differential reference).
 Status: accepted.
