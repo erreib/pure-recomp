@@ -8,6 +8,7 @@
 | D-004 | pending | Determinism: virtual clock, fixed RTC, frame-indexed input | open (M3) |
 | D-005 | pending | Savedata directory layout, DLC-ready | open (M5) |
 | D-006 | 2026-10-05 | Licence of our code: GPL-2.0-or-later | accepted |
+| D-007 | 2026-10-06 | Shell seam: `host::Shell` behind the HLE; Vulkan shell adapted, headless shell added, Metal shell implemented against it | accepted |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -60,4 +61,20 @@ day be the source of a ported piece. Erik may publish the repo and is fine with 
 Decision: our code is GPL-2.0-or-later. No PPSSPP code is copied until a decision records it; game assets,
 generated code and DLC keys never enter git.
 Consequences: compatible with every dependency; porting from PPSSPP later needs only a decision entry.
+Status: accepted.
+
+## D-007  2026-10-06  Shell seam
+Context: D-003 put the GE behind `GeBackend` but left the window shell fused in `VulkanRenderer`. Task 021 showed the
+two consequences: a non-Vulkan backend's picture has nothing to show it, and a run without a window has no pad, so
+every route runs windowed and the headless null backend proves nothing about the frontend.
+Decision: a second interface, `host::Shell` (docs/ge-backend.md section 8), with three implementations: `VulkanShell`
+adapting the existing renderer (no behaviour change: the regression suite is the gate), `HeadlessShell` reading the
+input script at pad level with no window, and `MetalShell` in our sources (task 027). The SDL pad sampling is shared
+code. `<prefix>_SHELL` selects; `<prefix>_NO_RENDER` keeps its meaning.
+Consequences: patch 0010 (task 026) is the second mechanical vendor patch of the series and an upstream candidate
+like 0009. Headless routes become possible but stay slow until the kernel's host-wait sleep is changed (patch 0011,
+Fable). The Metal presenter can show a Metal texture directly rather than through a read-back.
+Alternatives: showing Metal pictures through MoltenVK's Metal-object import in the Vulkan shell (keeps one shell, but
+the port would still need Vulkan on macOS, against D-002's "native Metal"); a profile-level pad injection into
+sceCtrl for headless runs only (smaller, but a second input path to keep in step with the script format).
 Status: accepted.

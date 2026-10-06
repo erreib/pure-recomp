@@ -67,7 +67,10 @@ interpolation (it works on presented images and stays in the shell), fast-forwar
 
 021 seam + null + record + Vulkan adapter (vendor patch; no behaviour change for Vulkan: frame_regress must be
 unchanged) → 022 ge_replay → 023 Metal backend, first pictures (frontend, through-mode 2D) → 024 Metal 3D (race
-frame against Vulkan and PPSSPP) → 025 Metal stencil/bloom/depth write-back → 026 Metal presenter + UI.
+frame against Vulkan and PPSSPP) → 025 Metal stencil/bloom/depth write-back → 026 the shell seam (section 8: `Shell`
+interface, Vulkan shell adapter, headless shell with pad from the input script; vendor patch 0010) → 027 Metal
+presenter + UI (a `MetalShell` against section 8). 022 and 023 run in parallel after 021; 026 runs in parallel with
+them (it touches the vendor only).
 
 ## 6. What landed (task 021, 2026-10-06)
 
@@ -167,3 +170,66 @@ the same run. Frame 6016's recorded image is pixel-identical to the suite's `rac
 (the lens-flare SIGNAL); frame 6016 has 12 block transfers (small 16-bit rectangles from RAM into VRAM at
 0x041C9700 and up), the other two none. Memory: 4.8 MB in the first frame (VRAM included), 1.6 MB in each of the
 others, mostly the 1 MB back buffer and the two 256 KB bloom buffers the bloom chain samples.
+
+## 8. The shell seam (D-007, 2026-10-06)
+
+Section 6 left the shell fused in `VulkanRenderer`: window, SDL events, pad sampling, scripted input, ImGui, frame
+pacing and interpolation, the swapchain. A Metal backend's `PresentedImage` has nothing to show it, and a run without
+a window has no pad (docs/status.md Blockers, "Headless input"). The second seam puts the shell behind an interface
+too, so the HLE talks to a `Shell` and a `GeBackend` and nothing else.
+
+### 8.1 The interface
+
+`portablekit::host::Shell` (vendor patch 0010, `host/shell/shell.hpp`), the methods the HLE and the UI layer call
+today on `VulkanRenderer` outside the GE (the list in `vulkan_renderer.hpp`, minus what section 1 moved to the
+backend and minus the texture-pack and internal-scale settings, which are the Vulkan backend's own):
+
+| Group | Methods |
+|---|---|
+| Lifecycle | `initialize(const ShellConfig &, std::string &error)`, `shutdown()`, `available()`, `name()`, `has_window()` |
+| Events and input | `pump_events() -> bool` (false when the window closed), `sample_pad()`, `pad() -> PadState`, `take_mouse_motion()`, `take_touch_motion()`, `take_touch_menu()`, `touch_controls_visible()`, `touch_controls()`, `mouse_captured()`, `quit_requested()`, `request_quit()`, `set_game_input(bool)`, `set_pointer_free(bool)`, `set_scripted_key(int, bool)`, `set_scripted_input(bool)`, `set_event_hook(fn)`, `gamepad() -> SDL_Gamepad *`, `window() -> SDL_Window *` (null without one) |
+| Presenting | `present(const PresentedImage &, std::uint32_t display_address, real_time) -> bool`, `present_due()`, `present_until(wake)`, `pause_interpolation()`, `set_fast_forward(bool)`, `hold_frame(bool)`, `capture_window(path)`, `game_aspect()`, `display_refresh()`, `frame_rate_now()`, `set_frame_rate(...)`, `set_frame_rate_auto(bool)`, `set_window_scale`, `set_fullscreen`, `set_present_mode`, `supports_present_mode`, `set_aspect`, `set_sharp_screen`, `set_perf_overlay`, `device_name()` |
+| Interface (ImGui) | `initialize_ui(error)`, `shutdown_ui()`, `begin_ui_frame()`, `set_ui_draw_data(ImDrawData *)`, `present_ui(bool show_game)` |
+
+`PadState`, `MouseMotion`, `CameraReading` and the scripted-mouse constant move to `host/shell/shell.hpp` (the
+renderer header keeps using them). `ShellConfig` is today's `RendererConfig` (the title).
+
+### 8.2 Implementations
+
+- `VulkanShell` (vendor, patch 0010): an adapter over `VulkanRenderer`, as `VulkanGeBackend` is for the GE side. The
+  `vulkan` GE backend needs this shell (`BackendConfig::vulkan_shell` is its renderer). `present()` ignores the image
+  argument for the Vulkan backend (the renderer shows its own target, as today) and, for a `Cpu` image from another
+  backend, uploads and shows it (`upload_frame` into a scratch target, then the usual present): that is how a Metal
+  backend's picture reaches a window before task 027, at the cost of a read-back a frame.
+- `HeadlessShell` (vendor, patch 0010): no window, no GPU. `pad()` comes from the input script
+  (`<prefix>_INPUT_SCRIPT`, the same file format) read at pad level: `pad NAME [FRAMES]` and `axis NAME VALUE`
+  set `PadState` by frame (the names `ui/input_script.cpp` accepts; `shot NAME` asks the GE backend for
+  `capture_frame` into `<prefix>_SCREENSHOT_DIR`; `quit` ends the run; mouse, key and text events are not supported
+  and are reported once). `pump_events()` is true until `quit`. `present()` counts frames. The live file
+  (`<prefix>_INPUT_LIVE`, the sweep's steering channel) is read the same way. This gives every route a headless run.
+- `MetalShell` (ours, task 027, `src/host/metal_shell.mm`): an SDL window with a `CAMetalLayer`
+  (`SDL_Metal_CreateView`), the shared SDL pad sampler, ImGui's SDL3 + Metal backends (`imgui_impl_metal.mm` is not
+  vendored; task 027 adds it under third_party or our sources), presents a `Metal` image by blitting the backend's
+  texture to the drawable, with letterboxing by `game_aspect()`.
+
+The SDL pad sampling (`VulkanRenderer::sample_pad`, the scripted keys, the gamepad attach) is extracted into
+`host/shell/sdl_pad.cpp` so `VulkanShell` and `MetalShell` share it; `ui/input_script.cpp` keeps pushing SDL events
+at `shell.window()` for the SDL shells.
+
+### 8.3 Selection and the HLE
+
+`<prefix>_SHELL=vulkan|headless|metal` (default vulkan). `<prefix>_NO_RENDER` keeps its meaning: the headless shell
+with the backend `<prefix>_GE_BACKEND` names when that backend needs no window, and no rendering at all otherwise
+(the default `vulkan` backend cannot run headless), exactly today's table in section 6. `ensure_backend` becomes
+`ensure_shell_and_backend`: the shell first, then the backend with `BackendConfig::vulkan_shell` set when the shell is
+the Vulkan one. `media().renderer` becomes `media().shell`; `active_renderer()` stays for the UI screens that need
+Vulkan itself (texture packs, device name) and returns the renderer only when the shell is the Vulkan one.
+
+### 8.4 What it does not solve
+
+Headless pace. Without a window `Kernel::pace_to_real_time` is off, and `Kernel::advance_clock` sleeps up to 1 ms of
+real time per clock step while any thread is in a `WaitType::Host` wait, which `user_main`'s `sceKernelWaitThreadEnd`
+is for the whole run: about 19 frames a second (section 6). A headless route is therefore slower than a windowed one
+until the kernel stops sleeping for waits that depend only on guest state. That is a scheduler change and stays with
+Fable (patch 0011, after 026 lands); the shell seam is designed so that nothing else is needed for fast headless
+suites afterwards.
