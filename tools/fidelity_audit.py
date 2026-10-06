@@ -100,12 +100,21 @@ def extend_modes():
         t["frames"][lg] = sum(cs.MODES["single_race"]["frames"][r] for r in cs.LEAGUES[lg]) + 4 * 3000
         t.setdefault("fresh", ["alpha"])
         added.append(("tournament", lg))
+    if "single_race_save" not in cs.MODES:
+        # Item 5 (saves and records): a Single Race that goes on past its results panel. The sweep's Tournament end
+        # rule with one race: Cross every ADVANCE_EVERY flips through ENTER TAG and the screens after it, until the
+        # rule's limit (ADVANCE_LIMIT flips) ends the cell as STUCK; the memory stick then holds what the game saved.
+        sr = cs.MODES["single_race"]
+        cs.MODES["single_race_save"] = dict(sr, end="standings", tracks=list(cs.ALPHA), fresh=list(cs.ALPHA),
+                                            races={t: [t] for t in cs.ALPHA}, leagues={"alpha": cs.ALPHA},
+                                            frames={t: sr["frames"][t] + cs.ADVANCE_LIMIT + 1000 for t in cs.ALPHA})
+        added += [("single_race_save", t) for t in cs.ALPHA]
     return added
 
 
 def is_extended(mode, track):
     return (mode in ("time_trial", "free_play") and track not in cs.ALPHA) or \
-        (mode == "tournament" and track != "alpha")
+        (mode == "tournament" and track != "alpha") or mode == "single_race_save"
 
 
 # The GE commands the framework's GE state ignores (vendor/portablekit/host/gpu/ge_state.cpp lists them at exit),
@@ -308,6 +317,9 @@ def scan_log(path, fps=60):
                 continue
             if UNDERRUN_RE.search(line):
                 add(line)
+                m = re.search(r"channel (\d+) underrun of \d+ frames \((\d+) ms\) at t=(\d+)", line)
+                if m:
+                    found.setdefault("underruns", []).append((int(m[1]), int(m[2]), round(int(m[3]) / 1e6, 2)))
                 continue
             tag = TAG_RE.match(line)
             if tag:
@@ -349,8 +361,10 @@ def wav_stats(path, start, end):
     if not m:
         return None
     z = ZERO_RE.search(out)
+    zl = next((ln.strip() for ln in out.splitlines() if ln.startswith("zero runs")), "")
+    sl = next((ln.strip() for ln in out.splitlines() if ln.startswith("silent seconds")), "")
     return {"active": float(m[1]), "active_s": int(m[2]), "seconds": int(m[3]), "clip": float(m[4]),
-            "zero_runs": int(z[1]) if z else 0}
+            "zero_runs": int(z[1]) if z else 0, "zero_detail": zl, "silent_detail": sl}
 
 
 def run_cell(mode, track, cls, opts):
@@ -525,6 +539,39 @@ def write_tables(cells, opts):
                   f"{n}, in every cell (first: {first}): " + ", ".join(names)]
     with open(os.path.join(out, "features.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
+
+    # The audio of each cell (item 4) and every two-vblank stretch (item 6), one row each.
+    aud = ["# Fidelity audit: audio from the race start (tools/fidelity_audit.py, tools/wavstats.py)", "",
+           "Active: whole seconds with RMS over 100 (wavstats' floor), as a fraction of the window. Clip: samples at "
+           "full scale. Zero runs: stretches of 50 ms or more of exact zeros inside the window. Underruns: the "
+           "capture's own lines (a buffer the game handed sceAudio late), per channel over the whole run (channel 3 "
+           "is the movies').", "",
+           "| cell | window s | mix active | mix clip | music (ch 2) active | music zero runs | sceSas (ch 1) active | "
+           "sceSas clip | underruns |", "|---|---|---|---|---|---|---|---|---|"]
+    st_rows = ["# Fidelity audit: the two-vblank stretches of the races (tools/fidelity_audit.py)", "",
+               "Runs of three or more race flips in a row whose virtual time step is two vblanks (the end-of-frame "
+               "routine's locked path, docs/timing.md), from the `[pure] ship` lines' `t=`; the race, the lap begun "
+               "(the lap clock's restarts plus one), the track distance and the speed where each starts.", "",
+               "| cell | race | lap | distance m | km/h | flips | seconds |", "|---|---|---|---|---|---|---|"]
+    for (mode, track, cls), r in recs:
+        if not r:
+            continue
+        name = cell_label(mode, track, cls)
+        wav = r.get("wav") or {}
+        under = ", ".join(f"ch {k.split('channel ')[1].split()[0]}: {n}" for k, n in sorted(r.get("features", {}).items())
+                          if "underrun" in k) or "0"
+        if "mix" in wav:
+            mx, mu, sa = wav["mix"], wav.get("music", {}), wav.get("sas", {})
+            aud.append(f"| {name} | {mx['seconds']} | {mx['active']:.2f} | {mx['clip']:.6f} | "
+                       f"{mu.get('active', float('nan')):.2f} | {mu.get('zero_runs', '-')} | "
+                       f"{sa.get('active', float('nan')):.2f} | {sa.get('clip', float('nan')):.6f} | {under} |")
+        for s in r.get("stretches", []):
+            st_rows.append(f"| {name} | {s['race']} | {s['lap']} | {s['dist']} | {s.get('kmh', '-')} | {s['flips']} | "
+                           f"{s['seconds']:.2f} |")
+    with open(os.path.join(out, "audio.md"), "w") as f:
+        f.write("\n".join(aud) + "\n")
+    with open(os.path.join(out, "stretches.md"), "w") as f:
+        f.write("\n".join(st_rows) + "\n")
     return os.path.join(out, "matrix.md"), os.path.join(out, "features.md")
 
 
@@ -748,7 +795,7 @@ def main(argv=None):
             rec = load(opts.out, name)
             if not rec or not rec.get("log") or not os.path.exists(os.path.join(ROOT, rec["log"])):
                 continue
-            for k in ("features", "ignored", "stretches", "tracks", "saves", "exit", "min_fps", "unimplemented",
+            for k in ("features", "ignored", "stretches", "tracks", "saves", "underruns", "exit", "min_fps", "unimplemented",
                       "unimplemented_list", "stopped", "race_start_s", "end_s", "races"):
                 rec.pop(k, None)
             rec.update(scan_log(os.path.join(ROOT, rec["log"]), cs.MODES[c[0]].get("fps", 60)))

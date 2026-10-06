@@ -1,0 +1,6 @@
+# PPSSPP route: answer YES on SAVE PROFILE instead of NO (task 035, 2026-10-06). Chain it right after frontend.txt:
+# its empty item at 5000 replaces frontend.txt's DOWN there (a later item for the same frame wins), so the CROSS at
+# 5100 confirms YES and the game opens the system's save dialog (sceUtilitySavedata LISTSAVE, the profile list
+# P0000 to P0004). The dialog's own presses follow in save_dialog.txt. This writes UCUS98612P0000 to PPSSPP's memory
+# stick (~/.config/ppsspp/PSP/SAVEDATA); the other routes expect no profile save there, so move it away afterwards.
+5000:, 5008:
