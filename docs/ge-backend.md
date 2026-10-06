@@ -68,3 +68,102 @@ interpolation (it works on presented images and stays in the shell), fast-forwar
 021 seam + null + record + Vulkan adapter (vendor patch; no behaviour change for Vulkan: frame_regress must be
 unchanged) → 022 ge_replay → 023 Metal backend, first pictures (frontend, through-mode 2D) → 024 Metal 3D (race
 frame against Vulkan and PPSSPP) → 025 Metal stencil/bloom/depth write-back → 026 Metal presenter + UI.
+
+## 6. What landed (task 021, 2026-10-06)
+
+Patch 0009 (`patches/0009-ge-backend-seam.patch`) adds the seam to the vendored framework. Files, all under
+`vendor/portablekit/`:
+
+| File | What |
+|---|---|
+| `host/gpu/ge_backend.hpp`, `.cpp` | `GeBackend`, `BackendConfig`, `PresentedImage`, the registry (`register_backend`, `make_backend`, `backend_names`, `BackendRegistration`), `selected_backend()` (`<prefix>_GE_BACKEND`, vulkan when unset or empty), a BMP encoder |
+| `host/gpu/vulkan_ge_backend.cpp` | `vulkan`: the adapter over `VulkanRenderer` (renderer sources) |
+| `host/gpu/null_backend.cpp` | `null` (system-layer sources: built without Vulkan) |
+| `host/gpu/record_backend.cpp`, `ge_record_format.hpp` | `record` and the `.gerec` format (Writer and Reader, for ge_replay) |
+| `host/gpu/vulkan_renderer.hpp`, `.cpp` | one new method, `display_image(address)`: the target `present()` would show, as a `PresentedImage`; it changes nothing |
+| `host/hle/hle_media.cpp` | every GE call goes to the backend; the window shell stays the `VulkanRenderer` |
+| `cmake/PortableKit.cmake` | the four new sources (outside the brief's "May touch", but the new files cannot be built without it) |
+
+### The interface as landed
+
+As in section 1, with these differences:
+
+- `block_transfer(const BlockTransfer &, GuestMemory &)`: the memory is not const, because the backend writes a
+  rendered source back into it. It is called before the HLE copies the rows; the copy itself stays in the HLE (it is
+  guest memory), followed by `begin_display_list()` as before.
+- Added: `name()`; `needs_window()` (asked before `initialize`: the Vulkan backend draws with the shell's device and
+  targets); `gpu_decode()` and `check_gpu_decode()` (whether `GeState` hands transformed draws over undecoded; false
+  unless a backend draws raw vertices, as Vulkan can with `<prefix>_GPU_DECODE=1`).
+- `BackendConfig`: `vulkan_shell` (the window's `VulkanRenderer`, null without a window), `internal_scale` and
+  `sharp_textures` (from the settings; the Vulkan backend keeps following the shell's settings itself).
+- `PresentedImage`: `api` (None, Cpu, Vulkan, Metal), `address`, `width`, `height`, `pixels` (Cpu), `image` and
+  `view` (the API handles as integers: for Vulkan the target's `VkImage` and `VkImageView`).
+- The frame, as `present_frame` drives it: `upload_frame` (a main-memory framebuffer), the interface,
+  `write_back_frame`, `present_image(address)`, then the shell's `VulkanRenderer::present`, the optional capture
+  (`capture_frame`, `frames_presented`, `draws_submitted` for the `[render] frame N (D draws)` line), and
+  `begin_frame()` for the next frame. `begin_frame()` is also called once after `initialize`.
+
+What stays fused in the Vulkan pair, and why no output changed: the renderer still begins its frame lazily at the
+first draw, upload or present, and ends it in `VulkanRenderer::present`, which also does the frame write-back's copy,
+frame interpolation and the swapchain. So `VulkanGeBackend::begin_frame()` does nothing and `present_image()` only
+names the image (`display_image`); the shell's present shows the same target. Every other method forwards to the
+renderer method the HLE called before, with the same arguments, at the same point. The frame regression suite gave
+the same fractions before and after (all five scenes +0.0000), and all five captures were pixel-identical to the
+ones before the patch.
+
+### Selection
+
+`ensure_backend()` in `hle_media.cpp` (also behind `ensure_renderer()`, which the setup screens call first) makes the
+backend `<prefix>_GE_BACKEND` names, and the window shell unless `<prefix>_NO_RENDER` is set:
+
+| `GE_BACKEND` | `NO_RENDER` unset | `NO_RENDER` set (any value, also empty) |
+|---|---|---|
+| vulkan (default) | window, Vulkan draws (as before) | no rendering at all, no draw sink (as before) |
+| null | window; the shell's present shows its own, empty targets (black); scripted input works | headless, no window, no GPU, every draw reaches the backend |
+| record | as its inner backend | as its inner backend |
+
+An unknown name prints the registered ones and falls back to vulkan. A backend that needs no window also runs when the
+window cannot be made.
+
+### null
+
+Counts draws, block transfers and uploads, returns a black 480x272 Cpu image, writes it for `capture_frame`. It
+prints `[render] null backend: frame N, D draws submitted (K in the last 600 frames, F fps)` every 600 frames and a
+total at exit. `PURE_GE_BACKEND=null tools/run_boot.py --frames 2000 --env PURE_NO_RENDER=` boots headless to frame
+2000 with 19615 draws submitted (the language screen draws 11 a frame from frame ~690).
+
+Speed: 2000 frames take 106 s with the null backend and 106 s with `PURE_NO_RENDER=1` and no backend at all, about
+19 game frames a second (63% of real time). `PURE_PERF=log` puts render time at 0.0 ms a frame, and the process
+runs at about 4% of one core (`ps`: 1.95 s of CPU in 46 s), about 2 ms of CPU a frame, which would be some 450
+frames a second if nothing slept. The limit is the kernel, not the seam: `user_main` waits for the main thread
+to end (`sceKernelWaitThreadEnd`, a `WaitType::Host` wait) for the whole game, and while any thread is in such a wait
+the unpaced clock sleeps up to 1 ms of real time per step (`Kernel::advance_clock`, kernel.cpp:451). The brief's
+"> 200 fps" needs that changed (task 021, open questions).
+
+### record and the .gerec format
+
+`PURE_GE_BACKEND=record PURE_GE_RECORD=<file> PURE_GE_RECORD_AT=N PURE_GE_RECORD_FRAMES=M PURE_GE_RECORD_INNER=<name>`.
+Frames are numbered as the inner backend's `frames_presented()` counts them once shown, the number the
+`[render] frame N (D draws)` lines carry. Recording starts at the `begin_frame()` after frame N-1 and each frame ends at
+the `begin_frame()` after its flip, where the inner backend's `capture_frame()` gives its image. The format is
+documented at the top of `ge_record_format.hpp`: an 8-byte magic `PKGEREC\0`, a u32 version (1), then records of a u8
+kind, a u32 size and a payload. Kinds: Begin, Memory (guest bytes a call reads: whole VRAM first, then texels and
+palettes and block-transfer sources, each written only when it changed since last written), Words (one word every 256
+bytes of a target's area at its first draw in a frame, what patch 0003's lookup compares), DisplayList, Draw (the
+whole `DrawCall`, decoded vertices and indices, raw vertex bytes and bone matrices when present), Transfer, ReadBack,
+WriteBackFrame, WriteBackDepth, Upload, FrameEnd (frame number, display address, the inner backend's counters, the
+frame's draw and record counts, the image as a BMP), End.
+
+`tools/gerec/gerec_dump.py FILE [--summary] [--images DIR]` lists the records, parses every Draw in full and checks
+it fills its payload, and prints a per-frame table: Draw records counted in the stream, the count FrameEnd states, and
+the change of the inner backend's cumulative counter since the frame before (Begin holds it before the first frame).
+It exits 1 when they disagree or the file is cut short.
+
+The race recording of the brief (`AT=6014 FRAMES=3`, Vulkan inner, `main_menu.txt` + `single_race.txt` on an empty
+stick): 23.4 MB, 4250 records; frames 6014, 6015, 6016 hold 906, 905 and 906 draws, equal to the Vulkan counter's
+steps (342830 before, then 343736, 344641, 345547) and to the screenshot line `[render] frame 6014 (343736 draws)` of
+the same run. Frame 6016's recorded image is pixel-identical to the suite's `race_hud` capture, and the run's own
+`race_hud` shot is identical too, so recording does not disturb what Vulkan draws. Each frame has one WriteBackDepth
+(the lens-flare SIGNAL); frame 6016 has 12 block transfers (small 16-bit rectangles from RAM into VRAM at
+0x041C9700 and up), the other two none. Memory: 4.8 MB in the first frame (VRAM included), 1.6 MB in each of the
+others, mostly the 1 MB back buffer and the two 256 KB bloom buffers the bloom chain samples.
