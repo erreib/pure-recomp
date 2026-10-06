@@ -1,6 +1,6 @@
 # 027: The Metal shell: a window with a CAMetalLayer, the shared SDL pad, ImGui on Metal
 
-Milestone: M6 | Branch: task/027-metal-shell | Status: OPEN
+Milestone: M6 | Branch: task/027-metal-shell | Status: MERGED 2026-10-06 (f5c330f)
 
 ## Goal
 With the shell seam (task 026, patch 0010) and the Metal GE backend (task 023), the port still shows Metal's
@@ -193,4 +193,20 @@ Open questions:
    a real CPU backend would want two.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 027`): twelve
+patches reproduce vendor at 8b0c3fe; `--shell metal --backend metal` lang 0.0002, title 0.0002, profile 0.0002 (the
+blinking cursor, as task 023 saw), 1m 13s; the Metal-shell frontend route reaches frame 2200 with `Profile_part1`
+opened and no Vulkan or MoltenVK line, 1 GPU wait in 2200 frames; then `tools/frame_regress.sh` (Vulkan) 5/5 at
+0.0544, 0.0302, 0.0543, 0.0331, 0.0672, +0.000 each (7m 7s).
+Spot-read: patch 0012 (the platform init moved into each shell's `initialize_ui`, both shutdowns paired),
+`metal_shell.mm` (window and layer setup, the event pump and `SdlPad`, `draw`: next drawable, letterboxed picture, the
+interface in the same pass, present, the pending window capture read back), the CMake and `frame_regress.sh --shell`
+changes, the two ImGui files (verbatim 1.92.9b).
+Merged: f5c330f into batch/m2; 57608da adds Dear ImGui's MIT licence beside its two files (open question 3).
+Notes: open question 1 (nearest sampling at whole multiples of 480x272, bilinear only at other sizes): keep; it is
+what the Vulkan shell does at 2x and it keeps the suite's fractions. CoreGraphics for the sRGB colour space: fine.
+Open question 4 (the shell samples the backend's targets from its own queue, relying on Metal's resource tracking
+across queues of one device): record as a backend follow-up (an `MTLSharedEvent` the backend signals at the flip),
+to be done in 025 or after. Open question 5: the menu's "Graphics: Vulkan on" text and the frame-rate rows under this
+shell are cosmetic; the stale `metal_shell.hpp` comment is fixed here. The read-back hand-over of task 023 now serves
+the Vulkan shell only.

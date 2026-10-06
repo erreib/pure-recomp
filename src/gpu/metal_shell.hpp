@@ -1,4 +1,4 @@
-// The Metal backend's picture in the window shell, until the shell has a Metal presenter (task 026).
+// The Metal backend's picture in the window shell, under the Vulkan shell only; the Metal shell (task 027) shows the texture itself.
 //
 // The window and its captures belong to the Vulkan shell (VulkanRenderer): it presents its own target at
 // the display address, and the input script's `shot` steps, which the frame regression suite captures
