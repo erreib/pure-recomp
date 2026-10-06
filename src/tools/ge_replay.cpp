@@ -5,7 +5,7 @@
 // with each other, and can bisect a frame to the first draw whose pictures differ.
 //
 //   PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--compare] [--tol T] [--max-frac F]
-//                                  [--frames A[-B]] [--a NAME --b NAME [--first-diff]] [--quiet]
+//                                  [--frames A[-B]] [--cut N] [--a NAME --b NAME [--first-diff]] [--quiet]
 //
 // It lives in the game's executable because the host layer is compiled into it and nowhere else (there is no host
 // library to link a tool against). The comparison is tools/imgdiff.py's, so the numbers agree with it.
@@ -605,6 +605,7 @@ struct Options {
     double max_frac{};
     std::uint32_t first{};
     std::uint32_t last{0xFFFFFFFFu};
+    std::size_t cut{};  // --cut N: the last frame replayed ends after its Nth draw (0: whole)
     std::string a;
     std::string b;
     bool first_diff{};
@@ -613,13 +614,15 @@ struct Options {
 
 const char *const kUsage =
     "usage: PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--compare] [--tol T] [--max-frac F]\n"
-    "                                    [--frames A[-B]] [--a NAME --b NAME [--first-diff]] [--quiet]\n"
+    "                                    [--frames A[-B]] [--cut N] [--a NAME --b NAME [--first-diff]] [--quiet]\n"
     "  --backend NAME  the GE backend to replay into (default null)\n"
     "  --out DIR       write each replayed frame as DIR/frame_N.bmp (DIR/a/ and DIR/b/ with --a/--b)\n"
     "  --compare       compare each frame with its recorded image (tools/imgdiff.py's comparison)\n"
     "  --tol T         a pixel differs when a channel differs by more than T (default 0)\n"
     "  --max-frac F    a frame passes when at most this fraction of its pixels differ (default 0)\n"
     "  --frames A[-B]  report and compare frames A to B only (earlier ones are replayed silently, later ones not)\n"
+    "  --cut N         the last frame replayed (B, or the recording's last) only up to and including its Nth draw,\n"
+    "                  then presented and captured (--out keeps the pictures)\n"
     "  --a, --b NAME   replay into two backends at once and compare their pictures per frame\n"
     "  --first-diff    with --a/--b: bisect the first failing frame to the first draw whose pictures differ\n"
     "  --quiet         print only failures and the summary\n"
@@ -685,6 +688,11 @@ int parse(int argc, char **argv, Options &options) {
         } else if (arg == "--frames") {
             if (!value(text) || !parse_frames(text, options.first, options.last))
                 return usage_error("--frames takes A or A-B (frame numbers, A <= B)");
+        } else if (arg == "--cut") {
+            if (!value(text) || text.empty() || text.find_first_not_of("0123456789") != std::string::npos ||
+                std::strtoull(text.c_str(), nullptr, 10) == 0u)
+                return usage_error("--cut takes a draw count of 1 or more");
+            options.cut = static_cast<std::size_t>(std::strtoull(text.c_str(), nullptr, 10));
         } else if (arg == "--a") {
             if (!value(options.a)) return usage_error("--a needs a backend name");
         } else if (arg == "--b") {
@@ -787,6 +795,11 @@ public:
             std::cout << "\n";
         }
 
+        // --cut: the last frame the loop below replays ends after its Nth draw.
+        cut_frame_.reset();
+        if (options_.cut != 0u) {
+            for (std::size_t f = 0; f < file_.frames.size() && file_.frames[f].number <= options_.last; ++f) cut_frame_ = f;
+        }
         std::size_t replayed = 0u, compared = 0u, passed = 0u;
         std::optional<std::size_t> first_failing;
         double worst = -1.0;
@@ -797,7 +810,8 @@ public:
             if (frame.number > options_.last) break;
             const bool wanted = frame.number >= options_.first;
             for (Lane *lane : lanes) lane->ms = 0.0;
-            for (std::size_t r = frame.first; r < frame.end; ++r) apply(r, file_.records[r], lanes);
+            const std::size_t end = records_end(f);
+            for (std::size_t r = frame.first; r < end; ++r) apply(r, file_.records[r], lanes);
             std::vector<std::string> captures(lanes.size());
             std::vector<bool> captured(lanes.size(), true);
             for (std::size_t i = 0; i < lanes.size(); ++i) {
@@ -812,6 +826,11 @@ public:
             std::ostringstream line;
             line << "[replay] frame " << frame.number << ": " << frame.draws.size() << " draws, "
                  << (frame.end - frame.first) << " records, ";
+            if (cut_frame_ == f)
+                line << (options_.cut <= frame.draws.size()
+                             ? "cut after draw " + std::to_string(options_.cut) + " (" + std::to_string(end - frame.first) +
+                                   " records), "
+                             : "--cut " + std::to_string(options_.cut) + " reaches past its last draw: whole, ");
             for (std::size_t i = 0; i < lanes.size(); ++i) {
                 total_ms[i] += lanes[i]->ms;
                 line << (i != 0u ? " + " : "") << format_ms(lanes[i]->ms);
@@ -908,6 +927,14 @@ public:
     }
 
 private:
+    // Where frame `f`'s records end: its FrameEnd, or with --cut, for the last frame replayed, the record after its
+    // Nth Draw.
+    std::size_t records_end(std::size_t f) const {
+        const Frame &frame = file_.frames[f];
+        if (cut_frame_ != f || options_.cut > frame.draws.size()) return frame.end;
+        return frame.draws[options_.cut - 1u] + 1u;
+    }
+
     // Replays the file from its Begin into fresh lanes A and B: every frame before `f` whole, then frame `f`'s
     // records up to and including its `n`th Draw, then a flip; returns how the two pictures compare.
     std::optional<Diff> prefix(std::size_t f, std::size_t n, std::string &error) {
@@ -940,7 +967,8 @@ private:
     // Bisects frame `f` to the smallest number of its draws after which the two pictures differ.
     int first_diff(std::size_t f) {
         const Frame &frame = file_.frames[f];
-        const std::size_t draws = frame.draws.size();
+        // A frame cut with --cut is bisected within the draws it was cut to.
+        const std::size_t draws = cut_frame_ == f ? std::min(options_.cut, frame.draws.size()) : frame.draws.size();
         if (draws == 0u) {
             std::cout << "[replay] frame " << frame.number
                       << " has no draws: the difference comes from its uploads, transfers or write-backs\n";
@@ -990,6 +1018,7 @@ private:
     const Options &options_;
     const Recording &file_;
     std::uint32_t scale_{};
+    std::optional<std::size_t> cut_frame_;  // the frame --cut cuts, by index
 };
 
 } // namespace
