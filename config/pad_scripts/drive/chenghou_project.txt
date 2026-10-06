@@ -1,0 +1,8 @@
+# Chenghou Project steering (Single Race, Vector, Feisar; 2 DOWN on TRACK SELECTION). tools/campaign_sweep.py
+# reads this file. `follow LINE WN PREVIEW [KEY=VALUE ...]`: steer closed loop along LINE (class Tuner in the
+# sweep; the options are documented there and in config/pad_scripts/drive/vineta_k.txt).
+# The line is the AI ships' mean path from a PPSSPP race (`tools/pp_lines.py chenghou_project --downs 2`, 2026-10-05),
+# exported with `tools/campaign_sweep.py single_race chenghou_project --export-line config/pad_scripts/drive/chenghou_project.line.csv`.
+# The track coordinate wraps at about 4963 m; the grid (player, 8th) is at 1121 m and the start line at about
+# 1272 m.
+follow config/pad_scripts/drive/chenghou_project.line.csv 0.8 0.8 recover=60 absorb=2

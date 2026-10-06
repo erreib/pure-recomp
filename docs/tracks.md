@@ -14,11 +14,14 @@ apart; each press is held 4 frames). In PPSSPP (`tools/pp_lines.py --downs N`) t
 | DOWN presses | Track | Sweep name | Length (menu) | Distance wraps at | Grid (player) | Start line | Steering table |
 |---|---|---|---|---|---|---|---|
 | 0 | Vineta K | `vineta_k` | 4446 m | about 4437 m | 1079 m | about 1233 m | `config/pad_scripts/drive/vineta_k.txt` |
-| 1 | Modesto Heights | `modesto_heights` | | about 4465 m | 652 m | about 803 m | `config/pad_scripts/drive/modesto_heights.txt` |
-| 2 | Chenghou Project | `chenghou_project` | | | | | `config/pad_scripts/drive/chenghou_project.txt` |
-| 3 | Blue Ridge | `blue_ridge` | | | | | `config/pad_scripts/drive/blue_ridge.txt` |
+| 1 | Modesto Heights | `modesto_heights` | 4576 m | about 4465 m | 652 m | about 803 m | `config/pad_scripts/drive/modesto_heights.txt` |
+| 2 | Chenghou Project | `chenghou_project` | 4866 m | about 4963 m | 1121 m | about 1272 m | `config/pad_scripts/drive/chenghou_project.txt` |
+| 3 | Blue Ridge | `blue_ridge` | 4780 m | about 4666 m | 229 m | about 375 m | `config/pad_scripts/drive/blue_ridge.txt` |
 
-The wrap and start-line columns come from the AI ships' race records in PPSSPP (`out/lines/<track>.csv`).
+The wrap, grid and start-line columns come from the AI ships' race records in PPSSPP (`out/lines/<track>.csv`,
+recorded 2026-10-05 with `tools/pp_lines.py TRACK --downs N`): the grid is the player's (8th) slot, the AI
+ships stand about 19.5 m apart ahead of it, and the start line is where their lap field turns from 0 to 1. The
+length is the TRACK SELECTION panel's (the sweep's `<cell>-menu` shot).
 
 ## The ship probe on a track
 
@@ -48,31 +51,67 @@ in two shots in a row, 30 flips apart. The shots start at the finish line; the r
 ## Steering tables
 
 `config/pad_scripts/drive/<track>.txt` can hold `FRAME:ACTION` input-script steps, `@DIST:ACTION` steps that the
-sweep sends through `PURE_INPUT_LIVE` as the ship passes DIST on every lap, and `follow LINE WN PREVIEW`, which
-makes the sweep steer closed loop along a racing line (`config/pad_scripts/drive/<track>.line.csv`, `dist,x,z`).
+sweep sends through `PURE_INPUT_LIVE` as the ship passes DIST on every lap, and `follow LINE WN PREVIEW
+[KEY=VALUE ...]`, which makes the sweep steer closed loop along a racing line
+(`config/pad_scripts/drive/<track>.line.csv`, `dist,x,z`; the options are documented in the sweep's class
+`Tuner`).
 
-Open-loop tables do not hold a race:
+Open-loop tables do not hold a race (task 012):
 - Frame-keyed: GO moves by about 6 flips between runs (task 007), and every wall contact shifts the rest of the
   race.
-- Distance-keyed: `tools/campaign_sweep.py MODE TRACK --tune` steers closed loop along an AI racing line from
-  `tools/pp_lines.py TRACK [--downs N]` and writes the second lap's steps to `out/sweep/<mode>-<track>.tuned.txt`.
-  On Vineta K that lap (53.5 s, 1825 steps) replayed open loop drifted 15 to 25 m off the line within 20 s, spun
-  the ship round at about 2440 m and was still on lap 1 after 101 s. Wall contacts and the other ships make each
-  run's path different, and nothing pulls an open-loop ship back.
+- Distance-keyed: the second lap of a `--tune` run on Vineta K (53.5 s, 1825 steps) replayed open loop drifted
+  15 to 25 m off the line within 20 s, spun the ship round at about 2440 m and was still on lap 1 after 101 s.
 
-So the committed tables are `follow` lines. They do not make a race certain yet. Two sweep runs of Vineta K on
-2026-10-05: one PASS (laps 64.2, 59.4, 58.0 s, 30 wall contacts), one STALL on lap 3. There, after 28
-contacts, the speed ran down from 290 km/h at 4260 m to 0 at 4437 m over 6 s without an impact, and the ship sat
-there with Cross held; a ship destroyed by wall damage is the suspect (no shot was taken). Fewer contacts need a
-better tracker: most happen 12 to 20 m off the line after a corner was run wide, where the line needs only 0.3 to
-0.5 rad/s, and the rest where it needs about 1 rad/s, the most full lock gives (airbrakes are not used).
-
-Making a table for a new track: `tools/pp_lines.py TRACK --downs N`
+So the committed tables are `follow` lines. Making one for a new track: `tools/pp_lines.py TRACK --downs N`
 (3.5 min), `tools/campaign_sweep.py single_race TRACK --export-line config/pad_scripts/drive/TRACK.line.csv`, and
 a `follow` line in `config/pad_scripts/drive/TRACK.txt`.
 
-Measured on Vineta K (2026-10-05): lx held at full lock turns the velocity heading at about 1 rad/s from
-150 km/h up, and the heading answers 0.2 to 0.5 s after the stick. A step sent through the live file lands 0 to
-10 flips after it is written (the port reads the file every 10 flips). Pure pursuit over 20 to 60 m was far too
-stiff for that lag and swung from lock to lock into the walls; the curvature feed-forward with heading and
-offset feedback at 1 rad/s (class `Tuner`) finishes three laps with about eight wall contacts a lap.
+### What the follower has to work with (Vineta K, task 016, 2026-10-05)
+
+- **The stick's dead zone.** Binned over a three-lap run, the velocity heading turns at about 0 rad/s for |lx| up
+  to 0.3, then about 1.15 * (|lx| - 0.3) rad/s, about 0.8 rad/s at full lock: the host's 15% dead zone
+  (rescaled) plus the game's own. Task 012's loop sat inside it whenever the offset was under about 20 m, so the
+  ship ran 10 to 13 m off the line for seconds at a time (71% of the race more than 10 m off). `Tuner.stick()`
+  now maps the loop's demand through it.
+- **The lag.** Fitted to a run with the mapping: about 0.3 s from the step being written to the heading starting
+  to move (the live file is read every 10 flips) and a 0.5 s first-order lag after it, about 0.8 s in all. With
+  the mapping, wn 1.0 / preview 0.3 swung 15 to 20 m either side of the line and wn 1.3 / preview 0.5 went lock
+  to lock. wn 0.8 / preview 0.8 is the calmest setting tried: the mean offset is 8.7 m, 38% of the race more
+  than 10 m off.
+- **Speed pads.** The ship reaches 400 to 460 km/h on the pads (the AI ships race at 270 to 340 km/h), and most
+  run met the left barrier at 2410 to 2450 m after the pad at about 2100 m, losing 190 to 380 km/h.
+- **Controls through the live file.** The game's default controls (FE.wad): X accelerate, O use pickup, SQ absorb
+  pickup, L1/R1 airbrakes, triangle reverse camera. The analog triggers press L and R, but `axis lefttrigger 0`
+  leaves the trigger pressed: release with `axis lefttrigger -1`. A `pad a 1` (to lift Cross) and a `pad a N`
+  (to hold it again) read in the same 10-flip batch run in the same frame, and the 1-frame release then lifts
+  Cross for good: the hold has to go a couple of frames later (`2:pad a N`). Both mistakes looked like a ship
+  slowing to a 10 km/h crawl, or a stop, "with Cross held".
+
+Contacts (the sweep's rule: the speed down by 20 km/h within 0.25 s) stayed at 11 to 18 a lap on Vineta K with
+every setting tried, and about 20 a lap on the other three tracks; the brief's target of under 10 was not
+reached. The shield falls about 1.7% a contact, so Vineta K's 37 to 47 contacts a race leave the ship alive and
+the other tracks destroy it in lap 2 or 3. Pressing Square ("Absorb pickup") showed no shield gain. A 250 km/h
+cap (`vmax`) did not lower the drain, and on Blue Ridge the capped ship fell at about 2360 m (a jump) and the game
+put it back at about 1960 m, three times in a row: the track coordinate jumps back with it, which the stall rule
+sees as no progress. The full list of runs is in `docs/tasks/016-sweep-reliability.md`.
+
+## Stalls
+
+The sweep takes a `stall` shot before it closes the window and classifies the stall (`classify_stall`):
+
+| Class | Seen | What it looks like |
+|---|---|---|
+| eliminated by damage | Chenghou Project, Modesto Heights and Blue Ridge, in lap 2 or 3, after 40 to 67 contacts | "SHIP DESTROYED" panel with the lap times and ENTER TAG; the HUD and its shield bar are gone (reads 0%); the ship at rest |
+| stuck on geometry | Vineta K at 1914 m (no `recover`) | the ship nosed into a barrier, Cross held, engine lit, at rest or crawling; the shield bar mostly full |
+| off the line | | more than 25 m from the line or moving more than 90 degrees off it |
+| stopped | | no contact since the last progress (task 012's lap-3 stop at 4437 m, speed run down over 6 s with no impact, fits a destroyed ship) |
+
+The shield bar reads 0% whenever the HUD is hidden, so a check for the "SHIP DESTROYED" title would be firmer.
+
+The shield (energy) bar is the HUD's cyan bar under the speed bar, bottom right; the sweep reads its fill from a
+shot (`SHIELD_BAR`). No shield field was found in the race records: `tools/pp_lines.py --dump` recordings of
+all eight records (+-0x1C0 around each entry's position; a Vineta K race with the player driving into a barrier,
+and a Modesto Heights race of the seven AI ships) show no field that starts equal for every ship and only falls,
+except +0x48, which goes from 0xFFFFFFFF to 5870 to 7017 as each AI ship ends its first lap (the lap time in
+1/100 s). The field probably lives in the ship object (`be::Ship`, found by its vtable in
+`src/profile/pure_profile.cpp`); reading it in the port needs a probe change under `src/`.
