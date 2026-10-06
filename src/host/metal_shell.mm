@@ -608,10 +608,6 @@ private:
         return whole ? nearest_ : linear_;
     }
 
-    // One present: `picture` letterboxed over `clear` (or `clear` alone without one), the interface over it, a
-    // window capture when one is pending, then presentDrawable and commit. False when there was no drawable.
-    // With `trace`, the wait for the drawable is timed and the drawable's presented handler reports when it reached
-    // the screen.
     // When a game picture is to reach the screen, in CACurrentMediaTime's seconds, or 0 for as soon as it can.
     //
     // The game flips at the PSP's 59.94 Hz, held to real time by the kernel's sleeps, which wake a millisecond or two
@@ -633,7 +629,11 @@ private:
         return CACurrentMediaTime() + ahead;
     }
 
-    // With `at` above 0 the drawable is shown at that time (CACurrentMediaTime's seconds), else as soon as it can be.
+    // One present: `picture` letterboxed over `clear` (or `clear` alone without one), the interface over it, a
+    // window capture when one is pending, then presentDrawable and commit. False when there was no drawable. With `at`
+    // above 0 the drawable is shown at that time (CACurrentMediaTime's seconds), else as soon as it can be. With
+    // `trace`, the wait for the drawable is timed and the drawable's presented handler reports when it reached the
+    // screen.
     bool draw(id<MTLTexture> picture, const double (&clear)[3], Trace *trace = nullptr, double at = 0.0) {
         ImDrawData *ui = ui_ready_ ? ui_draw_data_ : nullptr;
         ui_draw_data_ = nullptr;
@@ -645,8 +645,8 @@ private:
                 const std::uint64_t flip = trace->flip;
                 const double entered = trace->entered_media;
                 [drawable addPresentedHandler:^(id<MTLDrawable> shown) {
-                    const double at = shown.presentedTime;
-                    pure::metal::trace_presented(flip, at, at > 0.0 ? (at - entered) * 1000.0 : 0.0);
+                    const double when = shown.presentedTime;
+                    pure::metal::trace_presented(flip, when, when > 0.0 ? (when - entered) * 1000.0 : 0.0);
                 }];
             }
         }
