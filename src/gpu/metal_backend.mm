@@ -19,9 +19,11 @@
 // Not yet (tasks 024 and 025): lighting, fog, the stencil and the alpha it keeps, block transfers and
 // read-backs into guest memory, the depth write-back. Those calls are counted and logged once.
 //
-// The Vulkan shell still owns the window. Its present shows its own targets, and the input script's
-// `shot` steps read its window, so every presented picture is also handed to it (metal_shell.hpp);
-// PURE_METAL_SHELL=0 leaves the window black. PURE_METAL_LOG=1 prints a line per draw.
+// Under the Vulkan shell (BackendConfig::vulkan_shell), whose present shows its own targets and whose
+// window the input script's `shot` steps read, every presented picture is also read back and handed to it
+// (metal_shell.hpp); PURE_METAL_SHELL=0 leaves that window black. Under any other shell nothing is handed
+// over and nothing is read back: the Metal shell (src/host/metal_shell.mm) samples the presented texture
+// itself, and the headless one captures through capture_frame(). PURE_METAL_LOG=1 prints a line per draw.
 #include "metal_shaders.h"
 #include "metal_shell.hpp"
 
@@ -353,6 +355,8 @@ public:
             readback_ = [device_ newBufferWithLength:kPictureBytes options:MTLResourceStorageModeShared];
             pool_ = std::make_shared<ChunkPool>();
 
+            // The hand-over (a read-back a frame) only for the Vulkan shell; any other shell has
+            // vulkan_shell null and shows the texture present_image() names, or no window at all.
             shell_ = config.vulkan_shell;
             sharp_ = config.sharp_textures;
             const char *shell_switch = portablekit::env("METAL_SHELL");
@@ -367,7 +371,8 @@ public:
             std::cout << "[metal] drawing with " << device_.name.UTF8String << " at 480x272, shaders compiled in "
                       << ms << " ms; "
                       << (to_shell_ ? "pictures shown in the window"
-                                    : (shell_ != nullptr ? "window left black (PURE_METAL_SHELL=0)" : "no window"))
+                                    : (shell_ != nullptr ? "window left black (PURE_METAL_SHELL=0)"
+                                                         : "pictures shown by the shell, not read back"))
                       << "\n";
             return true;
         }

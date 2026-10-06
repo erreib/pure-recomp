@@ -388,6 +388,8 @@ Patch 0010 (`patches/0010-shell-seam.patch`) adds the seam to the vendored frame
 | `host/ui/*.cpp`, `.hpp` | renderer | the interface on a `Shell`: `Layer::attach(host::Shell &)`, `Layer::shell()`; `input_script.cpp` keeps its SDL path (events at `shell().window()`, the virtual gamepad) over the shared grammar |
 | `cmake/PortableKit.cmake` | | the six new sources |
 
+The `metal` shell (task 027) is in our sources, `src/host/metal_shell.mm`, registered with a `ShellRegistration` (docs/metal-backend.md, "The Metal shell"); patch 0012 moved ImGui's SDL3 platform init from `Layer::attach` into `Shell::initialize_ui` for it.
+
 #### The interface as landed
 
 As in 8.1, with these differences:

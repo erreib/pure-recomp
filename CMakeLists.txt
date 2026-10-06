@@ -14,10 +14,17 @@ portablekit_add_game(PureNative
     HOST_MAIN_NAME portablekit_main
     SOURCES src/profile/pure_profile.cpp src/hle/audio_capture.cpp
             src/host/pure_main.cpp src/tools/ge_replay.cpp
-            src/gpu/metal_backend.mm src/gpu/metal_shell.cpp)
+            src/gpu/metal_backend.mm src/gpu/metal_shell.cpp
+            src/host/metal_shell.mm third_party/imgui_metal/imgui_impl_metal.mm)
 
-# The Metal GE backend (PURE_GE_BACKEND=metal, docs/metal-backend.md): Objective-C++ with ARC, compiled by the
-# same clang as everything else. Its shaders are MSL source compiled at run time, so no Xcode is needed.
+# The Metal GE backend (PURE_GE_BACKEND=metal, docs/metal-backend.md), the Metal shell (PURE_SHELL=metal) and Dear
+# ImGui's Metal renderer backend (1.92.9b, the vendored ImGui's release, MIT): Objective-C++ with ARC, compiled by the
+# same clang as everything else. Their shaders are MSL source compiled at run time, so no Xcode is needed.
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal_backend.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host/metal_shell.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui_metal/imgui_impl_metal.mm"
     PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-x;objective-c++;-fobjc-arc")
-target_link_libraries(PureNative PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore")
+target_include_directories(PureNative PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui_metal")
+# CoreGraphics for the Metal shell's sRGB colour space.
+target_link_libraries(PureNative PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore"
+    "-framework CoreGraphics")
