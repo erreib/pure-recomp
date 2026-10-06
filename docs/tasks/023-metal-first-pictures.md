@@ -1,6 +1,6 @@
 # 023: The Metal GE backend, first pictures (the 2D frontend)
 
-Milestone: M6 | Branch: task/023-metal-first-pictures | Status: OPEN
+Milestone: M6 | Branch: task/023-metal-first-pictures | Status: MERGED 2026-10-06 (e2095d9)
 
 ## Goal
 A native Metal implementation of `portablekit::gpu::GeBackend` (docs/ge-backend.md, task 021) in our own sources,
@@ -182,4 +182,17 @@ Open questions:
    orthographic projection, but task 024 should check it on 3D sprites.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 023`): lang 0.0002,
+title 0.0002, profile 0.0000 at tol 24 (limits 0.07, 0.05, 0.07), 1m 12s; then `tools/frame_regress.sh` (Vulkan)
+5/5 at 0.0544, 0.0302, 0.0543, 0.0331, 0.0672, +0.000 each (7m 8s).
+Spot-read: `metal_backend.mm` (shutdown waits for the GPU and frees targets, textures and pipelines before the
+queue and device; one command buffer a frame with at most two in flight; `present_image` picks the target last
+drawn at the display address as Vulkan's `display_image` does; `find_framebuffer_texture` follows patch 0003's
+exact-address rule and the guest-word check; a draw sampling its own target reads a blit copy), `metal_shell.cpp`
+(the nearest-neighbour hand-over to the Vulkan window through `upload_frame`), the CMake change.
+Merged: e2095d9 into batch/m2 (CMakeLists.txt combined by hand with 022's entry point).
+Notes: the hand-over to the window is the right stopgap and matches the Vulkan shell's Cpu-image present that task
+026 added; task 027's Metal shell retires both for `PURE_SHELL=metal`. The suite's "moved more than 0.03" note for
+lang and profile is the Vulkan measured column being used for a Metal run (open question 3); a per-backend column
+is a tools follow-up. Deferred to 024: lighting, fog, screen-space sprites, culling check. Deferred to 025: stencil
+test and ops, the alpha copy rule, block transfers, read-backs, frame and depth write-backs.
