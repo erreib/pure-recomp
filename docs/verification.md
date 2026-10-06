@@ -57,33 +57,38 @@ rejected with its IHDR fields; the variance check fails on a flat region and pas
 # Frame regression suite (task 020, 2026-10-06)
 
 ```
-tools/frame_regress.sh [--backend vulkan|metal] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]
+tools/frame_regress.sh [--backend metal|vulkan] [--shell metal|vulkan|headless] [--out DIR] [--only SCENE[,SCENE...]]
+                       [--env KEY=VAL ...]
 ```
 
-One command that checks the port still renders the known screens like PPSSPP. Every renderer change (and the Metal
-backend later) runs it before merging. It boots the game three times, once per route, captures five scenes, and
-compares each capture with its reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL per
-scene and writes the same text to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one fails, and
+One command that checks the port still renders the known screens like PPSSPP. By default it runs the Metal path
+(`--shell metal --backend metal`, the macOS default since D-008, task 028); `--shell vulkan --backend vulkan` runs the
+Vulkan path. Every renderer change runs it on both paths before merging (D-008). It boots the game three times, once
+per route, captures five scenes, and compares each capture with its reference in `ref/` using `tools/imgdiff.py`. It
+prints a table with PASS or FAIL per scene and writes the same text to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one fails, and
 2 on a usage error or a missing build, game or reference. The full suite takes about 7 minutes, and `--only race_hud`
 about 3.5.
 
-| Scene | Route (`config/pad_scripts/`) | Frame | Reference | Tol | Limit | Measured | 2026-10-06 |
+| Scene | Route (`config/pad_scripts/`) | Frame | Reference | Tol | Limit | Vulkan measured | Metal measured |
 |---|---|---|---|---|---|---|---|
-| `lang` | `frontend.txt` | 690 | `ref/frontend.png` | 24 | 0.07 | 0.054 (task 006) | 0.0544 |
-| `title` | `frontend.txt` | 1750 | `ref/title.png` | 24 | 0.05 | 0.030 (tasks 006, 009-011) | 0.0302 |
-| `profile` | `frontend.txt` | 2100 | `ref/profile.png` | 24 | 0.07 | 0.054 (task 006) | 0.0543 |
-| `main_menu` | `main_menu.txt` | 4700 | `ref/main_menu.png` | 24 | 0.05 | 0.033 (task 006) | 0.0331 |
-| `race_hud` | `main_menu.txt` + `single_race.txt` | 6016 | `ref/vineta_k_start.png` | 32 | 0.10 | 0.067 (task 011) | 0.0672 |
+| `lang` | `frontend.txt` | 690 | `ref/frontend.png` | 24 | 0.07 | 0.054 (task 006; 0.0544) | 0.0002 (task 023) |
+| `title` | `frontend.txt` | 1750 | `ref/title.png` | 24 | 0.05 | 0.030 (tasks 006, 009-011; 0.0302) | 0.0002 (task 023) |
+| `profile` | `frontend.txt` | 2100 | `ref/profile.png` | 24 | 0.07 | 0.054 (task 006; 0.0543) | 0.0000 (task 023) |
+| `main_menu` | `main_menu.txt` | 4700 | `ref/main_menu.png` | 24 | 0.05 | 0.033 (task 006; 0.0331) | 0.0106 (task 023) |
+| `race_hud` | `main_menu.txt` + `single_race.txt` | 6016 | `ref/vineta_k_start.png` | 32 | 0.10 | 0.067 (task 011; 0.0672) | 0.0379 (task 025) |
 
-The table lives at the top of the script (`SCENES`), with the source of each measured value as a comment. A scene's
-fraction is the share of pixels that differ by more than Tol in any channel, with both frames at 480x272 (the
-960x544 capture is reduced by nearest neighbour). The scene passes at or below Limit.
+The table lives at the top of the script (`SCENES`), with a measured column per backend and the source of each value
+as a comment. A scene's fraction is the share of pixels that differ by more than Tol in any channel, with both frames
+at 480x272 (the 960x544 capture is reduced by nearest neighbour). The scene passes at or below Limit, which is shared
+by both backends.
 
-- lang and profile score 0.054 because of one-pixel edges of lines and glyphs, which the 2x-to-1x reduction moves.
+- On the Vulkan path lang and profile score 0.054 because of one-pixel edges of lines and glyphs, which the 2x-to-1x
+  reduction moves. The Metal backend draws at 480x272 and its shell scales by exactly 2x with nearest sampling, so no
+  edge moves: its few differing pixels are blinking cursors (docs/metal-backend.md, "Verify numbers").
   The main menu capture catches the help text partway through typing.
 - `race_hud` is frame 6016 of the race route, with bloom and shadows on (the defaults). It is the first frame where
   the HUD has fully faded in, and the same game moment as the PPSSPP frame 7155. The AI ships on the grid change from
-  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086.
+  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086 on the Vulkan path.
 
 How the runs are made:
 - Each route's input script is written to `<out>/<route>.route.txt`. The route files are joined in order with their
@@ -100,16 +105,21 @@ How the runs are made:
   - run logs: `<out>/<route>.log`
   - the runner's stdout: `<out>/<route>.stdout`
   - diff images for failing scenes only: `<out>/<scene>.diff.png`, the capture dimmed with differing pixels in red
-- `--backend` sets `PURE_GE_BACKEND` for the runs and records it in the summary. Only the Vulkan backend exists
-  today, so the value is passed on but has no effect yet.
+- `--backend` (default `metal`) sets `PURE_GE_BACKEND` for the runs, records it in the summary and picks the
+  measured column. `--shell` (default `metal`) sets `PURE_SHELL`: the captures are the Metal shell's window, the
+  Vulkan shell's, or, with `headless`, the backend's own 480x272 pictures (unpaced: the frontend scenes take
+  seconds, and on the Metal backend they score as in its window, docs/metal-backend.md "The Metal shell").
 - `--env KEY=VAL` passes extra environment to every run, through `tools/run_boot.py --env`. The summary records it.
-- The summary's first lines give the date, the commit (`+changes` when tracked files differ from it), the backend, the
-  extra environment, and each run's exit code, whether it reached its last frame, and how long it took.
-- Next to each fraction, the table prints `delta`, the difference from the measured value. If a scene moved by more
-  than 0.03, a line names it. That means something changed, even if the scene still passes.
+- The summary's first lines give the date, the commit (`+changes` when tracked files differ from it), the shell, the
+  backend and so the measured column, the extra environment, and each run's exit code, whether it reached its last
+  frame, and how long it took. The last line, the verdict, names the shell and the backend again.
+- Next to each fraction, the table prints `delta`, the difference from the running backend's measured value, to four
+  decimals. If a scene moved by more than 0.03, a line names it. That means something changed, even if the scene still
+  passes.
 
-The deliberate regression (2026-10-06): `tools/frame_regress.sh --only race_hud --env PURE_NO_STENCIL_BUFFER=1 --out
-out/regress-nostencil` turns off the stencil attachment of patch 0006. That removes the ship shadows, and the 0004
+The deliberate regression (2026-10-06, the Vulkan path): `tools/frame_regress.sh --shell vulkan --backend vulkan
+--only race_hud --env PURE_NO_STENCIL_BUFFER=1 --out out/regress-nostencil` turns off the stencil attachment of patch
+0006 (a Vulkan backend switch; the Metal backend does not read it). That removes the ship shadows, and the 0004
 alpha path darkens the whole track. race_hud then scores 0.3053 (delta +0.238), so it fails with
 `out/regress-nostencil/race_hud.diff.png` written, and the suite exits 1.
 
@@ -122,11 +132,14 @@ PPSSPP is one. New references are another. Never raise a limit to get a regressi
    for the scenes concerned. Three runs show the spread, which matters for `race_hud` because of the AI grid.
 2. Look at each capture and its diff (`tools/imgdiff.py CAPTURE REF --tol T --out diff.png`). Confirm the scene
    shows the same moment as the reference. If a route's timing moved, fix the frame column first.
-3. In the script's `SCENES` table, set `measured` to the typical value of the runs, to three decimals. Set `limit`
-   about 0.015 to 0.02 above the largest run, rounded to a hundredth. Today's limits follow that rule: lang and
-   profile 0.054 to 0.07, title 0.030 and main_menu 0.033 to 0.05, and race_hud's largest run 0.086 to 0.10.
+3. In the script's `SCENES` table, set the running backend's measured column to the typical value of the runs, to
+   three decimals (four on the Metal path, whose fractions are near zero). Set `limit` about 0.015 to 0.02 above the
+   largest run of either backend, rounded to a hundredth. Today's limits follow that rule on the Vulkan path, the
+   larger of the two: lang and profile 0.054 to 0.07, title 0.030 and main_menu 0.033 to 0.05, and race_hud's largest
+   run 0.086 to 0.10.
 4. Update the comment beside the row with the task and the date, and update the table above. The commit says why
-   the number moved.
+   the number moved. A change to one backend moves only that backend's column; run the other path to show its column
+   still holds.
 
 If the references themselves are regenerated (`ref/README.md`, "Regenerate"), check the new SHA-256 values against
 that README. New references mean a new baseline for every scene, following the steps above.
