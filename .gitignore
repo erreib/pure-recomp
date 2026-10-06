@@ -12,6 +12,10 @@ ghidra_project/
 # build, logs, caches
 build/
 out/
+# the app bundle (task 029): the release build, the packer's work and stage, distributable archives
+build/release/
+out/release-macos/
+dist/
 .ccache/
 .venv/
 # third party
