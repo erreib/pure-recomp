@@ -2,6 +2,7 @@
 """Campaign sweep: each (mode, track) cell from a cold boot to the race's results screen under scripted driving.
 
   tools/campaign_sweep.py [MODE [TRACK ...]] [--frames N] [--stall S] [--drive FILE] [--shots-every N] [--list]
+                          [--set KEY=VALUE ...] [--out DIR]
   tools/campaign_sweep.py MODE TRACK --tune [--line CSV] [--wn W] [--preview S]
   tools/campaign_sweep.py MODE TRACK --export-line OUT [--line CSV]
 
@@ -15,8 +16,9 @@ flips late. Its input script is
   the mode's race route              MAIN MENU to the race, the track picked by N DOWN presses (docs/tracks.md),
                                      Cross held from the countdown for the whole budget
   config/pad_scripts/drive/<track>.txt   the steering table (below)
-Every cell starts from an empty memory stick: the run's game directory is out/sweep/game (EBOOT.ELF and disc.iso
-linked to game/, ms0/ emptied before each cell), since the menu route creates a profile and answers its prompts.
+Every cell starts from an empty memory stick: the run's game directory is out/sweep/game/<cell> (EBOOT.ELF and
+disc.iso linked to game/, ms0/ emptied before each run), since the menu route creates a profile and answers its
+prompts. Cells of different tracks can run side by side (the summary is merged under a lock).
 
 Steering tables hold three kinds of lines (`#` starts a comment):
   FRAME:ACTION   an input-script step at that flip of the run (`6540:axis leftx 0.4`)
@@ -35,8 +37,16 @@ lap (the first full lap at speed; the first lap when the race ends sooner) becom
 out/sweep/<mode>-<track>.tuned.txt. Replayed open loop, such a table did not hold a lap on Vineta K
 (docs/tracks.md), so the committed tables `follow` an exported line instead. --export-line OUT writes the AI line
 of out/lines/<track>.csv (or --line) as `dist,x,z` rows for that.
+  follow LINE [WN [PREVIEW]] [KEY=VALUE ...]   the options of class Tuner: koff, kpsi (feedback gains), airbrake
+                 (hold the inside airbrake while the demanded |lx| passes it), lift and ahead (release Cross before
+                 a corner that needs more yaw rate than lift rad/s at the current speed). --set KEY=VALUE overrides
+                 them, and wn and preview, for one run (tuning).
 Every run also writes out/sweep/<mode>-<track>.trace.csv: per ship line the flip, race clock, lap, distance,
-position, speed, the lx in force and, when a line file exists, the signed offset from the AI line (m, + = right).
+position, speed, the lx in force, the signed offset from the AI line (m, + = right) and the heading error from it
+(rad) when a line file exists, Cross (1 held) and the airbrake (-1 L, 1 R), and <mode>-<track>.contacts.csv: the
+contacts (the speed down by CONTACT_KMH within CONTACT_WINDOW s: walls, other ships, weapon hits) with the race
+time, lap and distance. The summary's detail counts them a lap. A `ref` shot 600 flips into the race reads the
+HUD's shield bar (SHIELD_BAR, full) to check the reading.
 
 --frames N is the race budget: the run stops at flip THROTTLE + N, THROTTLE being the race route's Cross-hold step
 (6100), since the menu route alone takes that long (a three-lap race at Vector is 150 s, 9000 flips, more).
@@ -49,17 +59,21 @@ While the run goes the tool reads the `[pure] ship` lines (race clock, distance 
     variance) and unchanged in two shots in a row (region compare, tol 32, 2%). That is PASS; the tool then
     closes the window (`quit`).
   - stalled: no progress along the track (distance up by 5 m, or a new lap) for --stall seconds of race clock (a
-    wall stop shows as speed 0 with the distance constant): STALL, the window is closed.
+    wall stop shows as speed 0 with the distance constant): STALL. The tool takes a `stall` shot, then closes the
+    window. The detail classifies the stop from the shot's shield bar and the trace (classify_stall: eliminated by
+    damage, off the line, stuck on geometry, or stopped) and lists the last 5 s of the trace one row a second;
+    out/sweep/<mode>-<track>.stall.csv holds those 5 s in full.
   - halted: a `[hle-stub]`, `unsupported` or `Runtime stopped` line other than the frame exit and our own quit.
   - no race: no race clock 1800 flips after the Cross-hold step means the menu route broke; the sweep stops there.
 Outputs: out/sweep/<mode>-<track>.log (the game's output, repeated lines folded), out/sweep/<mode>-<track>.png (the
-results screen, or the last frame captured), out/sweep/<mode>-<track>/ (the live shots, BMP and PNG), and
+results screen, the stall shot, or the last frame captured), out/sweep/<mode>-<track>/ (the live shots), and
 out/sweep/summary.txt, a table with one row per cell ever run (the latest outcome replaces the cell's earlier row;
 --tune runs are not entered). Exit 0 when every cell of this invocation passed, 1 otherwise, 2 on bad arguments.
 --drive FILE uses FILE as the steering table (one track only; for tuning). --shots-every N also takes a live shot
-every N flips from the race start (named t<frame>), for tuning.
+every N flips from the race start (named t<frame>), for tuning. --out DIR writes everything (the game directory and
+the summary too) under DIR instead of out/sweep, so two tuning runs can go side by side.
 """
-import argparse, datetime, math, os, pty, re, select, shutil, subprocess, sys, termios, time
+import argparse, datetime, fcntl, math, os, pty, re, select, shutil, subprocess, sys, termios, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -99,19 +113,31 @@ PROGRESS_M = 5.0                # metres along the track that count as progress 
 NO_RACE_FLIPS = 1800            # flips after the Cross-hold step with no race clock: the route broke
 WRAP_M = 1000.0                 # a drop in the distance this big is the once-a-lap wrap, not a step back
 LX_STEP = 0.04                  # --tune sends a new lx when it moves this much
+# Contacts (walls, other ships, weapon hits): the speed falling by CONTACT_KMH within CONTACT_WINDOW s of race clock
+# from at least CONTACT_MIN_KMH; a drop within CONTACT_GAP s of the last one is the same contact.
+CONTACT_KMH = 20.0
+CONTACT_WINDOW = 0.25
+CONTACT_GAP = 1.0
+CONTACT_MIN_KMH = 80.0
+TAIL_S = 5.0                    # seconds of trace a STALL reports
+# The HUD's shield (energy) bar, bottom right under the speed bar, in 480x272 PSP pixels (out/m3/s7200.png: full,
+# 2026-10-05). It fills from the left, cyan to white; a column counts as filled when a pixel of it is.
+SHIELD_BAR = (310, 254, 143, 11)
+REF_SHOT_FLIPS = 600            # the `ref` shot (a full shield bar) this many flips after the race clock starts
 
 
 def parse_drive(path, drop_shots=True):
     """The steps of a pad script or steering table: ([(frame, action)], [(dist, action)], follow), follow being
-    the `follow LINE [WN [PREVIEW]]` line's (path, wn, preview) or None."""
+    the `follow LINE [WN [PREVIEW]] [KEY=VALUE ...]` line's (path, wn, preview, {KEY: VALUE}) or None."""
     steps, dist_steps, follow = [], [], None
     with open(os.path.join(ROOT, path)) as f:
         for line in f:
             line = line.split("#", 1)[0].strip()
             if line.startswith("follow "):
-                words = line.split()
-                follow = (words[1], float(words[2]) if len(words) > 2 else 1.0,
-                          float(words[3]) if len(words) > 3 else 0.3)
+                words = [w for w in line.split()[1:] if "=" not in w]
+                params = dict(w.split("=", 1) for w in line.split()[1:] if "=" in w)
+                follow = (words[0], float(words[1]) if len(words) > 1 else 1.0,
+                          float(words[2]) if len(words) > 2 else 0.3, params)
                 continue
             if not line or ":" not in line:
                 continue
@@ -148,7 +174,7 @@ class Race:
     def __init__(self, laps):
         self.laps = laps
         self.started = False
-        self.frame = 0
+        self.frame = self.start_frame = 0
         self.clock = 0.0
         self.base = 0.0               # the lap times completed so far
         self.total = 0.0
@@ -162,6 +188,8 @@ class Race:
         self.best = (0, 0.0)          # (laps done, distance) of the last progress
         self.best_total = 0.0         # race time at the last progress
         self.finished_frame = None    # first flip after the last lap was completed
+        self.hist = []                # (race time, km/h) of the last CONTACT_WINDOW s
+        self.contacts = []            # (race time, laps done, distance, km/h lost)
 
     def feed(self, m, line):
         self.frame = int(m[1])
@@ -171,6 +199,7 @@ class Race:
         self.prev_dist = self.dist if self.started else None
         if clock > 0.0 and not self.started:
             self.started = True
+            self.start_frame = self.frame
             self.best, self.best_total = (0, dist), clock
         if self.started and clock < self.clock - 1.0:
             self.base += self.clock
@@ -184,6 +213,22 @@ class Race:
             self.best, self.best_total = (self.laps_done, dist), self.total
         if self.finished_frame is None and self.started and self.laps_done >= self.laps:
             self.finished_frame = self.frame
+        if self.started and self.finished_frame is None:
+            self.hist.append((self.total, self.kmh))
+            while self.hist[0][0] < self.total - CONTACT_WINDOW:
+                self.hist.pop(0)
+            peak = max(k for _t, k in self.hist)
+            last = self.contacts[-1][0] if self.contacts else -1e9
+            if peak >= CONTACT_MIN_KMH and peak - self.kmh >= CONTACT_KMH and self.total - last >= CONTACT_GAP:
+                self.contacts.append([self.total, self.laps_done, dist, peak - self.kmh, float("nan")])
+
+    def contact_text(self):
+        """`N contacts (a, b, c a lap)` over the laps begun."""
+        laps = max(1, min(self.laps, self.laps_done + 1))
+        per = [0] * laps
+        for _t, lp, _d, _k, _o in self.contacts:
+            per[min(lp, laps - 1)] += 1
+        return f"{len(self.contacts)} contacts ({', '.join(map(str, per))} a lap)"
 
     def stalled_for(self):
         return self.total - self.best_total if self.started else 0.0
@@ -271,17 +316,53 @@ class Tuner:
     """Tracks an AiLine: lx = the line's curvature ahead as a feed-forward, plus heading and offset feedback.
 
     Angles are atan2(z, x); positive lx turns the ship towards larger angles (heading -x, -lx turns it towards +z;
-    task 012). Measured on Vineta K (2026-10-05): lx held at +-1 gives a velocity-heading rate of about 1 rad/s at
-    150 km/h and up, and the heading answers 0.2 to 0.5 s after the step. With yaw rate = YAW * lx, heading error
-    psi and offset e, lx = v*kappa(d + v*preview)/YAW + 2*ZETA*wn/YAW * psi - wn^2/(YAW*v) * e places the closed
-    loop's poles at wn rad/s with damping ZETA. (Pure pursuit over 20 to 60 m, the first try, was ten times too
-    stiff for that lag and swung from lock to lock.)"""
-    YAW = 1.0
-    ZETA = 0.7
+    task 012). The heading answers 0.2 to 0.5 s after the stick. The stick has a dead zone: binned over a
+    three-lap run (task 016, 2026-10-05) the velocity heading turns at about 0 rad/s for |lx| up to 0.3, then about
+    1.15 * (|lx| - 0.3) rad/s, about 0.8 rad/s at full lock (the host's 15% dead zone, rescaled, plus the game's).
+    The loop asks for a yaw rate u * yaw, and stick() maps u through the dead zone (lx = deadzone + (1 - deadzone)
+    * |u|). With heading error psi and offset e, u = v*kappa(d + v*preview)/yaw + 2*ZETA*wn/yaw * psi
+    - wn^2/(yaw*v) * e places the closed loop's poles at wn rad/s with damping ZETA. (Pure pursuit over 20 to 60 m,
+    the first try, was ten times too stiff for that lag and swung from lock to lock. Without the dead-zone mapping
+    the offset term stays inside the dead zone below about 20 m, and the ship ran 10 to 13 m off the line for
+    seconds at a time: 43 contacts in a three-lap run.)
 
-    def __init__(self, line, wn, preview):
+    The `follow` line's KEY=VALUE options (PARAMS) scale the feedback and use the controls full lock lacks:
+      yaw, deadzone  the stick model above (rad/s at full lock; lx where the turning starts)
+      koff, kpsi   multiply the offset and heading terms (1 = the poles above)
+      airbrake A   hold the airbrake on the inside of the turn (L for -lx, R for +lx, through the analog triggers)
+                   while the demanded |lx| is above A, until it falls below 0.8 A (0: never)
+      lift L       release Cross while the line's sharpest curvature from PREVIEW to AHEAD s ahead needs more than
+                   L rad/s at the current speed, and hold it again below 0.9 L (0: never)
+      ahead S      that look-ahead (s)
+      lag T        predict the ship T s ahead before steering (a Smith predictor): the heading turned by the lx
+                   steps sent in the last T s (the model above) and the position moved on along it; the loop then
+                   steers the predicted ship (0: steer the ship as last seen)
+      vmax V       above V km/h (a speed pad gives about 450; the AI ships race at 270 to 340) release Cross and
+                   hold both airbrakes until the speed is 10 km/h under V (0: never). Speed lost while braking is
+                   not counted as a contact. Blue Ridge needs speed at about 2360 m: capped at 250 km/h the ship
+                   fell there and the game put it back at about 1960 m, three times in a row (task 016)
+      absorb S     press Square (`pad x`, "Absorb pickup" in the game's default controls: X accelerate, O use
+                   pickup, SQ absorb, L1/R1 airbrakes) for `hold` frames every S s of race, meant to turn a weapon
+                   picked up from a pad into shield (0: never). A ship whose shield runs out is destroyed ("SHIP
+                   DESTROYED"). No shield gain was seen in task 016's shots, held 4 or 40 frames
+      recover K    below K km/h after the first 5 s (the ship against a wall, its velocity no guide to where its nose
+                   points) steer full lock towards the line, Cross held, until the speed is back (0: never)"""
+    ZETA = 0.7
+    PARAMS = {"yaw": 0.8, "deadzone": 0.3, "koff": 1.0, "kpsi": 1.0, "airbrake": 0.0, "lift": 0.0, "ahead": 1.5,
+              "lag": 0.0, "recover": 0.0, "vmax": 0.0, "absorb": 0.0, "hold": 4.0}
+
+    def __init__(self, line, wn, preview, **params):
         self.line, self.wn, self.preview = line, wn, preview
         self.heading = None
+        self.psi = self.offset = 0.0
+        self.sent = [(0.0, 0.0)]      # (race time, lx) of the steps sent, for the predictor
+        self.recovering = 0
+        for k, v in self.PARAMS.items():
+            setattr(self, k, float(params.get(k, v)))
+
+    def describe(self):
+        return f"wn {self.wn}, preview {self.preview} s" + "".join(
+            f", {k} {getattr(self, k):g}" for k, v in self.PARAMS.items() if getattr(self, k) != v)
 
     def line_heading(self, d):
         ax, az = self.line.at(d - 10.0)
@@ -291,18 +372,67 @@ class Tuner:
     def curvature(self, d):
         return wrap_angle(self.line_heading(d + 20.0) - self.line_heading(d - 20.0)) / 40.0
 
-    def steer(self, race):
+    def demand(self, race):
+        """The lx the loop asks for, before clipping to full lock."""
         speed = math.hypot(race.vx, race.vz)
         if speed > 3.0:
             self.heading = math.atan2(race.vz, race.vx)
         if self.heading is None:
             return 0.0
         v = max(speed, 30.0)
-        ff = speed * self.curvature(race.dist + speed * self.preview) / self.YAW
-        psi = wrap_angle(self.line_heading(race.dist) - self.heading)
-        e = self.line.offset(race.x, race.z, race.dist)
-        lx = ff + 2.0 * self.ZETA * self.wn / self.YAW * psi - self.wn ** 2 / (self.YAW * v) * e
-        return max(-1.0, min(1.0, lx))
+        heading, x, z, d = self.heading, race.x, race.z, race.dist
+        if self.lag > 0.0:
+            turn = self.pending(race.total)
+            mid = heading + turn / 2.0
+            x, z = x + speed * self.lag * math.cos(mid), z + speed * self.lag * math.sin(mid)
+            heading, d = heading + turn, d + speed * self.lag
+        ff = speed * self.curvature(d + speed * self.preview) / self.yaw
+        self.psi = psi = wrap_angle(self.line_heading(d) - heading)
+        self.offset = e = self.line.offset(x, z, d)
+        if self.recover > 0.0:
+            if race.total > 5.0 and race.kmh < self.recover:
+                if abs(e) >= 3.0 or not self.recovering:
+                    self.recovering = -1 if e > 0.0 else 1
+                return float(self.recovering)
+            self.recovering = 0
+        return (ff + self.kpsi * 2.0 * self.ZETA * self.wn / self.yaw * psi
+                - self.koff * self.wn ** 2 / (self.yaw * v) * e)
+
+    def note(self, t, lx):
+        """An lx step sent at race time t."""
+        self.sent.append((t, lx))
+        while len(self.sent) > 2 and self.sent[1][0] < t - 3.0:
+            self.sent.pop(0)
+
+    def response(self, lx):
+        """The yaw rate (rad/s) lx gives: none in the dead zone, linear past it."""
+        return math.copysign(max(0.0, abs(lx) - self.deadzone) / (1.0 - self.deadzone), lx) * self.yaw
+
+    def pending(self, t):
+        """The heading change still to come from the steps sent in the last `lag` s."""
+        t0, total = t - self.lag, 0.0
+        for i, (ts, lx) in enumerate(self.sent):
+            te = self.sent[i + 1][0] if i + 1 < len(self.sent) else t
+            a, b = max(ts, t0), min(te, t)
+            if b > a:
+                total += self.response(lx) * (b - a)
+        return total
+
+    def stick(self, u):
+        """The lx that gives the yaw rate u * yaw: past the dead zone the response is about linear in lx."""
+        if abs(u) < 0.02:
+            return 0.0
+        return math.copysign(self.deadzone + (1.0 - self.deadzone) * min(abs(u), 1.0), u)
+
+    def steer(self, race):
+        return self.stick(self.demand(race))
+
+    def corner_need(self, race):
+        """The yaw rate (rad/s) the sharpest curvature from PREVIEW to AHEAD s ahead needs at the current speed."""
+        speed = math.hypot(race.vx, race.vz)
+        d0, d1 = race.dist + speed * self.preview, race.dist + speed * max(self.ahead, self.preview)
+        kmax = max(abs(self.curvature(d0 + k * 5.0)) for k in range(int((d1 - d0) // 5.0) + 1))
+        return speed * kmax / self.yaw
 
 
 class DistTable:
@@ -438,9 +568,69 @@ def same_region(a, b, region):
     return imgdiff.compare(opts)["result"] == "PASS"
 
 
-def prepare_game_dir():
-    """out/sweep/game: EBOOT.ELF and disc.iso linked to game/, an empty memory stick."""
-    game = os.path.join(ROOT, OUT, "game")
+def shield_fraction(path):
+    """How full the HUD's shield bar is in a shot: the run of filled columns from the bar's left end over its full
+    width (SHIELD_BAR), 0 to 1; None when the shot cannot be read."""
+    try:
+        w, h, c, data = png.read_bmp(path)
+    except (OSError, ValueError):
+        return None
+    x0, y0, x1, y1 = imgdiff.scale_region(SHIELD_BAR, w, h)
+    run = 0
+    for x in range(x0, x1):
+        if not any(data[(y * w + x) * c + 2] >= 0xf0 and data[(y * w + x) * c + 1] >= 0xd0
+                   and data[(y * w + x) * c] >= 0x9c for y in range(y0, y1)):
+            break
+        run += 1
+    return run / (x1 - x0)
+
+
+def shield_text(path):
+    f = shield_fraction(path)
+    return "unreadable" if f is None else f"{f:.0%}"
+
+
+def classify_stall(race, tail, shield):
+    """Why the ship stopped, from the stall shot's shield bar, the contacts and the last TAIL_S s of the trace:
+      eliminated by damage  the shield bar is empty (5% or less)
+      stuck on geometry     a contact from 3 s before the last progress on (the stall began there)
+      off the line          more than 25 m from the AI line, or moving more than 90 degrees off it
+      stopped               none of these (the speed ran down without a contact)
+    with the mean speed of the last TAIL_S s (at rest, or crawling)."""
+    last = tail[-1] if tail else None
+    since = race.best_total - 3.0
+    hits = [c for c in race.contacts if c[0] >= since]
+    sh = "no stall shot" if shield is None else f"shield bar {shield:.0%}"
+    kmh = sum(r[4] for r in tail) / len(tail) if tail else 0.0
+    moving = (f"{'at rest' if kmh < 2.0 else f'crawling at {kmh:.0f} km/h'} with Cross "
+              f"{'held' if last and last[8] else 'up'}")
+    if shield is not None and shield <= 0.05:
+        return f"eliminated by damage ({sh}; {moving})"
+    if hits:
+        t, _lp, d, lost, off = hits[0]
+        return (f"stuck on geometry (contact at {d:.0f} m, {t:.1f} s, {lost:.0f} km/h lost, {off:+.0f} m off the "
+                f"line; {moving}; {sh})")
+    if last and (abs(last[6]) > 25.0 or (not math.isnan(last[7]) and abs(last[7]) > math.pi / 2)):
+        return (f"off the line ({last[6]:+.0f} m from the line, heading {math.degrees(last[7]):+.0f} deg off; "
+                f"{moving}; {sh})")
+    return f"stopped (no contact since the last progress; {moving}; {sh})"
+
+
+def tail_text(tail):
+    """The last TAIL_S s of the trace, one row a second: `race time/distance/km/h/offset/lx`."""
+    rows, nxt = [], None
+    for r in reversed(tail):
+        if nxt is None or r[1] <= nxt:
+            rows.append(r)
+            nxt = r[1] - 1.0
+    return "last 5 s (t/dist/kmh/off/lx): " + " ".join(
+        f"{r[1]:.1f}/{r[3]:.0f}/{r[4]:.0f}/{r[6]:+.0f}/{r[5]:+.2f}" for r in reversed(rows))
+
+
+def prepare_game_dir(cell):
+    """out/sweep/game/<cell>: EBOOT.ELF and disc.iso linked to game/, an empty memory stick (one per cell, so cells
+    of different tracks can run side by side)."""
+    game = os.path.join(ROOT, OUT, "game", cell)
     os.makedirs(game, exist_ok=True)
     for name in ("EBOOT.ELF", "disc.iso"):
         target = os.path.join(ROOT, "game", name)
@@ -485,8 +675,13 @@ def run_cell(mode, track, opts):
     if opts.tune or follow:
         if ai_line is None:
             sys.exit(f"campaign_sweep: no racing line {line_path} (tools/pp_lines.py {track})")
-        wn, preview = (opts.wn, opts.preview) if opts.tune or not follow else follow[1:]
-        tuner = Tuner(ai_line, wn, preview)
+        wn, preview, params = (opts.wn, opts.preview, {}) if opts.tune or not follow else follow[1:]
+        params = dict(params, **dict(kv.split("=", 1) for kv in opts.set))
+        wn, preview = float(params.pop("wn", wn)), float(params.pop("preview", preview))
+        unknown = set(params) - set(Tuner.PARAMS)
+        if unknown:
+            sys.exit(f"campaign_sweep: unknown follow option {', '.join(sorted(unknown))} ({', '.join(Tuner.PARAMS)})")
+        tuner = Tuner(ai_line, wn, preview, **params)
         drive_steps, dist_steps = [s for s in drive_steps if not s[1].startswith("axis")], []
     table = DistTable(dist_steps) if dist_steps else None
     script = os.path.join(out, f"{cell}.script.txt")
@@ -500,26 +695,31 @@ def run_cell(mode, track, opts):
         f.write("".join(f"{fr}:{a}\n" for fr, a in steps))
     open(live, "w").close()
     exit_frame = m["throttle"] + opts.frames
-    game = prepare_game_dir()
+    game = prepare_game_dir(cell)
     env = dict(os.environ)
     env.update({"PURE_GAME_DIR": game, "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
                 "PURE_EXIT_AT_FRAME": str(exit_frame), "PURE_INPUT_SCRIPT": ";".join(f"{fr}:{a}" for fr, a in steps),
                 "PURE_SCREENSHOT_DIR": shots, "PURE_SCREENSHOT_EVERY": "0", "PURE_WATCH_SHIP": "1",
                 "PSPRECOMP_NO_INTERPRETER": "1", "PURE_INPUT_LIVE": live, "PURE_FRAME_LOG": "60"})
     how = (f"{'tune' if opts.tune else 'follow'} {line_path} (coverage {ai_line.covered:.0%}, "
-           f"{ai_line.length:.0f} m, wn {tuner.wn}, preview {tuner.preview} s)" if tuner else
+           f"{ai_line.length:.0f} m, {tuner.describe()})" if tuner else
            f"drive {drive} ({len(drive_steps)} frame steps, {len(dist_steps)} distance steps)")
     print(f"[sweep] {cell}: {how}, exit at flip {exit_frame}", flush=True)
     port = Port(env, log, max(60.0, exit_frame / 15.0), opts.max_lines)
-    trace = open(os.path.join(out, f"{cell}.trace.csv"), "w")
-    trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset\n")
+    trace = open(os.path.join(out, f"{cell}.trace.csv"), "w", buffering=1)
+    trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake\n")
 
     race = Race(m["laps"])
-    state = {"outcome": None, "detail": "", "quit": False, "halt": None, "lx": 0.0, "steering": True,
-             "frame": 0, "steady": 0, "prev_shot": None, "results": None, "last_shot": None}
+    state = {"outcome": None, "detail": "", "quit": False, "quit_at": None, "halt": None, "lx": 0.0,
+             "steering": True, "thrust": 1, "airbrake": 0, "frame": 0, "steady": 0, "prev_shot": None,
+             "results": None, "last_shot": None, "ref": False, "slow_shots": 0, "slow_at": -10**9}
     shots_seen = {}                   # name -> frame
     analysed = set()
     sent = []                         # --tune: (lap, dist, lx) of every lx step sent
+    tail = []                         # the trace rows of the last TAIL_S s of race time
+    stall_shot = os.path.join(shots, "stall.bmp")
+    triggers = {-1: ["lefttrigger"], 1: ["righttrigger"], 2: ["lefttrigger", "righttrigger"]}
+    geo = tuner or (Tuner(ai_line, 1.0, 0.0) if ai_line else None)     # the line's heading for the trace
 
     def send(text):
         with open(live, "a") as f:
@@ -528,9 +728,32 @@ def run_cell(mode, track, opts):
     def stop(why_outcome, why):
         if state["outcome"] is None:
             state["outcome"], state["detail"] = why_outcome, why
-        if not state["quit"]:
-            send("0:quit")
-            state["quit"] = True
+        if state["quit"] or state["quit_at"]:
+            return
+        if why_outcome == "STALL":
+            # A picture of what stopped the ship first; the loop quits once it is written (or 4 s on).
+            send("0:shot stall")
+            state["quit_at"] = time.time() + 4.0
+            return
+        send("0:quit")
+        state["quit"] = True
+
+    def set_controls(airbrake, thrust):
+        if airbrake != state["airbrake"]:
+            for axis in triggers.get(state["airbrake"], []):
+                # -1, not 0: a trigger axis set to 0 stays pressed (task 016: L and R held after a release with 0
+                # braked the ship to a 10 km/h crawl with Cross held, in three runs).
+                send(f"0:axis {axis} -1")
+            for axis in triggers.get(airbrake, []):
+                send(f"0:axis {axis} 1")
+            state["airbrake"] = airbrake
+        if thrust != state["thrust"]:
+            # Cross is held by the route's `pad a BUDGET`; a 1-frame press releases it early, a long one holds it.
+            # The hold goes 2 frames after the line is read: the port reads the live file every 10 flips, and a
+            # release and a hold read together would otherwise run in the same frame, the release of the 1-frame
+            # press then lifting Cross for good (task 016: a ship left coasting to a stop at 266 m).
+            send("0:pad a 1" if not thrust else f"2:pad a {opts.frames + 1000}")
+            state["thrust"] = thrust
 
     def on_ship(s, text):
         race.feed(s, text)
@@ -540,22 +763,62 @@ def run_cell(mode, track, opts):
         if race.finished_frame is not None:
             if state["steering"]:
                 send("0:axis leftx 0")
+                set_controls(0, 1)
                 state["steering"], state["lx"] = False, 0.0
         elif tuner is not None:
-            lx = round(tuner.steer(race), 2)
+            raw = tuner.demand(race)
+            lx = round(tuner.stick(raw), 2)
             if abs(lx - state["lx"]) >= LX_STEP or (lx == 0.0 and state["lx"] != 0.0):
                 send(f"0:axis leftx {lx:.2f}")
                 state["lx"] = lx
                 sent.append((race.laps_done, race.dist, lx))
+                tuner.note(race.total, lx)
+            airbrake, thrust = 0, 1
+            if tuner.airbrake > 0.0 and not tuner.recovering:
+                side = 1 if raw > 0 else -1
+                hold = tuner.airbrake * (0.8 if state["airbrake"] == side else 1.0)
+                airbrake = side if abs(raw) > hold else 0
+            if tuner.lift > 0.0 and not tuner.recovering:
+                need = tuner.corner_need(race)
+                thrust = 0 if need > tuner.lift * (0.9 if not state["thrust"] else 1.0) else 1
+            if tuner.vmax > 0.0 and not tuner.recovering:
+                over = state["airbrake"] == 2
+                if race.kmh > tuner.vmax - (10.0 if over else 0.0):
+                    airbrake, thrust = 2, 0
+            set_controls(airbrake, thrust)
         elif table is not None:
             acts = table.start(race.dist) if race.prev_dist is None else table.crossed(race.prev_dist, race.dist)
             for a in acts:
                 send(f"0:{a}")
                 if a.startswith("axis leftx"):
                     state["lx"] = float(a.split()[2])
-        off = f"{ai_line.offset(race.x, race.z, race.dist):.2f}" if ai_line else ""
+        if (tuner is not None and tuner.absorb > 0.0 and race.finished_frame is None
+                and race.total - state.get("absorbed", 0.0) >= tuner.absorb):
+            send(f"0:pad x {int(tuner.hold)}")   # Square: "Absorb pickup" in the default controls
+            state["absorbed"] = race.total
+        if not state["ref"] and race.frame - race.start_frame >= REF_SHOT_FLIPS:
+            send("0:shot ref")
+            state["ref"] = True
+        off = ai_line.offset(race.x, race.z, race.dist) if ai_line else float("nan")
+        if race.contacts and math.isnan(race.contacts[-1][4]):
+            if state["airbrake"] == 2:
+                race.contacts.pop()               # the vmax brake, not a contact
+            else:
+                race.contacts[-1][4] = off
+        if (race.finished_frame is None and race.total > 5.0 and race.kmh < 30.0 and state["slow_shots"] < 3
+                and race.frame - state["slow_at"] >= 600):
+            send(f"0:shot slow{race.frame}")         # what slowed the ship down (for the stall diagnosis)
+            state["slow_shots"] += 1
+            state["slow_at"] = race.frame
+        psi = (wrap_angle(geo.line_heading(race.dist) - math.atan2(race.vz, race.vx))
+               if geo and race.kmh > 10.0 else float("nan"))
+        row = (race.frame, race.total, race.laps_done, race.dist, race.kmh, state["lx"], off, psi, state["thrust"],
+               state["airbrake"])
+        tail.append(row)
+        while tail[0][1] < race.total - TAIL_S:
+            tail.pop(0)
         trace.write(f"{race.frame},{race.total:.3f},{race.laps_done},{race.dist:.2f},{race.x:.2f},{race.z:.2f},"
-                    f"{race.kmh:.1f},{state['lx']:.2f},{off}\n")
+                    f"{race.kmh:.1f},{state['lx']:.2f},{off:.2f},{psi:.3f},{state['thrust']},{state['airbrake']}\n")
 
     def handle(text):
         s = SHIP_RE.search(text)
@@ -586,6 +849,12 @@ def run_cell(mode, track, opts):
         if state["outcome"] is None and race.started:
             if race.finished_frame is None and race.stalled_for() >= opts.stall:
                 stop("STALL", f"no progress for {race.stalled_for():.1f} s of race clock")
+        if state["quit_at"] and not state["quit"]:
+            if os.path.exists(stall_shot):
+                state["quit_at"] = min(state["quit_at"], time.time() + 0.5)   # let the writer finish
+            if time.time() >= state["quit_at"]:
+                send("0:quit")
+                state["quit"] = True
         # Live shots once the race is finished (and for tuning, every --shots-every flips).
         if state["outcome"] is None and not state["quit"] and race.started:
             every = SHOT_EVERY if race.finished_frame is not None else opts.shots_every
@@ -606,6 +875,8 @@ def run_cell(mode, track, opts):
                 continue            # still being written
             analysed.add(name)
             state["last_shot"] = path
+            if name == "ref":
+                print(f"[sweep] {cell}: shot ref: shield bar {shield_text(path)}", flush=True)
             if race.finished_frame is None or not name.startswith("f"):
                 continue
             state["steady"] = state["steady"] + 1 if steady and var >= RESULTS_MIN_VARIANCE else 0
@@ -642,7 +913,7 @@ def run_cell(mode, track, opts):
                 png.write_png(os.path.join(shots, name[:-4] + ".png"), w, h, c, data)
             except (OSError, ValueError):
                 pass
-    pick = state["results"] or state["last_shot"]
+    pick = state["results"] or (stall_shot if os.path.exists(stall_shot) else None) or state["last_shot"]
     if pick:
         w, h, c, data = png.read_bmp(pick)
         png.write_png(os.path.join(out, f"{cell}.png"), w, h, c, data)
@@ -650,6 +921,19 @@ def run_cell(mode, track, opts):
         tuned = os.path.join(out, f"{cell}.tuned.txt")
         lap, n = write_tuned(tuned, cell, sent, race.laps_done, opts)
         print(f"[sweep] {cell}: {n} steps of lap {lap + 1} -> {tuned}", flush=True)
+    if race.started:
+        detail += f"; {race.contact_text()}"
+    if outcome == "STALL":
+        shield = shield_fraction(stall_shot) if os.path.exists(stall_shot) else None
+        detail = f"{classify_stall(race, tail, shield)}; {detail}; {tail_text(tail)}"
+        with open(os.path.join(out, f"{cell}.stall.csv"), "w") as f:
+            f.write("frame,clock,lap,dist,kmh,lx,offset,psi,thrust,airbrake\n")
+            for r in tail:
+                f.write(",".join(f"{v:.3f}" if isinstance(v, float) else str(v) for v in r) + "\n")
+    with open(os.path.join(out, f"{cell}.contacts.csv"), "w") as f:
+        f.write("clock,lap,dist,kmh_lost,offset\n")
+        for t, lp, d, k, o in race.contacts:
+            f.write(f"{t:.2f},{lp},{d:.1f},{k:.0f},{o:.1f}\n")
     row = {"mode": mode, "track": track, "outcome": outcome, "frame": race.frame, "laps": race.laps_done,
            "clock": race.total, "detail": detail if outcome == "PASS" else f"{detail}; last: {race.line.strip()}",
            "seconds": elapsed, "tune": opts.tune}
@@ -659,6 +943,13 @@ def run_cell(mode, track, opts):
 
 
 def write_summary(rows):
+    """Merges this invocation's rows into the summary, under a lock (sweeps of other cells may run alongside)."""
+    with open(os.path.join(ROOT, OUT, "summary.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _write_summary(rows)
+
+
+def _write_summary(rows):
     path = os.path.join(ROOT, OUT, "summary.txt")
     header = ("| mode | track | outcome | flip | laps | race clock | real s | run | detail |\n"
               "|---|---|---|---|---|---|---|---|---|\n")
@@ -690,7 +981,7 @@ def parse(argv):
     p = argparse.ArgumentParser(prog="campaign_sweep.py", usage=__doc__.split("\n\n")[1].strip())
     p.add_argument("mode", nargs="?", default="single_race")
     p.add_argument("tracks", nargs="*")
-    p.add_argument("--frames", type=int, default=12000)
+    p.add_argument("--frames", type=int, default=13000)
     p.add_argument("--stall", type=float, default=20.0)
     p.add_argument("--drive")
     p.add_argument("--shots-every", type=int, default=0)
@@ -700,8 +991,13 @@ def parse(argv):
     p.add_argument("--wn", type=float, default=1.0)
     p.add_argument("--preview", type=float, default=0.3)
     p.add_argument("--export-line", metavar="OUT")
+    p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+    p.add_argument("--out", default=OUT)
     p.add_argument("--list", action="store_true")
     opts = p.parse_args(argv)
+    bad = [kv for kv in opts.set if "=" not in kv]
+    if bad:
+        p.error(f"--set takes KEY=VALUE, not {bad[0]!r}")
     if opts.mode not in MODES:
         p.error(f"unknown mode {opts.mode!r} (modes: {', '.join(MODES)})")
     known = MODES[opts.mode]["tracks"]
@@ -715,7 +1011,9 @@ def parse(argv):
 
 
 def main(argv=None):
+    global OUT
     opts = parse(sys.argv[1:] if argv is None else argv)
+    OUT = opts.out
     if opts.list:
         for t in opts.tracks:
             print(f"{opts.mode} {t} ({MODES[opts.mode]['tracks'].index(t)} DOWN)")
