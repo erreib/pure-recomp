@@ -106,7 +106,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   bundle; the profile names the plain BOOT.BIN so the installer works). **The app at `out/release-macos/stage/Wipeout
   Pure.app` is built from the merged tree with the HUD fix and passes its checks.** Merged: 032 (the test-only
   unlock-all switch, racing lines from the port's own AI, every track in the sweep). Merged: 034 (faster tests: the suite headless on Metal in 10 s, a sweep cell in 199 s with only the race paced,
-  tools on scratch data directories, silent runs; Verify rerun pending). Next: 033 (frame-time dips: a per-frame trace,
+  tools on scratch data directories, silent runs; Verify rerun PASS). Next: 033 (frame-time dips: a per-frame trace,
   pipeline pre-warming; alone on the GPU). **D-009 (Erik, 2026-10-06): fidelity before enhancements; the
   pause-menu redesign is dropped.** After 033: 035, the M8 fidelity audit (briefed: every halt and unimplemented GE
   feature over the whole sweep, PPSSPP comparisons beyond the five scenes, the 30-fps modes and higher classes on

@@ -1,6 +1,6 @@
 # 034: Faster tests: unpaced menus, the suite headless on Metal, the sweep paced only during the race
 
-Milestone: M7 (tooling) | Branch: task/034-faster-tests | Status: OPEN (after task 032)
+Milestone: M7 (tooling) | Branch: task/034-faster-tests | Status: MERGED 2026-10-06 (007b0ab)
 
 ## Goal
 Every scripted run is held to real time from its first frame, so the 4,450 flips of movies and menus before the
@@ -272,4 +272,16 @@ Open questions:
    status.md is outside "May touch".
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-06 (`tools/verify_task.sh 034`): the suite
+headless on Metal 5/5 in 10 s (lang 0.0002, title 0.0002, profile 0.0000, main_menu 0.0106, race_hud 0.0374), the
+Vineta K cell PASS in 191 s with the `ref` shot's shield bar read as full (3 laps, 62.1, 59.1, 55.2 s). The app's
+`audio.mute` is back at 0 and nothing else in the player's settings changed.
+Spot-read: `PURE_PACED_FROM` in the profile (set at registration and on every flip so the shell cannot undo it),
+run_boot's `--data-dir`, `--sound` and `other_games`, the suite's headless default and guard, the sweep's defaults,
+`--sound` pacing the whole run, the scratch directories' `ui.menu_hint_seen=1`.
+Merged: 007b0ab (made on `main` by mistake when a worktree creation switched the checkout; moved to batch/m2, main
+reset to b5cb152).
+Notes: no cached-profile route: the NEW-profile leg costs 0.65 s unpaced. Headless captures are pixel-identical to
+the Metal window's, so the Metal column serves both. Open questions 1 to 3 (pad_record.py's recording command wants
+`--sound` and `--data-dir`; `PureNative --replay` and `tools/bundle.sh --check` still use the player's directory or
+sound) are in docs/status.md Follow-ups. The window run's `PURE_AUDIO_WAV` exception stays.
