@@ -37,6 +37,10 @@ from the PPSSPP recordings of all eight records and the port's three-lap run (20
 - `lap` is 0 on the grid and 1 from the first crossing, and stays 1: it is not a lap counter. Once the race is
   over, bit 16 is set as well (65537 from the finish line on). PPSSPP reads taken while the CPU runs sometimes
   catch 257 for a frame.
+- `shield` (task 017) is not in the race record: it is the ship object's float at `be::Ship` +0xF8, 100.000 on the
+  grid for the Feisar (the ship type's maximum, `*(*(ship + 0xC8) + 0x74) + 0x84`). Every wall or ship contact
+  lowers it (Vineta K, 2026-10-05: 100 to 77.4 over the first 11 contacts, about 2 a contact); at 0 or below the
+  ship is destroyed.
 
 A race of N laps is therefore over at the Nth restart of the lap clock, which is what the sweep counts.
 
@@ -101,17 +105,58 @@ The sweep takes a `stall` shot before it closes the window and classifies the st
 
 | Class | Seen | What it looks like |
 |---|---|---|
-| eliminated by damage | Chenghou Project, Modesto Heights and Blue Ridge, in lap 2 or 3, after 40 to 67 contacts | "SHIP DESTROYED" panel with the lap times and ENTER TAG; the HUD and its shield bar are gone (reads 0%); the ship at rest |
+| eliminated by damage | Chenghou Project, Modesto Heights and Blue Ridge, in lap 2 or 3, after 40 to 67 contacts | "SHIP DESTROYED" panel with the lap times; the HUD and its shield bar are gone (reads 0%); the ship at rest. The sweep decides it from the stall shot's title (`DESTROYED_TITLE`) or the probe's shield at 0 or below |
 | stuck on geometry | Vineta K at 1914 m (no `recover`) | the ship nosed into a barrier, Cross held, engine lit, at rest or crawling; the shield bar mostly full |
 | off the line | | more than 25 m from the line or moving more than 90 degrees off it |
 | stopped | | no contact since the last progress (task 012's lap-3 stop at 4437 m, speed run down over 6 s with no impact, fits a destroyed ship) |
 
-The shield bar reads 0% whenever the HUD is hidden, so a check for the "SHIP DESTROYED" title would be firmer.
+The shield bar reads 0% whenever the HUD is hidden, so it only goes into the detail; the class comes from the
+title and the probe. The "SHIP DESTROYED" panel comes up about 5 s after the ship is destroyed, in the place of the
+results panel's "BAD LUCK... 8TH", with LAP 1-3 and PRESS X TO CONTINUE: `TITLE_REGION` and `DESTROYED_TITLE` in
+the sweep are its title's lit columns, taken from a Vineta K run on a local build that held the shield at 1 (the
+first wall, at 6.2 s, destroyed the ship; task 017).
+
+## The shield
 
 The shield (energy) bar is the HUD's cyan bar under the speed bar, bottom right; the sweep reads its fill from a
-shot (`SHIELD_BAR`). No shield field was found in the race records: `tools/pp_lines.py --dump` recordings of
-all eight records (+-0x1C0 around each entry's position; a Vineta K race with the player driving into a barrier,
-and a Modesto Heights race of the seven AI ships) show no field that starts equal for every ship and only falls,
-except +0x48, which goes from 0xFFFFFFFF to 5870 to 7017 as each AI ship ends its first lap (the lap time in
-1/100 s). The field probably lives in the ship object (`be::Ship`, found by its vtable in
-`src/profile/pure_profile.cpp`); reading it in the port needs a probe change under `src/`.
+shot (`SHIELD_BAR`). The value behind it is the ship object's float at `be::Ship` +0xF8 (task 017), not a field of
+the race records (task 016 looked there with `tools/pp_lines.py --dump` and found none). In the code:
+
+| Function | What it does with the shield |
+|---|---|
+| FUN_0892478c | reads +0xF8 (in the modes below 9 of `DAT_08b173e4`; the network modes keep it in a net record) |
+| FUN_089247dc | writes +0xF8, clamped to the ship type's maximum `*(*(ship + 0xC8) + 0x74) + 0x84`; for the player it also updates the HUD's `~CRAFTCRITICAL` warning (FUN_0881e944, under 20 and 10) |
+| FUN_08928274 | the damage: lowers the shield by the amount (halved in some modes), plays `energycritical` when it falls through 20, and at 0 or below puts the ship in state 4, destroyed (FUN_08928824); for the player it adds the amount to the race stats at `DAT_08b17794` +0x84, +0x88 or +0x8c by kind (the stats that FUN_0895a244 reports as `TotalWeaponDamage`, `TotalWallCollisionDamage`, `TotalShipCollisionDamage`) |
+| FUN_08926ae4 | the ship's update: a wall or ship contact calls the damage with `impact * 0.05 * 0.7` |
+| FUN_08923b78, FUN_08923b9c | refill to the maximum; add (absorbing a pickup, `TotalEnergyAbsorbed`) |
+| FUN_0892195c (Player.cpp) | copies the shield and its maximum into the player's HUD data each frame |
+| FUN_0881ebd8 (HUD.cpp) | the bar (`Shield3D`): eases towards shield / maximum; red and blinking under 20 |
+
+`PURE_WATCH_SHIP=1` prints it as `shield=` and `PURE_TEST_NO_DAMAGE=1` (a test switch, `README.md`) refills it
+every flip; a local build that wrote 1 instead destroyed the ship at its first wall, which is what showed the
+field is the shield and not a copy.
+
+## No-damage runs (task 017)
+
+The follower takes about 20 contacts a lap on Modesto Heights, Chenghou Project and Blue Ridge, which runs the
+shield out in lap 2 or 3. The sweep's job there is to reach the results screen and see whether anything halts, so
+`tools/campaign_sweep.py ... --no-damage` sets `PURE_TEST_NO_DAMAGE=1` and the summary marks the row
+`(no damage)`. Vineta K passes without it (task 016). Each track has its own budget in `MODES` (`frames`): 13000
+flips for Vineta K, 17000 for the other three, whose laps take the follower 75 to 95 s.
+
+The runs of 2026-10-05/06 (the committed steering tables; the summary's damage figure is the shield the frames
+took, which the switch put back):
+
+| Cell | Switch | Outcome | Laps (s) | Contacts (a lap) | Shield taken | Flips (budget ends at) |
+|---|---|---|---|---|---|---|
+| modesto_heights | no damage | PASS | 94.3, 83.8, 86.5 | 73 (25, 21, 27) | 135 | 22380 (23100) |
+| chenghou_project | no damage | PASS | 89.1, 87.2, 83.2 | 72 (24, 25, 23) | 150 | 22020 (23100) |
+| blue_ridge | no damage | PASS | 86.4, 89.8, 88.0 | 61 (19, 20, 22) | 126 | 22360 (23100) |
+| vineta_k | off | PASS | 63.4, 59.6, 63.8 | 42 (15, 11, 16) | 87 (13 left) | 17830 (19100) |
+| modesto_heights | off (`--out out/017/damage`) | STALL: eliminated by damage ("SHIP DESTROYED" title, probe shield -0.4), destroyed at 179.9 s, 453 m into lap 2 | 93.4, then 86.5 into lap 2 | 60 (27, 33) | 100 (62.4 left after lap 1) | 18200 (23100) |
+
+No cell halted: no `[hle-stub]`, unsupported instruction or runtime stop other than the sweep's own quit. A
+contact costs about 2 shield (1.7 to 2.1 a contact over these runs; one frame of a wall contact took at most 4.7),
+so a race of more than about 50 contacts ends in "SHIP DESTROYED"; Vineta K's pass leaves only 13. On Chenghou
+Project the game put the ship back twice, at 46.5 s (3965 m to 3755 m) and at 154.2 s (128 m to 4663 m), each
+time while it was going backwards along the track, and two frames before each took 8 and then 13 at once.

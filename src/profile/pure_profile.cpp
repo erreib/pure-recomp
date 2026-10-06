@@ -68,16 +68,26 @@ void watch_movie(Runtime &rt, std::uint64_t frame) {
 }
 
 // PURE_WATCH_SHIP=1 (task 007): once per flip during a race, the player's ship as the game's per-ship race record holds
-// it, printed when it changes (`[pure] ship frame N t=... clock=... pos=... vel=... kmh=... dist=... lap=...`).
-// The race records are a .bss array of 0x1C0-byte entries, one per ship; relative to entry k's position vector at
-// 0x08B72010 + k * 0x1C0: -0x20 velocity (m/s; the HUD speed is |v| * 3.6), +0 position (x, y, z, 1; the same as
-// the ship object's matrix row at +0x70), +0x10 lap counter, +0x14 the entry's ship index, +0x18 distance along the
-// track, +0x1C race clock (s). The player's entry is found through its be::Ship object (vtable 0x08AC259C at +0x3c,
-// set by LinkObj_etc__089261ac): +0x480 ship index, +0x488 kind (0/1 player, 2/3 AI), +0xcc AI flag. The objects
-// are found by scanning user RAM every 30 flips until one is there, and again when the race is torn down.
+// it, printed when it changes (`[pure] ship frame N t=... clock=... pos=... vel=... kmh=... dist=... lap=...
+// shield=...`). The race records are a .bss array of 0x1C0-byte entries, one per ship; relative to entry k's position
+// vector at 0x08B72010 + k * 0x1C0: -0x20 velocity (m/s; the HUD speed is |v| * 3.6), +0 position (x, y, z, 1; the
+// same as the ship object's matrix row at +0x70), +0x10 lap counter, +0x14 the entry's ship index, +0x18 distance
+// along the track, +0x1C race clock (s). The player's entry is found through its be::Ship object (vtable 0x08AC259C
+// at +0x3c, set by LinkObj_etc__089261ac): +0x480 ship index, +0x488 kind (0/1 player, 2/3 AI), +0xcc AI flag. The
+// objects are found by scanning user RAM every 30 flips until one is there, and again when the race is torn down.
+// `shield` is the ship object's own field (below), not the race record's.
 constexpr std::uint32_t kShipVtable = 0x08AC259Cu;
 constexpr std::uint32_t kRaceRecordPos = 0x08B72010u;
 constexpr std::uint32_t kRaceRecordStride = 0x1C0u;
+
+// The shield (energy) of a be::Ship (task 017): a float at +0xF8. FUN_0892478c reads it (in the modes below 9 that
+// DAT_08b173e4 numbers; the network modes keep it in a net record instead) and FUN_089247dc writes it, clamped to
+// the ship type's maximum at *(*(ship + 0xC8) + 0x74) + 0x84; for the player the setter also tells the HUD
+// (FUN_0881e944, the ~CRAFTCRITICAL warning under 20 and 10). Damage goes through FUN_08928274(amount, ship, kind),
+// called from the ship's collision handling in FUN_08926ae4 (a wall or ship contact: amount = impact * 0.05 * 0.7):
+// it lowers the shield, plays "energycritical" when it falls through 20, and at 0 or below puts the ship in state 4
+// (destroyed, FUN_08928824). FUN_08923b78 refills it to the maximum, FUN_08923b9c adds to it (absorbing a pickup).
+constexpr std::uint32_t kShipShield = 0xF8u;
 
 std::uint32_t find_player_ship(Runtime &rt) {
     const auto &m = rt.memory();
@@ -94,35 +104,74 @@ std::uint32_t find_player_ship(Runtime &rt) {
     return 0u;
 }
 
-std::string item_f(float v) { char b[24]; std::snprintf(b, sizeof b, "%.3f", static_cast<double>(v)); return b; }
+bool env_on(const char *name) { const char *v = env(name); return v != nullptr && *v != '\0' && *v != '0'; }
 
-void watch_ship(Runtime &rt, std::uint64_t frame) {
-    static const bool on = [] { const char *v = env("WATCH_SHIP"); return v != nullptr && *v != '\0' && *v != '0'; }();
-    if (!on) return;
+// The player's be::Ship object for the probes and switches that need it (0 when there is none): found by the scan
+// above every 30 flips until one is there, dropped when its vtable is gone (the race torn down).
+std::uint32_t player_ship(Runtime &rt, std::uint64_t frame) {
     static std::uint32_t ship = 0u;
     static std::uint64_t last_scan = 0u;
-    static std::string last;
     const auto &m = rt.memory();
     if (ship != 0u && m.load32(ship + 0x3cu) != kShipVtable) ship = 0u;
     if (ship == 0u) {
-        if (frame - last_scan < 30u) return;
+        if (frame - last_scan < 30u) return 0u;
         last_scan = frame;
         ship = find_player_ship(rt);
-        if (ship == 0u) return;
+        if (ship == 0u) return 0u;
         std::cout << "[pure] ship frame " << frame << " player object " << item_hex(ship) << " index "
                   << m.load32(ship + 0x480u) << "\n";
     }
+    return ship;
+}
+
+float load_float(Runtime &rt, std::uint32_t a) {
+    const std::uint32_t u = rt.memory().load32(a);
+    float x;
+    std::memcpy(&x, &u, 4);
+    return x;
+}
+
+// The ship type's full shield, the setter's clamp; 0 when the type data is not there yet.
+float ship_shield_max(Runtime &rt, std::uint32_t ship) {
+    const auto &m = rt.memory();
+    const std::uint32_t sim = m.load32(ship + 0xC8u);
+    if (sim < 0x08800000u || sim >= 0x0A000000u) return 0.0f;
+    const std::uint32_t type = m.load32(sim + 0x74u);
+    if (type < 0x08800000u || type >= 0x0A000000u) return 0.0f;
+    const float full = load_float(rt, type + 0x84u);
+    return std::isfinite(full) && full > 0.0f ? full : 0.0f;
+}
+
+std::string item_f(float v) { char b[24]; std::snprintf(b, sizeof b, "%.3f", static_cast<double>(v)); return b; }
+
+void watch_ship(Runtime &rt, std::uint64_t frame, std::uint32_t ship) {
+    static std::string last;
+    if (ship == 0u) return;
+    const auto &m = rt.memory();
     const std::uint32_t rec = kRaceRecordPos + m.load32(ship + 0x480u) * kRaceRecordStride;
-    const auto f = [&m](std::uint32_t a) { const std::uint32_t u = m.load32(a); float x; std::memcpy(&x, &u, 4); return x; };
+    const auto f = [&rt](std::uint32_t a) { return load_float(rt, a); };
     const float vx = f(rec - 0x20u), vy = f(rec - 0x1cu), vz = f(rec - 0x18u);
     std::ostringstream o;
     o << "clock=" << item_f(f(rec + 0x1cu)) << " pos=" << item_f(f(rec)) << "," << item_f(f(rec + 4u)) << ","
       << item_f(f(rec + 8u)) << " vel=" << item_f(vx) << "," << item_f(vy) << "," << item_f(vz)
       << " kmh=" << item_f(3.6f * std::sqrt(vx * vx + vy * vy + vz * vz)) << " dist=" << item_f(f(rec + 0x18u))
-      << " lap=" << m.load32(rec + 0x10u);
+      << " lap=" << m.load32(rec + 0x10u) << " shield=" << item_f(f(ship + kShipShield));
     if (o.str() == last) return;
     last = o.str();
     std::cout << "[pure] ship frame " << frame << " t=" << kernel().now_us() << " " << last << "\n";
+}
+
+// PURE_TEST_NO_DAMAGE=1 (task 017), a test instrument for tools/campaign_sweep.py, never for play: before each flip
+// the player's shield (+0xF8) is set back to its full value, so contacts never destroy the ship and the sweep can
+// run a track to its results screen to look for halts. Only the field is written (the HUD's warning follows it at
+// the next hit). Announced once at start-up as `[pure] TEST SWITCH: no damage`.
+void test_no_damage(Runtime &rt, std::uint32_t ship) {
+    if (ship == 0u) return;
+    const float full = ship_shield_max(rt, ship);
+    if (full <= 0.0f) return;
+    std::uint32_t u;
+    std::memcpy(&u, &full, 4);
+    rt.memory().store32(ship + kShipShield, u);
 }
 
 void wrap_flip_counter(HleRegistrar &hle) {
@@ -134,8 +183,13 @@ void wrap_flip_counter(HleRegistrar &hle) {
         static const std::uint64_t log_every = [] { const char *v = env("FRAME_LOG"); return v ? std::strtoull(v, nullptr, 10) : 0ull; }();
         ++frames;
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
+        static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE");
         watch_movie(rt, frames);
-        watch_ship(rt, frames);
+        if (watch || no_damage) {
+            const std::uint32_t ship = player_ship(rt, frames);
+            if (watch) watch_ship(rt, frames, ship);
+            if (no_damage) test_no_damage(rt, ship);
+        }
         original(rt, ctx);
         if (exit_at != 0u && frames >= exit_at) {
             std::cout << "[pure] exit at frame " << frames << "\n";
@@ -173,6 +227,9 @@ void wrap_call_traces(HleRegistrar &hle) {
 // the interpreter run of spike S3 hit it before the frontend. Keep this list short; a call any game makes belongs in
 // the framework or in an HLE extension module (docs/HLE_EXTENSIONS.md), not here.
 void register_pure_hle(HleRegistrar &hle) {
+    if (env_on("TEST_NO_DAMAGE"))
+        std::cout << "[pure] TEST SWITCH: no damage (PURE_TEST_NO_DAMAGE=1: the player's shield is refilled every "
+                     "flip; a sweep instrument, never for play)\n";
     wrap_flip_counter(hle);
     wrap_call_traces(hle);
     register_audio_capture(hle);
