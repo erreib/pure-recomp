@@ -162,6 +162,31 @@ void watch_ship(Runtime &rt, std::uint64_t frame, std::uint32_t ship) {
     std::cout << "[pure] ship frame " << frame << " t=" << kernel().now_us() << " " << last << "\n";
 }
 
+// PURE_WATCH_GRID=1 (task 032): during a race (while the player's ship object is there), once per flip, every entry
+// of the race record array, k = 0..7, printed when it changes: `[pure] grid frame N k=K clock=C pos=x,y,z
+// vel=vx,vy,vz dist=D lap=L`, the ship probe's race-record fields for each ship (entry k is the ship with index k;
+// the player's is the index the `player object` line names, 7 on a Single Race grid). tools/pp_lines.py --port turns
+// a log of these lines into a racing line from the port's own AI ships.
+void watch_grid(Runtime &rt, std::uint64_t frame, std::uint32_t ship) {
+    static std::string last[8];
+    if (ship == 0u) {
+        for (auto &l : last) l.clear();
+        return;
+    }
+    const auto &m = rt.memory();
+    const auto f = [&rt](std::uint32_t a) { return load_float(rt, a); };
+    for (std::uint32_t k = 0u; k < 8u; ++k) {
+        const std::uint32_t rec = kRaceRecordPos + k * kRaceRecordStride;
+        std::ostringstream o;
+        o << "clock=" << item_f(f(rec + 0x1cu)) << " pos=" << item_f(f(rec)) << "," << item_f(f(rec + 4u)) << ","
+          << item_f(f(rec + 8u)) << " vel=" << item_f(f(rec - 0x20u)) << "," << item_f(f(rec - 0x1cu)) << ","
+          << item_f(f(rec - 0x18u)) << " dist=" << item_f(f(rec + 0x18u)) << " lap=" << m.load32(rec + 0x10u);
+        if (o.str() == last[k]) continue;
+        last[k] = o.str();
+        std::cout << "[pure] grid frame " << frame << " k=" << k << " " << last[k] << "\n";
+    }
+}
+
 // PURE_TEST_NO_DAMAGE=1 (task 017), a test instrument for tools/campaign_sweep.py, never for play: before each flip
 // the player's shield (+0xF8) is set back to its full value, so contacts never destroy the ship and the sweep can
 // run a track to its results screen to look for halts. Only the field is written (the HUD's warning follows it at
@@ -184,11 +209,13 @@ void wrap_flip_counter(HleRegistrar &hle) {
         static const std::uint64_t log_every = [] { const char *v = env("FRAME_LOG"); return v ? std::strtoull(v, nullptr, 10) : 0ull; }();
         ++frames;
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
-        static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE");
+        static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE"),
+                          grid = env_on("WATCH_GRID");
         watch_movie(rt, frames);
-        if (watch || no_damage) {
+        if (watch || no_damage || grid) {
             const std::uint32_t ship = player_ship(rt, frames);
             if (watch) watch_ship(rt, frames, ship);
+            if (grid) watch_grid(rt, frames, ship);
             if (no_damage) test_no_damage(rt, ship);
         }
         original(rt, ctx);
