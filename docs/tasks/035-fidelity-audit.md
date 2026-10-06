@@ -54,7 +54,16 @@ player would notice, each row a candidate task.
    (shots before and after), the autosave's files under the scratch memory stick, and a restart that LOADs the
    profile and shows the same records; two profiles created in a row and what the LOAD screen then offers (the
    framework's save list picks the first slot: record what the PSP's own dialog would show, from PPSSPP).
-6. `docs/fidelity.md`: the four evidence sections, then the **differences list**: for each, what a player sees or
+6. The two-vblank stretches (task 033): in every race, at about the same track positions on both paths, the game
+   runs 0.4 to 1.3 s at a two-vblank cadence (the frame object's locked path: `+0x116c` 0 or the countdown at
+   `+0x117c`, docs/timing.md step 5; the main thread calls `sceDisplayWaitVblankStart` twice a frame there).
+   Find what sets the lock during a race (`PURE_TRACE_CALLS` on the writers of those fields, or a memory watch;
+   docs/timing.md names the limiter), and whether PPSSPP shows the same cadence at the same positions (its
+   frame counter against the race clock through the driver). If the game sets it from a timing it measures (a
+   frame-time estimate from the system clock, as FUN_08804390 computes), the HLE's answers are the suspect;
+   if it is the game's own rule (a weapon, a camera cut, a section of track), it is faithful and the list says
+   so. Report either way; fix nothing here.
+7. `docs/fidelity.md`: the four evidence sections, the stretches' finding, then the **differences list**: for each, what a player sees or
    would see, where (track, mode, frame), the evidence (log line, shot pair, fraction), the suspected cause (backend
    feature, HLE stub, follower, unknown), and a size guess. Ordered by visibility. Also a short "what matches" section
    so the list is read in proportion. README.md: the tool and the doc. docs/verification.md: the new scenes.
@@ -62,7 +71,7 @@ player would notice, each row a candidate task.
 ## Acceptance criteria
 - [ ] `tools/fidelity_audit.py --quick` runs its three cells and writes the two tables.
 - [ ] docs/fidelity.md holds the full matrix (every planned cell with an outcome), the feature table, the audio
-      table, the saves section and the differences list.
+      table, the saves section, the two-vblank finding and the differences list.
 - [ ] At least eight new reference scenes pass in the suite with measured values, and `tools/frame_regress.sh`
       (headless Metal) still passes every scene.
 - [ ] No game-facing code changed (src/, vendor/, patches/ untouched).
