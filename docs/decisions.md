@@ -10,6 +10,7 @@
 | D-006 | 2026-10-05 | Licence of our code: GPL-2.0-or-later | accepted |
 | D-007 | 2026-10-06 | Shell seam: `host::Shell` behind the HLE; Vulkan shell adapted, headless shell added, Metal shell implemented against it | accepted |
 | D-008 | 2026-10-06 | Metal shell and Metal backend are the default on macOS; Vulkan stays the portable path, selectable | accepted |
+| D-009 | 2026-10-06 | Priority: as close to 1:1 with the original as possible before any enhancement; the host pause menu stays the framework's | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -94,4 +95,19 @@ Metal only unless the Vulkan path is asked for. Vulkan-specific interface rows (
 under the Metal shell until the backend grows them (enhancements E3, E5).
 Alternatives: keep Vulkan the default until the enhancements land (rejected: the Metal path is the more faithful one
 today and is the one Erik asked for); drop Vulkan (rejected: it is the portable path and the differential reference).
+Status: accepted.
+
+## D-009  2026-10-06  Fidelity before enhancements
+Context: after the first playable app Erik asked about redesigning the framework's Escape menu and unifying it with
+the game's own pause menu. Both are possible (an overlay hook patch, then our own menu; the game's actions driven
+through its pause screen) and were queued.
+Decision (Erik): drop the pause-menu work. The next milestone is fidelity: the game as close to 1:1 with the
+original as possible, measured against PPSSPP and the original's behaviour, across every track, mode, class and
+screen. Enhancements (controls, widescreen, internal resolution, 60 fps in the 30-fps modes, filtering) are
+discussed after that. The frame-time work (033) stays, since steady 60 fps in the race is part of faithful play, and
+the test speed-up (034) stays, since the fidelity sweep depends on it.
+Consequences: the host overlay remains the framework's menu with its cosmetic leftovers until further notice. The
+fidelity work is a milestone of its own (M8 in docs/status.md): the breadth sweep's halts and unimplemented GE
+features, PPSSPP comparisons beyond the five scenes, the 30-fps modes and higher classes on every track, audio and
+save behaviour, the PSP system dialogs the framework replaces (the save list), and whatever the playtests find.
 Status: accepted.
