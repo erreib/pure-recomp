@@ -1,6 +1,6 @@
 # 032: A test-only unlock-all switch, racing lines from the port's own AI, every track in the sweep
 
-Milestone: M5 (breadth) | Branch: task/032-unlock-all-and-breadth | Status: OPEN
+Milestone: M5 (breadth) | Branch: task/032-unlock-all-and-breadth | Status: MERGED 2026-10-06 (c8aea4f)
 
 ## Goal
 The sweep covers the Alpha league's four tracks because a fresh profile unlocks nothing else. The game has a
@@ -247,4 +247,16 @@ holds 10 PASS rows. zone_2's PASS row is from a run with the final code (14:09).
    route (NO RACE). Should the sweep refuse to start when another PureNative is running?
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun from the main checkout, 2026-10-06, on the adjusted line (Sagarmatha for the Beta track): Sagarmatha
+PASS (3 laps, 70.6, 65.9, ... s; results screen at flip 18720) and Zone 2 PASS (TOTAL ZONES CLEAR 7, destroyed at
+59.8 s). `tools/frame_regress.sh` on the merged tree 5/5 at the Metal column. The first rerun used Citta Nuova and
+stalled on geometry at 2580 m where the worker's run had passed with 33 to 37 contacts a lap: that track is marginal
+for the follower, so the Verify names the track the driver handles best.
+Spot-read: the GPI override and `watch_grid` in the profile (test-only, off unless set), the sweep's leagues, classes
+and Zone picks, the put-back stall class, the title-edge tolerance, `pp_lines.py --port` (the winner's fastest pass
+within 15 m), the twelve lines and tables.
+Merged: c8aea4f into batch/m2 (clean).
+Notes: PARTIAL accepted; every acceptance criterion holds and the Verify miss is the test driver's. The follower's
+limits on Sinucit (a fork), Manor Top (a tight bend) and the long Beta tracks are in docs/status.md Follow-ups with
+the options (Erik's recorded laps, a per-flip live read, a fork-aware line). Flash to Phantom and the other modes'
+higher leagues are the M8 audit's. The one-game-at-a-time guard goes into task 034. The line rule stays as landed.
