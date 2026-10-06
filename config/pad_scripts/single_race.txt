@@ -2,8 +2,11 @@
 # countdown. Follows main_menu.txt (MAIN MENU at ~4450); measured 2026-10-05 (out/race2/route.txt). Screens:
 # SINGLE PLAYER by 4750, CLASS SELECTION by 4950, LEAGUE SELECTION by 5150, TRACK SELECTION by 5350, TEAM
 # SELECTION by 5550; the race loads from 5700 (the ship probe finds the player at ~5730) and goes at ~6250.
-# The track: tools/campaign_sweep.py adds N `pad dpdown` steps at 5380, 5410, 5440 for the Nth track of the list
-# (docs/tracks.md); with none this is Vineta K. The sweep stretches the Cross hold at 6100 to its flip budget.
+# The picks (task 032): tools/campaign_sweep.py adds the DOWN presses, 30 flips apart, for the class on CLASS
+# SELECTION from 4980 (--class: VECTOR, VENOM, FLASH, RAPIER, PHANTOM), the league on LEAGUE SELECTION from 5180
+# (ALPHA, BETA, CLASSIC) and the track on TRACK SELECTION from 5380 (the league's four, docs/tracks.md); with none
+# this is Vector, Alpha, Vineta K. A new profile has VECTOR, VENOM and ALPHA only; the sweep runs the other picks
+# with PURE_TEST_UNLOCK_ALL=1. It stretches the Cross hold at 6100 to its flip budget.
 4700:pad a
 4900:pad a
 5100:pad a

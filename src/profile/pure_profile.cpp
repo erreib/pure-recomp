@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <sstream>
 #include <vector>
 #include <iostream>
@@ -33,6 +34,7 @@ constexpr SaveFolder kSaveFolders[] = {
 };
 
 void return_zero(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 0u); }
+void return_one(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 1u); }
 
 // Frame counter behind PURE_EXIT_AT_FRAME (bounded, deterministic runs for the tools) and PURE_FRAME_LOG (a line
 // every N frames). It wraps the framework's sceDisplaySetFrameBuf handler, the game's flip, so it counts headless too.
@@ -161,6 +163,31 @@ void watch_ship(Runtime &rt, std::uint64_t frame, std::uint32_t ship) {
     std::cout << "[pure] ship frame " << frame << " t=" << kernel().now_us() << " " << last << "\n";
 }
 
+// PURE_WATCH_GRID=1 (task 032): during a race (while the player's ship object is there), once per flip, every entry
+// of the race record array, k = 0..7, printed when it changes: `[pure] grid frame N k=K clock=C pos=x,y,z
+// vel=vx,vy,vz dist=D lap=L`, the ship probe's race-record fields for each ship (entry k is the ship with index k;
+// the player's is the index the `player object` line names, 7 on a Single Race grid). tools/pp_lines.py --port turns
+// a log of these lines into a racing line from the port's own AI ships.
+void watch_grid(Runtime &rt, std::uint64_t frame, std::uint32_t ship) {
+    static std::string last[8];
+    if (ship == 0u) {
+        for (auto &l : last) l.clear();
+        return;
+    }
+    const auto &m = rt.memory();
+    const auto f = [&rt](std::uint32_t a) { return load_float(rt, a); };
+    for (std::uint32_t k = 0u; k < 8u; ++k) {
+        const std::uint32_t rec = kRaceRecordPos + k * kRaceRecordStride;
+        std::ostringstream o;
+        o << "clock=" << item_f(f(rec + 0x1cu)) << " pos=" << item_f(f(rec)) << "," << item_f(f(rec + 4u)) << ","
+          << item_f(f(rec + 8u)) << " vel=" << item_f(f(rec - 0x20u)) << "," << item_f(f(rec - 0x1cu)) << ","
+          << item_f(f(rec - 0x18u)) << " dist=" << item_f(f(rec + 0x18u)) << " lap=" << m.load32(rec + 0x10u);
+        if (o.str() == last[k]) continue;
+        last[k] = o.str();
+        std::cout << "[pure] grid frame " << frame << " k=" << k << " " << last[k] << "\n";
+    }
+}
+
 // PURE_TEST_NO_DAMAGE=1 (task 017), a test instrument for tools/campaign_sweep.py, never for play: before each flip
 // the player's shield (+0xF8) is set back to its full value, so contacts never destroy the ship and the sweep can
 // run a track to its results screen to look for halts. Only the field is written (the HUD's warning follows it at
@@ -174,6 +201,40 @@ void test_no_damage(Runtime &rt, std::uint32_t ship) {
     rt.memory().store32(ship + kShipShield, u);
 }
 
+// PURE_PACED_FROM=N (task 034), for the tools: the kernel's clock runs unpaced (Kernel::set_paced(false), patch
+// 0011) from start-up until flip N, and is held to real time (set_paced(true)) from flip N on, whatever the shell.
+// Without a window the menus before a race then take seconds, while the race, where tools/campaign_sweep.py steers
+// closed loop from the probe's lines, keeps real time. A window still presents at the display's rate (the Metal
+// shell waits for a drawable at vsync), so a windowed run gains little. 0 is paced from the start; unset (or empty)
+// leaves pacing to the shell, as before: paced with a window, unpaced without. Set every flip, so nothing the shell
+// does later undoes it.
+std::optional<std::uint64_t> paced_from() {
+    static const std::optional<std::uint64_t> value = []() -> std::optional<std::uint64_t> {
+        const char *v = env("PACED_FROM");
+        if (v == nullptr || *v == '\0') return std::nullopt;
+        char *end = nullptr;
+        const std::uint64_t n = std::strtoull(v, &end, 10);
+        if (end == nullptr || *end != '\0') {
+            std::cout << "[pure] PURE_PACED_FROM=" << v << " is not a flip number; ignored\n";
+            return std::nullopt;
+        }
+        return n;
+    }();
+    return value;
+}
+
+void apply_paced_from(std::uint64_t frame) {
+    const auto from = paced_from();
+    if (!from) return;
+    const bool paced = frame >= *from;
+    static bool announced = false;
+    if (paced && !announced && *from != 0u) {
+        announced = true;
+        std::cout << "[pure] paced from frame " << frame << " t=" << kernel().now_us() << "\n";
+    }
+    kernel().set_paced(paced);
+}
+
 void wrap_flip_counter(HleRegistrar &hle) {
     static HleFunction original = hle.bound_function("sceDisplay", kNidSceDisplaySetFrameBuf);
     if (!original) return;
@@ -182,12 +243,15 @@ void wrap_flip_counter(HleRegistrar &hle) {
         static const std::uint64_t exit_at = [] { const char *v = env("EXIT_AT_FRAME"); return v ? std::strtoull(v, nullptr, 10) : 0ull; }();
         static const std::uint64_t log_every = [] { const char *v = env("FRAME_LOG"); return v ? std::strtoull(v, nullptr, 10) : 0ull; }();
         ++frames;
+        apply_paced_from(frames);
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
-        static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE");
+        static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE"),
+                          grid = env_on("WATCH_GRID");
         watch_movie(rt, frames);
-        if (watch || no_damage) {
+        if (watch || no_damage || grid) {
             const std::uint32_t ship = player_ship(rt, frames);
             if (watch) watch_ship(rt, frames, ship);
+            if (grid) watch_grid(rt, frames, ship);
             if (no_damage) test_no_damage(rt, ship);
         }
         original(rt, ctx);
@@ -230,13 +294,29 @@ void register_pure_hle(HleRegistrar &hle) {
     if (env_on("TEST_NO_DAMAGE"))
         std::cout << "[pure] TEST SWITCH: no damage (PURE_TEST_NO_DAMAGE=1: the player's shield is refilled every "
                      "flip; a sweep instrument, never for play)\n";
+    if (const auto from = paced_from()) {
+        // The shell (register_media, before this hook) has set the pace from its window; the switch wins from here.
+        std::cout << "[pure] PURE_PACED_FROM=" << *from
+                  << (*from == 0u ? ": paced to real time from the start\n"
+                                  : ": unpaced until that flip, paced to real time from it\n");
+        apply_paced_from(0u);
+    }
     wrap_flip_counter(hle);
     wrap_call_traces(hle);
     register_audio_capture(hle);
 
     // The dev-kit switch block. Retail reads 0, which selects display mode 0 and the normal pacing path
     // (docs/timing.md).
-    hle.add("UtilsForUser", "sceKernelGetGPI", return_zero);
+    // PURE_TEST_UNLOCK_ALL=1 (task 032), a test instrument for tools/campaign_sweep.py, never for play: GPI reads 1
+    // (bit 0 only). Every frontend lock check reads `unlocked = (sceKernelGetGPI() & 1) ? 1 : profile->0x381`
+    // (FUN_088b43d4, FUN_0894fa5c, FUN_089516b8; the profile byte is what the main menu's hidden button sequence in
+    // FUN_0894d4c8 sets, "Everything"), so every class, league and track is open on any profile. Bits 0x20/0x40/0x80,
+    // the frame limiter's and the display mode's (FUN_0886511c), stay 0; the game copies GPI to GPO each frame
+    // (FUN_08804390), which the framework ignores.
+    if (env_on("TEST_UNLOCK_ALL"))
+        std::cout << "[pure] TEST SWITCH: unlock all (PURE_TEST_UNLOCK_ALL=1: sceKernelGetGPI returns 1, which the "
+                     "frontend's lock checks read as everything unlocked; a sweep instrument, never for play)\n";
+    hle.add("UtilsForUser", "sceKernelGetGPI", env_on("TEST_UNLOCK_ALL") ? return_one : return_zero);
 
     // sceKernelUSec2SysClock(usec, SceKernelSysClock *clock): the 64-bit clock is just the microsecond count.
     hle.add("ThreadManForUser", "sceKernelUSec2SysClock", [](Runtime &rt, AllegrexContext &ctx) {

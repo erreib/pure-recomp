@@ -2,18 +2,26 @@
 """Bounded run of PureNative with a de-duplicated, length-capped log.
 
   tools/run_boot.py [--seconds N] [--frames N] [--window] [--shell vulkan|metal|headless] [--backend NAME]
-                    [--strict] [--script FILE] [--shots DIR] [--every N] [--stubs] [--max-lines N]
-                    [--env KEY=VAL ...] out/run.log
+                    [--strict] [--script FILE] [--shots DIR] [--every N] [--stubs] [--max-lines N] [--sound]
+                    [--data-dir DIR] [--env KEY=VAL ...] out/run.log
 
-Defaults: headless (PURE_NO_RENDER=1 PURE_NO_AUDIO=1), 60 s wall-clock deadline, stubs listed at start-up
-(PURE_LIST_STUBS=1). The shell and the GE backend are PureNative's own default (on macOS the Metal ones unless the
-environment names others, D-008; PURE_NO_RENDER makes the shell headless). --window keeps the renderer and audio on.
+Defaults: headless (PURE_NO_RENDER=1), silent (PURE_NO_AUDIO=1), a scratch data directory (PURE_DATA_DIR=
+out/data/run_boot), 60 s wall-clock deadline, stubs listed at start-up (PURE_LIST_STUBS=1). The shell and the GE
+backend are PureNative's own default (on macOS the Metal ones unless the environment names others, D-008;
+PURE_NO_RENDER makes the shell headless). --window keeps the renderer on.
 --shell NAME sets PURE_SHELL. vulkan and metal are window shells and imply --window. headless (no window, no GPU
 unless a backend that draws is named) implies no window: the run is headless as by default, even with --script or
---shots, with the null GE backend (PURE_GE_BACKEND=null unless --backend or the environment names one) and no audio
-device (PURE_NO_AUDIO=1 unless the environment sets it). Such a run is unpaced, so --shell headless --script FILE
---shots DIR runs a route in seconds, its shots the backend's own 480x272 captures. --backend NAME sets
-PURE_GE_BACKEND (vulkan, metal, null, record). --strict sets PURE_STRICT_HLE=1.
+--shots, with the null GE backend (PURE_GE_BACKEND=null unless --backend or the environment names one). Such a run
+is unpaced, so --shell headless --script FILE --shots DIR runs a route in seconds, its shots the backend's own
+480x272 captures. --backend NAME sets PURE_GE_BACKEND (vulkan, metal, null, record). --strict sets PURE_STRICT_HLE=1.
+Sound (task 034): every run is silent, PURE_NO_AUDIO=1 (no audio device; the game's sceAudio calls still run on the
+virtual clock, so PURE_AUDIO_WAV captures as before), unless --sound, or the environment (or --env) sets
+PURE_NO_AUDIO, or sets PURE_AUDIO_WAV for a run with a window (task 013's audio checks).
+The data directory (task 034): PURE_DATA_DIR (settings.ini, pipeline caches, logs, save backups) is --data-dir DIR
+(default out/data/run_boot), made on first use and kept between runs, unless the environment (or --env) names one,
+so a test run never reads or writes the player's ~/Library/Application Support/pure-recomp/PureNative/ and settings
+changed while playing never reach a test. A new one starts with a settings.ini holding ui.menu_hint_seen=1 (the
+menu hint would sit over a window's first 12 s). The game itself comes from PURE_GAME_DIR (default game/).
 --frames N sets PURE_EXIT_AT_FRAME=N (the profile stops the runtime at that flip), raises the deadline to
 max(seconds, N/15) and exits 0 when the run ended there (`[pure] exit at frame` in the output).
 --script FILE joins the file's non-empty lines that do not start with `#` with `;` into PURE_INPUT_SCRIPT and
@@ -42,6 +50,48 @@ FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the fr
 STUB_RE = re.compile(r"\[hle-stub\] (\S+)")
 RA_RE = re.compile(r"\bra=(0x[0-9A-Fa-f]+)")
 LIST_RE = re.compile(r"Unimplemented imports: (\d+) of (\d+)")
+# What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
+# over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings.
+SCRATCH_SETTINGS = "ui.menu_hint_seen=1\n"
+
+
+def scratch_data_dir(env, path):
+    """Sets PURE_DATA_DIR in env to path (relative to the checkout), made on first use with SCRATCH_SETTINGS and kept
+    between runs, unless env already names a data directory; returns the directory the run uses (task 034)."""
+    if env.get("PURE_DATA_DIR"):
+        return env["PURE_DATA_DIR"]
+    path = os.path.join(ROOT, path)
+    os.makedirs(path, exist_ok=True)
+    settings = os.path.join(path, "settings.ini")
+    if not os.path.exists(settings):
+        with open(settings, "w") as f:
+            f.write(SCRATCH_SETTINGS)
+    env["PURE_DATA_DIR"] = path
+    return path
+
+
+def silence(env, sound=False, window=True):
+    """PURE_NO_AUDIO=1 unless sound is asked for or env decides (task 034): env sets PURE_NO_AUDIO, or PURE_AUDIO_WAV
+    with a window. No audio device only: the game's sceAudio calls still run on the virtual clock and PURE_AUDIO_WAV
+    still captures them."""
+    if not sound and "PURE_NO_AUDIO" not in env and not (window and "PURE_AUDIO_WAV" in env):
+        env["PURE_NO_AUDIO"] = "1"
+
+
+def other_games():
+    """The PureNative processes running now (`pgrep -f build/.*/bin/PureNative`, kept when the executable itself is
+    PureNative, not a command line that mentions it), as (pid, command) pairs (task 034: one game at a time)."""
+    try:
+        pids = subprocess.run(["pgrep", "-f", "build/.*/bin/PureNative"], capture_output=True, text=True).stdout.split()
+    except OSError:
+        return []
+    games = []
+    for pid in pids:
+        def ps(field):
+            return subprocess.run(["ps", "-o", f"{field}=", "-p", pid], capture_output=True, text=True).stdout.strip()
+        if os.path.basename(ps("comm")) == "PureNative":
+            games.append((int(pid), ps("command")))
+    return games
 
 
 def parse(argv):
@@ -58,6 +108,8 @@ def parse(argv):
     p.add_argument("--every", type=int)
     p.add_argument("--stubs", action="store_true")
     p.add_argument("--max-lines", type=int, default=20000)
+    p.add_argument("--sound", action="store_true")
+    p.add_argument("--data-dir", default=os.path.join("out", "data", "run_boot"), metavar="DIR")
     p.add_argument("--env", action="append", default=[], metavar="KEY=VAL")
     opts = p.parse_args(argv)
     for kv in opts.env:
@@ -150,16 +202,15 @@ def main(argv=None):
     window = opts.window or (opts.shell is not None and not headless) or \
         (not headless and (opts.script is not None or opts.shots is not None))
     if not window:
-        env.setdefault("PURE_NO_RENDER", "1"); env.setdefault("PURE_NO_AUDIO", "1")
+        env.setdefault("PURE_NO_RENDER", "1")
     if opts.shell is not None:
         env["PURE_SHELL"] = opts.shell
     if opts.backend is not None:
         env["PURE_GE_BACKEND"] = opts.backend
     if headless:
-        # No window and no audio device; the null backend unless one is named (the default one would draw on the GPU).
+        # No window; the null backend unless one is named (the default one would draw on the GPU).
         if opts.backend is None and not env.get("PURE_GE_BACKEND"):
             env["PURE_GE_BACKEND"] = "null"
-        env.setdefault("PURE_NO_AUDIO", "1")
     if opts.strict:
         env["PURE_STRICT_HLE"] = "1"
     if opts.frames is not None:
@@ -175,7 +226,11 @@ def main(argv=None):
         env["PURE_SCREENSHOT_EVERY"] = str(opts.every)
     if opts.stubs:
         env["PURE_LIST_STUBS"] = "1"
-    env.update(kv.split("=", 1) for kv in opts.env)
+    extra = dict(kv.split("=", 1) for kv in opts.env)
+    asked = dict(env, **extra)          # --env counts as the environment for the two defaults below
+    silence(asked, opts.sound, window)
+    scratch_data_dir(asked, opts.data_dir)
+    env.update(asked)
     os.makedirs(os.path.dirname(os.path.abspath(log)) or ".", exist_ok=True)
     shots_before = bmp_state(shots) if shots is not None else {}
 

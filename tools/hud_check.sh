@@ -9,6 +9,8 @@
 #   --out      default out/hud/<shell>: the route (route.txt), the run's log (run.log), the shots (shots/h<FLIP>.bmp
 #              and .png) and the count (summary.txt). Removed first.
 #   --env      extra environment for the run (tools/run_boot.py --env).
+# The run is silent and uses the data directory out/data/hud_check (settings.ini, pipeline caches), not the
+# player's, unless the environment sets PURE_NO_AUDIO or PURE_DATA_DIR (tools/run_boot.py; task 034).
 # The route: config/pad_scripts/main_menu.txt + single_race.txt (Vineta K, Cross held from flip 6100, no steering),
 # their own shot steps dropped, on an empty memory stick (<out>/game, EBOOT.ELF and disc.iso linked to game/), with a
 # shot every 25 flips from 6200 to 7700 (61 shots; the race goes at about 6250) and the run ending at flip 7710.
@@ -71,6 +73,7 @@ shots=$(( (LAST - FIRST) / STEP + 1 ))
 echo "hud_check: shell $SHELL_NAME, backend $BACKEND, $shots shots from flip $FIRST to $LAST, out $OUT"
 t0=$SECONDS
 python3 tools/run_boot.py --script "$OUT/route.txt" --shots "$OUT/shots" --frames $END --shell "$SHELL_NAME" \
+  --data-dir out/data/hud_check \
   --backend "$BACKEND" --env PURE_GAME_DIR="$OUT/game" ${ENVS[@]+"${ENVS[@]}"} "$OUT/run.log" > "$OUT/run.stdout" 2>&1
 rc=$?
 reached=no
