@@ -205,7 +205,7 @@ draws, a line each, `lit`, `fog` and `cull` among the tags) gives:
 | Frames | Screen | Draws a frame | Lit | Fogged | Stencil | Bloom targets | Depth-tested |
 |---|---|---|---|---|---|---|---|
 | 1-5707 | boot, language, title, profile, menus, CLASS, LEAGUE, TRACK, TEAM, loading | up to 81 | 0 | 0 | 0 | 0 | 2 a frame at 5-123 (boot), 13 at 5702-5706 (loading) |
-| 5503-5701 | TEAM SELECTION (within the line above) | 65-69 | 0 | 0 | 0 | 0 | 0 |
+| 5503-5701 | TEAM SELECTION (within the line above) | 59-81 while it comes in, 65-69 from 5531 | 0 | 0 | 0 | 0 | 0 |
 | 5708 on | the race | 682-684 | 220-261 | 434-436 | 519 | 5 | 672-674 |
 
 The TEAM screen's rotating ship is ten textured quads (pre-drawn outline pictures, 256x128 CLUT8 textures in VRAM),
@@ -237,7 +237,7 @@ stencil draw, where at 2x the first pixel over tol 24 comes at draw 40 (11 pixel
 | race frame 6016 whole, against Vulkan at 1x | 0.3246 at tol 24 (42380 pixels): the shadow darkening over the whole screen, the bloom, and what follows from them |
 | `race_warm.gerec` (2x) frame 6016, `--first-diff --tol 24` | first difference at draw 40 (11 pixels): a fogged, alpha-tested (GREATER 0x7F), bilinear-textured strip that writes the stencil, its alpha-test edge moved by the 2x-to-1x reduction. Bisected to the first draw past 5% of the pixels instead: draw 394 |
 | race frame 6016 whole, against Vulkan at 2x | 0.3768 at tol 24 |
-| race frame 6016 against PPSSPP (`tools/frame_regress.sh --backend metal --only race_hud`) | RACE_HUD_PENDING |
+| race frame 6016 against PPSSPP (`tools/frame_regress.sh --backend metal --only race_hud`) | 0.2978 at tol 32, limit 0.10 (task 023: 0.2977; Vulkan 0.0672): FAIL, not yet a pass condition. The red is the track, the ships and the stands under the stencil-gated darkening quad, which without the stencil dims the whole screen, and the missing bloom: both 025's, and large enough to hide what lighting changed |
 
 That the race comparison would catch a wrong rule: the 1x recording cut after draw 393 of frame 6016, replayed into
 Vulkan, and into Metal alone with a switch (pixels over tol 24 against Vulkan's picture):
@@ -253,11 +253,11 @@ Vulkan, and into Metal alone with a switch (pixels over tol 24 against Vulkan's 
 What the race lights with (frames 6008-6016): lit draws whose vertex colour stands in for all three material colours
 with no light on (emissive plus the global ambient times the vertex colour; 1944 draws over the nine frames), and
 lit draws with the material colours and two directional diffuse lights (523); fog with four settings (end 1400 and
-scale 1/1230 towards 0xCCA38E or black, end 1270 and scale 1/770 towards 0xEDFCFF, end 5001 and scale 1 towards
-grey). No point or spot light, no specular, no powered diffuse, no reversed normals, no separate specular: those
+scale 1/1230 towards the colour register 0xCCA38E (0xBBGGRR) or black, end 1270 and scale 1/770 towards 0xEDFCFF,
+end 5001 and scale 1 towards grey). No point or spot light, no specular, no powered diffuse, no reversed normals, no separate specular: those
 are ported from `ge.vert` as they are and checked by nothing but the port.
 
-In the replays Metal takes 4 to 6 ms a race frame and Vulkan 6 to 9 (each including its capture).
+In the replays Metal takes 4 to 6 ms a race frame and Vulkan 5 to 10 (each including its capture).
 
 ## Verify numbers
 
@@ -289,3 +289,12 @@ frame. The first shader compile on a machine takes about 0.7 s, later ones 0.5 t
 With the Metal sources built in, `tools/frame_regress.sh` (Vulkan) passes 5/5 with the fractions it had before
 (0.0544, 0.0302, 0.0543, 0.0331, 0.0672), and its five captures are pixel-identical to the main checkout's run of
 2026-10-06 03:35.
+
+### Task 024
+
+`tools/build.sh profile && tools/gerec/metal_check.sh && tools/frame_regress.sh --backend metal --only
+lang,title,profile` (2026-10-06, M4 Pro): metal_check PASS (6 s with its recordings made; team frames 0.000000 at
+tol 24, the race bisected to draw 394 at 1x and to draw 40 at 2x), and the three frontend scenes at their task 023
+fractions: `lang` 0.0002, `title` 0.0002, `profile` 0.0000. `tools/frame_regress.sh` (Vulkan): 5/5 at the fractions it
+had (0.0544, 0.0302, 0.0543, 0.0331, 0.0672), its five captures pixel-identical to the main checkout's run of
+2026-10-06 07:30-07:36.
