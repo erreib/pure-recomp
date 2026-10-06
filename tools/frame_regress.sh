@@ -4,9 +4,13 @@
 # Exit 0 only when every scene passes. Every renderer change runs this before merging. About 7 minutes: three bounded
 # windowed runs (input scripts need the renderer's pad), one per route, each on an empty memory stick of its own
 # (<out>/game, EBOOT.ELF and disc.iso linked to game/), because main_menu.txt creates and saves a profile.
-#   tools/frame_regress.sh [--backend vulkan|metal] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]
+#   tools/frame_regress.sh [--backend vulkan|metal] [--shell vulkan|metal|headless] [--out DIR]
+#                          [--only SCENE[,SCENE...]] [--env KEY=VAL ...]
 #   --backend  sets PURE_GE_BACKEND for the runs and records it in the summary (default vulkan). Only the Vulkan
 #              backend exists today: the value is passed on, not enforced.
+#   --shell    sets PURE_SHELL for the runs and records it in the summary beside the backend (default vulkan): the
+#              shots are the Vulkan shell's window, the Metal shell's (task 027), or, headless, the GE backend's own
+#              480x272 captures.
 #   --out      captures (<out>/shots/<scene>.png), run logs, diff images of failing scenes (<out>/<scene>.diff.png:
 #              the capture dimmed, differing pixels red) and summary.txt; default out/regress. The suite's files
 #              from an earlier run there are removed first.
@@ -38,15 +42,17 @@ EXTRA_FLIPS=30
 
 OUT=out/regress
 BACKEND=vulkan
+SHELL_NAME=vulkan
 ONLY=
 ENVS=()
 usage() {
-  echo "usage: tools/frame_regress.sh [--backend vulkan|metal] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]"
+  echo "usage: tools/frame_regress.sh [--backend vulkan|metal] [--shell vulkan|metal|headless] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...]"
   exit 2
 }
 while [ $# -gt 0 ]; do
   case $1 in
     --backend) [ $# -ge 2 ] || usage; BACKEND=$2; shift 2 ;;
+    --shell) [ $# -ge 2 ] || usage; SHELL_NAME=$2; shift 2 ;;
     --out) [ $# -ge 2 ] || usage; OUT=$2; shift 2 ;;
     --only) [ $# -ge 2 ] || usage; ONLY=$2; shift 2 ;;
     --env) [ $# -ge 2 ] || usage; case $2 in *=*) ;; *) usage ;; esac; ENVS+=(--env "$2"); shift 2 ;;
@@ -55,6 +61,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 case $BACKEND in vulkan|metal) ;; *) echo "frame_regress: --backend is vulkan or metal, not $BACKEND"; exit 2 ;; esac
+case $SHELL_NAME in vulkan|metal|headless) ;; *) echo "frame_regress: --shell is vulkan, metal or headless, not $SHELL_NAME"; exit 2 ;; esac
 
 [ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
@@ -86,7 +93,7 @@ SUMMARY=()
 note() { echo "$*"; SUMMARY+=("$*"); }
 commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 git diff --quiet HEAD 2>/dev/null || commit="$commit+changes"
-note "frame regression $(date '+%Y-%m-%d %H:%M'), commit $commit, backend $BACKEND (PURE_GE_BACKEND: recorded, not enforced)"
+note "frame regression $(date '+%Y-%m-%d %H:%M'), commit $commit, backend $BACKEND (PURE_GE_BACKEND: recorded, not enforced), shell $SHELL_NAME (PURE_SHELL)"
 extra=$(printf '%s ' ${ENVS[@]+"${ENVS[@]}"} | sed 's/--env //g; s/ *$//')
 note "extra environment: ${extra:-none}"
 
@@ -107,7 +114,7 @@ for route in $ROUTES; do
   echo "run $name: $frames flips ..."
   t0=$SECONDS
   python3 tools/run_boot.py --script "$script" --shots "$OUT/shots" --frames "$frames" \
-    --env PURE_GAME_DIR="$OUT/game" --env PURE_GE_BACKEND="$BACKEND" ${ENVS[@]+"${ENVS[@]}"} \
+    --env PURE_GAME_DIR="$OUT/game" --env PURE_GE_BACKEND="$BACKEND" --env PURE_SHELL="$SHELL_NAME" ${ENVS[@]+"${ENVS[@]}"} \
     "$OUT/$name.log" > "$OUT/$name.stdout" 2>&1
   rc=$?
   reached=no

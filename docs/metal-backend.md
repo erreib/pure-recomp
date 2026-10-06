@@ -5,7 +5,8 @@
 023 built its skeleton (device, targets, textures, the draws of the 2D frontend, clears, blending, the alpha test,
 captures) and proved it on the frame regression suite's three frontend scenes, which it draws within a few pixels
 of PPSSPP: the language page, the title screen and the profile screen. 3D lighting, the stencil kept as alpha, the
-bloom chain and the read-backs into guest memory are tasks 024 and 025; the Metal presenter in the shell is 026.
+bloom chain and the read-backs into guest memory are tasks 024 and 025. The Metal shell (task 027, "The Metal shell"
+below) shows its pictures in a window of its own, with no Vulkan involved.
 
 ## Quick start
 
@@ -14,13 +15,16 @@ tools/build.sh profile
 tools/frame_regress.sh --backend metal --only lang,title,profile          # the three frontend scenes (about 75 s)
 PURE_GE_BACKEND=metal tools/run_boot.py --frames 300 out/x.log             # headless: no window, Metal still draws
 PURE_GE_BACKEND=metal tools/run_boot.py --frames 700 --env PURE_METAL_LOG=1 out/x.log   # a line per draw
+PURE_SHELL=metal PURE_GE_BACKEND=metal tools/run_boot.py --window --frames 700 out/x.log # the Metal shell: no Vulkan
+tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile          # the same scenes, Metal shell
 ```
 
 | Switch | Effect |
 |---|---|
 | `PURE_GE_BACKEND=metal` | draw with this backend; with the window open (no `PURE_NO_RENDER`) or without one |
 | `PURE_METAL_LOG=1` | a line per draw and per new target (below). Every 600 frames and at exit the backend prints its counts either way |
-| `PURE_METAL_SHELL=0` | do not hand the pictures to the window shell: the window stays black and the input script's `shot` steps capture nothing (see "The window") |
+| `PURE_METAL_SHELL=0` | under the Vulkan shell, do not hand the pictures to its window: the window stays black and the input script's `shot` steps capture nothing (see "The window"). Under any other shell there is no hand-over to turn off |
+| `PURE_SHELL=metal` | show the pictures in the Metal shell's window instead of the Vulkan shell's (see "The Metal shell") |
 | `PURE_NO_FB_TEXTURES=1` | every texture decoded from guest memory, none read from a target (the framework's switch, as for Vulkan) |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -35,7 +39,9 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | `src/gpu/metal_backend.mm` | `MetalGeBackend : portablekit::gpu::GeBackend` and its `BackendRegistration("metal", ...)`. Objective-C++ with ARC |
 | `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT) |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
-| `CMakeLists.txt` | the two sources in `portablekit_add_game(... SOURCES ...)`, the `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, and `-framework Metal`, `Foundation`, `QuartzCore` linked |
+| `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
+| `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
+| `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the three `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
 
 Built without Xcode, in the shape of the Bouncer's backend (`~/dev/bouncer-recomp/docs/metal-backend.md`): the
 `.mm` goes through the same `/usr/bin/clang++` and ccache as every other source of `tools/build.sh profile`, and
@@ -124,8 +130,8 @@ textures are found again rather than decoded. (The language page draws the pause
 
 ### The window
 
-The window still belongs to the Vulkan shell (`VulkanRenderer`), which presents its own target at the display
-address, and the input script's `shot` steps, which the frame regression suite captures with, read that window
+Under the Vulkan shell (the default, `PURE_SHELL` unset), the window belongs to `VulkanRenderer`, which presents its
+own target at the display address, and the input script's `shot` steps, which the frame regression suite captures with, read that window
 (`VulkanRenderer::capture_window`, from `ui/input_script.cpp`), not `GeBackend::capture_frame`. With nothing in the
 shell's targets the window is black and a `shot` writes no file at all (checked: `--only lang --env
 PURE_METAL_SHELL=0` ends `FAIL (no capture)`). So, when there is a window, `present_image` reads the picture back
@@ -133,8 +139,69 @@ and hands it to the shell (`show_in_shell` in `metal_shell.cpp`: `VulkanRenderer
 address), scaled by nearest neighbour to the shell's target size (960x544 at the default 2x) so that the shell's blit
 copies it 1:1. The window then shows what Metal drew, and a `shot`, reduced to 480x272 by nearest neighbour as the
 suite does, gives Metal's pixels back exactly: the suite's `lang` shot and the backend's own `capture_frame` of the
-same frame are identical at 480x272. This costs one GPU wait and a 2 MB upload a frame, and goes when the shell gets
-its Metal presenter (task 026). `PURE_METAL_SHELL=0` turns it off.
+same frame are identical at 480x272. This costs one GPU wait and a 2 MB upload a frame. `PURE_METAL_SHELL=0` turns it
+off. Under any other shell `BackendConfig::vulkan_shell` is null and there is no hand-over and no read-back:
+`present_image` commits the frame and names the target's texture, which the Metal shell samples itself (below) and the
+headless shell never looks at (its `shot` steps are `capture_frame`). The start-up line then ends "pictures shown by
+the shell, not read back".
+
+## The Metal shell (task 027, 2026-10-06)
+
+`PURE_SHELL=metal` puts the game in a window shell of our own, `src/host/metal_shell.mm` (`MetalShell :
+portablekit::host::Shell`, registered as `metal` with a `ShellRegistration`, docs/ge-backend.md section 8), instead of
+the Vulkan one. With `PURE_GE_BACKEND=metal` the game then runs with no Vulkan and no MoltenVK: the frontend route's
+log has no line naming either. Under another GE backend it shows that backend's `Cpu` picture (the null backend's
+black); the Vulkan backend needs the Vulkan shell and draws nothing here, as in the headless shell.
+
+| Part | What it does |
+|---|---|
+| Window | an SDL window (`SDL_WINDOW_METAL \| SDL_WINDOW_RESIZABLE`, 480x272 times the window-size setting, full screen by the setting), titled as the Vulkan shell's (`PURE_WINDOW_TITLE`, else the program's name and build label); `SDL_Metal_CreateView` and its `CAMetalLayer`: BGRA8, tagged sRGB (as MoltenVK tags its swapchain, so the colours look the same), `framebufferOnly` off for the captures, the system default device (`MTLCreateSystemDefaultDevice`, the backend's) and a command queue of the shell's own. Prints `[shell] metal: Apple M4 Pro, window 960x544, vsync` |
+| Events and input | `pump_events` handles the window's events as the Vulkan renderer's pump does: close, gamepads arriving and leaving, a display change, the mouse while it is captured for the game (only the script's mouse under scripted input), then the interface's event hook. The pad is a `host::SdlPad` the shell holds, the code the Vulkan shell uses: the keyboard through the player's bindings, the first gamepad or the input script's virtual one, the script's keys (`set_scripted_key`), the neutral pad while an interface screen is up (`set_game_input`). The pointer is captured by the Vulkan renderer's rule. `sample_pad` pumps SDL and samples without handling events |
+| Present | the backend's `Metal` image (its target's `id<MTLTexture>`) is drawn into the layer's next drawable by one triangle over the letterboxed rectangle, placed as the Vulkan renderer's `record_game_blit` places it (Original), or over the whole drawable (Stretch); a `Cpu` image is uploaded to a texture first; no image clears to black. The interface is drawn in the same pass, then `presentDrawable` and commit. A fast-forwarding load presents a flip only when none was shown for 33 ms, as the Vulkan shell does. Vsync is the layer's `displaySyncEnabled`, off for Immediate; there is no Mailbox (`supports_present_mode`) |
+| Scaling filter | nearest when the sharp-screen setting is on, and whenever the picture covers a whole multiple of 480x272 (the default 2x window); linear otherwise (below) |
+| Captures | `capture_window` (the input script's `shot`): the next present also copies the drawable, interface included, into a shared buffer, waits for it and writes the BMP (`[render] window 960x544 -> PATH`), as the Vulkan shell's window captures are written. `ShellConfig::capture_frame` is not used |
+| Interface | `initialize_ui`: `ImGui_ImplSDL3_InitForMetal` and `ImGui_ImplMetal_Init` (patch 0012 moved the SDL3 platform init from `Layer::attach` into the shells); `begin_ui_frame`: `ImGui_ImplMetal_NewFrame` with a render pass descriptor that has the drawable's attachments (one BGRA8 colour attachment, no depth: a 1x1 stand-in texture, since the drawable itself is taken at the present); `set_ui_draw_data` keeps the draw data, drawn by the next `present` or `present_ui` over the picture; `present_ui(show_game)` presents the last game picture (behind the paused menu) or the setup screens' brown, with the interface; `shutdown_ui` waits for the GPU and shuts both ImGui backends down |
+| Other | `hold_frame` keeps a copy of the picture on screen while the hold lasts; `frame_rate_now` counts the presents of the last second; `display_refresh` is the refresh rate SDL gives for the window's display; `game_aspect` is 480/272; `device_name` the Metal device's name |
+
+What it leaves out: frame interpolation (`present_due`, `present_until` and `pause_interpolation` do nothing and
+`set_frame_rate` is ignored: every flip is presented as it comes, so the menu's frame rate row changes nothing here),
+the Fill aspect (taken as Original: the shell keeps the PSP's shape, as `usable_aspect` does for a game that cannot
+draw another), the touch controls (`touch_controls_visible` is false), the performance overlay (`set_perf_overlay` does
+nothing; `PURE_PERF=log` still prints), and the menu's resolution, texture filter and texture-pack rows, which need the
+Vulkan renderer (`active_renderer()` is null under this shell, and the menu leaves them out). The System tab's
+graphics line still reads "Vulkan on" the device's name: that text is the framework's (`ui/menu.cpp`).
+
+The backend commits each frame's command buffer in `present_image`, before the HLE calls `present`, and its targets
+are tracked resources of the same device, so Metal orders the shell's sampling after the frame's draws and the next
+frame's draws after the sampling.
+
+### The scaling filter
+
+The backend draws at 480x272 and the default window is 960x544. At an exact 2x, linear sampling mixes every window
+pixel with its neighbour by a quarter: with plain bilinear the suite scores lang 0.0521, title 0.0388 and profile
+0.0473 (inside the limits, far from the backend's own 0.0002, 0.0002 and 0.0000), and the picture is visibly softer
+than the Vulkan shell's, which at the same settings copies its 2x target 1:1. So the shell samples nearest whenever the
+picture covers a whole multiple of its size, where each game pixel covers whole window pixels and filtering could only
+blur. Sharp (the sharp-screen setting) is nearest at any size; Smooth is bilinear at the sizes that are not whole
+multiples (a resized window, full screen).
+
+### Numbers
+
+`tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile` (2026-10-06, M4 Pro): lang 0.0002,
+title 0.0002, profile 0.0000, task 023's values, in 72 s. The three 960x544 captures are pixel-identical
+(`imgdiff.py --tol 0`) to the Vulkan shell's with the hand-over (`--backend metal`) of the same day. Over the frontend
+route the backend waited for the GPU twice (0.9 ms) against 2128 times (1009 ms) with the hand-over; the route takes
+the same 71 s either way, paced to real time. One of the runs caught the blinking cursor after LOAD at frame 2100
+(profile 0.0002, 22 pixels, 19893 draws instead of 19853): its phase follows the real-time pacing, as on lang and
+title. For comparison, `--shell headless --backend metal` gives the same three fractions from the backend's own 480x272
+captures in 2 s (no window, unpaced: patch 0011), and `tools/frame_regress.sh` with the Vulkan shell and backend still
+passes 5/5 at 0.0544, 0.0302, 0.0543, 0.0331 and 0.0672.
+
+A window resized through the menu (Window size x3) gets a 1440x816 drawable, and its capture reduced to 480x272 is
+identical to the 2x one: nearest at 3x as at 2x.
+
+The menu opens over the game with Esc (the interface's key) and closes with Esc again: `out/027/menu_shots/menu_open.png`
+of task 027's check shows it over the paused language page.
 
 ## What is not done yet
 
@@ -142,7 +209,6 @@ its Metal presenter (task 026). `PURE_METAL_SHELL=0` turns it off.
 |---|---|
 | 024 | lighting and fog (lit draws use their vertex colour); transformed sprites are expanded in object space, as the Vulkan backend does, which is right only for the frontend's orthographic projection; culling to be confirmed on the race; the colour test, logic ops, the texture environment colour and colour doubling are not in `DrawCall` |
 | 025 | the stencil attachment's test and operations, the alpha copy rule (patches 0004 and 0006: today non-clear draws leave the alpha alone), `block_transfer`, `read_back_framebuffer`, `write_back_frame` and `write_back_depth`. These four are counted and say `[metal] <call>: not implemented (task 025); counted, nothing written` once; `write_back_depth` returns false. The frontend calls only `write_back_frame` (once a flip) |
-| 026 | the Metal presenter in the shell, which replaces the hand-over to the window and its per-frame wait |
 
 ## Where it differs from the Vulkan backend on purpose
 

@@ -103,7 +103,94 @@ ImGui (report the error; do not patch ImGui), or the platform-init change needs 
 Do not change the GE backend beyond item 6, and do not add frame interpolation or Fill.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+Changed:
+- `src/host/metal_shell.mm` (new): `MetalShell : portablekit::host::Shell`, registered as `metal`. SDL window
+  (`SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE`, size and full screen from the settings, the Vulkan shell's title),
+  `SDL_Metal_CreateView`, its `CAMetalLayer` on `MTLCreateSystemDefaultDevice` (BGRA8, sRGB-tagged as MoltenVK tags
+  its swapchain, `framebufferOnly` off), a queue of its own. Events and input as the Vulkan renderer's pump, the pad
+  from a held `host::SdlPad` (gamepad attach, scripted keys, scripted mouse, pointer capture); no touch controls.
+  `present`: the `Metal` texture (or an uploaded `Cpu` picture, or black) drawn letterboxed into the next drawable, the
+  interface in the same pass, `presentDrawable`, commit; fast-forward thinning as the Vulkan shell; vsync by
+  `displaySyncEnabled`; no interpolation, no Fill. `capture_window` reads the composited drawable back as a BMP.
+  Interface: `ImGui_ImplSDL3_InitForMetal` + `ImGui_ImplMetal_Init`, `ImGui_ImplMetal_NewFrame` with a pass descriptor
+  of the drawable's attachments (a 1x1 BGRA8 stand-in, since the drawable is taken at the present), `present_ui`.
+- `third_party/imgui_metal/imgui_impl_metal.h`, `imgui_impl_metal.mm` (new): Dear ImGui's Metal backend from the
+  v1.92.9b tag, verbatim (the vendored `imgui.h` and `backends/imgui_impl_sdl3.cpp` are byte-identical to that tag's).
+- `patches/0012-ui-platform-init-in-shell.patch` and its row in `patches/README.md`: vendor `host/ui/layer.cpp`
+  (`Layer::attach` loads the fonts, calls only `shell.initialize_ui`, then sets the gamepad mode),
+  `host/shell/shell.hpp` (the contract's comment), `host/shell/vulkan_shell.cpp` (`ImGui_ImplSDL3_InitForVulkan` before
+  the renderer's ImGui backend; `shutdown_ui` shuts both down).
+- `src/gpu/metal_backend.mm` (item 6): `to_shell_` already required `BackendConfig::vulkan_shell`; the comments say so
+  and the start-up line under another shell now ends "pictures shown by the shell, not read back" (was "no window").
+- `CMakeLists.txt`: the shell and ImGui's `.mm` beside the backend's (Objective-C++, ARC), `third_party/imgui_metal` on
+  the include path, and `-framework CoreGraphics` (the sRGB colour space; see Open questions).
+- `tools/frame_regress.sh`: `--shell vulkan|metal|headless` sets `PURE_SHELL` and is recorded in the summary.
+- `docs/metal-backend.md` ("The Metal shell": parts, what it leaves out, the scaling filter, numbers; the quick start,
+  switches, files and "The window" brought up to date), `docs/ge-backend.md` 8.5 (one line), `README.md`.
+
+Acceptance:
+- Verify route: frame 2200 reached, `Profile_part1.PMF` opened after `pad start` at 1800, `grep -ci "vulkan\|moltenvk"
+  out/027/metal.log` prints 0; the backend made 1 GPU wait in the run (shutdown), against 2128 with the hand-over.
+- `tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile`: 0.0002, 0.0002, 0.0000 (Verify run
+  and one more; a third run caught the blinking cursor after LOAD on profile, 0.0002, 22 pixels: pacing, as task 023
+  saw on lang and title). The captures are pixel-identical at 960x544 to the Vulkan shell's hand-over captures.
+- `tools/frame_regress.sh` (Vulkan shell and backend): PASS 5/5, 0.0544 0.0302 0.0543 0.0331 0.0672, 7m 7s; the lang
+  capture is identical to the main checkout's run of 04:54. `--backend metal` under the Vulkan shell: 0.0002, 0.0002,
+  0.0000 (the hand-over still works). `--shell headless --backend metal`: the same three, in 2 s.
+- Menu: Esc over the language page opens the paused menu over the game and Esc closes it (`[menu] closed after
+  1.4 s`): `out/027/menu_shots/menu_open.png` (open) and `out/027/menu_shots/menu_closed.png` (closed). Also checked:
+  Window size x3 from the menu resizes to a 1440x816 drawable (`out/027/resize_shots/`, run on a scratch
+  `PURE_DATA_DIR`), and `PURE_GE_BACKEND=null` in this shell shows its black Cpu picture.
+
+Verify output (last 20 lines):
+```
+  0xda x1 first=0x0
+  0xe2 x2 first=0x0
+  0xe3 x2 first=0x0
+  0xe4 x2 first=0x0
+  0xe5 x2 first=0x0
+  0xe6 x1 first=0x0
+  0xf0 x1 first=0x0
+  0xf1 x1 first=0x0
+  0xf2 x1 first=0x0
+  0xf3 x1 first=0x0
+  0xf4 x1 first=0x0
+  0xf5 x1 first=0x0
+  0xf6 x1 first=0x0
+  0xf7 x1 first=0x0
+  0xf8 x1 first=0x0
+  0xf9 x1 first=0x0
+[metal] 2200 frames, 20623 draws, 2196 passes, 347 textures decoded, 0 framebuffer textures, 0 target copies, 0 uploads, 2 targets, 1 GPU waits (0.371792 ms) in 73.831 s
+[run_boot] shots: 4 new BMP(s) converted to PNG in out/027/shots (lang, notice, profile, title)
+[run_boot] exit 0 after 74.4s, 361 lines
+verify 027: PASS
+```
+(Above them in `out/027/verify.txt`: `ok: 12 patch(es) reproduce vendor/portablekit at 8b0c3fe`, and the suite's table
+lang 0.0002, title 0.0002, profile 0.0000, `frame regression: PASS, 3/3 scenes pass (1m 11s)`.)
+
+Open questions:
+1. The scaling filter departs from "nearest or linear by the sharp-screen setting": the shell samples nearest whenever
+   the picture covers a whole multiple of 480x272 (the default 2x window), and Smooth is bilinear only at other sizes.
+   Plain bilinear at 2x blends every pixel with its neighbour by a quarter and scores 0.0521, 0.0388, 0.0473 (inside
+   the limits, not task 023's fractions the acceptance asks for), and looks softer than the Vulkan shell, which copies
+   its 2x target 1:1 at the same settings. Keep, or make Smooth literal and accept those fractions?
+2. `-framework CoreGraphics` is linked (the brief expected the frameworks to be there already) for
+   `CGColorSpaceCreateWithName(kCGColorSpaceSRGB)`, so the layer is colour-matched like MoltenVK's sRGB swapchain.
+   Without it the window would show the same bytes untagged (more saturated on a P3 display); captures are unaffected.
+3. `third_party/imgui_metal/` holds only the two files, as the brief says. Their headers carry no copyright line; the
+   MIT notice is in the vendored `third_party/imgui/LICENSE.txt`, which is not committed in our repo. Add a copy of it
+   beside the two files?
+4. The shell samples the backend's targets on its own command queue. It relies on Metal's tracking of tracked
+   resources across the queues of one device and on the backend committing the frame before `present`; captures are
+   identical to the read-back path and nothing tore, but Apple documents the ordering plainly only within one queue. An
+   `MTLSharedEvent` the backend signals would make it explicit, which is a backend change beyond item 6.
+5. Framework text outside May touch: the menu's System tab reads "Graphics: Vulkan on <device>" under this shell
+   (`ui/menu.cpp`), and its Frame rate row offers rates this shell ignores. `src/gpu/metal_shell.hpp` still says the
+   hand-over lasts "until the shell has a Metal presenter (task 026)"; it now serves the Vulkan shell only.
+6. A `Cpu` picture is uploaded into one texture after waiting for the previous present; fine for the null backend,
+   a real CPU backend would want two.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
