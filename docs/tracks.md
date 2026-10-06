@@ -58,8 +58,20 @@ Sinucit forks at about 800 m: in its recording the winner took a branch near x 5
 near x 440 to 470 in lap 2, 130 m apart.
 
 The classes (CLASS SELECTION, `--class NAME`): VECTOR (0 DOWN), VENOM (1), FLASH (2), RAPIER (3), PHANTOM (4); a new
-profile has VECTOR and VENOM. Every cell of task 032 ran at Vector; the other classes' routes are proved by the
-menu shot (PHANTOM at 4 DOWN, out/032/h/pclassic) and not raced. Faster classes would need their own budgets.
+profile has VECTOR and VENOM. A race is longer at the faster classes. Headless recordings of Vineta K at each class
+(`--record-line --class NAME`, 2026-10-06, `out/032/rec`) reached their races, and the AI winner restarted its lap
+clock before its finish as many times as a race of these laps needs:
+
+| Class | DOWN | New profile | Laps (`CLASS_LAPS`) | The AI winner's laps on Vineta K |
+|---|---|---|---|---|
+| vector | 0 | open | 3 | 47 to 59 s |
+| venom | 1 | open | 3 | 41 to 46 s |
+| flash | 2 | switch | 4 | 34 to 40 s |
+| rapier | 3 | switch | 4 | 31 to 34 s |
+| phantom | 4 | switch | 5 | 27 to 29 s |
+
+A `--class` cell counts its class's laps and scales the track's budget by them (`cell_laps`, `cell_budget`). Every
+windowed cell of task 032 ran at Vector; the follower has not driven a faster class.
 
 ## Everything unlocked: the test switch (task 032)
 
@@ -128,8 +140,9 @@ picks. For the other tracks the lines come from the port's own AI ships:
   (`PURE_SHELL=headless`, the Metal backend, unpaced) with Cross held from 6100 and no steering, the grid probe,
   `PURE_TEST_NO_DAMAGE=1` and the unlock switch where the track needs it, to the end of the cell's budget, then calls
   `tools/pp_lines.py --port`. The player meets the first barrier and stays there (its shield refilled); the seven
-  AI ships race their three laps by themselves. A recording takes 1 to 2 minutes of wall time.
-- `tools/pp_lines.py --port LOG [--out CSV] [--samples CSV] [--ships leader|ai] [--compare REF]` reads the first
+  AI ships race the whole race by themselves (they did on all nine tracks recorded, and on Vineta K at every class). A
+  recording takes 1 to 2 minutes of wall time.
+- `tools/pp_lines.py --port LOG [--out CSV] [--samples CSV] [--ships leader|ai] [--near M] [--compare REF]` reads the first
   race of such a log, drops the player's record and every record whose lap field has bit 16 set (that ship has
   finished), and writes the samples in the PPSSPP recording's CSV form (`--samples`, the flip in the usec column).
   The line is made from the AI ship with the most progress: the one furthest along the track (the distance
@@ -392,3 +405,71 @@ No cell halted: no `[hle-stub]`, unsupported instruction or runtime stop other t
 Tournament races the next player object appeared about 1010 flips (17 s, eight Cross presses) after the results
 panel, and the final TOURNAMENT STANDING about 670 flips after race 4's panel. The Feisar finished the first
 run's tournament 8th ("8TH - COMMISERATIONS. HAVE ANOTHER GO!").
+
+## Runs of the other leagues and the Zone tracks (task 032)
+
+Every cell from a new profile, windowed on the default path (the Metal shell and backend), the unlock switch set by
+the sweep, Single Race with `--no-damage` (2026-10-06; `out/sweep/summary.txt`). The race clock's laps, the
+sweep's contacts, the shield the frames took (the switch put it back), the game's put-backs (the ship off the
+track and set back along it), and the flip of the outcome with the flip the budget ended at.
+
+### Beta
+
+| Cell | Outcome | Laps (s) | Contacts (a lap) | Shield taken | Put-backs | Flip (budget ends at) | Real s |
+|---|---|---|---|---|---|---|---|
+| sinucit | STALL: put back by the game, 9 times in 50 s, each time after it left the track at 896 to 980 m (just past the fork at about 800 m), set down at about 517 m; 0 laps | | 13 (13) | 54 | 9 | 9570 (31600) | 262 |
+| citta_nuova | PASS | 119.4, 116.1, 116.2 | 105 (33, 37, 35) | 255 | 0 | 27450 (29100) | 562 |
+| sebenco_climb | PASS | 101.0, 106.8, 111.0 | 86 (28, 27, 31) | 178 | 0 | 25590 (26600) | 526 |
+| sol_2 | PASS | 87.5, 87.6, 84.4 | 66 (22, 21, 23) | 151 | 2 (at 970 and 1109 m in lap 3) | 21840 (27100) | 472 |
+
+### Classic
+
+| Cell | Outcome | Laps (s) | Contacts (a lap) | Shield taken | Put-backs | Flip (budget ends at) | Real s |
+|---|---|---|---|---|---|---|---|
+| karbonis | PASS | 82.8, 66.2, 62.3 | 64 (22, 20, 22) | 150 | 4 (at 2605 to 2922 m in lap 1) | 19000 (22100) | 421 |
+| sagarmatha | PASS | 71.4, 62.7, 68.0 | 49 (17, 14, 18) | 80 | 0 | 18830 (27600) | 416 |
+| manor_top | STALL: put back by the game, 3 times at about 1500 m and then 4 times after it left the track at 2198 to 2305 m, set down at about 2008 m; 0 laps | | 26 (26) | 91 | 7 | 10470 (26100) | 276 |
+| mandrashee | PASS | 79.4, 72.8, 82.3 | 69 (25, 20, 24) | 140 | 0 | 20520 (24600) | 447 |
+
+The two stalls ran before the put-back class existed, so their summary rows say "stuck on geometry" (an incidental
+contact); the class above is from their traces (`tools/campaign_sweep.py`'s `classify_stall` on the same logs gives
+"put back by the game 4 times since the last progress" for both). Their stall shots are
+`out/sweep/single_race-sinucit/stall.png` and `out/sweep/single_race-manor_top/stall.png`. What happens there:
+
+- **Sinucit.** The track forks at about 800 m, and the AI ships take both branches (in the recording, 81 samples on
+  the branch near x 430 to 470 and 78 on the one near x 570 to 610 at 850 m). The line follows the winner's fastest
+  pass, on the first. The follower ran 9 to 16 m right of it there, inside the right-hand bend after the fork, where
+  the AI pack keeps within about 9 m of its own mean, and fell off: the probe's height dropped from 124 to 95 m in
+  1.2 s and the game put the ship back at about 517 m, nine times. Tries with the follower's own options, apart from
+  the summary: `--set preview=0.5` (`out/032/p05`) got through twice in sixteen falls and stalled in lap 3 at 942 to
+  1012 m; a line round the winner's other pass, on the other branch (`out/032/alt`), fell at 1012 to 1042 m.
+- **Manor Top.** No fork: the AI pack keeps within 3 to 7 m of its mean through a tight right-left bend at 2150 to
+  2350 m. The follower turned in at full lock and swung 15 to 23 m right of the line, off the track; `--set
+  preview=0.5` (`out/032/p05`) stalled at the same bend (2195 to 2462 m).
+
+Both are the follower's limit (its 0.8 s lag, task 016), not a halt: the committed tables keep Vineta K's settings.
+
+No cell halted: no `[hle-stub]`, unsupported instruction or runtime stop other than the sweep's own quit (or a
+recording's frame exit) in any of the 30 logs: the cells, the reruns, the tries and the 13 recordings.
+
+### Zone
+
+| Cell | Track | Outcome | Zones (TOTAL ZONES CLEAR) | Destroyed at | Contacts | Flip (budget ends at) | Real s |
+|---|---|---|---|---|---|---|---|
+| zone_2 | MALLAVOL | PASS | 7 (TOP SPEED 461.63, SCORE 4808) | 59.8 s, at rest at 443 m | 1 | 7410 (14250) | 247 |
+| zone_3 | CORIDON 12 | PASS | 7 (TOP SPEED 504.83, SCORE 4991) | 62.5 s, at 1815 m | 6 | 7490 (14250) | 250 |
+| zone_4 | SYNCOPIA | PASS | 7 | 61.3 s, at 1603 m | 3 | 7440 (14250) | 253 |
+
+As on PRO TOZO (zone 6), the ship runs with Cross held and no steering into a barrier and drains its shield (75)
+against it for about a minute. The first runs of zone_2 and zone_3 timed out with the panel on the screen for seven
+minutes: on these tracks the SHIP DESTROYED title lit every glyph one column narrower (13 columns off the signature
+against a limit of 8), and the 7 of TOTAL ZONES CLEAR, a top bar with a centre stroke, read as `?`. The title check
+now ignores a column an edge moved by one place explains (the panels count 0, race views and the other panels 23 or
+more) and the 7 has a second signature; the zone_4 cell and the zone_2 and zone_3 reruns ran with the fix.
+
+### Without the switch
+
+- `tools/campaign_sweep.py single_race vineta_k --no-damage`: PASS at flip 18240 (laps 68.4, 59.6, 63.7 s, 43
+  contacts); the log has no `unlock all` line.
+- `tools/frame_regress.sh` (the Metal shell and backend, `out/032/regress`): PASS, 5/5 scenes, every fraction equal
+  to the measured column but race_hud's 0.0366 (measured 0.0379).
