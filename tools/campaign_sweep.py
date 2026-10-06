@@ -8,10 +8,8 @@
 
 MODE is a row of MODES (default single_race); TRACK names a track of the mode (default: all of them, in menu
 order). Each cell is one run of build/arm64/bin/PureNative, strict (PURE_STRICT_HLE=1) with
-PSPRECOMP_NO_INTERPRETER=1 and PURE_WATCH_SHIP=1, windowed (the input script drives the renderer's virtual pad), on
-the Vulkan path (PURE_SHELL=vulkan PURE_GE_BACKEND=vulkan unless the environment names a shell or backend): the
-macOS default since task 028 is the Metal one, whose window drops the race HUD in most race frames (2026-10-06), and
-the sweep reads the HUD, the results panel and the SHIP DESTROYED title from its shots.
+PSPRECOMP_NO_INTERPRETER=1 and PURE_WATCH_SHIP=1, windowed (the input script drives the shell's virtual pad), on
+the default path (the Metal shell and backend on macOS; PURE_SHELL and PURE_GE_BACKEND name others).
 The tool runs the game itself under a pty, the way tools/run_boot.py does, and writes the log line by line: it
 steers from the `[pure] ship` lines as they come, and run_boot's block-buffered log reaches a reader up to 50
 flips late. Its input script is
@@ -930,9 +928,6 @@ def run_cell(mode, track, opts):
     exit_frame = m["throttle"] + frames
     game = prepare_game_dir(cell)
     env = dict(os.environ)
-    # The Vulkan path unless the environment names another (the Metal window loses the race HUD; docstring).
-    env.setdefault("PURE_SHELL", "vulkan")
-    env.setdefault("PURE_GE_BACKEND", "vulkan")
     env.update({"PURE_GAME_DIR": game, "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
                 "PURE_EXIT_AT_FRAME": str(exit_frame), "PURE_INPUT_SCRIPT": ";".join(f"{fr}:{a}" for fr, a in steps),
                 "PURE_SCREENSHOT_DIR": shots, "PURE_SCREENSHOT_EVERY": "0", "PURE_WATCH_SHIP": "1",
