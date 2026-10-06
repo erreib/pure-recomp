@@ -148,6 +148,10 @@ LEAGUES = {"alpha": ALPHA, "beta": BETA, "classic": CLASSIC}
 # CLASS SELECTION, top to bottom; a new profile has the first two (2026-10-06, out/032).
 CLASSES = ["vector", "venom", "flash", "rapier", "phantom"]
 FRESH_CLASSES = ["vector", "venom"]
+# The laps of a Single Race at each class: the port's AI winner on Vineta K restarted its lap clock 2, 2, 3, 3 and 4
+# times before its finish (`--record-line --class`, 2026-10-06; laps of 59, 41 to 46, 34 to 40, 31 to 34 and 27 to
+# 29 s).
+CLASS_LAPS = {"vector": 3, "venom": 3, "flash": 4, "rapier": 4, "phantom": 5}
 # The lengths on the TRACK SELECTION panels (m).
 LENGTHS = {"vineta_k": 4446, "modesto_heights": 4576, "chenghou_project": 4866, "blue_ridge": 4780,
            "sinucit": 6117, "citta_nuova": 5408, "sebenco_climb": 4813, "sol_2": 4400,
@@ -306,6 +310,20 @@ def needs_unlock(mode, track, cls="vector"):
     """True when a new profile does not have the cell's track or class open (the cell then runs with
     PURE_TEST_UNLOCK_ALL=1)."""
     return track not in MODES[mode].get("fresh", MODES[mode]["tracks"]) or cls not in FRESH_CLASSES
+
+
+def cell_laps(mode, cls="vector"):
+    """The laps of a cell's race: the class's (CLASS_LAPS) where the mode picks a class, else the mode's."""
+    m = MODES[mode]
+    return CLASS_LAPS[cls] if "class_at" in m and m["laps"] else m["laps"]
+
+
+def cell_budget(mode, track, cls="vector"):
+    """The track's budget (MODES `frames`), scaled by the class's laps over the mode's (a rough guide: a faster class
+    also laps faster)."""
+    m = MODES[mode]
+    frames = m["frames"].get(track, DEFAULT_FRAMES)
+    return frames if not m["laps"] else int(math.ceil(frames * cell_laps(mode, cls) / m["laps"] / 500.0) * 500)
 
 
 def cell_name(mode, track, cls="vector"):
@@ -1018,7 +1036,7 @@ def run_cell(mode, track, opts):
     shots = os.path.join(out, cell)
     shutil.rmtree(shots, ignore_errors=True)
     os.makedirs(shots)
-    frames = opts.frames or m["frames"].get(track, DEFAULT_FRAMES)
+    frames = opts.frames or cell_budget(mode, track, opts.cls)
     steps = build_script(mode, track, legs[0].drive_steps, frames, opts.cls)
     with open(script, "w") as f:
         f.write("".join(f"{fr}:{a}\n" for fr, a in steps))
@@ -1053,7 +1071,7 @@ def run_cell(mode, track, opts):
 
     leg = 0
     tuner, table, ai_line = legs[0].tuner, legs[0].table, legs[0].ai_line
-    race = Race(m["laps"], refilled=no_damage)
+    race = Race(cell_laps(mode, opts.cls), refilled=no_damage)
     done = []                         # Tournament: (track, Race) of each race whose results panel came up
     standings = {}                    # Tournament: race number -> flip of its TOURNAMENT STANDING shot
     state = {"outcome": None, "detail": "", "quit": False, "quit_at": None, "halt": None, "lx": 0.0,
@@ -1129,7 +1147,7 @@ def run_cell(mode, track, opts):
         leg += 1
         tuner, table, ai_line = legs[leg].tuner, legs[leg].table, legs[leg].ai_line
         geo = tuner or (Tuner(ai_line, 1.0, 0.0) if ai_line else None)
-        race = Race(m["laps"], refilled=no_damage)
+        race = Race(cell_laps(mode, opts.cls), refilled=no_damage)
         tail.clear()
         state.update({"advance": None, "steering": True, "lx": 0.0, "ref": False, "slow_shots": 0,
                       "slow_at": -10**9, "steady": 0, "prev_shot": None, "results": None})
@@ -1456,7 +1474,7 @@ def record_line(mode, track, opts):
     m = MODES[mode]
     cell = cell_name(mode, track, opts.cls) + "-grid"
     out = os.path.join(ROOT, OUT)
-    frames = opts.frames or m["frames"].get(track, DEFAULT_FRAMES)
+    frames = opts.frames or cell_budget(mode, track, opts.cls)
     steps = build_script(mode, track, [], frames, opts.cls)
     log = os.path.join(out, f"{cell}.log")
     shots = os.path.join(out, cell)
@@ -1595,8 +1613,8 @@ def main(argv=None):
             what = ("class", "league", "track") if len(picks(opts.mode, t, opts.cls)) == 3 else ("track",)
             downs = ", ".join(f"{w} {n} DOWN at {at}" for w, (at, n) in zip(what, picks(opts.mode, t, opts.cls)))
             unlock = "; unlock all" if needs_unlock(opts.mode, t, opts.cls) else ""
-            print(f"{opts.mode} {track_label(t, opts.cls)} ({downs}; budget "
-                  f"{MODES[opts.mode]['frames'].get(t, DEFAULT_FRAMES)}{unlock})")
+            print(f"{opts.mode} {track_label(t, opts.cls)} ({downs}; {cell_laps(opts.mode, opts.cls)} laps, budget "
+                  f"{cell_budget(opts.mode, t, opts.cls)}{unlock})")
         return 0
     if opts.export_line:
         src = opts.line or os.path.join(LINES_DIR, f"{opts.tracks[0]}.csv")
