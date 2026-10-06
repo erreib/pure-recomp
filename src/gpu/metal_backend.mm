@@ -1,7 +1,8 @@
 // The GE drawn with Metal: PURE_GE_BACKEND=metal (docs/metal-backend.md).
 //
 // A GeBackend (vendor/portablekit/host/gpu/ge_backend.hpp, docs/ge-backend.md) in our own sources, so its
-// registration below is linked into the program directly. Task 023 built what the 2D frontend needs:
+// registration below is linked into the program directly. Task 023 built what the 2D frontend needs, task
+// 024 the 3D draws:
 //
 //   targets    keyed by (colour address, stride, format), each a 480x272 RGBA8 colour texture (5650, 5551
 //              and 4444 targets too, for now) and a Depth32Float_Stencil8 texture (internal scale 1,
@@ -12,12 +13,14 @@
 //              decode_texture() and cached by its contents (texels and the palette entries it can reach).
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
 //              blend, the write masks, the alpha test, the depth test and (carried for task 025) the
-//              stencil; clears; scissor; the GE viewport folded into clip space.
+//              stencil; clears; scissor; the GE viewport folded into clip space; back-face culling.
+//              Transformed draws get the GE's per-vertex lighting and fog (ge.vert's, in the shaders), and
+//              transformed sprites are expanded on the screen after projection, as the GE draws them.
 //   frames     one command buffer a frame, committed at the flip. present_image() names the display
 //              target's texture; capture_frame() reads it back synchronously.
 //
-// Not yet (tasks 024 and 025): lighting, fog, the stencil and the alpha it keeps, block transfers and
-// read-backs into guest memory, the depth write-back. Those calls are counted and logged once.
+// Not yet (task 025): the stencil and the alpha it keeps, block transfers and read-backs into guest
+// memory, the depth write-back. Those calls are counted and logged once.
 //
 // The Vulkan shell still owns the window. Its present shows its own targets, and the input script's
 // `shot` steps read its window, so every presented picture is also handed to it (metal_shell.hpp);
@@ -408,6 +411,12 @@ public:
             const char *log = portablekit::env("METAL_LOG");
             log_draws_ = log != nullptr && *log != '\0' && std::strcmp(log, "0") != 0;
             no_framebuffer_textures_ = portablekit::env("NO_FB_TEXTURES") != nullptr;
+            // The framework's switches for bisecting 3D draws, as the Vulkan backend reads them: NO_LIGHTING
+            // draws lit geometry with its vertex colour (white without one) and turns fog off too, NO_FOG turns
+            // fog off alone, NO_CULL culls nothing.
+            no_lighting_ = portablekit::env("NO_LIGHTING") != nullptr;
+            no_fog_ = no_lighting_ || portablekit::env("NO_FOG") != nullptr;
+            no_cull_ = portablekit::env("NO_CULL") != nullptr;
             started_ = std::chrono::steady_clock::now();
             report_start_ = started_;
             ready_ = true;
@@ -893,8 +902,9 @@ private:
     // -----------------------------------------------------------------------------------------------
     // Draws
 
-    // The draw's vertices as a list of the Metal primitive it is drawn as, `count` of them; false for none.
-    // `transform` (projection x view x world) is what a transformed sprite is projected with.
+    // The draw's vertices into vertices_ as a list of the Metal primitive it is drawn as, the first `drawn`
+    // of them drawn (a transformed sprite draw's sources follow); false for none. `transform` (projection x
+    // view x world) is what a transformed sprite is projected with.
     bool expand(const DrawCall &call, const std::array<float, 16> &transform, MTLPrimitiveType &type,
                 std::size_t &drawn) {
         vertices_.clear();
@@ -1309,8 +1319,8 @@ private:
         id<MTLDepthStencilState> depth = depth_state(key.depth);
 
         // Lighting and fog, as ge.vert and ge.frag: transformed draws only, never a clear.
-        const bool lit = call.lighting_enabled && !call.through && !call.clear_mode;
-        const bool fogged = call.fog.enabled && !call.through && !call.clear_mode;
+        const bool lit = call.lighting_enabled && !no_lighting_ && !call.through && !call.clear_mode;
+        const bool fogged = call.fog.enabled && !no_fog_ && !call.through && !call.clear_mode;
         if (lit || fogged) fill_lighting(call, lit, fogged);
         if (fogged) {
             fragment.fog = unpack_color(call.fog.color, 1.0f);
@@ -1340,7 +1350,7 @@ private:
                 viewport.zfar = std::clamp((vp.z_offset + vp.z_scale) / 65535.0, 0.0, 1.0);
             }
         }
-        const bool cull = call.culling_enabled && !call.through && type == MTLPrimitiveTypeTriangle &&
+        const bool cull = call.culling_enabled && !no_cull_ && !call.through && type == MTLPrimitiveTypeTriangle &&
                           call.primitive != PrimitiveType::Sprites && !call.clear_mode;
 
         // Into the target's pass (after the texture, whose copy may have ended it).
@@ -1377,8 +1387,8 @@ private:
         if (!bound_.cull_set || bound_.cull != cull_mode || bound_.clockwise != call.cull_clockwise) {
             [encoder_ setCullMode:cull_mode];
             // Metal counts the winding in window coordinates (y down), where the GE and the Vulkan
-            // backend's flipping viewport count it too (checked with a test triangle, 2026-10-06; the
-            // frontend culls nothing, so task 024 confirms it on the race).
+            // backend's flipping viewport count it too: confirmed on the race (task 024), whose first
+            // 393 draws of frame 6016 match Vulkan's while the reversed winding differs from draw 41 on.
             [encoder_ setFrontFacingWinding:call.cull_clockwise ? MTLWindingClockwise : MTLWindingCounterClockwise];
             bound_.cull = cull_mode;
             bound_.clockwise = call.cull_clockwise;
@@ -1585,6 +1595,9 @@ private:
     bool sharp_{};
     bool log_draws_{};
     bool no_framebuffer_textures_{};
+    bool no_lighting_{};
+    bool no_fog_{};
+    bool no_cull_{};
 
     std::uint64_t frames_{};
     std::uint64_t frame_draws_{};
@@ -1599,7 +1612,7 @@ private:
     std::uint64_t report_draws_{};
 };
 
-const pk::BackendRegistration registration("metal", "native Metal (task 023: targets, textures, 2D draws)",
+const pk::BackendRegistration registration("metal", "native Metal (tasks 023-024: targets, textures, 2D and 3D draws)",
                                            [] { return std::unique_ptr<pk::GeBackend>(new MetalGeBackend()); });
 
 } // namespace
