@@ -1,6 +1,6 @@
 # 017: Shield probe and a test-only no-damage switch for the sweep
 
-Milestone: M5 | Branch: task/017-sweep-no-damage | Status: OPEN
+Milestone: M5 | Branch: task/017-sweep-no-damage | Status: MERGED
 
 ## Goal
 The follower cannot keep the shield alive on Modesto Heights, Chenghou Project and Blue Ridge (task 016: ~20
@@ -173,4 +173,8 @@ The command exited 0. Each cell's log has `[pure] TEST SWITCH: no damage`. None 
    window size has not been tried.
 
 ## Review
-(Fable fills)
+Merged (Fable). The field identification is thorough (damage path, setter clamp, HUD element, a destructive
+confirmation). Decisions: raise the three long tracks' budgets to 18000; sweep Vineta K with `--no-damage` as well
+for coverage and keep a separate damage-free count (its 3/3 from task 016 stands as that count's baseline); the
+wrong-way put-backs are follower quality, logged in docs/tracks.md, not a blocker. Not rerun by Fable (three
+eight-minute races); the traces and summary rows are recorded.
