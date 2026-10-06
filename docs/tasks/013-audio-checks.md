@@ -1,6 +1,6 @@
 # 013: Audio capture and checks (M4)
 
-Milestone: M4 | Branch: task/013-audio-checks | Status: OPEN
+Milestone: M4 | Branch: task/013-audio-checks | Status: MERGED
 
 ## Goal
 Music (ATRAC3+ through the framework's FFmpeg build), sound effects (sceSas) and movie audio play, but nothing
@@ -33,7 +33,9 @@ clipping or dropping.
 - [ ] The race capture's stats are in the Result with the effects observation.
 
 ## Verify
-`python3 tools/wavstats.py out/013/menu.wav --from 15 --min-active-frac 0.9 --max-clip-frac 0.001`
+`python3 tools/wavstats.py out/013/menu.wav --from 146 --min-active-frac 0.9 --max-clip-frac 0.001`
+(The game plays no music before the main menu; the first track starts right after the profile save, at ~146 s in
+this route. The original `--from 15` was the brief's error.)
 
 ## May touch
 - src/hle/audio_capture.cpp (new), src/profile/pure_profile.cpp (registration + include only), CMakeLists.txt
@@ -186,4 +188,8 @@ Captures (not committed): `out/013/{menu,loop,race,attract-loop}.wav*` with thei
 `race.txt`, and `loop.sinkdump.wav`.
 
 ## Review
-(Fable fills)
+Verify rerun by Fable on the worker's capture with the corrected window (`--from 146`): PASS; race window 209-232 s
+PASS at 1.0 active. The brief's premise was wrong, not the audio: PPSSPP's own boot log creates its first ATRAC
+context between the WARNING confirm and the main menu. Spot-read: the capture's channel bookkeeping (format bit,
+data length) and the virtual-time placement. Merged into batch/m2. Watch item: two one-off ~200 ms zero runs in the
+music feed under load (not reproduced); the zero-run report will show it if it returns.
