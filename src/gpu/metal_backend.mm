@@ -21,7 +21,8 @@
 //              Transformed draws get the GE's per-vertex lighting and fog (ge.vert's, in the shaders), and
 //              transformed sprites are expanded on the screen after projection, as the GE draws them.
 //   frames     one command buffer a frame, committed at the flip. present_image() names the display
-//              target's texture; capture_frame() reads it back synchronously.
+//              target's texture; capture_frame() reads it back synchronously. The device and the command
+//              queue are the program's one pair (metal_device.hpp), which the Metal shell presents on too.
 //   guest      block transfers from a target, read_back_framebuffer() and the frame write-back store a
 //   memory     target's pixels in guest VRAM in its own format; write_back_depth() stores the depth as the
 //              GE's 16-bit z at a SIGNAL (the lens flare reads it). Each waits for the GPU; counted, with
@@ -32,6 +33,7 @@
 // (metal_shell.hpp); PURE_METAL_SHELL=0 leaves that window black. Under any other shell nothing is handed
 // over and nothing is read back: the Metal shell (src/host/metal_shell.mm) samples the presented texture
 // itself, and the headless one captures through capture_frame(). PURE_METAL_LOG=1 prints a line per draw.
+#include "metal_device.hpp"
 #include "metal_shaders.h"
 #include "metal_shell.hpp"
 
@@ -417,12 +419,14 @@ public:
     bool initialize(const pk::BackendConfig &config, std::string &error) override {
         @autoreleasepool {
             const auto start = std::chrono::steady_clock::now();
-            device_ = MTLCreateSystemDefaultDevice();
+            // The program's one device and queue, which the Metal shell presents on too (metal_device.hpp): its
+            // sampling of the frame's target is then ordered after every draw this backend committed before it.
+            device_ = pure::metal::device();
             if (device_ == nil) {
                 error = "there is no Metal device";
                 return false;
             }
-            queue_ = [device_ newCommandQueue];
+            queue_ = pure::metal::queue();
             MTLCompileOptions *options = [MTLCompileOptions new];
             if (@available(macOS 15.0, *)) {
                 options.mathMode = MTLMathModeSafe;
