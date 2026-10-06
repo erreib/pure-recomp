@@ -67,8 +67,8 @@ Last updated: 2026-10-05 evening (session 2 paused; see "Resume" below)
 - Earlier resume notes (session 1) follow.
 
 ## Resume (written 2026-10-05 at the first pause)
-- Branches: `main` fast-forwarded to 2971eff on 2026-10-05 (Erik: "fast-forward main", twice today): patches
-  0001-0005, tasks 001-010, briefs 011-012. `batch/m2` continues from there. Both other workers committed PARTIAL results on their branches (worktrees under `.claude/worktrees/`):
+- Branches: `main` fast-forwarded to ad219ee on 2026-10-05 (Erik's third "fast-forward main"): patches 0001-0007,
+  tasks 001-015 (012 partial, 016 running). `batch/m2` continues from there. Both other workers committed PARTIAL results on their branches (worktrees under `.claude/worktrees/`):
   - `task/001-tooling-port`: `tools/patches.sh` DONE (check/export tested), `tools/worktree_init.sh` written (a fresh
     worktree builds in 33 s, all 144 corpus units ccache hits, so R5 is resolved); run_boot flags, check_env PIN check,
     README rows NOT done. Merge the two scripts after rerunning `tools/patches.sh check`; re-brief the rest as task 004.
