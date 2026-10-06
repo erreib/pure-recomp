@@ -102,7 +102,152 @@ without a window (report which), or the input script's grammar cannot be read at
 a headless run at about 19 frames a second is expected (section 8.4).
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE. All seven deliverables are in patch 0010. The Verify line passes, and so do all four acceptance
+criteria. Nothing in the brief's "Escalate when" came up: the Vulkan path keeps pixel-identical output without any
+change to the renderer's frame loop, no `ui/` screen needs more than `active_renderer()` gives, and every action the
+frontend route uses (`pad`, `shot`) has a pad-level meaning.
+
+Changed:
+- `patches/0010-shell-seam.patch` (new, 3030 lines: 1576 added, 608 removed). Files under `vendor/portablekit/`:
+  - `host/shell/shell.hpp`, `shell.cpp` (new, system layer). `host::Shell` with the four groups of 8.1, plus
+    `ShellConfig`, `PadState`, `MouseMotion`, `CameraReading` and `kScriptedMouse`. The registry is
+    `register_shell`, `make_shell`, `shell_names`, `shell_description`, `ShellRegistration` and `selected_shell()`
+    (`<prefix>_SHELL`, vulkan by default).
+  - `host/shell/vulkan_shell.hpp`, `vulkan_shell.cpp` (new, renderer). `VulkanShell` owns the `VulkanRenderer` and
+    forwards every call to it. Its `present()` uploads a `Cpu` image with `upload_frame` first, then calls
+    `renderer.present(address, time)` as before. `host::vulkan_renderer(Shell *)` is the renderer accessor.
+  - `host/shell/headless_shell.cpp` (new, system layer, no SDL). `HeadlessShell`; see "The headless shell" in
+    docs/ge-backend.md 8.5.
+  - `host/shell/sdl_pad.hpp`, `sdl_pad.cpp` (new, renderer). `host::SdlPad` holds the pad sampling, the gamepad
+    open/scan/close and the scripted keys, moved out of `VulkanRenderer::Impl`. `Impl` now derives from it, so the
+    renderer's code that uses those members did not change.
+  - `host/shell/gamepad.hpp`, `gamepad.cpp` (new, system layer). `read_gamepad`, `PadTuning` and `pad_tuning()`,
+    moved out of the renderer. They use SDL-free button and axis numbers with SDL's names, which `static_assert`s in
+    `sdl_pad.cpp` check against SDL.
+  - `host/shell/script_steps.hpp`, `script_steps.cpp` (new, system layer). The input script's grammar, moved out of
+    `ui/input_script.cpp` and shared by both readers. The brief asked to say whether the parser was shared: it was
+    shared, not rewritten.
+  - `host/gpu/vulkan_renderer.hpp`, `.cpp`: moves only. The four types are now aliases, and the pad code, about 260
+    lines, is removed. What remains new is the base class and one call in `Impl::sample_pad`.
+  - `host/hle/hle_media.cpp`: `media().shell` replaces the renderer, declared before the backend. Also
+    `active_shell()` and `ensure_shell_and_backend()`. `present_frame` calls `shell->present(image, address, time)`
+    and does the rest through the interface. sceCtrl samples the shell's pad. `active_renderer()` returns the
+    renderer only under the Vulkan shell.
+  - `host/ui/layer.hpp`, `layer.cpp`, `ui.hpp`, `menu.cpp`, `input_script.cpp`, `input_script.hpp`, `text_input.cpp`,
+    `file_browser.cpp`, `widgets.cpp`, `texture_pack_screen.cpp`, `setup_screens.cpp`:
+    - The interface uses `Layer::attach(host::Shell &)` and `Layer::shell()`. `attach` refuses a shell without a
+      window.
+    - The menu's resolution, texture filter and texture pack rows, and the texture pack screen, reach the renderer
+      through `active_renderer()`. Under another shell those rows are left out.
+    - The setup screens test `Layer::get().attached()`.
+  - `cmake/PortableKit.cmake`: the six new sources.
+  - `host/camera_probe.cpp`: unchanged. The `gpu::CameraReading` alias and `active_renderer()` still serve it.
+- `patches/README.md`: the 0010 row.
+- `README.md`: a `PURE_SHELL` row, and the headless shell's script support in the `PURE_INPUT_SCRIPT`,
+  `PURE_SCREENSHOT_DIR` and `--script` rows.
+- `docs/ge-backend.md`: section 8.5, "What landed". It covers the files, the interface as landed and how it differs
+  from 8.1, the selection table, the headless shell and the numbers.
+- Commits: 8d34aa5 (the seam) and the Result commit.
+
+Differences from 8.1 (details in 8.5):
+- `ShellConfig` is `{title, capture_frame}`, with an empty title meaning the shell's default.
+  - `default_window_title()` needs the build-label header, which `portablekit_host_check` does not see. It therefore
+    stays in the renderer, and so does `RendererConfig`.
+  - `capture_frame` is how a shell without a window takes a picture for `capture_window()`: the HLE passes in the
+    backend's `capture_frame`.
+- `present()` takes `moment` without a default argument.
+- The kernel's idle and poll hooks are set only for a shell with a window.
+
+Numbers:
+- `tools/frame_regress.sh`, three runs: before on c394d8b, after on the patched tree, and the Verify run on 8d34aa5.
+  They took 7m 8s, 7m 8s and 7m 7s.
+
+  | Scene | Before | After | Verify | Captures vs before, `imgdiff.py --tol 0` |
+  |---|---|---|---|---|
+  | lang | 0.0544 | 0.0544 | 0.0544 | identical in both (0 of 522240 px) |
+  | title | 0.0302 | 0.0302 | 0.0302 | identical in both |
+  | profile | 0.0543 | 0.0543 | 0.0543 | identical in both |
+  | main_menu | 0.0331 | 0.0331 | 0.0331 | identical in both |
+  | race_hud | 0.0672 | 0.0672 | 0.0672 | identical in both |
+
+- Headless frontend route (acceptance 2):
+  - 2200 frames in 115.1 s (Verify run), with 20643 draws submitted. That is 19 frames a second, the pace 8.4
+    expects.
+  - Every script step ran at its frame: `[script] frame 690: shot lang`, 700, 1600, 1640, 1650, 1750 and 1800
+    `pad start`, then 2100 `shot profile`.
+  - With `PURE_TRACE_PAD=1` the presses show up as `[pad] buttons 0x4000` (Cross) and `0x8` (Start).
+  - After Start, the game opens `Movies/Profile_part1.PMF`. The events come in the same order as in the windowed
+    suite run's `frontend.log`.
+- Acceptance 3: the same run with `--shots out/026/headless_shots` printed the four `[script] frame N: shot NAME`
+  lines. It wrote `lang`, `notice`, `title` and `profile`, each a black 480x272 BMP plus PNG.
+- Acceptance 4: `tools/patches.sh check` printed "ok: 10 patch(es) reproduce vendor/portablekit at 8b0c3fe".
+- Other paths, checked with short runs:
+
+  | Setting | Result |
+  |---|---|
+  | null backend in the Vulkan window | the uploaded image is shown, and a `shot` of it is uniform black |
+  | `PURE_SHELL=bogus` | falls back to vulkan and prints the registered names |
+  | `PURE_SHELL=headless` with the Vulkan backend | prints that nothing is drawn |
+  | `PURE_NO_RENDER=1` with the Vulkan backend | prints "Renderer: disabled", as before |
+  | headless with `PURE_INPUT_LIVE` | lines appended mid-run were read at frame 290; `pad start` pressed Start; `key` was reported once as ignored; `quit` stopped the run ("quit from the input script") |
+
+- Without a renderer: the system-layer sources (`shell.cpp`, `gamepad.cpp`, `script_steps.cpp`,
+  `headless_shell.cpp`, `hle_media.cpp`) pass a syntax check with `PORTABLEKIT_HAS_RENDERER` undefined and with no
+  SDL or generated-version include paths. My files give no warnings under `-Wall -Wextra`.
+
+Verify output (`tools/verify_task.sh 026`, exit 0; the suite's table is quoted above, and the tail is the null
+run's log as run_boot echoes it):
+```
+  0xd9 x1 first=0x0
+  0xda x1 first=0x0
+  0xe2 x2 first=0x0
+  0xe3 x2 first=0x0
+  0xe4 x2 first=0x0
+  0xe5 x2 first=0x0
+  0xe6 x1 first=0x0
+  0xf0 x1 first=0x0
+  0xf1 x1 first=0x0
+  0xf2 x1 first=0x0
+  0xf3 x1 first=0x0
+  0xf4 x1 first=0x0
+  0xf5 x1 first=0x0
+  0xf6 x1 first=0x0
+  0xf7 x1 first=0x0
+  0xf8 x1 first=0x0
+  0xf9 x1 first=0x0
+[render] null backend: 2200 frames, 20643 draws submitted, 0 block transfers, 0 uploads in 115.122 s
+[run_boot] exit 0 after 115.5s, 2538 lines
+verify 026: PASS
+```
+
+Open questions:
+1. A headless run is paced to real time when `PURE_NO_RENDER` is left unset.
+   - `Kernel::pace_to_real_time` decides on `NO_RENDER` alone, and I did not touch it.
+   - So `PURE_SHELL=headless PURE_GE_BACKEND=null` without `NO_RENDER` ran 1200 frames in 39.6 s, about 30 frames a
+     second. The Verify's `NO_RENDER=` run does 19.
+   - Until patch 0011, a headless route is about 1.6 times faster without `NO_RENDER`.
+   - Should a headless route drop `NO_RENDER`, or should the pacing check ask the shell?
+2. `shot` without `PURE_SCREENSHOT_DIR` writes to `./NAME.bmp`, the same as in a window.
+   - The Verify line sets no `PURE_SCREENSHOT_DIR`, so each Verify run leaves `lang.bmp`, `notice.bmp`, `title.bmp`
+     and `profile.bmp` in the repo root. They are not git-ignored. I deleted mine.
+   - Two possible fixes: add `--shots out/026/headless_shots` to the Verify line, or add `*.bmp` to `.gitignore`.
+3. `tools/run_boot.py --script` implies `--window`, so it leaves audio on. A headless-shell run through it plays
+   sound. A `--shell headless` flag in run_boot could set `PURE_SHELL`, `PURE_GE_BACKEND=null`,
+   `PURE_NO_RENDER=` and `PURE_NO_AUDIO=1` together. `tools/` was outside this brief.
+4. `Profile_part1` appears in an `[io] open ... Profile_part1.PMF` line, not in a `[mpeg]` line: the MPEG trace
+   prints no file names. The Verify's `grep` reads the whole log, so it passes either way. The same line appears in
+   the windowed log.
+5. For task 027 (the Metal shell):
+   - `Layer::attach` still uses `ImGui_ImplSDL3_InitForVulkan`.
+   - `gpu::default_window_title()` lives in `vulkan_renderer.cpp`.
+   - The menu leaves out the resolution, texture filter and texture pack rows under any non-Vulkan shell.
+   - `SdlPad` is ready to share. A MetalShell can derive from it or hold one, and call `sample()` with its own
+     pointer and touch state.
+6. The headless shell copies one quirk of SDL's virtual gamepad so that both shells agree: a trigger set with
+   `axis lefttrigger 0` reads as half pressed (0.5 > 0.25), so L is held. No route uses trigger axes.
+7. `hle_common.hpp` still says "The renderer owns the window" above `active_renderer()`. That file was outside "May
+   touch", so the stale comment stays.
+8. `vulkan_renderer(Shell *)` uses a `dynamic_cast`, the first in the framework. RTTI is on in the build.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
