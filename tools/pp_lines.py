@@ -1,7 +1,9 @@
 #!/opt/homebrew/bin/python3
-"""Record the AI racing lines of a Single Race in PPSSPP: the steering source for tracks nobody has driven.
+"""Record the AI racing lines of a Single Race in PPSSPP, or take them from a port log: the steering source for
+tracks nobody has driven.
 
-  tools/pp_lines.py TRACK_NAME [--downs N] [--race-seconds S] [--out CSV] [--pad ITEMS] [--dump BIN]
+  tools/pp_lines.py TRACK_NAME [--downs N] [--race-seconds S] [--out CSV] [--pad ITEMS] [--dump BIN] [--debug-port P]
+  tools/pp_lines.py --port LOG [--out LINE_CSV] [--samples CSV] [--ships leader|ai] [--compare LINE_CSV]
 
 Boots disc.iso in PPSSPPSDL through tools/ppsspp/ppsspp_ctl.py (used as a library; hardware renderer, sound off,
 the ini put back afterwards), plays tools/ppsspp/routes/frontend.txt and vineta_k_start.txt with N DOWN presses
@@ -15,8 +17,22 @@ whenever its clock moved) to out/lines/TRACK_NAME.csv. tools/campaign_sweep.py -
 straight on and meets the walls). --dump BIN also writes each sample's raw race-record block (DUMP_SIZE bytes from
 DUMP_START: one stride before entry 0 to the end of entry 7) as a u64 usec and the bytes, for finding fields such
 as the shield energy (task 016).
+
+--port LOG (task 032) needs no PPSSPP: LOG is a run of the port with PURE_WATCH_GRID=1, whose `[pure] grid frame N
+k=K clock=C pos=x,y,z vel=vx,vy,vz dist=D lap=L` lines give every race record each flip (tools/campaign_sweep.py
+--record-line makes such a run and calls this). The samples of the first race (from the first `player object` line
+to the next) go to --samples in the PPSSPP recording's CSV form (the flip in the usec column; default LOG with
+`.grid.csv`), skipping the player's entry (the index the `player object` line names) and records whose lap field
+has bit 16 set (that ship's race is over). The line is made from the AI ship with the most progress over the race
+(the furthest along the track, the distance unwrapped at each wrap, at the last flip every AI ship still races;
+`--ships ai` takes the mean of all the AI ships instead, as
+tools/campaign_sweep.py --export-line does with a PPSSPP recording): the AiLine of tools/campaign_sweep.py (2 m
+bins, gaps interpolated, smoothed over +-3 bins), written to --out as the `dist,x,z` rows a steering table's `follow`
+reads (default LOG with `.line.csv`). --compare REF reports how far the new line lies from REF, another `dist,x,z`
+line, over the lap: the lateral distance (across REF at the same track distance) and the distance between the two
+points of the same track distance, mean and maximum.
 """
-import argparse, base64, struct, sys, time
+import argparse, base64, math, re, struct, sys, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,17 +62,117 @@ def records(data):
     return out
 
 
+GRID_RE = re.compile(r"\[pure\] grid frame (\d+) k=(\d+) clock=(\S+) pos=(\S+),(\S+),(\S+) vel=(\S+),(\S+),(\S+) "
+                     r"dist=(\S+) lap=(\d+)")
+PLAYER_RE = re.compile(r"\[pure\] ship frame \d+ player object \S+ index (\d+)")
+WRAP_M = 1000.0         # a drop in the distance this big is the once-a-lap wrap (tools/campaign_sweep.py)
+RACE_OVER = 0x10000     # lap field bit 16: that ship has finished (docs/tracks.md)
+
+
+def port_samples(log):
+    """The first race's grid samples of a port log: ([(frame, k, clock, x, y, z, vx, vy, vz, dist, lap)], player)."""
+    rows, player, races = [], 7, 0
+    with open(log, errors="replace") as f:
+        for line in f:
+            m = PLAYER_RE.search(line)
+            if m:
+                races += 1
+                if races > 1:
+                    break
+                player = int(m[1])
+                continue
+            m = GRID_RE.search(line)
+            if not m or races == 0:
+                continue
+            frame, k, lap = int(m[1]), int(m[2]), int(m[11])
+            vals = [float(v) for v in m.groups()[2:10]]
+            if vals[0] <= 0.0 or lap & RACE_OVER:
+                continue                # before GO, or that ship's race is over
+            rows.append((frame, k, *vals, lap))
+    return rows, player
+
+
+def progress(rows, player):
+    """Per AI ship: (how far along the track it is at the last flip every AI ship still races, the flip): the
+    distance unwrapped at the track's wrap point (the largest distance seen), counted from the track's 0, so the grid
+    order counts. Samples stop at a ship's finish (RACE_OVER), so a later flip would compare finished ships."""
+    length = max(r[9] for r in rows)
+    state, path = {}, {}
+    for r in rows:
+        k, frame, d = r[1], r[0], r[9]
+        if k == player:
+            continue
+        w, last = state.get(k, (0, d))
+        if d < last - WRAP_M:
+            w += 1
+        state[k] = (w, d)
+        path.setdefault(k, []).append((frame, w * length + d))
+    at = min(p[-1][0] for p in path.values())
+    return {k: (max(u for f, u in p if f <= at), at) for k, p in path.items()}
+
+
+def port_main(a):
+    sys.path.insert(0, str(ROOT / "tools"))
+    from campaign_sweep import AiLine   # noqa: E402  (the follower's line, so the two agree)
+    log = Path(a.port)
+    rows, player = port_samples(log)
+    if not rows:
+        sys.exit(f"pp_lines: no grid lines of a race in {log} (PURE_WATCH_GRID=1)")
+    samples = Path(a.samples) if a.samples else log.with_suffix(".grid.csv")
+    with open(samples, "w") as f:
+        f.write("usec,ship,clock,x,y,z,vx,vy,vz,dist,lap\n")
+        for r in rows:
+            f.write(f"{r[0]},{r[1]}," + ",".join(f"{v:.3f}" for v in r[2:10]) + f",{r[10]}\n")
+    prog = progress(rows, player)
+    for k in sorted(prog):
+        print(f"ship {k}: {prog[k][0]:.0f} m along the track at flip {prog[k][1]}")
+    if a.ships == "leader":
+        leader = max(prog, key=lambda k: prog[k][0])
+        ships, what = {leader}, f"ship {leader}, the AI ship with the most progress"
+    else:
+        ships, what = set(prog), f"the mean of the AI ships {', '.join(map(str, sorted(prog)))}"
+    line = AiLine(str(samples), player=player, ships=ships)
+    out = Path(a.out) if a.out else log.with_suffix(".line.csv")
+    line.export(str(out))
+    frames = [r[0] for r in rows]
+    print(f"{log}: {len(rows)} samples of flips {min(frames)} to {max(frames)} (player {player}); {what}: "
+          f"{line.length:.0f} m, {line.covered:.0%} of the bins sampled -> {out}")
+    if a.compare:
+        ref = AiLine(str(Path(a.compare)))
+        lat, pts = [], []
+        for i in range(line.n):
+            d = i * line.BIN
+            if d >= ref.length:
+                break
+            x, z = line.x[i], line.z[i]
+            rx, rz = ref.at(d)
+            lat.append(abs(ref.offset(x, z, d)))
+            pts.append(math.hypot(x - rx, z - rz))
+        worst = max(range(len(lat)), key=lat.__getitem__)
+        print(f"against {a.compare} ({ref.length:.0f} m) over {len(lat)} bins: lateral distance mean "
+              f"{sum(lat) / len(lat):.2f} m, max {lat[worst]:.2f} m (at {worst * line.BIN:.0f} m); same-distance "
+              f"points mean {sum(pts) / len(pts):.2f} m, max {max(pts):.2f} m")
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("track")
+    p.add_argument("track", nargs="?")
+    p.add_argument("--port", metavar="LOG", help="make the line from a port log with PURE_WATCH_GRID=1 lines")
+    p.add_argument("--samples", help="--port: the samples CSV (default LOG with .grid.csv)")
+    p.add_argument("--ships", choices=("leader", "ai"), default="leader")
+    p.add_argument("--compare", metavar="LINE_CSV")
     p.add_argument("--downs", type=int, default=0)
     p.add_argument("--race-seconds", type=float, default=80.0)
     p.add_argument("--out")
-    p.add_argument("--port", type=int, default=pc.DEFAULT_PORT)
+    p.add_argument("--debug-port", type=int, default=pc.DEFAULT_PORT, help="PPSSPP's debugger port")
     p.add_argument("--wall-limit", type=float, default=600.0, help="give up after this many seconds of wall time")
     p.add_argument("--pad", default="", help="extra pad items appended to the route")
     p.add_argument("--dump", help="also write the raw race-record block of every sample here")
     a = p.parse_args()
+    if a.port:
+        return port_main(a)
+    if not a.track:
+        p.error("TRACK_NAME is needed without --port")
     out = Path(a.out or ROOT / "out" / "lines" / f"{a.track}.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     script = (ROUTES / "frontend.txt").read_text() + "\n" + (ROUTES / "vineta_k_start.txt").read_text()
@@ -66,11 +182,11 @@ def main():
     states = pc.parse_pad_script(script)
     rows = 0
     t0 = time.time()
-    with pc.IniSession(False, port=a.port, renderer="hardware", hle_log=False, mute=True, savestate_key=False):
+    with pc.IniSession(False, port=a.debug_port, renderer="hardware", hle_log=False, mute=True, savestate_key=False):
         proc = pc.launch(pc.DEFAULT_ISO)
         dbg = None
         try:
-            dbg, _ = pc.connect(a.port, proc.pid, proc)
+            dbg, _ = pc.connect(a.debug_port, proc.pid, proc)
             pc.wait_boot(dbg)
             dbg.request("replay.time.set", value=1767225600)
             blob = pc.build_replay_blob(states)

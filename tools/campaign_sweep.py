@@ -122,13 +122,41 @@ OUT = "out/sweep"
 #           every ADVANCE_EVERY flips through ENTER TAG and the standings until the next race's ship is on its
 #           grid; after the last race the TOURNAMENT STANDING screen, by its title, is the end)
 #   races   Tournament: the tracks of each league in race order (each race steers with its track's table)
+# And (task 032) for the longer menus that PURE_TEST_UNLOCK_ALL=1 opens (docs/tracks.md, "Everything unlocked"):
+#   leagues    the LEAGUE SELECTION list in order, each league's TRACK SELECTION list in order: the sweep picks the
+#              league with N DOWN presses at `league_at`, `downs_gap` apart, then the track at `downs_at`
+#   class_at   where the DOWN presses that pick the class (--class, CLASSES) go on CLASS SELECTION
+#   fresh      the tracks a new profile has open; a cell outside them (or a class outside FRESH_CLASSES) runs with
+#              the test switch PURE_TEST_UNLOCK_ALL=1
 ALPHA = ["vineta_k", "modesto_heights", "chenghou_project", "blue_ridge"]
+BETA = ["sinucit", "citta_nuova", "sebenco_climb", "sol_2"]
+CLASSIC = ["karbonis", "sagarmatha", "manor_top", "mandrashee"]
+LEAGUES = {"alpha": ALPHA, "beta": BETA, "classic": CLASSIC}
+# CLASS SELECTION, top to bottom; a new profile has the first two (2026-10-06, out/032).
+CLASSES = ["vector", "venom", "flash", "rapier", "phantom"]
+FRESH_CLASSES = ["vector", "venom"]
+# The lengths on the TRACK SELECTION panels (m).
+LENGTHS = {"vineta_k": 4446, "modesto_heights": 4576, "chenghou_project": 4866, "blue_ridge": 4780,
+           "sinucit": 6117, "citta_nuova": 5408, "sebenco_climb": 4813, "sol_2": 4400,
+           "karbonis": 3256, "sagarmatha": 4544, "manor_top": 4199, "mandrashee": 3901}
+ZONES = ["zone_1", "zone_2", "zone_3", "zone_4"]   # PRO TOZO, MALLAVOL, CORIDON 12, SYNCOPIA
+
+
+def lap_budget(track, laps=3, fps=60):
+    """A race budget from the track's length (task 032): `laps` laps at 45 m/s (162 km/h; the follower averaged
+    about 52 to 60 m/s on Modesto Heights, Chenghou Project and Blue Ridge, task 017) and 15 s for the countdown and
+    the results panel, in flips, rounded up to 500."""
+    seconds = laps * LENGTHS[track] / 45.0 + 15.0
+    return int(math.ceil(seconds * fps / 500.0) * 500)
+
+
 DEFAULT_FRAMES = 13000
 MODES = {
     "single_race": {"route": "config/pad_scripts/single_race.txt", "laps": 3, "throttle": 6100,
-                    "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
-                    "frames": {"vineta_k": 13000, "modesto_heights": 18000, "chenghou_project": 18000,
-                               "blue_ridge": 18000}},
+                    "class_at": 4980, "league_at": 5180, "downs_at": 5380, "downs_gap": 30,
+                    "tracks": ALPHA + BETA + CLASSIC, "leagues": LEAGUES, "fresh": ALPHA,
+                    "frames": dict({t: lap_budget(t) for t in BETA + CLASSIC},
+                                   vineta_k=13000, modesto_heights=18000, chenghou_project=18000, blue_ridge=18000)},
     # Three laps alone against the clock, at 30 flips a second. The live file is read every 10 flips, a third of
     # a second here, and the follower's laps are slower than in Single Race: 81.8, 67.5 and 73.6 s on Vineta K
     # (2026-10-06), 6800 flips with the results panel. The other tracks' 75 to 95 s laps would be up to 9000.
@@ -140,9 +168,11 @@ MODES = {
                   "end": "session", "downs_at": 5380, "downs_gap": 30, "tracks": ALPHA,
                   "frames": {"vineta_k": 9000, "modesto_heights": 11000, "chenghou_project": 11000,
                              "blue_ridge": 11000}},
-    # Zone tracks: zone_1 is PRO TOZO, the only one open on a new profile.
+    # Zone tracks: zone_1 is PRO TOZO, the only one open on a new profile; zone_2 to zone_4 (MALLAVOL, CORIDON 12,
+    # SYNCOPIA) need the unlock switch.
     "zone": {"route": "config/pad_scripts/zone.txt", "laps": 0, "throttle": 5250, "fps": 30, "end": "destroyed",
-             "downs_at": 4980, "downs_gap": 30, "tracks": ["zone_1"], "frames": {"zone_1": 9000}},
+             "downs_at": 4980, "downs_gap": 30, "tracks": ZONES, "fresh": ["zone_1"],
+             "frames": {t: 9000 for t in ZONES}},
     # Leagues: ALPHA only on a new profile. The budget covers all four races (Single Race's budgets, 13000 +
     # 3 * 18000, and about 3000 flips for the screens after each race).
     "tournament": {"route": "config/pad_scripts/tournament.txt", "laps": 3, "throttle": 5850, "end": "standings",
@@ -241,12 +271,38 @@ def parse_drive(path, drop_shots=True):
     return steps, dist_steps, follow
 
 
-def build_script(mode, track, drive_steps, budget):
+def picks(mode, track, cls="vector"):
+    """The DOWN presses a cell's route needs: [(first flip, presses)] for the class, the league and the track."""
+    m = MODES[mode]
+    out = []
+    if "class_at" in m:
+        out.append((m["class_at"], CLASSES.index(cls)))
+    if "leagues" in m:
+        league = next(lg for lg in m["leagues"].values() if track in lg)
+        out.append((m["league_at"], list(m["leagues"].values()).index(league)))
+        out.append((m["downs_at"], league.index(track)))
+    else:
+        out.append((m["downs_at"], m["tracks"].index(track)))
+    return out
+
+
+def needs_unlock(mode, track, cls="vector"):
+    """True when a new profile does not have the cell's track or class open (the cell then runs with
+    PURE_TEST_UNLOCK_ALL=1)."""
+    return track not in MODES[mode].get("fresh", MODES[mode]["tracks"]) or cls not in FRESH_CLASSES
+
+
+def cell_name(mode, track, cls="vector"):
+    return f"{mode}-{track}" + (f"-{cls}" if cls != "vector" else "")
+
+
+def build_script(mode, track, drive_steps, budget, cls="vector"):
     m = MODES[mode]
     steps = parse_drive(MENU_ROUTE)[0] + parse_drive(m["route"])[0]
-    downs = m["tracks"].index(track)
-    steps += [(m["downs_at"] + k * m["downs_gap"], "pad dpdown") for k in range(downs)]
-    steps.append((m["downs_at"] + max(downs, 1) * m["downs_gap"], f"shot {mode}-{track}-menu"))
+    for at, n in picks(mode, track, cls):
+        steps += [(at + k * m["downs_gap"], "pad dpdown") for k in range(n)]
+    downs = picks(mode, track, cls)[-1][1]
+    steps.append((m["downs_at"] + max(downs, 1) * m["downs_gap"], f"shot {cell_name(mode, track, cls)}-menu"))
     # The race route's throttle step holds Cross for the whole budget.
     steps = [(f, f"pad a {budget}") if f == m["throttle"] and a.startswith("pad a") else (f, a) for f, a in steps]
     steps += drive_steps
@@ -349,12 +405,13 @@ class Race:
 
 class AiLine:
     """An AI racing line: the AI ships' mean x, z per BIN metres of track distance, gaps interpolated, smoothed over
-    +-3 bins, closed at the wrap. Read from tools/pp_lines.py's recording, or from a `dist,x,z` line file that
-    --export-line wrote from one (the form a steering table's `follow` names)."""
+    +-3 bins, closed at the wrap. Read from tools/pp_lines.py's recording (PPSSPP's, or the port's from --port; `ships`
+    keeps only those ship indices), or from a `dist,x,z` line file that --export-line wrote from one (the form a
+    steering table's `follow` names)."""
     BIN = 2.0
 
     @staticmethod
-    def samples(path, player):
+    def samples(path, player, ships=None):
         with open(path) as f:
             header = next(f).strip()
             for row in f:
@@ -365,13 +422,15 @@ class AiLine:
                 _u, k, _clock, x, _y, z, vx, _vy, vz, dist, _lap = cols
                 if int(k) == player or math.hypot(float(vx), float(vz)) < 20.0:
                     continue            # the idle player, and ships on the grid
+                if ships is not None and int(k) not in ships:
+                    continue
                 yield float(dist), float(x), float(z)
 
-    def __init__(self, path, player=7):
+    def __init__(self, path, player=7, ships=None):
         sums, dmax = {}, 0.0
         with open(path) as f:
             exported = f.readline().strip() == "dist,x,z"
-        for d, x, z in self.samples(path, player):
+        for d, x, z in self.samples(path, player, ships):
             s = sums.setdefault(int(d // self.BIN), [0.0, 0.0, 0])
             s[0] += x
             s[1] += z
@@ -907,7 +966,7 @@ class Leg:
 
 def run_cell(mode, track, opts):
     m = MODES[mode]
-    cell = f"{mode}-{track}"
+    cell = cell_name(mode, track, opts.cls)
     out = os.path.join(ROOT, OUT)
     end = m.get("end", "results")
     fps = m.get("fps", 60)
@@ -921,7 +980,7 @@ def run_cell(mode, track, opts):
     shutil.rmtree(shots, ignore_errors=True)
     os.makedirs(shots)
     frames = opts.frames or m["frames"].get(track, DEFAULT_FRAMES)
-    steps = build_script(mode, track, legs[0].drive_steps, frames)
+    steps = build_script(mode, track, legs[0].drive_steps, frames, opts.cls)
     with open(script, "w") as f:
         f.write("".join(f"{fr}:{a}\n" for fr, a in steps))
     open(live, "w").close()
@@ -937,9 +996,14 @@ def run_cell(mode, track, opts):
         env["PURE_TEST_NO_DAMAGE"] = "1"      # a test switch: the player's shield refilled every flip
     if opts.no_damage and not no_damage:
         print(f"[sweep] {cell}: --no-damage ignored: {mode} ends when the ship is destroyed", flush=True)
+    env.pop("PURE_TEST_UNLOCK_ALL", None)
+    unlock = opts.unlock_all or needs_unlock(mode, track, opts.cls)
+    if unlock:
+        env["PURE_TEST_UNLOCK_ALL"] = "1"     # a test switch: every class, league and track open
     for k, leg in enumerate(legs):
         print(f"[sweep] {cell}: {f'race {k + 1} {leg.track}: ' if len(legs) > 1 else ''}{leg.how}", flush=True)
-    print(f"[sweep] {cell}: exit at flip {exit_frame}{', no damage (test switch)' if no_damage else ''}", flush=True)
+    print(f"[sweep] {cell}: exit at flip {exit_frame}{', no damage (test switch)' if no_damage else ''}"
+          f"{', unlock all (test switch)' if unlock else ''}", flush=True)
     port = Port(env, log, max(60.0, exit_frame / 15.0), opts.max_lines)
     trace = open(os.path.join(out, f"{cell}.trace.csv"), "w", buffering=1)
     trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake,shield,race\n")
@@ -1335,10 +1399,72 @@ def run_cell(mode, track, opts):
     clock = sum(total for _t, _r, total in done) + (race.total if current else 0.0)
     row = {"mode": mode, "track": track, "outcome": outcome, "frame": state["frame"], "laps": laps,
            "clock": clock, "detail": detail if outcome == "PASS" else f"{detail}; last: {race.line.strip()}",
-           "seconds": elapsed, "tune": opts.tune, "no_damage": no_damage}
-    print(f"[sweep] {cell}: {outcome}{' (no damage)' if no_damage else ''} at flip {state['frame']}, "
+           "seconds": elapsed, "tune": opts.tune, "no_damage": no_damage, "unlock": unlock, "cls": opts.cls}
+    print(f"[sweep] {cell}: {outcome}{switch_marks(row)} at flip {state['frame']}, "
           f"{laps} laps, race time {clock:.1f} s, {elapsed:.0f} s: {row['detail']}", flush=True)
     return row
+
+
+def record_line(mode, track, opts):
+    """--record-line OUT (task 032): a racing line for the track from the port's own AI ships. The cell's route runs
+    headless (PURE_SHELL=headless with the Metal backend, unpaced: the race clock still runs at 60 flips a second,
+    so the race is the windowed one, about ten times faster) with Cross held from the throttle step and no steering
+    (the player meets the first barrier and stays there; PURE_TEST_NO_DAMAGE keeps it alive), the grid probe
+    (PURE_WATCH_GRID=1: every race record each flip) and the unlock switch where the cell needs it, for the cell's
+    budget. tools/pp_lines.py --port then makes the line from the AI ship with the most progress and writes it to
+    OUT; --line REF also compares it with REF. Outputs out/sweep/<cell>-grid.{log,grid.csv} and the menu shot in
+    out/sweep/<cell>-grid/. Exit 0 when the line was written."""
+    m = MODES[mode]
+    cell = cell_name(mode, track, opts.cls) + "-grid"
+    out = os.path.join(ROOT, OUT)
+    frames = opts.frames or m["frames"].get(track, DEFAULT_FRAMES)
+    steps = build_script(mode, track, [], frames, opts.cls)
+    log = os.path.join(out, f"{cell}.log")
+    shots = os.path.join(out, cell)
+    shutil.rmtree(shots, ignore_errors=True)
+    os.makedirs(shots)
+    unlock = opts.unlock_all or needs_unlock(mode, track, opts.cls)
+    env = dict(os.environ)
+    env.update({"PURE_GAME_DIR": prepare_game_dir(cell), "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
+                "PURE_SHELL": "headless", "PURE_GE_BACKEND": "metal", "PURE_NO_RENDER": "1", "PURE_NO_AUDIO": "1",
+                "PURE_EXIT_AT_FRAME": str(m["throttle"] + frames),
+                "PURE_INPUT_SCRIPT": ";".join(f"{fr}:{a}" for fr, a in steps), "PURE_SCREENSHOT_DIR": shots,
+                "PURE_SCREENSHOT_EVERY": "0", "PURE_WATCH_GRID": "1", "PURE_TEST_NO_DAMAGE": "1",
+                "PSPRECOMP_NO_INTERPRETER": "1", "PURE_FRAME_LOG": "600"})
+    env.pop("PURE_TEST_UNLOCK_ALL", None)
+    if unlock:
+        env["PURE_TEST_UNLOCK_ALL"] = "1"
+    print(f"[sweep] {cell}: recording the AI line headless to flip {m['throttle'] + frames}"
+          f"{', unlock all (test switch)' if unlock else ''}", flush=True)
+    port = Port(env, log, 900.0, max(opts.max_lines, 8 * (frames + 2000)))
+    halt = None
+    while port.alive():
+        for text in port.read(0.2):
+            if halt is None and HALT_RE.search(text) and "PURE_EXIT_AT_FRAME" not in text:
+                halt = text.strip()
+    code, rest = port.close()
+    for text in rest:
+        if halt is None and HALT_RE.search(text) and "PURE_EXIT_AT_FRAME" not in text:
+            halt = text.strip()
+    for name in os.listdir(shots):
+        if name.endswith(".bmp"):
+            w, h, c, data = png.read_bmp(os.path.join(shots, name))
+            png.write_png(os.path.join(shots, name[:-4] + ".png"), w, h, c, data)
+    print(f"[sweep] {cell}: exit {code} after {time.time() - port.start:.0f} s{f'; HALT: {halt}' if halt else ''}",
+          flush=True)
+    cmd = [sys.executable, os.path.join(ROOT, "tools", "pp_lines.py"), "--port", log, "--out", opts.record_line,
+           "--samples", os.path.join(out, f"{cell}.grid.csv")] + (["--compare", opts.line] if opts.line else [])
+    return subprocess.call(cmd, cwd=ROOT) or (1 if halt else 0)
+
+
+def switch_marks(row):
+    """` (no damage, unlock all)`: the test switches a row ran with."""
+    marks = [name for key, name in (("no_damage", "no damage"), ("unlock", "unlock all")) if row.get(key)]
+    return f" ({', '.join(marks)})" if marks else ""
+
+
+def track_label(track, cls):
+    return track + (f"/{cls}" if cls != "vector" else "")
 
 
 def write_summary(rows):
@@ -1363,11 +1489,12 @@ def _write_summary(rows):
     for r in rows:
         if r.get("tune"):
             continue
-        outcome = r["outcome"] + (" (no damage)" if r.get("no_damage") else "")
-        kept[(r["mode"], r["track"])] = (f"| {r['mode']} | {r['track']} | {outcome} | {r['frame']} | "
+        outcome = r["outcome"] + switch_marks(r)
+        label = track_label(r["track"], r.get("cls", "vector"))
+        kept[(r["mode"], label)] = (f"| {r['mode']} | {label} | {outcome} | {r['frame']} | "
                                          f"{r['laps']} | {r['clock']:.1f} | {r['seconds']:.0f} | {stamp} | "
                                          f"{r['detail']} |")
-    order = [(m, t) for m in MODES for t in MODES[m]["tracks"]]
+    order = [(m, track_label(t, c)) for m in MODES for t in MODES[m]["tracks"] for c in CLASSES]
     with open(path, "w") as f:
         f.write("# Campaign sweep (tools/campaign_sweep.py): the latest outcome of every cell run\n\n")
         f.write(header)
@@ -1395,6 +1522,9 @@ def parse(argv):
     p.add_argument("--out", default=OUT)
     p.add_argument("--list", action="store_true")
     p.add_argument("--no-damage", action="store_true")
+    p.add_argument("--class", dest="cls", default="vector", choices=CLASSES)
+    p.add_argument("--unlock-all", action="store_true")
+    p.add_argument("--record-line", metavar="OUT")
     opts = p.parse_args(argv)
     bad = [kv for kv in opts.set if "=" not in kv]
     if bad:
@@ -1406,8 +1536,12 @@ def parse(argv):
     for t in opts.tracks:
         if t not in known:
             p.error(f"unknown track {t!r} for {opts.mode} (tracks: {', '.join(known)})")
-    if (opts.drive or opts.tune or opts.line or opts.export_line) and len(opts.tracks) != 1:
-        p.error("--drive, --tune, --line and --export-line take one track")
+    if (opts.drive or opts.tune or opts.line or opts.export_line or opts.record_line) and len(opts.tracks) != 1:
+        p.error("--drive, --tune, --line, --export-line and --record-line take one track")
+    if opts.cls != "vector" and "class_at" not in MODES[opts.mode]:
+        p.error(f"--class: {opts.mode} has no class pick in the sweep (only {', '.join(m for m in MODES if 'class_at' in MODES[m])})")
+    if opts.record_line and (MODES[opts.mode].get("races") or MODES[opts.mode]["laps"] == 0):
+        p.error(f"--record-line takes a one-race cell with AI ships, not {opts.mode}")
     if (opts.drive or opts.tune or opts.line) and MODES[opts.mode].get("races"):
         p.error(f"--drive, --tune and --line take a one-race cell, not {opts.mode}")
     return opts
@@ -1419,7 +1553,11 @@ def main(argv=None):
     OUT = opts.out
     if opts.list:
         for t in opts.tracks:
-            print(f"{opts.mode} {t} ({MODES[opts.mode]['tracks'].index(t)} DOWN)")
+            what = ("class", "league", "track") if len(picks(opts.mode, t, opts.cls)) == 3 else ("track",)
+            downs = ", ".join(f"{w} {n} DOWN at {at}" for w, (at, n) in zip(what, picks(opts.mode, t, opts.cls)))
+            unlock = "; unlock all" if needs_unlock(opts.mode, t, opts.cls) else ""
+            print(f"{opts.mode} {track_label(t, opts.cls)} ({downs}; budget "
+                  f"{MODES[opts.mode]['frames'].get(t, DEFAULT_FRAMES)}{unlock})")
         return 0
     if opts.export_line:
         src = opts.line or os.path.join(LINES_DIR, f"{opts.tracks[0]}.csv")
@@ -1428,6 +1566,8 @@ def main(argv=None):
         print(f"{src}: {line.length:.0f} m, {line.covered:.0%} of the bins sampled -> {opts.export_line}")
         return 0
     os.makedirs(os.path.join(ROOT, OUT), exist_ok=True)
+    if opts.record_line:
+        return record_line(opts.mode, opts.tracks[0], opts)
     rows = []
     for track in opts.tracks:
         row = run_cell(opts.mode, track, opts)
