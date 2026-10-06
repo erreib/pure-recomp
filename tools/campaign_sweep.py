@@ -3,14 +3,26 @@
 
   tools/campaign_sweep.py [MODE [TRACK ...]] [--frames N] [--stall S] [--drive FILE] [--shots-every N] [--list]
                           [--set KEY=VALUE ...] [--out DIR] [--no-damage] [--class NAME] [--unlock-all]
+                          [--shell headless|metal|vulkan] [--backend NAME] [--sound] [--allow-parallel]
   tools/campaign_sweep.py MODE TRACK --tune [--line CSV] [--wn W] [--preview S]
   tools/campaign_sweep.py MODE TRACK --export-line OUT [--line CSV]
   tools/campaign_sweep.py MODE TRACK --record-line OUT [--line REF] [--class NAME]
 
 MODE is a row of MODES (default single_race); TRACK names a track of the mode (default: all of them, in menu
 order). Each cell is one run of build/arm64/bin/PureNative, strict (PURE_STRICT_HLE=1) with
-PSPRECOMP_NO_INTERPRETER=1 and PURE_WATCH_SHIP=1, windowed (the input script drives the shell's virtual pad), on
-the default path (the Metal shell and backend on macOS; PURE_SHELL and PURE_GE_BACKEND name others).
+PSPRECOMP_NO_INTERPRETER=1 and PURE_WATCH_SHIP=1. By default (task 034) it runs headless on the Metal backend
+(PURE_SHELL=headless, PURE_GE_BACKEND=metal: no window, the input script drives the pad directly, the shots are the
+backend's own 480x272 pictures) with PURE_PACED_FROM=<the mode's throttle flip>: the menus before the race run
+unpaced (seconds), and from the Cross hold on the race is held to real time, as the follower needs (it steers from
+the probe's lines, and the port reads the live file every 10 flips). --shell metal (or vulkan, with its backend)
+runs the cell in a window to watch it, the race paced as before and the menus unpaced at the display's rate;
+--backend names another GE backend; PURE_SHELL, PURE_GE_BACKEND and PURE_PACED_FROM in the environment are kept.
+Every cell is silent (PURE_NO_AUDIO=1) unless --sound, which also keeps the whole run paced (PURE_PACED_FROM=0) so
+the menus sound right, or the environment sets PURE_NO_AUDIO (or PURE_AUDIO_WAV in a window); and every cell uses
+the data directory out/data/campaign_sweep (settings.ini, pipeline caches), never the player's, unless the
+environment sets PURE_DATA_DIR (tools/run_boot.py, scratch_data_dir and silence). The sweep refuses to start while
+another PureNative runs (one game at a time: task 032 saw a second game beside a windowed cell delay its boot and
+break its menu route), naming it, unless --allow-parallel.
 The tool runs the game itself under a pty, the way tools/run_boot.py does, and writes the log line by line: it
 steers from the `[pure] ship` lines as they come, and run_boot's block-buffered log reaches a reader up to 50
 flips late. Its input script is
@@ -20,7 +32,8 @@ flips late. Its input script is
   config/pad_scripts/drive/<track>.txt   the steering table (below)
 Every cell starts from an empty memory stick: the run's game directory is out/sweep/game/<cell> (EBOOT.ELF and
 disc.iso linked to game/, ms0/ emptied before each run), since the menu route creates a profile and answers its
-prompts. Cells of different tracks can run side by side (the summary is merged under a lock).
+prompts. Cells of different tracks can run side by side with --allow-parallel (the summary is merged under a
+lock); a cell's race is paced and steered closed loop, so a game beside it can still cost it its timing.
 
 Steering tables hold three kinds of lines (`#` starts a comment):
   FRAME:ACTION   an input-script step at that flip of the run (`6540:axis leftx 0.4`)
@@ -109,12 +122,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
 import png  # noqa: E402  (tools/png.py)
+import run_boot  # noqa: E402  (tools/run_boot.py: the scratch data directory, silence, one game at a time)
 
 EXE = os.path.join(ROOT, "build", "arm64", "bin", "PureNative")
 MENU_ROUTE = "config/pad_scripts/main_menu.txt"
 DRIVE_DIR = "config/pad_scripts/drive"
 LINES_DIR = "out/lines"
 OUT = "out/sweep"
+DATA_DIR = "out/data/campaign_sweep"   # PURE_DATA_DIR for every run unless the environment names one (task 034)
 
 # The modes and their race routes. `throttle` is the frame of the route's Cross-hold step (the budget counts from
 # it); `downs_at` is where the DOWN presses that pick the track go, `downs_gap` apart; `tracks` lists the track menu
@@ -1021,6 +1036,23 @@ class Leg:
                     f"drive {drive} ({len(drive_steps)} frame steps, {len(dist_steps)} distance steps)")
 
 
+def cell_environment(opts, paced_from):
+    """The environment every cell starts from (task 034): the shell (--shell, else PURE_SHELL, else headless) and
+    its backend (--backend, else PURE_GE_BACKEND, else metal; vulkan under the vulkan shell), PURE_PACED_FROM
+    (paced_from unless the environment sets it), silent unless --sound, and the scratch data directory."""
+    env = dict(os.environ)
+    shell = opts.shell or env.get("PURE_SHELL") or "headless"
+    env["PURE_SHELL"] = shell
+    if opts.backend:
+        env["PURE_GE_BACKEND"] = opts.backend
+    elif not env.get("PURE_GE_BACKEND"):
+        env["PURE_GE_BACKEND"] = "vulkan" if shell == "vulkan" else "metal"
+    env.setdefault("PURE_PACED_FROM", str(paced_from))
+    run_boot.silence(env, opts.sound, window=shell != "headless")
+    run_boot.scratch_data_dir(env, DATA_DIR)
+    return env
+
+
 def run_cell(mode, track, opts):
     m = MODES[mode]
     cell = cell_name(mode, track, opts.cls)
@@ -1043,7 +1075,7 @@ def run_cell(mode, track, opts):
     open(live, "w").close()
     exit_frame = m["throttle"] + frames
     game = prepare_game_dir(cell)
-    env = dict(os.environ)
+    env = cell_environment(opts, paced_from=0 if opts.sound else m["throttle"])
     env.update({"PURE_GAME_DIR": game, "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
                 "PURE_EXIT_AT_FRAME": str(exit_frame), "PURE_INPUT_SCRIPT": ";".join(f"{fr}:{a}" for fr, a in steps),
                 "PURE_SCREENSHOT_DIR": shots, "PURE_SCREENSHOT_EVERY": "0", "PURE_WATCH_SHIP": "1",
@@ -1060,7 +1092,9 @@ def run_cell(mode, track, opts):
     for k, leg in enumerate(legs):
         print(f"[sweep] {cell}: {f'race {k + 1} {leg.track}: ' if len(legs) > 1 else ''}{leg.how}", flush=True)
     print(f"[sweep] {cell}: exit at flip {exit_frame}{', no damage (test switch)' if no_damage else ''}"
-          f"{', unlock all (test switch)' if unlock else ''}", flush=True)
+          f"{', unlock all (test switch)' if unlock else ''}; shell {env['PURE_SHELL']}, backend "
+          f"{env['PURE_GE_BACKEND']}, paced from flip {env['PURE_PACED_FROM'] or '(the shell decides)'}"
+          f"{', sound on' if 'PURE_NO_AUDIO' not in env else ''}, data {env['PURE_DATA_DIR']}", flush=True)
     port = Port(env, log, max(60.0, exit_frame / 15.0), opts.max_lines)
     trace = open(os.path.join(out, f"{cell}.trace.csv"), "w", buffering=1)
     trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake,shield,race\n")
@@ -1482,6 +1516,7 @@ def record_line(mode, track, opts):
     os.makedirs(shots)
     unlock = opts.unlock_all or needs_unlock(mode, track, opts.cls)
     env = dict(os.environ)
+    run_boot.scratch_data_dir(env, DATA_DIR)
     env.update({"PURE_GAME_DIR": prepare_game_dir(cell), "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
                 "PURE_SHELL": "headless", "PURE_GE_BACKEND": "metal", "PURE_NO_RENDER": "1", "PURE_NO_AUDIO": "1",
                 "PURE_EXIT_AT_FRAME": str(m["throttle"] + frames),
@@ -1582,6 +1617,10 @@ def parse(argv):
     p.add_argument("--class", dest="cls", default="vector", choices=CLASSES)
     p.add_argument("--unlock-all", action="store_true")
     p.add_argument("--record-line", metavar="OUT")
+    p.add_argument("--shell", choices=("headless", "metal", "vulkan"))
+    p.add_argument("--backend", metavar="NAME")
+    p.add_argument("--sound", action="store_true")
+    p.add_argument("--allow-parallel", action="store_true")
     opts = p.parse_args(argv)
     bad = [kv for kv in opts.set if "=" not in kv]
     if bad:
@@ -1622,6 +1661,11 @@ def main(argv=None):
         line.export(opts.export_line)
         print(f"{src}: {line.length:.0f} m, {line.covered:.0%} of the bins sampled -> {opts.export_line}")
         return 0
+    others = [] if opts.allow_parallel else run_boot.other_games()
+    if others:
+        print("campaign_sweep: another PureNative is running; one game at a time (--allow-parallel starts anyway):\n"
+              + "\n".join(f"  pid {pid}: {command}" for pid, command in others), flush=True)
+        return 2
     os.makedirs(os.path.join(ROOT, OUT), exist_ok=True)
     if opts.record_line:
         return record_line(opts.mode, opts.tracks[0], opts)
