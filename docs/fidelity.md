@@ -34,16 +34,17 @@ To read the list below in proportion, what the audit found the same as the origi
   menu, the results panel and Zone's end panel have PPSSPP's layout and fonts.
 - **The game's logic and timing.** The same follower drove Vineta K in PPSSPP and in the port to laps within 1.5 s
   of each other and the same 45 contacts; Zone 1 with Cross held ends in both at TOTAL ZONES CLEAR 6, TOP SPEED
-  405.07 (PPSSPP) and 404.68 (port), SCORE 4292 and 4291, and the end panels differ in 1.8% of the pixels; the race
-  start runs the same 57 frames at two vblanks; the two-vblank stretches are the game's own and PPSSPP has them too
-  (below).
+  405.07 (PPSSPP) and 404.68 (port), SCORE 4292 and 4291, and the end panels differ in 1.8% of the pixels; its first
+  zone change comes at the same score on both; the race start runs the same 57 frames at two vblanks; the two-vblank
+  stretches are the game's own and PPSSPP has them too (below).
 - **Saves round-trip.** The autosaves after a Single Race and after the tournament's races write the profile, and a
   reboot that LOADs it shows the records the races set and the play times.
-- **Audio keeps going.** Every race has its mix, its music and its effects active in every second from the start,
-  with clipping in at most 0.014% of the samples, the only gaps being the game's own between music tracks (below).
+- **Audio keeps going.** Every race has its mix and its effects active in every second from the start and its music
+  in 97 to 100% of them (the gaps: loads, music track changes, Free Play's finish; difference 8 asks whether the PSP
+  has the last two), with clipping in at most 0.014% of the samples.
 - **Every circuit reachable.** All 12 circuits race in Single Race at Vector and Phantom and in Time Trial, Free Play
-  on each league, the tournaments and the four Zone tracks; where the follower fails (Sinucit's fork, Manor Top's
-  bend, a wedge on Chenghou Project) the game itself behaves.
+  on each league, the tournaments and the four Zone tracks; where the follower fails (Sinucit's fork, Manor Top,
+  Karbonis at Phantom, a wedge on Chenghou Project) the game itself behaves.
 
 ## The campaign matrix (item 2)
 
@@ -196,10 +197,10 @@ channel's buffer late, and how long the channel went without):
   and Ghidra decompiles until 21:51; a browser, Spotlight indexing and other sessions' work, a load average of about
   5, at the rerun), and the sweep reads the game's output through a pty while it steers, so a reader held up for a
   moment holds the game's writes. Whether a player's run has them is open: difference 7.
-- **Channel 2 (the music)**, 34 lines in 23 cells: the hitches above, and once at each change of music track, 15 to
-  60 ms just after the new track starts: at 527.3 s of virtual time in every cell that runs that long (the first
-  change, 5:24 into the race music), and at the later changes of the long cells (636, 755, 932 and 1224 s). Each
-  follows a silence on the music channel (the audio section): difference 8.
+- **Channel 2 (the music)**, 34 lines in 23 cells: the hitches above, and once at each change of music track, 10 to
+  60 ms just after the new track starts: at 527.3 s of virtual time in every cell but the tournaments that runs that
+  long (the first change, about 5:24 into the race music), and at the later changes of the long cells (636, 755, 932
+  and 1224 s). Each follows a silence on the music channel (the audio section): difference 8.
 
 The framework's list of ignored GE commands, summed over the cells (every cell lists the same 65):
 
@@ -455,8 +456,8 @@ channel is active 156 of 174 seconds, the two loads its only silences.
 
 The mix clips in the demos' races: 2611 samples at full scale over the window (0.017%), in nine seconds between 202
 and 276 s, up to 1000 samples in one second, and the sceSas channel itself holds 3474 clipped samples: the clipping is
-in what the sceSas mixer hands the game, before sceAudio. The scripted races clip far less (the single-race cells'
-mix 0.00003 or less). Whether the PSP's own SAS mixer clips there too was not measured (PPSSPP can dump its audio,
+in what the sceSas mixer hands the game, before sceAudio. The scripted races clip far less (at most 0.000105 of the
+mix's samples, Citta Nuova at Vector). Whether the PSP's own SAS mixer clips there too was not measured (PPSSPP can dump its audio,
 `DumpAudio` in its ini, not used here).
 
 ## Saves and records (item 5)
@@ -512,9 +513,9 @@ framework answers in a few polls, picks the first slot to write and the first ex
 asks before writing over one.
 
 PPSSPP's save also differs in its bytes: its `PROFILE.BIN` is 41586 bytes of ciphertext and its `PARAM.SFO` lists
-the file in `SAVEDATA_FILE_LIST` (the list a PSP keeps of its encrypted files), while the port writes the 41570 plain bytes with an empty
-list (task 014 took the game's 0x5DC-byte parameter block, which has no key field, to mean the PSP leaves the file
-plain; PPSSPP encrypts it with the PSP's no-key savedata encryption). The other five files are byte-for-byte the
+the file in `SAVEDATA_FILE_LIST` (the list a PSP keeps of its encrypted files), while the port writes the 41570
+plain bytes with an empty list (task 014 took the game's 0x5DC-byte parameter block, which has no key field, to mean
+the PSP leaves the file plain; PPSSPP encrypts it with the PSP's no-key savedata encryption). The other five files are byte-for-byte the
 same size. So a save made on a PSP (or in PPSSPP) will not load in the port, which would read the ciphertext as a
 profile, and a port save copied to a PSP would not load there. The PPSSPP save was moved out of its memory stick
 afterwards, as the routes expect none.
