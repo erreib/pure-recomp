@@ -1,6 +1,6 @@
 # 042: The pre-warm list covers the campaign, and the app bundle carries it
 
-Milestone: M8 | Branch: task/042-prewarm-list-and-bundle | Status: OPEN
+Milestone: M8 | Branch: task/042-prewarm-list-and-bundle | Status: MERGED (823c6c4, 2026-10-07)
 
 ## Goal
 Two follow-ups of tasks 033, 040 and 041. `config/metal_pipelines.txt` lists only the pipelines of the Vineta K
@@ -217,4 +217,20 @@ Open questions:
    to skip the download and the SDL3 and loader build. `out/` is ignored.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout after the merge (2026-10-07): `tools/verify_task.sh 042` repacked the app
+from the merged tree (so it carries patch 0018 too), the bundle check passed all eight checks including the new
+`prewarm` (37 render pipelines and 30 depth-stencil states from Contents/Resources, 0 not in the list on both runs),
+race_hud 0.0148.
+
+Spot-read: tools/bundle.sh (the list staged into the build's `app_resources` before the packer, so it is inside the
+signature; the check's mute through the scratch settings.ini; the finder logs started afresh, a task 029 bug),
+packaging/release.env (`RELEASE_RESOURCES="app_resources=."`), config/metal_pipelines.txt (77 lines, the header says
+what it covers). Files outside May touch: none.
+
+Merged: 823c6c4 into batch/m2.
+
+Notes: not covered by the list yet: classes other than Vector, Zone 2 to 4, the 30-fps modes on tracks other than
+Vineta K, the attract demos, weapons the follower never fires; any such key shows as "not in the list" on a run's exit
+line and the documented recipe adds it. Nothing was measured on a cold shader cache (task 033's method, under src/).
+Karbonis stalled on lap 3 this time (the follower leaving the track), a third track for the stall list. Status rows
+88 and 85 closed.

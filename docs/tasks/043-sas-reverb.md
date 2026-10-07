@@ -1,6 +1,6 @@
 # 043: The SAS reverb (fidelity difference 12)
 
-Milestone: M8 | Branch: task/043-sas-reverb | Status: OPEN
+Milestone: M8 | Branch: task/043-sas-reverb | Status: MERGED (09f11e2, 2026-10-07; PARTIAL resolved by D-010)
 
 ## Goal
 The game asks the SAS mixer for reverb from the race load on (`__sceSasRevType` 5, `__sceSasRevVON` with the dry and
@@ -186,4 +186,20 @@ Open questions:
 5. **Not measured again.** The attract demo's clipping (difference 9) was not re-measured with the reverb.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at 09f11e2 plus the 042 merge (2026-10-07): 17 patches reproduce vendor,
+`tools/sas_reverb_check.sh` PASS (the five steps at 1.05 to 1.27 of PPSSPP's), race_hud 0.0148. The reference WAV
+copied from the worker's ref/audio with the SHA-256 ref/README.md lists (6487ea24...).
+
+Spot-read: patch 0018 (the SPU formula with its saturations and the preset tables; the sends at half as one shift in
+the send mix, the wet volumes at unity, type 0 or the wet switch off giving the old output; the SPU-rate path with
+its 39-tap filters behind `PURE_SAS_REVERB_SPU_RATE`; `__sceSasSetVolume` passing its effect sends; the four Rev
+calls wired), tools/sas_reverb_check.sh (the tail-start heuristic is tuned to this route, as the worker says). Files
+outside May touch: none.
+
+Merged: 09f11e2 into batch/m2.
+
+Notes: the worker reported PARTIAL on the escalation clause (the documented formula alone is 3 to 14 times
+PPSSPP's); I accepted the two fitted constants as D-010 (PPSSPP is the oracle with tolerance; the documented path
+stays switchable). Faithful to PPSSPP, not proven faithful to a PSP: a hardware capture is the one independent check.
+The inferred parts no game here exercises are named in the patch's row. The attract demo's clipping was not
+re-measured with the reverb.
