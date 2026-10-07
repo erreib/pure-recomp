@@ -23,15 +23,20 @@ The release build is its own build directory, `build/release`, configured by the
 The corpus compiles again in Release: 8 minutes on the M4 Pro the first time (2026-10-06), seconds after a change in
 `src/` only. The developer build in `build/arm64` is not touched.
 
-`tools/bundle.sh` then runs `release_macos.sh --game . --no-dmg build/release` with the version
-`0.1.0-<commit>[-dirty]` (CMakeLists.txt's project version and `git describe`). The packer:
+`tools/bundle.sh` then copies `config/metal_pipelines.txt` into `build/release/bin/app_resources` (task 042: the
+packer ships the contents of that folder in `Contents/Resources`, because `packaging/release.env` sets
+`RELEASE_RESOURCES="app_resources=."`; the packer refuses to run without the folder, so run it through
+`tools/bundle.sh`) and runs `release_macos.sh --game . --no-dmg build/release` with the version
+`0.1.0-<commit>[-dirty]` (CMakeLists.txt's project version and `git describe`). A newer pipeline list does not make the
+release build stale: it is not compiled in. The packer:
 
 1. checks that `packaging/THIRD_PARTY_NOTICES.md` names every pinned component (SDL3, FFmpeg and its configure line,
    MoltenVK, the Vulkan loader), that the executable is a release build and that `bin/lib` holds the bundled FFmpeg;
 2. fetches the pinned sources into `out/release-macos/sources`, each checked by SHA-256 (it needs the network the
    first time), and builds SDL3 3.4.16 and the Vulkan loader 1.4.357 for macOS 13 into `out/release-macos/deps`
    (about a minute, once; they are rebuilt only when a pin changes);
-3. assembles `out/release-macos/stage/Wipeout Pure.app`, points every library at `@rpath` (the bundle's
+3. assembles `out/release-macos/stage/Wipeout Pure.app` (with the `RELEASE_RESOURCES` folder's files in
+   `Contents/Resources`), points every library at `@rpath` (the bundle's
    `Contents/Frameworks`), strips local symbols, checks the system symbols the binaries import against the macOS 13
    SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX13.3.sdk` on this Mac) and marks them for macOS 13;
 4. signs every library and the app ad hoc (no Developer ID, not notarized) and checks the app: the signature, no
@@ -51,6 +56,7 @@ asks to be offered beside the binaries, `SHA256SUMS` and `BUILDINFO.txt`. Withou
 | `Frameworks/libMoltenVK.dylib`, `Resources/vulkan/icd.d/MoltenVK_icd.json` | MoltenVK 1.4.2 and its manifest, for the Vulkan path only |
 | `Resources/Wipeout Pure.icns` | the icon (`packaging/make_icon.py`: a rounded square with W and P, no game art) |
 | `Resources/fonts/NotoSansCJKjp-Regular.otf` | the framework's fallback font for Japanese text in the menu |
+| `Resources/metal_pipelines.txt` | (task 042) the Metal backend's pre-warm list, a copy of `config/metal_pipelines.txt` made at packing: the render pipelines and depth-stencil states made at start, the pipelines asynchronously, so no draw compiles one on first use, not even on a machine's first start with a cold shader cache (docs/metal-backend.md, "The pre-warm list"). The backend looks for it here first, and the app's signature seals it. `PURE_METAL_PIPELINES=FILE` or `0` still overrides it |
 | `Resources/licenses/` | `Wipeout Pure-LICENSE.txt` (GPL v2; ours is GPL-2.0-or-later, D-006), PortableKit's, SDL3's, FFmpeg's, the loader's, MoltenVK's, Dear ImGui's, tiny-AES-c's, xxHash's, the font's, and `THIRD_PARTY_NOTICES.md` |
 | `Info.plist`, `PkgInfo`, `_CodeSignature/` | id `com.erikreiblein.pure-recomp`, name, version, `LSMinimumSystemVersion` 13.0, category racing games; the ad hoc seal |
 
@@ -72,6 +78,9 @@ executable's SHA-256, then copies the image into the data directory (the default
 "Wipeout Pure.app/Contents/MacOS/Wipeout Pure" --install                      # the setup screens again
 "Wipeout Pure.app/Contents/MacOS/Wipeout Pure" --install IMAGE [--in-place]   # no screens: set up and exit
 ```
+
+Fixed the same day by 16718e6 (the profile names the plain `BOOT.BIN`): the setup finishes, and `tools/bundle.sh
+--check` runs it. What task 029 found before the fix:
 
 **The setup cannot finish yet (2026-10-06, task 029).** It copies the image, then fails with "The prepared executable
 does not match the supported one" and leaves only `disc.iso.part`. The framework's installer prepares the executable
@@ -126,7 +135,8 @@ open --env PURE_SHELL=vulkan --env PURE_GE_BACKEND=vulkan "Wipeout Pure.app"
 
 ## The check
 
-`tools/bundle.sh --check DIR` (task 029's Verify line with `DIR` = `out/029`) prints PASS or FAIL per check:
+`tools/bundle.sh --check DIR` (task 029's Verify line with `DIR` = `out/029`; task 042's with `out/042`) prints PASS
+or FAIL per check:
 
 | Check | Passes when |
 |---|---|
@@ -137,11 +147,19 @@ open --env PURE_SHELL=vulkan --env PURE_GE_BACKEND=vulkan "Wipeout Pure.app"
 | setup | the bundled executable with `PURE_DATA_DIR=DIR/data` (empty) and `--install "$(readlink disc.iso)"`, with no other `PURE_` variable, exits 0 with `EBOOT.ELF`, `settings.ini` and the copied `disc.iso` there |
 | route | the bundled executable again, with only `PURE_DATA_DIR` and the route's variables: the log names `DIR/data/EBOOT.ELF` and `DIR/data/disc.iso`, the Metal shell, the frontend route (`config/pad_scripts/frontend.txt`) reaches frame 2200, and `DIR/shots/title.png` is within tol 24, max-frac 0.05 of `ref/title.png` |
 | finder | `open "Wipeout Pure.app"` (LaunchServices, as Finder does; `--env` gives it the same data directory and route): the Metal window opens and its title shot, `DIR/finder_shots/title.png`, is within the same limit |
+| prewarm | (task 042) `Contents/Resources/metal_pipelines.txt` is `config/metal_pipelines.txt` (`cmp`), and the route and finder runs each print `[metal] pre-warm: R render pipelines (made asynchronously) and D depth-stencil states from` that copy, with R and D the copy's own counts. Each run's exit line, `(W of them waited for the pre-warm, X not in the list)`, is reported, not checked: it measures how much of the route the list covers, not the bundle |
 
-It exits 0 when all pass. route and finder play the installation, so when setup fails they are reported FAIL without
-running (with no game the app shows its setup screens and waits). It writes only under `DIR`; `DIR/data` holds the
-copy of the image, so `DIR` must stay under the ignored `out/`. Today it ends `bundle check: FAIL (3 checks)`: setup
-fails as "First run: the setup" describes, and route and finder are not run.
+It exits 0 when all pass. route, finder and prewarm play the installation, so when setup fails they are reported
+FAIL without running (with no game the app shows its setup screens and waits). It writes only under `DIR`;
+`DIR/data` holds the copy of the image, so `DIR` must stay under the ignored `out/`.
+
+The runs are silent and use no data directory but `DIR/data` (task 034's follow-up, task 042), as the other tools run
+on their scratch directories. Every run names `PURE_DATA_DIR=DIR/data`, which the packed app honours (the route check
+reads `Executable:` and `Disc image:` from there), and after the setup the check appends `audio.mute=1` to
+`DIR/data/settings.ini`: the in-game menu's Mute, which the app reads from its data directory at start (the audio
+sink sets the device's gain to 0). The setting has no environment variable, so the data directory is the one way to
+reach the app through `open` as well. The check does not use `PURE_NO_AUDIO`, which would leave the audio device
+closed; with Mute the app opens it as a player's app does. The setup run opens no audio device.
 
 ## Limits
 
@@ -153,4 +171,4 @@ fails as "First run: the setup" describes, and route and finder are not run.
   and `THIRD_PARTY_NOTICES.md` give the actual terms (GPL-2.0-or-later for the combination).
 - The setup's welcome screen says the disc image "the PlayStation 3 release carries it", a sentence the framework
   wrote for another game (`host/ui/setup_screens.cpp`); a vendor patch would make it a profile field.
-- The setup itself does not finish with the current profile (above, "First run: the setup").
+- (Resolved by 16718e6.) The setup did not finish with task 029's profile (above, "First run: the setup").
