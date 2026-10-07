@@ -20,7 +20,9 @@ runs the cell in a window to watch it, the race paced as before and the menus un
 Every cell is silent (PURE_NO_AUDIO=1) unless --sound, which also keeps the whole run paced (PURE_PACED_FROM=0) so
 the menus sound right, or the environment sets PURE_NO_AUDIO (or PURE_AUDIO_WAV in a window); and every cell uses
 the data directory out/data/campaign_sweep (settings.ini, pipeline caches), never the player's, unless the
-environment sets PURE_DATA_DIR (tools/purelib's scratch_data_dir and silence, as tools/run_boot.py). The sweep
+environment sets PURE_DATA_DIR (tools/purelib's scratch_data_dir and silence, as tools/run_boot.py). A headless
+cell without --sound runs with PURE_NO_BUSY_CLOCK=1 (the framework's busy-time charge off, so the cell does not
+depend on the machine's load) unless the environment names it; a window or --sound keeps the charge. The sweep
 refuses to start while another PureNative runs (one game at a time: task 032 saw a second game beside a windowed
 cell delay its boot and break its menu route), naming it, unless --allow-parallel.
 The tool runs the game itself under a pty (tools/purelib's PtyRun, as tools/run_boot.py does) and writes the log line
@@ -936,7 +938,8 @@ class Leg:
 def cell_environment(opts, paced_from):
     """The environment every cell starts from (task 034): the shell (--shell, else PURE_SHELL, else headless) and
     its backend (--backend, else PURE_GE_BACKEND, else metal; vulkan under the vulkan shell), PURE_PACED_FROM
-    (paced_from unless the environment sets it), silent unless --sound, and the scratch data directory."""
+    (paced_from unless the environment sets it), silent unless --sound, and the scratch data directory; a headless
+    cell without --sound also gets PURE_NO_BUSY_CLOCK=1 unless the environment names it (task 050)."""
     env = dict(os.environ)
     shell = opts.shell or env.get("PURE_SHELL") or "headless"
     env["PURE_SHELL"] = shell
@@ -947,6 +950,8 @@ def cell_environment(opts, paced_from):
     env.setdefault("PURE_PACED_FROM", str(paced_from))
     port.silence(env, opts.sound, window=shell != "headless")
     port.scratch_data_dir(env, DATA_DIR)
+    if shell == "headless" and not opts.sound:
+        port.steady_clock(env)            # the busy-time charge off; a window or --sound keeps a player's clock
     return env
 
 
@@ -1415,6 +1420,7 @@ def record_line(mode, track, opts):
     unlock = opts.unlock_all or needs_unlock(mode, track, opts.cls)
     env = dict(os.environ)
     port.scratch_data_dir(env, DATA_DIR)
+    port.steady_clock(env)                # headless: the busy-time charge off (task 050)
     env.update({"PURE_GAME_DIR": prepare_game_dir(cell), "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
                 "PURE_SHELL": "headless", "PURE_GE_BACKEND": "metal", "PURE_NO_RENDER": "1", "PURE_NO_AUDIO": "1",
                 "PURE_EXIT_AT_FRAME": str(m["throttle"] + frames),
