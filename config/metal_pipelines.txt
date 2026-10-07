@@ -7,7 +7,7 @@
 # Free Play on Vineta K (--no-damage), Zone 1, and the Alpha Tournament's four races (--no-damage): boot, the
 # frontend, the race loads, the races with the follower's pickups used, the end screens and the standings. Fields:
 # Metal's values for the blend factors, operations, write masks and the depth compare; the GE's for the stencil
-# function and operations; color_test and sixteen since task 040 (metal_backend.mm, RenderKey and DepthStencilKey).
+# function and operations; color_test and sixteen since task 040 (metal_types.hpp (the keys) and metal_pipelines.mm (the list), RenderKey and DepthStencilKey).
 depth compare=2 write=0 stencil=0 function=0 fail=0 depth_fail=0 pass=0 compare_mask=0 write_mask=0
 depth compare=2 write=0 stencil=1 function=1 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=255
 depth compare=2 write=1 stencil=0 function=0 fail=0 depth_fail=0 pass=0 compare_mask=0 write_mask=0

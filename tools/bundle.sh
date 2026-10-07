@@ -236,7 +236,7 @@ finder_check() {   # finder_check DIR DATA SCRIPT
 }
 
 # prewarm: the app carries the checkout's pre-warm list in Contents/Resources, and both runs of the packed app (route
-# and finder) pre-warmed from that copy (task 042). The backend looks there first (metal_backend.mm,
+# and finder) pre-warmed from that copy (task 042). The backend looks there first (metal_pipelines.mm (find_pipeline_list),
 # find_pipeline_list) and prints `[metal] pre-warm: R render pipelines (made asynchronously) and D depth-stencil
 # states from PATH, T ms at start`; R and D must be the copy's own counts. The exit line's "not in the list" count is
 # reported, not checked: it measures the list's coverage of the route, not the bundle.

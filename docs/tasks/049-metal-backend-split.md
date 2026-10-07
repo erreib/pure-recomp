@@ -1,6 +1,6 @@
 # 049: Split the Metal backend by concern (the organisation pass, 1 of 5)
 
-Milestone: M9 organisation | Branch: task/049-metal-backend-split | Status: OPEN
+Milestone: M9 organisation | Branch: task/049-metal-backend-split | Status: MERGED (f5ec793, 2026-10-07)
 
 ## Goal
 src/gpu/metal_backend.mm is 2975 lines in one file with 20 structs and one class, and the MSL shaders live as a
@@ -216,4 +216,22 @@ Open questions:
      That is not this task's; a re-baseline is docs/verification.md's call.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at f5ec793 (2026-10-07), with the before captures retaken on batch/m2
+(after tasks 050 to 052) as the worker advised: `tools/refactor_check.sh` 18/18 scenes at 0 differing pixels and the
+same counts; `tools/frame_regress.sh` 18/18; `tools/hud_check.sh --shell headless` 61 of 61;
+`tools/gerec/metal_check.sh` PASS (team 0 px, race 0 px).
+
+Spot-read: the file layout (seven .mm by concern, metal_types.hpp, metal_backend.hpp with a heading per concern;
+largest file metal_draw.mm at 725 lines), shaders/ge.metal with embed.cmake (the raw string under the old name;
+touching the shader re-embeds and recompiles one file), CMakeLists.txt, the refactor check script (`--before`,
+`--wait`, the count lines with timing taken out). The move was scripted from the class body, bodies untouched.
+Files outside May touch: none.
+
+Merged: f5ec793 into batch/m2.
+
+Notes: the two stale comments the worker found outside its scope (config/metal_pipelines.txt line 10, tools/bundle.sh
+line 239) fixed in this review. The shader cache misses once per machine after this (comments changed the text;
+0.2 to 0.7 s at one start). The worker's list of simplifications seen and not done (draw() at 300 lines, three
+blit copies, four target scans, 90 data members in one class) is the candidate list for a later simplification
+task, recorded in docs/status.md. Its observation that the boot's loading screen follows host time (flips 118 to
+124 differ between runs only with the per-draw log on) is recorded too.
