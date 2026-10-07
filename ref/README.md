@@ -76,6 +76,14 @@ the load sooner in emulated time and moves every later frame. The race scenes be
 capture between the last menu press and the scene; where the table says "burst", the file is one frame of a
 `--shots-every` run whose captures all come after the load, and that run is the command to repeat.
 
+A burst names each file after the frame it asked for. A capture holds the game over two flips (the flip its
+breakpoint stops at and the captured one), so in a 30-fps scene captures come at most every four vblanks, and a burst
+that asks for more (every vblank, or every two) falls behind: the run's `frame N: captured frame M` lines give the
+vblank each file shows. `tt_hud.png` and `fp_hud.png` (requested 7302, bursts every vblank from 7290) show vblank
+7340, and `zone_hud.png` (requested 6668, from 6660) vblank 6694, as the re-run of 2026-10-06 below logged; the
+burst K files (every two vblanks) likewise show later vblanks than their names, by an amount those runs' logs, not
+kept, would give. The files themselves are what the suite compares with: only their labels were off.
+
 | Scene | File | Route (after `frontend.txt`) | Requested | How |
 |---|---|---|---|---|
 | SINGLE PLAYER (SINGLE RACE highlighted) | single_player.{png,ppdmp} | vineta_k_start.txt | 5850 | run A |
@@ -84,12 +92,12 @@ capture between the last menu press and the scene; where the table says "burst",
 | TRACK SELECTION (VINETA K) | track_select.{png,ppdmp} | vineta_k_start.txt | 6450 | run A |
 | TEAM SELECTION (FEISAR) | team_select.{png,ppdmp} | vineta_k_start.txt | 6690 | run A |
 | Time Trial TRACK SELECTION (records, medal times) | tt_track_select.{png,ppdmp} | time_trial_start.txt | 6650 | run B |
-| Time Trial, first full-HUD frame, Vineta K | tt_hud.png | time_trial_start.txt | 7302 | burst C |
+| Time Trial, first full-HUD frame, Vineta K | tt_hud.png | time_trial_start.txt | 7302 (captured 7340) | burst C |
 | Free Play TRACK SELECTION | fp_track_select.{png,ppdmp} | free_play_start.txt | 6650 | run D |
-| Free Play, first full-HUD frame, Vineta K | fp_hud.png | free_play_start.txt | 7302 | burst E |
+| Free Play, first full-HUD frame, Vineta K | fp_hud.png | free_play_start.txt | 7302 (captured 7340) | burst E |
 | TOURNAMENT SELECTION (ALPHA) | tournament_select.{png,ppdmp} | tournament_start.txt | 6450 | run F |
 | Zone TRACK SELECTION (PRO TOZO) | zone_track_select.{png,ppdmp} | zone_start.txt | 6250 | run G |
-| Zone 1, first frame with the HUD | zone_hud.png | zone_start.txt | 6668 | burst H |
+| Zone 1, first frame with the HUD | zone_hud.png | zone_start.txt | 6668 (captured 6694) | burst H |
 | OPTIONS, CONTROLS | options.{png,ppdmp}, controls.{png,ppdmp} | options_controls.txt | 6550, 6900 | run I |
 | first full-HUD frame, Modesto Heights / Chenghou Project / Blue Ridge | modesto_heights_hud, chenghou_project_hud, blue_ridge_hud .{png,ppdmp} | vineta_k_start.txt + track_down1/2/3.txt | 7158 | run J (one per track) |
 | first full-HUD frame, Sinucit, Citta Nuova, Sebenco Climb, Sol 2 | sinucit_hud.png ... sol_2_hud.png | unlock_all.txt + unlock_race_beta.txt [+ unlock_track_downN.txt] | 7662, 7664, 7670, 7652 | burst K |
@@ -98,6 +106,7 @@ capture between the last menu press and the scene; where the table says "burst",
 | the results panel after a three-lap Vineta K race | results_vineta_k.png | (`tools/fidelity_audit.py --ppsspp-race vineta_k`) | finish + 240 | the race driver |
 | the system save dialog: the list, and Save completed | save_dialog.png, save_completed.png | save_yes.txt | 5200, 5400 | burst M |
 | Zone 1's end panel (SHIP DESTROYED, TOTAL ZONES CLEAR 6), Cross held | zone_end.png | zone_start.txt | 11000 | run N |
+| Zone 1's first zone change: the first frame with ZONE 2 and SCORE 800, the ship stopped at the first barrier, Cross held | zone_change.{png,ppdmp} | zone_start.txt | 7526 (captured 7528) | run O |
 
 ```
 P=/opt/homebrew/bin/python3; R=tools/ppsspp/routes; C=tools/ppsspp/ppsspp_ctl.py
@@ -126,15 +135,26 @@ $P $C run --pad-file $R/frontend.txt --pad-file $R/vineta_k_start.txt --pad-file
 $P $C run --pad-file $R/frontend.txt --pad-file $R/save_yes.txt --until 6200 --shots-every 10 --shots-from 5100 --shots-dir out/ppsspp/saveyes
 # run N: sparse captures, none during the load
 $P $C run --pad-file $R/frontend.txt --pad-file $R/zone_start.txt --until 11400 --shot 7500:out/ppsspp/z/f07500.png --shot 8500:out/ppsspp/z/f08500.png --shot 9500:out/ppsspp/z/f09500.png --shot 10500:out/ppsspp/z/f10500.png --shot 11000:ref/zone_end.png --shot 11300:out/ppsspp/z/f11300.png
+# run O: one capture in the race, none before it (a burst every 4 vblanks from 7496 found the change: SCORE 299 and
+# ZONE 1 at 7526, SCORE 801 and ZONE 2 at 7530)
+$P $C run --pad-file $R/frontend.txt --pad-file $R/zone_start.txt --until 7540 --shot 7526:ref/zone_change.png --gedump 7526:ref/zone_change.ppdmp
 # the results panel: out/fidelity/ppsspp/vineta_k/shots/r<finish+240>.png of
 python3 tools/fidelity_audit.py --ppsspp-race vineta_k
 ```
 
-The runs of 2026-10-06 (in the worktree of task 035) gave these files. Each menu scene was captured twice, by an
-exploration run with a capture every 10 vblanks and by its run above, with identical pixels; the Alpha HUD frames of
-run J equal those of a burst from 7100 (Modesto Heights within 0.0001 at tol 0); each burst was run once. A run
-of `time_trial_start.txt` with a capture and GE dump at 6650 and one at 7302 put the race at another moment
-(0.98 of the pixels differ from burst C's 7302), the load-timing effect above.
+The runs of 2026-10-06 (in the first worktree of task 035) gave these files. Each menu scene was captured twice, by
+an exploration run with a capture every 10 vblanks and by its run above, with identical pixels; the Alpha HUD frames
+of run J equal those of a burst from 7100 (Modesto Heights within 0.0001 at tol 0). The first worktree's captures went
+with it, so the files the suite uses (runs A, B, D, F, G and bursts C, E, H) were made again in the task's second
+worktree the same evening, 23:10 to 23:35, with the commands above: every PNG and GE dump came out byte-identical to
+the hashes below. Run O (the zone change) comes from the second worktree and was run twice, with a byte-identical
+PNG and GE dump.
+
+Captures before a load do not move what follows: a run of `time_trial_start.txt` with a capture and GE dump at 6650
+(TRACK SELECTION) and a shot at 7340, and one with the shot alone, captured the same flip (vblank 7342) with the same
+pixels. The first worktree had found 0.98 of the pixels differing between a capture at 7302 and burst C's file, but
+that file is vblank 7340, 38 vblanks later; the load-timing effect above rests on the two Zone runs of
+docs/fidelity.md, whose captures came during the load.
 
 | File | SHA-256 |
 |---|---|
@@ -182,3 +202,5 @@ of `time_trial_start.txt` with a capture and GE dump at 6650 and one at 7302 put
 | save_dialog.png | b1664e284c5e5795dc86ad32ebac44bf271fb2df198779e80e5290c5ebb539b0 |
 | save_completed.png | 536f89bc31f5e753a6a988a5fca5924d76ffada82316816ae7775561afaa660d |
 | zone_end.png | a20fcb80d2823f818a9d915ca6c38b972aaac56eb5c58c40b5e46a559374425f |
+| zone_change.png | a192682e6ddf59f033d4797d0ab848eff2d0f2efecce3b7e17235cb0475a7bed |
+| zone_change.ppdmp | 985cd7a5224f2a3e06eea5ceca140aed48cf7d6a8a9286eae9e6015a236b5f2b |

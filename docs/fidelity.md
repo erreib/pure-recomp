@@ -9,7 +9,7 @@ Four kinds of evidence:
 - **The campaign matrix** (`tools/fidelity_audit.py`, below): 46 cells headless on the Metal backend, every halt,
   unimplemented import, unemulated GE state, warning, two-vblank stretch and audio figure collected per cell.
 - **PPSSPP references beyond the five**: new routes in `tools/ppsspp/routes/`, new captures in `ref/` (listed in
-  `ref/README.md`), twelve of them in the frame regression suite, and a PPSSPP race driven by the sweep's own
+  `ref/README.md`), thirteen of them in the frame regression suite, and a PPSSPP race driven by the sweep's own
   follower (`tools/fidelity_audit.py --ppsspp-race`).
 - **Audio** over every cell (`PURE_AUDIO_WAV` on each, `tools/wavstats.py` from the race start) and a five-minute
   idle on the main menu.
@@ -144,8 +144,8 @@ did; each cell ran once and was not retried, as the brief asks):
 
 The other columns, over the whole matrix:
 
-- **Halts, stubs, warnings**: no halt and no stub anywhere; the warnings counted are the audio capture's underrun lines,
-  two in every cell and up to seven in one (the next section says what they are).
+- **Halts, stubs, warnings**: no halt and no stub anywhere; the warnings counted are the audio capture's underrun
+  lines, two in every cell and up to seven in one (the next section says what they are).
 - **GE ignored**: the framework lists the same 65 GE commands it does not apply in every cell (next section).
 - **Min fps**: the lowest Metal rate over a 600-frame window of the race is 44.9 to 58.5 in the 60-fps modes, pulled
   down by the two-vblank stretches, and 29.6 to 30.0 in Time Trial, Free Play and Zone, which run at 30 throughout;
@@ -284,7 +284,7 @@ New routes in `tools/ppsspp/routes/` reach every scene of the brief in PPSSPP wi
 are listed in `ref/README.md` with their hashes and the commands that make them. A port capture of the same game
 moment was made for each, headless on the Metal backend: by the suite's own routes where `config/pad_scripts/` has
 one, by ad-hoc presses otherwise (the steps are in the table). Scenes with a port route are now rows of
-`tools/frame_regress.sh` (twelve; "Re-baselining" in docs/verification.md for their measured values); the others
+`tools/frame_regress.sh` (thirteen; "Re-baselining" in docs/verification.md for their measured values); the others
 need a route file in `config/pad_scripts/`, which this task could not add (Must not touch), so their fractions are
 here only.
 
@@ -292,13 +292,20 @@ How the moments were matched: the frontend runs at two vblanks a frame on both, 
 press is PPSSPP vblank `V + 2k` for port flip `F + k`; each menu pair was then confirmed by searching a burst of port
 captures for the PPSSPP frame (every menu matched at a fraction of 0.0000 at tol 24, the Metal backend drawing the
 2D screens exactly). Race and Zone scenes are the first frame with the HUD fully faded in, found on both sides from
-the CURRENT and LAP labels' brightness (`tools/hud_check.py`'s regions) or, in Zone, the SCORE label's.
+the CURRENT and LAP labels' brightness (`tools/hud_check.py`'s regions) or, in Zone, the SCORE label's. The zone
+change is the first frame with ZONE 2 on both: the score counts one a flip on both and jumps by 501 at the change (299
+to 800), so the frame with SCORE 800 is the same game moment, port flip 5679 and PPSSPP vblank 7528. With Cross held
+the ship has stopped at the first barrier by then, so the frame holds the 3D at rest and the HUD; what differs is the
+3D (the ship's environment map, the mip levels).
 
 A PPSSPP capture made while the CPU is held at a breakpoint lets PPSSPP's file reads run on in real time, so a
 capture during a load makes the load end sooner in emulated time and moves everything after it (two runs of
 `zone_start.txt`, one with a capture every 10 vblanks and one with none during the load, put the race 100 vblanks
 apart). Every race reference was therefore taken in a run with no capture between the route's last menu press and
-the scene.
+the scene. A capture on a menu before the load does not move the race (a Time Trial run with a capture and GE dump
+on TRACK SELECTION and one without captured the same race frame). A burst names its files after the frames it asked
+for, and in a 30-fps scene a burst asking for every vblank falls behind (each capture holds the game over two flips):
+the race references' vblanks below are the ones the runs logged, `ref/README.md` has the details.
 
 Fractions are the share of pixels differing by more than the tolerance (`tools/imgdiff.py`), both at 480x272. Port
 flips are of the headless Metal run; "+ steps" are presses added to the named `config/pad_scripts/` routes.
@@ -311,12 +318,13 @@ flips are of the headless Metal run; "+ steps" are presses added to the named `c
 | TRACK SELECTION | vineta_k_start.txt, 6450 | the same, 5390 | 24 | 0.0000 | `track_select` |
 | TEAM SELECTION | vineta_k_start.txt, 6690 | the same, 5600 | 24 | 0.0000 | `team_select` |
 | Time Trial TRACK SELECTION | time_trial_start.txt, 6650 | main_menu.txt + time_trial.txt, 5375 | 24 | 0.0000 | `tt_track_select` |
-| Time Trial, first full HUD, Vineta K | time_trial_start.txt, 7302 | the same, 5890 | 32 | 0.0617 | `tt_hud` |
+| Time Trial, first full HUD, Vineta K | time_trial_start.txt, 7340 | the same, 5890 | 32 | 0.0617 | `tt_hud` |
 | Free Play TRACK SELECTION | free_play_start.txt, 6650 | main_menu.txt + free_play.txt, 5375 | 24 | 0.0000 | `fp_track_select` |
-| Free Play, first full HUD, Vineta K | free_play_start.txt, 7302 | the same, 5890 | 32 | 0.0620 | `fp_hud` |
+| Free Play, first full HUD, Vineta K | free_play_start.txt, 7340 | the same, 5890 | 32 | 0.0620 | `fp_hud` |
 | TOURNAMENT SELECTION | tournament_start.txt, 6450 | main_menu.txt + tournament.txt, 5185 | 24 | 0.0000 | `tournament_select` |
 | Zone TRACK SELECTION | zone_start.txt, 6250 | main_menu.txt + zone.txt, 4975 | 24 | 0.0000 | `zone_track_select` |
-| Zone 1, first frame with the HUD | zone_start.txt, 6668 | the same, 5260 | 32 | 0.0348 | `zone_hud` |
+| Zone 1, first frame with the HUD | zone_start.txt, 6694 | the same, 5260 | 32 | 0.0348 | `zone_hud` |
+| Zone 1's first zone change (ZONE 2, SCORE 800; the ship stopped at the first barrier) | zone_start.txt, 7528 | the same, 5679 | 32 | 0.0649 | `zone_change` |
 | Zone 1's end panel (TOTAL ZONES CLEAR 6, TOP SPEED 405.07 / 404.68, SCORE 4292 / 4291) | zone_start.txt, 11000 | the matrix's `zone-zone_1` end shot | 32 | 0.0181 | no (the sweep's shot) |
 | OPTIONS | options_controls.txt, 6550 | main_menu.txt + 4700, 4740 DOWN, 4800 Cross, 4950 to 5040 four DOWN, 5100 Cross; 5155 | 24 | 0.0000 | no route |
 | CONTROLS | options_controls.txt, 6900 | the same + 5300 Cross; 5375 | 24 | 0.0000 | no route |

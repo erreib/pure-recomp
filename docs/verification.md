@@ -140,7 +140,7 @@ alpha path darkens the whole track. race_hud then scores 0.3053 (delta +0.238), 
 
 ## The scenes task 035 added (2026-10-06)
 
-Twelve more PPSSPP scenes (task 035, docs/fidelity.md "PPSSPP references beyond the five"; captures and commands
+Thirteen more PPSSPP scenes (task 035, docs/fidelity.md "PPSSPP references beyond the five"; captures and commands
 in `ref/README.md`), each reachable by a route the suite already has, so they add three runs (the Time Trial, Free
 Play, Tournament and Zone routes; the Single Race menus share the race route's run). Headless the whole suite now
 takes about 23 s.
@@ -153,12 +153,13 @@ takes about 23 s.
 | `track_select` | the same | 5390 | `ref/track_select.png` (6450) | 24 | 0.06 | 0.041 | 0.0000 |
 | `team_select` | the same | 5600 | `ref/team_select.png` (6690) | 24 | 0.06 | 0.042 | 0.0000 |
 | `tt_track_select` | `main_menu.txt` + `time_trial.txt` | 5375 | `ref/tt_track_select.png` (6650) | 24 | 0.06 | 0.040 | 0.0000 |
-| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7302) | 32 | 0.12 | 0.096 | 0.0617 |
+| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7340) | 32 | 0.12 | 0.096 | 0.0617 |
 | `fp_track_select` | `main_menu.txt` + `free_play.txt` | 5375 | `ref/fp_track_select.png` (6650) | 24 | 0.06 | 0.041 | 0.0000 |
-| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7302) | 32 | 0.11 | 0.095 | 0.0620 |
+| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7340) | 32 | 0.11 | 0.095 | 0.0620 |
 | `tournament_select` | `main_menu.txt` + `tournament.txt` | 5185 | `ref/tournament_select.png` (6450) | 24 | 0.08 | 0.063 | 0.0000 |
 | `zone_track_select` | `main_menu.txt` + `zone.txt` | 4975 | `ref/zone_track_select.png` (6250) | 24 | 0.05 | 0.033 | 0.0000 |
-| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6668) | 32 | 0.09 | 0.065 | 0.0348 |
+| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6694) | 32 | 0.09 | 0.065 | 0.0348 |
+| `zone_change` | the same | 5679 | `ref/zone_change.png` (7528) | 32 | 0.10 | 0.082 | 0.0649 |
 
 - The menus match PPSSPP exactly on the Metal backend (0 pixels over tol 24): the frontend's 2D draws at 480x272.
   On the Vulkan path (one windowed run, `--shell vulkan --backend vulkan`, 15.5 min for the five routes) they score
@@ -170,6 +171,10 @@ takes about 23 s.
   bronze time in Time Trial and Free Play, SCORE and ZONE in Zone. The player is alone in those modes, so the frames
   do not vary from run to run: three headless runs gave the same fraction to four places in every new scene. What
   differs from PPSSPP there is the 3D (docs/fidelity.md: the mip levels, the environment-mapped ship).
+- `zone_change` (added last, 2026-10-06) is Zone 1's first zone change: the first frame with ZONE 2, where the score
+  jumps from 299 to 800, port flip 5679 and PPSSPP vblank 7528 (both found from the HUD, `ref/README.md` run O). With
+  Cross held the ship is at rest against the first barrier by then. Metal scored 0.0649 in three headless runs, the
+  Vulkan path 0.0818 in one windowed run (`--only zone_change`, 3 min 10 s); limit 0.10 by the rule below.
 - Matching a race scene needs care on the PPSSPP side: a capture made during a load moves the race in emulated time
   (`ref/README.md`), so these references come from runs with no capture before the race.
 
