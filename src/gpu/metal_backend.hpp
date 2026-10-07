@@ -31,8 +31,8 @@ MTLCompareFunction to_compare(std::uint32_t function);                        //
 std::uint32_t stored_reference(const DrawCall &call);                         // metal_backend.mm
 int stencil_alpha(const DrawCall &call);                                      // metal_backend.mm
 bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail);        // metal_backend.mm
-const char *format_name(TextureFormat format);                                // metal_backend.mm
-std::uint32_t texture_bits(TextureFormat format);                             // metal_backend.mm
+const char *format_name(TextureFormat format);                                // metal_textures.mm
+std::uint32_t texture_bits(TextureFormat format);                             // metal_textures.mm
 
 class MetalGeBackend final : public pk::GeBackend {
 public:
@@ -88,7 +88,7 @@ private:
     void upload(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
                 std::uint32_t stride);
 
-    // Textures from guest memory: mip levels, the content key, the decode and cache, the level rule (metal_backend.mm)
+    // Textures from guest memory: mip levels, the content key, the decode and cache, the level rule (metal_textures.mm)
     std::uint32_t mip_levels(const GuestMemory &memory, const TextureState &state);
     const Target *target_holding(std::uint32_t address, std::size_t bytes) const;
     static std::uint64_t content_key(const GuestMemory &memory, const TextureState &state, std::uint32_t levels);
