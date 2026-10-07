@@ -2408,8 +2408,8 @@ private:
             [encoder_ setVertexBufferOffset:offset atIndex:0];
         }
         [encoder_ setVertexBytes:&vertex length:sizeof(vertex) atIndex:1];
-        // The lighting block: a lit or fogged draw's whenever it changed, and something always, since the
-        // vertex function names it.
+        // The lighting block: a lit, fogged or environment-mapped draw's whenever it changed, and something
+        // always, since the vertex function names it.
         if (!lighting_bound_ || ((lit || fogged || shade_mapped) && lighting_changed_)) {
             [encoder_ setVertexBytes:&lighting_ length:sizeof(lighting_) atIndex:2];
             lighting_bound_ = true;
