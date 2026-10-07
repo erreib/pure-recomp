@@ -1,0 +1,6 @@
+# PPSSPP route: the system's save dialog that save_yes.txt opens (task 045, 2026-10-07). Chain it after frontend.txt
+# and save_yes.txt. The dialog (LISTSAVE, the game's list P0000 to P0004) fades in from ~5120 with the cursor on the
+# first entry, NEW DATA (P0000); frontend.txt's CROSS at 5250, meant for the WARNING that a NO brings, picks it, and
+# the dialog says "Save completed." from ~5270 until Back. PPSSPP has then written PSP/SAVEDATA/UCUS98612P0000 to its
+# memory stick (~/.config/ppsspp/PSP/SAVEDATA): move it away afterwards, as the other routes expect no profile save.
+5400:CIRCLE, 5408:                # "Save completed.": Back closes the dialog -> MAIN MENU
