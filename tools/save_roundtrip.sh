@@ -34,6 +34,7 @@ SECOND_NAME=NAME1111
 DLC=UCUS98612DGAMMAPACK1
 DIGITS=200,92,115,26   # PSP pixels: the 5th to 8th letters of the SET NAME field, blank for the default "NAME"
 MIN_NAME_VARIANCE=500  # measured: 1545 with NAME0000 loaded, 0 on the empty stick
+MIN_ONES_VARIANCE=200  # measured: 449 with NAME1111 loaded (thin digits), 0 on the empty stick (task 039)
 
 [ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
@@ -265,8 +266,8 @@ v5=$(variance "$OUT/run5/name-p0001.png" "$DIGITS")
 python3 tools/imgdiff.py "$OUT/run5/name-p0001.png" "$OUT/run2/name-loaded.png" --region "$DIGITS" --tol 32 \
   --max-frac 0.05 > "$OUT/run5.name.txt" 2>&1
 differs=$?
-if [ "$v5" -ge "$MIN_NAME_VARIANCE" ] && [ $differs -eq 1 ]; then
-  ok "SET NAME shows a loaded name other than $NAME (variance $v5; against run 2's: $(cut -d' ' -f1-3 "$OUT/run5.name.txt"))"
+if [ "$v5" -ge "$MIN_ONES_VARIANCE" ] && [ $differs -eq 1 ]; then
+  ok "SET NAME shows a loaded name past NAME other than $NAME (variance $v5 >= $MIN_ONES_VARIANCE; against run 2's: $(cut -d' ' -f1-3 "$OUT/run5.name.txt"))"
 else
   bad "SET NAME capture $OUT/run5/name-p0001.png: variance $v5, against run 2's $NAME: $(head -1 "$OUT/run5.name.txt")"
 fi
