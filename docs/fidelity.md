@@ -44,7 +44,27 @@ To read the list below in proportion, what the audit found the same as the origi
   on each league, the tournaments and the four Zone tracks; where the follower fails (Sinucit's fork, Manor Top's
   bend, a wedge on Chenghou Project) the game itself behaves.
 
-<!-- MATRIX -->
+## The campaign matrix (item 2)
+
+```
+python3 tools/fidelity_audit.py [--cells FILE] [--resume]     # the 46 cells, one at a time, about 5 h
+python3 tools/fidelity_audit.py --report                      # the tables again from out/fidelity/cells/*.json
+```
+
+Every cell is `tools/campaign_sweep.py MODE TRACK --no-damage [--class phantom]` from a cold boot on an empty memory
+stick, headless on the Metal backend, the race paced, with `PURE_AUDIO_WAV`; `(extended)` cells are the league
+picks the sweep's tables lack, added by the audit in the sweep's process (README.md). The run of 2026-10-06 went in
+this order: four cells that tried the extended routes and Phantom first, then the rest; the three cells of
+`--quick` (Single Race Vineta K, Zone 1, Time Trial Vineta K) are those of the Verify. Columns: the sweep's outcome
+and the flip it ended at, laps, the race clock and the wall time; the tracks whose `TrackStartup.xml` the race load
+opened (the proof that the route picked the track); halts and stubs, then other warning lines; how many distinct GE
+commands the framework ignored; the two-vblank stretches and hitches; the lowest of the Metal backend's per-600-frame
+rates in the race; the render pipelines a draw made that the pre-warm list lacks; the audio; the savedata requests
+beyond the two every boot makes; the sweep's detail.
+
+<!-- MATRIX_TABLE -->
+
+<!-- MATRIX_NOTES -->
 
 ## Halts, stubs and what the GE draws without (item 1's feature table)
 
@@ -52,7 +72,13 @@ To read the list below in proportion, what the audit found the same as the origi
 times taken out), then the framework's exit list of GE commands it ignores, then the imports with no
 implementation. Over the whole matrix:
 
-<!-- FEATURE_SUMMARY -->
+<!-- LINES_TABLE -->
+
+<!-- FEATURE_NOTES -->
+
+The framework's list of ignored GE commands, summed over the cells (every cell lists the same 65):
+
+<!-- IGNORED_TABLE -->
 
 ### The GE state the framework ignores, and how much of it the game uses
 
