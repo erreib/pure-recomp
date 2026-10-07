@@ -128,3 +128,9 @@ survey: [the audit's feature table](history/fidelity.md#the-ge-state-the-framewo
   the byte with the profile, as a player's would be).
 - The SAS reverb's two constants (D-010) are PPSSPP's, not proven against a PSP; a capture from real hardware would
   settle them.
+
+## History
+
+[docs/history/fidelity.md](history/fidelity.md): the fidelity audit's report as it stood, with every
+task's findings from 035 to 048 (the matrix, the feature table, the references, audio, saves, the
+stretches, and each difference's evidence).

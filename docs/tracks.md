@@ -386,3 +386,8 @@ The sweep's cells of that track then run on your line until the file is replaced
 Checked 2026-10-06 on a follower-driven Vineta K race logged with `PURE_WATCH_GRID=1`: `--ships player` kept the
 player's fastest whole pass (57.2 s of 82117 samples) as a line 8.3 m mean from the AI line (max 27 m at 2490 m,
 where the follower had left the line), so the conversion runs end to end; a human lap has not been recorded yet.
+
+## History
+
+[docs/history/tracks.md](history/tracks.md): the sweep's run tables of tasks 017, 018 and 032 and the
+port lines against PPSSPP's.

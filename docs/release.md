@@ -156,3 +156,8 @@ closed; with Mute the app opens it as a player's app does. The setup run opens n
   and `THIRD_PARTY_NOTICES.md` give the actual terms (GPL-2.0-or-later for the combination).
 - The setup's welcome screen says the disc image "the PlayStation 3 release carries it", a sentence the framework
   wrote for another game (`host/ui/setup_screens.cpp`); a vendor patch would make it a profile field.
+
+## History
+
+[docs/history/release.md](history/release.md): the setup before 16718e6 and the hand-made
+installation task 029 played.

@@ -708,3 +708,10 @@ that the docs name only what exists:
 
 It prints one line per finding (`FILE:LINE: what`) and a verdict, and exits 0 when there is none, 1 otherwise. Run it
 after editing a doc, and in a task that moves or renames a file, a tool or a patch.
+
+## History
+
+[docs/history/verification.md](history/verification.md): each check's first runs and tables (the
+suite's first five scenes and the thirteen task 035 added, the re-baselines, the HUD check before
+task 031, the wall times of task 034, task 051's log diff, the M4 audio checks, the reverb's steps,
+the VFPU measurements, the shared runner's equivalence checks).

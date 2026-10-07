@@ -172,3 +172,8 @@ The follow-ups resolved since they were collected, with what resolved them:
   diverged); `PURE_NO_BUSY_CLOCK=1` makes them repeat exactly and the shared runner (task 050) sets it for every
   headless run; a player's game keeps the charge (task 051). Resolved: task 050: the shared runner sets
   `PURE_NO_BUSY_CLOCK=1` for every headless run.
+
+## History
+
+[docs/history/sessions.md](history/sessions.md): the resume notes of every session, and the milestone
+table as it stood before task 053.
