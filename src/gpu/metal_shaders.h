@@ -6,11 +6,11 @@
 // and the update bits, ambient, diffuse, specular with the material's power, reverse normals) and fog
 // (tasks 023 and 024), transformed sprites as rectangles already projected (their lighting and fog taken
 // from the second vertex), the GE's texture mapping modes (task 036: the texture matrix and the environment map,
-// which the framework's shaders do not have), the five texture functions, the alpha test by the GE's numbering (0 NEVER,
-// 1 ALWAYS: patch 0005) and the FIX source factor; the stencil value stored as the target's alpha instead of
-// the fragment's, with the fragment's own alpha handed to a source-alpha blend as a second output (dual-source
-// blending, ge_fragment_dual) as patches 0004 and 0006 do (task 025). The colour test, logic ops and colour
-// doubling are not in the draw state.
+// which the framework's shaders do not have), the mip level by the GE's rule (task 037), the five texture
+// functions, the alpha test by the GE's numbering (0 NEVER, 1 ALWAYS: patch 0005) and the FIX source factor;
+// the stencil value stored as the target's alpha instead of the fragment's, with the fragment's own alpha handed
+// to a source-alpha blend as a second output (dual-source blending, ge_fragment_dual) as patches 0004 and 0006 do
+// (task 025). The colour test, logic ops and colour doubling are not in the draw state.
 //
 // The structs below are laid out exactly as their C++ twins in metal_backend.mm (static_asserts there).
 #pragma once
@@ -86,6 +86,10 @@ struct FragmentUniforms {
     float4 fog;           // rgb: the fog colour; w: 1 when the draw is fogged
     uint4 stencil;        // x: 1 when the target's alpha, the PSP's stencil, receives y (0..255) instead of the
                           // fragment's alpha (the zpass REPLACE or ZERO the stencil attachment does too)
+    // The mip level (task 037): x the rule (0 none: level 0, Metal's own derivatives; 1 auto, 2 constant, 3 slope:
+    // TEXLEVEL's modes), y the part of D (1/16 levels) that is the same across the draw, zw level 0's size.
+    float4 level;
+    float4 level_range;   // x: the highest D, 16 x (levels - 1)
 };
 
 // What ge_fragment_dual hands the blend: the colour with the stored alpha, and the fragment's own alpha as the
@@ -255,13 +259,40 @@ vertex Varyings ge_vertex(uint vid [[vertex_id]],
     return out;
 }
 
+// The GE's logarithm for the mip level, in 1/16 levels: the float's exponent and the top four bits of its mantissa
+// (a piecewise linear log2, floored to 1/16), of |x|. ge_log16 in metal_backend.mm.
+float ge_log16(float x) {
+    return float(int((as_type<uint>(x) >> 19u) & 0xFFFu) - 127 * 16);
+}
+
+// The texel, at the mip level the GE picks for a texture with levels (task 037; PPSSPP's hardware notes, "Mip level
+// selection"): D = log16(g) - log16(q) (auto), the bias (constant) or 16 + log16(slope) - log16(q) + bias (slope),
+// u.level.y holding what does not change across the draw. q is the GE's per-pixel q: 1/w (position.w, which Metal
+// gives as 1/w), times the texture matrix's q; s and t are the texture coordinates times q, whose screen
+// gradients g takes, in texels. D is clamped to the levels the texture has; the sampler's mip filter takes the
+// nearest level or blends the two around it.
+float4 sample_texture(Varyings in, constant FragmentUniforms &u, texture2d<float> image, sampler image_sampler) {
+    const float2 uv = u.texture.w != 0u ? in.uv.xy / in.uv.z : in.uv.xy;
+    if (u.level.x == 0.0f) return image.sample(image_sampler, uv);
+    const float q = in.position.w * in.uv.z;
+    float d = u.level.y;
+    if (u.level.x == 1.0f) {
+        const float2 st = in.uv.xy * in.position.w;
+        const float2 across = abs(dfdx(st)) * u.level.zw;
+        const float2 down = abs(dfdy(st)) * u.level.zw;
+        d += ge_log16(max(max(across.x, across.y), max(down.x, down.y)));
+    }
+    if (u.level.x != 2.0f) d -= ge_log16(q);
+    return image.sample(image_sampler, uv, level(clamp(d, 0.0f, u.level_range.x) / 16.0f));
+}
+
 // The fragment's colour and alpha as the GE computes them: texture function, separate specular, fog, alpha
 // test (which discards), FIX source factor. The alpha is the fragment's own; the entry points below decide what
 // the target's alpha receives.
 float4 shade(Varyings in, constant FragmentUniforms &u, texture2d<float> image, sampler image_sampler) {
     float4 color = in.color;
     if (kTextured) {
-        float4 texel = image.sample(image_sampler, u.texture.w != 0u ? in.uv.xy / in.uv.z : in.uv.xy);
+        float4 texel = sample_texture(in, u, image, image_sampler);
         // A 16-bit 5650 framebuffer sampled as a texture has no alpha.
         if (u.texture.z != 0u) texel.a = 1.0f;
         const bool rgba = u.texture.y != 0u;

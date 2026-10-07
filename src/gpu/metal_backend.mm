@@ -14,7 +14,9 @@
 //   textures   a bind that lies in a target samples that target, the one starting at the address first
 //              (patch 0003), while guest memory under it is what it was when the target was first drawn
 //              in the frame; anything else is decoded from guest memory with the framework's
-//              decode_texture() and cached by its contents (texels and the palette entries it can reach).
+//              decode_texture() and cached by its contents (texels and the palette entries it can reach);
+//              a texture with mip levels (task 037) is a mipmapped texture, each level decoded from its own
+//              address, sampled at the level the GE's rule (TEXLEVEL) picks.
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
 //              blend, the write masks, the alpha test, the depth test and the stencil; clears; scissor;
 //              the GE viewport folded into clip space; back-face culling.
@@ -156,8 +158,22 @@ struct FragmentUniforms {
     std::array<std::uint32_t, 4> alpha_test{};
     std::array<float, 4> fog{};               // rgb: the fog colour; w: 1 when fogged
     std::array<std::uint32_t, 4> stencil{};  // x: 1 when the alpha stored is y (the PSP's stencil), not the fragment's
+    // The mip level the GE samples (task 037): x the rule (kLevelNone, kLevelAuto, kLevelConstant, kLevelSlope),
+    // y the part of the level D (in 1/16 levels) that does not change across the draw, z and w level 0's size.
+    std::array<float, 4> level{};
+    std::array<float, 4> level_range{};  // x: the highest D, 16 x (levels - 1)
 };
-static_assert(sizeof(FragmentUniforms) == 80u, "FragmentUniforms must match metal_shaders.h");
+static_assert(sizeof(FragmentUniforms) == 112u, "FragmentUniforms must match metal_shaders.h");
+
+// FragmentUniforms::level.x: how the level is chosen. None samples level 0 with the derivatives Metal takes (a
+// texture without levels); the others are TEXLEVEL's modes 0 to 2 plus one, the level computed in the shader.
+constexpr float kLevelNone = 0.0f;
+constexpr float kLevelAuto = 1.0f;
+constexpr float kLevelConstant = 2.0f;
+constexpr float kLevelSlope = 3.0f;
+// The sampler index's mip filter bits (the sampler table in initialize()).
+constexpr std::uint32_t kMipNearest = 16u;
+constexpr std::uint32_t kMipLinear = 32u;
 
 // A GE colour register (0x00BBGGRR) as 0..1 floats, with an explicit fourth value.
 std::array<float, 4> unpack_color(std::uint32_t color, float fourth = 1.0f) {
@@ -312,6 +328,39 @@ std::uint64_t hash_guest(std::uint64_t hash, const GuestMemory &memory, std::uin
     return hash;
 }
 
+// The bytes decode_texture() reads for a texture: rows of its buffer width (its width when that is 0), or the
+// blocks of a DXT texture.
+std::size_t texture_bytes(const TextureState &state) {
+    const std::uint32_t bits = texture_bits(state.format);
+    if (bits != 0u) {
+        const std::uint32_t stride = state.buffer_width != 0u ? state.buffer_width : state.width;
+        return static_cast<std::size_t>(stride) * bits / 8u * state.height;
+    }
+    const std::size_t blocks = static_cast<std::size_t>((state.width + 3u) / 4u) * ((state.height + 3u) / 4u);
+    return blocks * (state.format == TextureFormat::Dxt1 ? 8u : 16u);
+}
+
+// Mip level n of a texture as a texture of its own: level 0's format, swizzle and palette, the level's address,
+// row length and size. What decode_texture() decodes the level from.
+TextureState texture_level(const TextureState &state, std::uint32_t n) {
+    TextureState level = state;
+    if (n == 0u || n > state.levels.size()) return level;
+    const pk::TextureLevel &registers = state.levels[n - 1u];
+    level.address = registers.address;
+    level.buffer_width = registers.buffer_width;
+    level.width = registers.width;
+    level.height = registers.height;
+    return level;
+}
+
+// The GE's logarithm for the mip level, in 1/16 levels: a float's exponent and the top four bits of its mantissa,
+// a piecewise linear log2 floored to 1/16 (PPSSPP's hardware notes, "GE arithmetic"). metal_shaders.h has the same.
+std::int32_t ge_log16(float value) {
+    std::uint32_t bits{};
+    std::memcpy(&bits, &value, sizeof(bits));
+    return static_cast<std::int32_t>((bits >> 19u) & 0xFFFu) - 127 * 16;
+}
+
 // A render target: (colour address, stride, pixel format), docs/ge-backend.md section 2.
 struct TargetKey {
     std::uint32_t address{};
@@ -446,6 +495,8 @@ struct TextureIdentity {
     std::uint32_t clut_address{};
     std::uint32_t clut{};
     bool swizzled{};
+    std::uint32_t levels{};       // the levels uploaded (task 037), 1 without mipmaps
+    std::uint64_t level_places{}; // a hash of levels 1 and up's addresses, row lengths and sizes
     auto operator<=>(const TextureIdentity &) const = default;
 };
 
@@ -472,6 +523,8 @@ struct Stats {
     std::uint64_t draws{};
     std::uint64_t passes{};
     std::uint64_t decoded{};
+    std::uint64_t decoded_levels{};  // mip levels decoded after the first, in the decoded textures (task 037)
+    std::uint64_t mipmapped_draws{}; // draws that sampled a texture with levels
     std::uint64_t framebuffer_textures{};
     std::uint64_t texture_mapped{};  // draws whose texture coordinates came from the texture matrix or the normals
     std::uint64_t copies{};
@@ -608,13 +661,18 @@ public:
                 return false;
             }
             // Samplers by index: bit 0 linear magnification, bit 1 linear minification, bit 2 clamp u,
-            // bit 3 clamp v.
+            // bit 3 clamp v; bits 4 and 5 between mip levels (task 037): 0 level 0 only, 1 the nearest level
+            // (kMipNearest), 2 linear between the two nearest (kMipLinear).
             for (std::uint32_t index = 0; index < samplers_.size(); ++index) {
                 MTLSamplerDescriptor *sampler = [MTLSamplerDescriptor new];
                 sampler.magFilter = (index & 1u) != 0u ? MTLSamplerMinMagFilterLinear : MTLSamplerMinMagFilterNearest;
                 sampler.minFilter = (index & 2u) != 0u ? MTLSamplerMinMagFilterLinear : MTLSamplerMinMagFilterNearest;
                 sampler.sAddressMode = (index & 4u) != 0u ? MTLSamplerAddressModeClampToEdge : MTLSamplerAddressModeRepeat;
                 sampler.tAddressMode = (index & 8u) != 0u ? MTLSamplerAddressModeClampToEdge : MTLSamplerAddressModeRepeat;
+                const std::uint32_t mip = index & (kMipNearest | kMipLinear);
+                sampler.mipFilter = mip == kMipLinear    ? MTLSamplerMipFilterLinear
+                                    : mip == kMipNearest ? MTLSamplerMipFilterNearest
+                                                         : MTLSamplerMipFilterNotMipmapped;
                 samplers_[index] = [device_ newSamplerStateWithDescriptor:sampler];
             }
             MTLTextureDescriptor *white = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
@@ -648,6 +706,8 @@ public:
             no_cull_ = portablekit::env("NO_CULL") != nullptr;
             // Ours (task 036): every draw takes its UVs (texture map mode 0), as before the mapping modes.
             no_texture_map_ = portablekit::env("NO_TEXMAP") != nullptr;
+            // Ours (task 037): every texture uploaded and sampled at level 0 alone, as before the mip levels.
+            no_mipmaps_ = portablekit::env("NO_MIPMAPS") != nullptr;
             // The framework's traces, as the Vulkan backend reads them: a line per copy of the stencil into the
             // alpha, and per depth write-back.
             trace_stencil_copy_ = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
@@ -682,6 +742,8 @@ public:
             std::cout << "[metal] " << frames_ << " frames, " << stats_.draws << " draws, " << stats_.passes
                       << " passes, " << stats_.decoded << " textures decoded, " << stats_.framebuffer_textures
                       << " framebuffer textures, " << stats_.texture_mapped << " texture-mapped draws, "
+                      << stats_.mipmapped_draws << " mipmapped draws (" << stats_.decoded_levels
+                      << " mip levels decoded after the first), "
                       << stats_.copies << " target copies, " << stats_.uploads
                       << " uploads, " << targets_.size() << " targets, " << stats_.waits << " GPU waits ("
                       << stats_.wait_ms << " ms) in " << seconds << " s\n";
@@ -1588,24 +1650,65 @@ private:
     // -----------------------------------------------------------------------------------------------
     // Textures from guest memory
 
-    // Address, layout, the bytes the texels lie in and the palette entries they can reach.
-    static std::uint64_t content_key(const GuestMemory &memory, const TextureState &state) {
-        std::uint64_t key = 0xCBF29CE484222325ull;
-        key = hash_value(key, state.address);
-        key = hash_value(key, static_cast<std::uint64_t>(state.width) << 16u | state.height);
-        key = hash_value(key, static_cast<std::uint64_t>(state.format) << 32u | state.buffer_width);
-        key = hash_value(key, state.swizzled ? 1u : 0u);
-        const std::uint32_t bits = texture_bits(state.format);
-        std::size_t bytes = 0u;
-        if (bits != 0u) {
-            const std::uint32_t stride = state.buffer_width != 0u ? state.buffer_width : state.width;
-            bytes = static_cast<std::size_t>(stride) * bits / 8u * state.height;
-        } else {
-            const std::size_t blocks = static_cast<std::size_t>((state.width + 3u) / 4u) * ((state.height + 3u) / 4u);
-            bytes = blocks * (state.format == TextureFormat::Dxt1 ? 8u : 16u);
+    // The mip levels a draw samples its texture with (task 037): the GE's level count when the minification
+    // filter takes levels (min_filter bit 2) and every level after the first halves the one before, lies in
+    // guest memory and outside every render target; 1 otherwise. A texture with a level that fails is drawn at
+    // level 0 alone, said once per texture.
+    std::uint32_t mip_levels(const GuestMemory &memory, const TextureState &state) {
+        if (no_mipmaps_ || state.level_count <= 1u || (state.min_filter & 4u) == 0u) return 1u;
+        const std::uint32_t count =
+            std::min<std::uint32_t>(state.level_count, 1u + static_cast<std::uint32_t>(state.levels.size()));
+        for (std::uint32_t n = 1u; n < count; ++n) {
+            const TextureState level = texture_level(state, n);
+            const char *why = nullptr;
+            if (level.width != std::max(1u, static_cast<std::uint32_t>(state.width) >> n) ||
+                level.height != std::max(1u, static_cast<std::uint32_t>(state.height) >> n))
+                why = "is not half the level before it";
+            else if (!memory.contains(level.address, texture_bytes(level)))
+                why = "lies outside guest memory";
+            else if (target_holding(level.address, texture_bytes(level)) != nullptr)
+                why = "lies in a render target";
+            if (why == nullptr) continue;
+            if (bad_levels_.insert(state.address).second)
+                std::cout << "[metal] texture 0x" << std::hex << state.address << std::dec << " "
+                          << format_name(state.format) << " " << state.width << "x" << state.height << ": level " << n
+                          << " (0x" << std::hex << level.address << std::dec << " " << level.width << "x"
+                          << level.height << ") " << why << "; drawn at level 0 alone\n"
+                          << std::flush;
+            return 1u;
         }
-        key = hash_guest(key, memory, state.address, bytes);
+        return count;
+    }
+
+    // A render target whose memory overlaps [address, address + bytes), or none.
+    const Target *target_holding(std::uint32_t address, std::size_t bytes) const {
+        const std::uint64_t first = GuestMemory::canonical(address);
+        const std::uint64_t end = first + bytes;
+        for (const auto &[key, target] : targets_) {
+            if (!target->color_defined) continue;
+            const std::uint64_t base = key.address;
+            const std::uint64_t target_end =
+                base + static_cast<std::uint64_t>(key.stride) * kHeight * target->bytes_per_pixel();
+            if (first < target_end && base < end) return target.get();
+        }
+        return nullptr;
+    }
+
+    // Address, layout, the bytes the texels of each of its first `levels` levels lie in and the palette entries
+    // they can reach.
+    static std::uint64_t content_key(const GuestMemory &memory, const TextureState &state, std::uint32_t levels) {
+        std::uint64_t key = 0xCBF29CE484222325ull;
+        key = hash_value(key, static_cast<std::uint64_t>(state.format) << 32u | levels);
+        key = hash_value(key, state.swizzled ? 1u : 0u);
+        for (std::uint32_t n = 0u; n < levels; ++n) {
+            const TextureState level = texture_level(state, n);
+            key = hash_value(key, level.address);
+            key = hash_value(key, static_cast<std::uint64_t>(level.width) << 16u | level.height);
+            key = hash_value(key, level.buffer_width);
+            key = hash_guest(key, memory, level.address, texture_bytes(level));
+        }
         if (indexed(state.format)) {
+            const std::uint32_t bits = texture_bits(state.format);
             key = hash_value(key, state.clut_address);
             key = hash_value(key, static_cast<std::uint64_t>(state.clut_format) << 48u |
                                       static_cast<std::uint64_t>(state.clut_shift) << 32u |
@@ -1622,8 +1725,16 @@ private:
         return key;
     }
 
-    id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state) {
+    // The texture with its first `levels` levels (mip_levels()), each decoded from its own address with the
+    // framework's decoder; with more than one it is a mipmapped texture.
+    id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state, std::uint32_t levels) {
         const TraceClock clock(trace_file_ != nullptr, times_.texture);
+        std::uint64_t places = 0u;
+        for (std::uint32_t n = 1u; n < levels; ++n) {
+            const pk::TextureLevel &level = state.levels[n - 1u];
+            places = hash_value(places, static_cast<std::uint64_t>(level.address) << 32u | level.buffer_width);
+            places = hash_value(places, static_cast<std::uint64_t>(level.width) << 16u | level.height);
+        }
         const TextureIdentity identity{state.address,
                                        state.buffer_width,
                                        static_cast<std::uint32_t>(state.width) << 16u | state.height,
@@ -1631,12 +1742,14 @@ private:
                                        state.clut_address,
                                        state.clut_format | state.clut_shift << 4u | state.clut_mask << 12u |
                                            state.clut_offset << 20u,
-                                       state.swizzled};
+                                       state.swizzled,
+                                       levels,
+                                       places};
         std::uint64_t key{};
         if (const auto memo = list_keys_.find(identity); memo != list_keys_.end()) {
             key = memo->second;
         } else {
-            key = content_key(memory, state);
+            key = content_key(memory, state, levels);
             list_keys_.emplace(identity, key);
         }
         if (const auto found = textures_.find(key); found != textures_.end()) {
@@ -1657,7 +1770,8 @@ private:
             [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                width:state.width
                                                               height:state.height
-                                                           mipmapped:NO];
+                                                           mipmapped:levels > 1u];
+        descriptor.mipmapLevelCount = levels;
         descriptor.storageMode = MTLStorageModeShared;
         descriptor.usage = MTLTextureUsageShaderRead;
         id<MTLTexture> texture = [device_ newTextureWithDescriptor:descriptor];
@@ -1665,10 +1779,55 @@ private:
                    mipmapLevel:0
                      withBytes:pixels_.data()
                    bytesPerRow:static_cast<NSUInteger>(state.width) * 4u];
+        std::uint64_t bytes = static_cast<std::uint64_t>(state.width) * state.height * 4u;
+        for (std::uint32_t n = 1u; n < levels; ++n) {
+            // mip_levels() checked the level's size and memory, and a level is no larger than level 0, which
+            // decoded: the decoder does not refuse it.
+            const TextureState level = texture_level(state, n);
+            if (!pk::decode_texture(memory, level, pixels_) ||
+                pixels_.size() != static_cast<std::size_t>(level.width) * level.height) {
+                not_emulated("texture level that cannot be decoded (its texels undefined), format",
+                             static_cast<std::uint32_t>(state.format));
+                continue;
+            }
+            [texture replaceRegion:MTLRegionMake2D(0, 0, level.width, level.height)
+                       mipmapLevel:n
+                         withBytes:pixels_.data()
+                       bytesPerRow:static_cast<NSUInteger>(level.width) * 4u];
+            bytes += static_cast<std::uint64_t>(level.width) * level.height * 4u;
+            ++stats_.decoded_levels;
+        }
         textures_.emplace(key, CachedTexture{texture, ++texture_clock_});
         ++stats_.decoded;
-        stats_.decoded_bytes += static_cast<std::uint64_t>(state.width) * state.height * 4u;
+        stats_.decoded_bytes += bytes;
         return texture;
+    }
+
+    // The GE's level rule (task 037; PPSSPP's hardware notes, "Mip level selection"), D in 1/16 levels:
+    //   auto (TEXLEVEL mode 0)   D = log16(g) - log16(q)
+    //   constant (mode 1)        D = bias
+    //   slope (mode 2)           D = 16 + log16(slope) - log16(q) + bias
+    // clamped to 0..16 x (levels - 1); log16 is ge_log16(). g (the largest of the texture coordinates' four
+    // screen gradients, in texels a pixel) and q (1/w, times the texture matrix's q) change across the draw, so
+    // the shader adds their terms; this sets the rest.
+    static void set_level_rule(const TextureState &state, std::uint32_t levels, FragmentUniforms &fragment) {
+        float rule = kLevelAuto;
+        std::int32_t constant = 0;
+        switch (state.level_mode) {
+        case 0u: break;
+        case 1u:
+            rule = kLevelConstant;
+            constant = state.level_bias;
+            break;
+        case 2u:
+            rule = kLevelSlope;
+            constant = 16 + ge_log16(state.lod_slope) + state.level_bias;
+            break;
+        default: not_emulated("texture level mode (drawn as auto)", state.level_mode); break;
+        }
+        fragment.level = {rule, static_cast<float>(constant), static_cast<float>(state.width),
+                          static_cast<float>(state.height)};
+        fragment.level_range = {16.0f * static_cast<float>(levels - 1u), 0.0f, 0.0f, 0.0f};
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -2229,9 +2388,16 @@ private:
                                        (uv[3] * height + static_cast<float>(source_y)) / static_cast<float>(kHeight)};
                 ++stats_.framebuffer_textures;
             } else {
-                texture = decoded_texture(memory, state);
+                const std::uint32_t levels = mip_levels(memory, state);
+                texture = decoded_texture(memory, state, levels);
                 sampler = (linear_mag ? 1u : 0u) | (linear_min ? 2u : 0u) | (state.wrap_s != 0u ? 4u : 0u) |
                           (state.wrap_t != 0u ? 8u : 0u);
+                if (levels > 1u && texture != white_) {
+                    // min_filter bit 1: linear between the two levels around D, else the nearest one.
+                    sampler |= (state.min_filter & 2u) != 0u ? kMipLinear : kMipNearest;
+                    set_level_rule(state, levels, fragment);
+                    ++stats_.mipmapped_draws;
+                }
             }
             fragment.texture = {state.function, state.alpha_from_texture ? 1u : 0u,
                                 source != nullptr && state.format == TextureFormat::Rgba5650 ? 1u : 0u, 0u};
@@ -2467,6 +2633,9 @@ private:
                 if (source != nullptr)
                     std::cout << " from target 0x" << std::hex << source->key.address << std::dec << " at " << x
                               << "," << y;
+                if (call.texture.level_count > 1u)
+                    std::cout << " levels " << call.texture.level_count << " mode " << call.texture.level_mode
+                              << " bias " << call.texture.level_bias;
                 if (!call.through && call.texture_map.map_mode == 1u)
                     std::cout << " texmatrix " << call.texture_map.proj_source;
                 else if (!call.through && call.texture_map.map_mode == 2u)
@@ -2560,7 +2729,7 @@ private:
     id<MTLLibrary> library_;
     id<MTLFunction> vertex_function_;
     std::array<id<MTLFunction>, 8> fragment_functions_{};  // by kTextured | kAlphaTest << 1 | dual source << 2
-    std::array<id<MTLSamplerState>, 16> samplers_{};
+    std::array<id<MTLSamplerState>, 48> samplers_{};
     id<MTLTexture> white_;
     id<MTLBuffer> readback_;          // the presented picture, read back (picture_)
     id<MTLBuffer> frame_writeback_;   // the presented picture, copied at the flip for write_back_frame()
@@ -2610,6 +2779,7 @@ private:
     double last_wait_ms_{};  // of the last commit(true)
     portablekit::gpu::VulkanRenderer *shell_{};
     std::vector<std::uint8_t> shell_scratch_;
+    std::set<std::uint32_t> bad_levels_;  // textures drawn at level 0 alone for a level mip_levels() refused
     bool to_shell_{};
     bool sharp_{};
     bool log_draws_{};
@@ -2618,6 +2788,7 @@ private:
     bool no_fog_{};
     bool no_cull_{};
     bool no_texture_map_{};
+    bool no_mipmaps_{};
     bool trace_stencil_copy_{};
     bool trace_depth_{};
     bool depth_announced_{};
