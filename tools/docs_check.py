@@ -21,7 +21,8 @@ blocks too except for links:
   patches  every patch named as `NNNN-slug` (with or without `patches/` and `.patch`) is a file in patches/; every
            "patch NNNN" or "patches NNNN" without its slug is reported: since task 052 the numbers that tasks
            001 to 048 used name other patches (patches/README.md maps them). "old NNNN" is how a doc names an old number on
-           purpose. The mapping table of patches/README.md ("Old numbers") is skipped.
+           purpose. The mapping table of patches/README.md ("Old numbers") is skipped, and a history file may cite
+           an old patch by the name that table gives it (`patches/0009-ge-backend-seam.patch` as it was then).
   tasks    every `docs/tasks/NNN` (with or without its slug) is a task file.
 
 Exit 0 when every check passes, else 1 with one line per finding (FILE:LINE: what). Standard library only.
@@ -115,6 +116,24 @@ def clean(token):
     return token
 
 
+_OLD = []
+
+
+def old_stems():
+    """The old patch names of patches/README.md's mapping table (\"Old numbers\"), which history files may cite."""
+    if not _OLD:
+        section = False
+        with open(os.path.join(ROOT, "patches", "README.md"), encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#"):
+                    section = line.strip("# \n") == "Old numbers"
+                m = re.match(r"\|\s*(0\d{3}-[a-z0-9-]+)\s*\|", line) if section else None
+                if m:
+                    _OLD.append(m.group(1))
+        _OLD.append("")  # read once, even when the table is empty
+    return _OLD
+
+
 def check_file(rel, patch_stems, task_files, findings):
     path = os.path.join(ROOT, rel)
     history = rel.startswith("docs/history/")
@@ -136,8 +155,10 @@ def check_file(rel, patch_stems, task_files, findings):
         # Patches named with their slug.
         for m in PATCH_NAME_RE.finditer(line):
             stem = f"{m.group(1)}-{m.group(2)}"
-            if stem not in patch_stems and not re.match(r"\d{4}-\d", stem):
-                findings.append(f"{where}: patch {stem} is not in patches/")
+            if stem in patch_stems or (history and stem in old_stems()):
+                continue
+            findings.append(f"{where}: patch {stem} is not in patches/" +
+                            (" (an old name: patches/README.md, \"Old numbers\")" if stem in old_stems() else ""))
         # Patches named by a bare number.
         # (A citation broken across two lines counts on the first: the next line's first word is read with it.)
         following = lines[number].split()[:1] if number < len(lines) else []
