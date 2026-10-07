@@ -294,6 +294,62 @@ routes keep it: a cached profile and a LOAD route would save under a second a ru
 | the Vulkan backend or shell (vendor renderer patches) | `--shell vulkan --backend vulkan` and `tools/hud_check.sh --shell vulkan` |
 | pacing, the kernel's clock, the input script, the follower | the headless suite, one window path (`--shell metal`), and a sweep cell (`campaign_sweep.py single_race vineta_k --no-damage`) |
 
+# Test hooks (task 051, 2026-10-07)
+
+The port's test instruments live in `src/profile/test_hooks.{hpp,cpp}`, apart from the game's profile
+(`src/profile/pure_profile.cpp`): `PURE_TEST_NO_DAMAGE`, `PURE_TEST_UNLOCK_ALL`, `PURE_TEST_RACE_CLOCK`,
+`PURE_VFPU_DOT`, `PURE_WATCH_MOVIE`, `PURE_WATCH_SHIP`, `PURE_WATCH_GRID`, `PURE_WATCH_RAND`, `PURE_WATCH_WORDS`,
+`PURE_TRACE_RAND` and `PURE_TRACE_CALLS`, each in its own function under its README row's text (README.md marks the
+row test-only). The profile keeps the run-control switches, `PURE_EXIT_AT_FRAME`, `PURE_FRAME_LOG` and
+`PURE_PACED_FROM`: they shape a run (its length, a log line, the pace) and neither change nor watch the game, and
+README.md lists them in the main table, not under "Test switches".
+
+The seam is two calls from the profile:
+- `test_hooks::install(hle)`, once, from `register_pure_hle`: the switches' start-up lines, the race clock's
+  `sceKernelGetSystemTimeWide` wrapper and the `PURE_TRACE_CALLS` wrappers; it returns what `sceKernelGetGPI`
+  answers (0 as on retail, 1 under the unlock switch or a race clock file's `unlocked 1`), which the profile binds.
+- `test_hooks::flip(rt, frame)`, from the profile's flip counter (the `sceDisplaySetFrameBuf` wrapper) once a flip
+  before the game's own: the native `srand()` and `rand()` of the race clock and `PURE_TRACE_RAND` at the first flip,
+  `PURE_VFPU_DOT` there too, then the probes and the shield refill.
+
+The bindings keep their order: the flip counter, then `install` (the frame timer, then the call traces), then the
+audio capture, then `sceKernelGetGPI`. So `PURE_TRACE_CALLS` still wraps the flip counter
+(`tools/scorecard.py` counts flips with `sceDisplay:0x289D82FE`) and the race clock's timer, and a trace of
+`sceKernelGetGPI` still finds the framework's binding and is replaced by the profile's answer. A new instrument goes
+in `test_hooks.cpp` with its switch read there (`pure_profile.cpp` reads no `TEST_`, `WATCH_` or `TRACE_` switch) and
+a test-only row in README.md.
+
+The proof of no change was a log diff of three headless runs of the Vineta K Single Race route
+(`main_menu.txt` + `single_race.txt` without their `shot` lines) to flip 6500, on the Metal backend, each on an empty
+memory stick (a `PURE_GAME_DIR` holding links to `game/EBOOT.ELF` and the disc image and an empty `ms0/PSP/SAVEDATA`,
+as `tools/frame_regress.sh` makes it), with `--max-lines 400000`:
+- the brief's run: `PURE_TEST_UNLOCK_ALL=1 PURE_TEST_NO_DAMAGE=1 PURE_WATCH_GRID=1 PURE_WATCH_SHIP=1
+  PURE_WATCH_RAND=1 PURE_TRACE_RAND=1` (8969 lines): identical;
+- the rest beside the run-control switches: `PURE_WATCH_MOVIE=1 PURE_WATCH_WORDS=08AB45BC,08B17C18
+  PURE_TRACE_CALLS=sceDisplay:0x289D82FE,UtilsForUser:0x37FB5C42 PURE_VFPU_DOT=ppsspp PURE_WATCH_RAND=2
+  PURE_TEST_NO_DAMAGE=1 PURE_FRAME_LOG=100 PURE_PACED_FROM=100000` (20398 lines): the same lines, 66 of them in
+  another place (below);
+- the race clock: `PURE_TEST_RACE_CLOCK=ref/race_clock/vineta_k.txt PURE_TEST_UNLOCK_ALL=1 PURE_WATCH_SHIP=1
+  PURE_WATCH_RAND=1 PURE_TRACE_CALLS=sceDisplay:0x289D82FE,ThreadManForUser:0x82BC5777` (14875 lines): identical.
+
+Two things to know when repeating it:
+- **The log diff needs `PURE_NO_BUSY_CLOCK=1`.** A headless run's log is deterministic except for the framework's
+  busy-time charge (`Kernel::charge_busy_time`): a thread that runs over 100 ms of wall time without a wait has that
+  time (up to 250 ms) added to the virtual clock. On a loaded machine a race frame sometimes crosses the line: two of
+  the twelve runs made with the charge on, with other workers' games beside them, took a 101 ms (flip 6072 to 6073)
+  and a 105 ms (flip 6428 to 6429) step, which changes every later `t=` and, without the race clock's replayed frame
+  times, the race. `PURE_NO_BUSY_CLOCK=1` turns the charge off; with it each run gave the same log twice on both builds.
+  Beyond that only the framework's wall-clock figures differ between runs (the `[metal]` lines' ms, fps and GPU wait
+  counts, the `[run_boot] exit` time), which the diff masks.
+- **Two orders moved, the lines did not.** With one install call the start-up lines come in one block after the
+  profile's own, so `[pure] PURE_PACED_FROM=N: ...` now comes before the `TEST SWITCH` lines instead of between the
+  race clock's and no damage's and the unlock lines, and the `PURE_AUDIO_WAV` capture's `audio capture: mix -> ...`
+  line after the unlock lines instead of before them. Within a flip the profile's own lines (`[pure] frame N`,
+  `[pure] paced from frame N`) now come before every test hook's line; `[pure] rand calls frame N` and `[pure] words
+  frame N` used to come before them (the probes' other lines came after them, as now). No tool reads these lines by
+  their order; every effect (each binding, each native function, the GPI answer, the rounding mode) happens at the
+  same moment as before.
+
 # Audio (task 013, 2026-10-05)
 
 ## PURE_AUDIO_WAV

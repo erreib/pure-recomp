@@ -12,7 +12,7 @@ add_subdirectory(vendor/portablekit portablekit)
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
-    SOURCES src/profile/pure_profile.cpp src/hle/audio_capture.cpp
+    SOURCES src/profile/pure_profile.cpp src/profile/test_hooks.cpp src/hle/audio_capture.cpp
             src/host/pure_main.cpp src/tools/ge_replay.cpp
             src/gpu/metal_backend.mm src/gpu/metal_device.mm src/gpu/metal_shell.cpp
             src/host/metal_shell.mm third_party/imgui_metal/imgui_impl_metal.mm)
