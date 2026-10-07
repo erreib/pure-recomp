@@ -1,6 +1,6 @@
 # 044: The accuracy scorecard
 
-Milestone: M8 | Branch: task/044-accuracy-scorecard | Status: OPEN (dispatch after 042)
+Milestone: M8 | Branch: task/044-accuracy-scorecard | Status: MERGED (7be61bf, 2026-10-07)
 
 ## Goal
 One command that says how close the port is to the original, in numbers that can be re-run after every change:
@@ -254,4 +254,22 @@ Open questions:
    went to the save format.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at 7be61bf (2026-10-07): selftest, then `--quick` in 49 s (pictures
+faithful, timing close, saves close, coverage close, as the worker's run). The PPSSPP references copied from the
+worker's ref/scorecard (38 files, hashes in ref/README.md and ref/scorecard/manifest.json).
+
+Spot-read: tools/scorecard.py (the references are read-only inputs with hashes; the port side reruns; a missing
+reference degrades to a row; the shared-PPSSPP waits and the torn-read double reads of the race records; the pad
+release 9000 vblanks on, which pp_lines.py's `--pad` users need too), docs/scorecard.md (the thresholds in the
+header, every row with a grade). Files outside May touch: none; batch/m2 merged into the branch twice by the worker
+(D-011, then patch 0019), as I asked.
+
+Merged: 7be61bf into batch/m2.
+
+Notes: the one `differs` category is Trajectories, and the finding is real: the port's AI ships run a different race
+from PPSSPP's on every circuit from 0.4 s after GO, while each side repeats itself exactly. So the AI's starting
+state differs (the time the port answers, or the number of frames the shorter loads of D-011 run before the race).
+The player's own path is faithful on eight circuits, close on Sol 2, and differs on Sinucit, Mandrashee and
+Karbonis, where an AI ship comes near or (Karbonis) a wall scrape amplifies a 1 to 3 km/h contact difference. That
+is the next fidelity task (046: what seeds the AI, and the contact response). Coverage reads the 2026-10-06 matrix;
+functions entered is not measured; the VFPU differential test is still unbriefed (the number 045 went to saves).
