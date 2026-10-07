@@ -633,7 +633,7 @@ Three GE states the framework's GE state ignored until task 040 (patch 0002-ge-s
 | DITHERENABLE (0x20), DITH0 to DITH3 (0xE2 to 0xE5) | the switch; the 4x4 matrix, DITHn the row for the pixels whose y & 3 is n, four signed 4-bit offsets, the one for x & 3 in bits 4 (x & 3) to 4 (x & 3) + 3 | `DitherState`: `enabled`, `rows`, `offset(x, y)` |
 | CLIPENABLE (0x1C) | on: transformed primitives clipped at the near plane, each vertex's screen z clamped to 0..65535 | `clip_enabled` |
 
-The command numbers are those of the framework's list of ignored commands (docs/fidelity.md, the feature table) and
+The command numbers are those of the framework's list of ignored commands (docs/history/fidelity.md, the feature table) and
 the PSP SDK's `sceGuColorFunc` and `sceGuSetDither`; the numbers in the task's brief (0xE1, 0x23, 0xE2 for the colour
 test, 0x25 and 0xD0 to 0xD3 for dithering, 0x1D for CLIPENABLE) are other registers (FIXB, the depth test switch,
 anti-aliasing, TEXLODSLOPE, culling). The ten commands left the list: 30 distinct remain, from 40.

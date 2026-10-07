@@ -379,11 +379,11 @@ times means the two played the same samples in between; a different offset after
 in the switch, to the sample. A 2 s template takes about half a second per second searched.
 
 `--selftest` (task 041's Verify) writes WAVs with known gaps, clipping and a hidden stretch and checks the figures, PASS
-or FAIL. The comparisons of differences 7 to 9, and the routes on both sides, are in docs/fidelity.md ("Differences 7 to
-9"). Two things to know when repeating them: the game picks the attract demo's tracks itself, differently from run to
-run, so demos compare by their figures rather than sample for sample; and a dump of a race includes PPSSPP's SAS reverb,
-which the port models since task 043 (patch 0008-sas-reverb; before it, PPSSPP's idle race mix had about 1.4% more
-level).
+or FAIL. The comparisons of differences 7 to 9, and the routes on both sides, are in docs/history/fidelity.md
+("Differences 7 to 9"). Two things to know when repeating them: the game picks the attract demo's tracks itself,
+differently from run to run, so demos compare by their figures rather than sample for sample; and a dump of a race
+includes PPSSPP's SAS reverb, which the port models since task 043 (patch 0008-sas-reverb; before it, PPSSPP's idle race
+mix had about 1.4% more level).
 
 ## The SAS reverb check
 
@@ -544,7 +544,7 @@ tools/vfpu_probe.py port ref/vfpu/jit                        # the port's result
 python3 tools/vfpu_model.py --selftest && python3 tools/vfpu_model.py --check ref/vfpu
 ```
 
-The check behind difference 13's last step (docs/fidelity.md, "The dot-product rule, measured"): PPSSPP's VFPU
+The check behind difference 13's last step (docs/history/fidelity.md, "The dot-product rule, measured"): PPSSPP's VFPU
 results at the game's own instructions, and a model that reproduces every one of them.
 
 **The sites.** `scan` decodes EBOOT.ELF and keeps the instructions the corpus has code for (its `L_XXXXXXXX` labels,

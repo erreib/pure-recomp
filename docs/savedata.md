@@ -22,16 +22,16 @@ save, named game name + save name, files flat in the folder as on a PSP memory s
 
 The game's parameter block is 0x5DC bytes, the firmware 1.x layout with no key field. A PSP writes such a save in the
 save-data utility's no-key mode (mode 1, below), and since task 045 so does the port: `PROFILE.BIN` is enciphered,
-`SAVEDATA_FILE_LIST` lists it with its hash, and `SAVEDATA_PARAMS` carries the flag 0x01 and PARAM.SFO's hash (task
-014 took the missing key field to mean a plain save; PPSSPP's saves showed otherwise, fidelity difference 5). Decrypted,
-`PROFILE.BIN` starts with a word 2, the pilot name padded with spaces (`NAME0000  `) and the 3-letter tag (`AAA`). `PARAM.SFO` of a profile: `TITLE` "Wipeout Pure", `SAVEDATA_TITLE` "Profile data",
-`SAVEDATA_DIRECTORY` "UCUS98612P0000", `SAVEDATA_DETAIL` "User name: NAME0000 / Gold medals awarded: 0 / Ranking:
-Rookie" (three lines). The brief's `DATA/PROFILE.BIN` does not exist: the PSP layout has no subfolder, and
-`PROFILE.BIN` sits beside `PARAM.SFO`.
+`SAVEDATA_FILE_LIST` lists it with its hash, and `SAVEDATA_PARAMS` carries the flag 0x01 and PARAM.SFO's hash (task 014
+took the missing key field to mean a plain save; PPSSPP's saves showed otherwise, fidelity difference 5). Decrypted,
+`PROFILE.BIN` starts with a word 2, the pilot name padded with spaces (`NAME0000  `) and the 3-letter tag (`AAA`).
+`PARAM.SFO` of a profile: `TITLE` "Wipeout Pure", `SAVEDATA_TITLE` "Profile data", `SAVEDATA_DIRECTORY`
+"UCUS98612P0000", `SAVEDATA_DETAIL` "User name: NAME0000 / Gold medals awarded: 0 / Ranking: Rookie" (three lines). The
+brief's `DATA/PROFILE.BIN` does not exist: the PSP layout has no subfolder, and `PROFILE.BIN` sits beside `PARAM.SFO`.
 
 The executable also names the files directly (`ms:UCUS98612P%04d\PROFILE.BIN`, `\PARAM.SFO`, `\ICON0.PNG`), and
-`Data\FE\Profile\profile_FULL.PNG`, `profile_EMPTY.PNG`, "Empty profile": most likely the icons and title of the
-list entries the PSP's own dialog shows. Strings "Profile Autosaving" and "Ghost Autosaving" exist; see "Autosave" below.
+`Data\FE\Profile\profile_FULL.PNG`, `profile_EMPTY.PNG`, "Empty profile": most likely the icons and title of the list
+entries the PSP's own dialog shows. Strings "Profile Autosaving" and "Ghost Autosaving" exist; see "Autosave" below.
 
 ## Modes the game uses
 
@@ -87,7 +87,7 @@ list closed: result 0x00000000`; `PURE_TRACE_SAVEDATA` adds the list (`P0000 (sa
 
 `host/ui/save_list.cpp`, drawn by the interface over each game frame (`ui::draw_over_game`) as the on-screen keyboard
 is, laid out in the PSP's 480x272 pixels after the PSP's own dialog (PPSSPP's `PSPSaveDialog` was read for the
-positions; the picture in `ref/save_dialog.png` is described in docs/fidelity.md):
+positions; the picture in `ref/save_dialog.png` is described in docs/history/fidelity.md):
 
 - a banner along the top: Save, Load or Delete;
 - the column of entries on the left: the chosen one's icon large (144x80 at 27,97) with a white frame, the others
