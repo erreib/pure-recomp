@@ -1,5 +1,6 @@
-// The Metal GE backend's shaders (metal_backend.mm), as MSL source compiled when the backend starts:
-// the machine needs no Xcode for it, only the Metal compiler that comes with macOS.
+// The Metal GE backend's shaders (metal_backend.mm), as MSL source compiled when the backend starts: the machine
+// needs no Xcode for it, only the Metal compiler that comes with macOS. The build embeds this file in the program
+// as a string (embed.cmake beside it, task 049), so the program reads nothing from the checkout at run time.
 //
 // Ported from the framework's GLSL (vendor/portablekit/host/gpu/shaders/ge.vert and ge.frag, MIT):
 // through-mode and transformed vertices, the GE's per-vertex lighting (four lights, the material colours
@@ -16,11 +17,7 @@
 // doubling are not in the draw state.
 //
 // The structs below are laid out exactly as their C++ twins in metal_backend.mm (static_asserts there).
-#pragma once
 
-namespace pure::metal {
-
-inline const char *const kShaderSource = R"metal(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -511,6 +508,3 @@ fragment DualOutput ge_fragment_dual(Varyings in [[stage_in]],
     out.source = float4(color.a);
     return out;
 }
-)metal";
-
-} // namespace pure::metal

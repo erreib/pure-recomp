@@ -27,6 +27,20 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal_backend.m
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui_metal/imgui_impl_metal.mm"
     PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-x;objective-c++;-fobjc-arc")
 target_include_directories(PureNative PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui_metal")
+# The backend's shaders are src/gpu/shaders/ge.metal, a plain Metal source file (task 049), turned at build time into a
+# generated header that holds its text as a raw string (pure::metal::kShaderSource), so the app carries them and no
+# build reads a path at run time; the backend compiles them when it starts, as before.
+set(metal_shader_header "${CMAKE_CURRENT_BINARY_DIR}/generated_metal/ge_metal.hpp")
+add_custom_command(
+    OUTPUT "${metal_shader_header}"
+    COMMAND ${CMAKE_COMMAND} "-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/shaders/ge.metal"
+            "-DOUTPUT=${metal_shader_header}" -DNAME=kShaderSource
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/shaders/embed.cmake"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/shaders/ge.metal" "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/shaders/embed.cmake"
+    VERBATIM
+    COMMENT "Embedding the Metal shaders")
+target_sources(PureNative PRIVATE "${metal_shader_header}")
+target_include_directories(PureNative PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated_metal")
 # CoreGraphics for the Metal shell's sRGB colour space.
 target_link_libraries(PureNative PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore"
     "-framework CoreGraphics")
