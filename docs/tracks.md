@@ -475,3 +475,19 @@ more) and the 7 has a second signature; the zone_4 cell and the zone_2 and zone_
   contacts); the log has no `unlock all` line.
 - `tools/frame_regress.sh` (the Metal shell and backend, `out/032/regress`): PASS, 5/5 scenes, every fraction equal
   to the measured column but race_hud's 0.0366 (measured 0.0379).
+
+## Recording a human lap (Erik's line)
+
+Where the follower cannot drive a track (Sinucit's fork, Manor Top's bend, the long Beta tracks on a bad grid), a
+human line replaces the AI's. The follower steers in a closed loop along a line, so what it needs is the positions of
+a good lap, not the presses (a replayed pad script diverges, since the AI grid differs every run).
+
+1. `tools/record_lap.sh TRACK`: the game opens in a window with sound and your own bindings (a copy of your settings
+   in a scratch data directory), every track and class unlocked by the test switch, and every ship's position logged
+   once per flip (`PURE_WATCH_GRID=1`). Drive Single Race > the class > the league > TRACK, race three laps (one
+   clean lap is enough; the fastest whole lap is kept), then close the window. The log is `out/laps/TRACK.log`.
+2. `tools/record_lap.sh TRACK --line`: your fastest whole lap, as the line `config/pad_scripts/drive/TRACK.line.csv`
+   (`tools/pp_lines.py --port --ships player`); the AI line it replaces is kept once as `TRACK.line.ai.csv`.
+3. `python3 tools/campaign_sweep.py single_race TRACK --no-damage`: the follower on your line.
+
+The sweep's cells of that track then run on your line until the file is replaced again.

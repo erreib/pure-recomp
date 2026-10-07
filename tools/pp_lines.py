@@ -3,7 +3,7 @@
 tracks nobody has driven.
 
   tools/pp_lines.py TRACK_NAME [--downs N] [--race-seconds S] [--out CSV] [--pad ITEMS] [--dump BIN] [--debug-port P]
-  tools/pp_lines.py --port LOG [--out LINE_CSV] [--samples CSV] [--ships leader|ai] [--near M] [--compare LINE_CSV]
+  tools/pp_lines.py --port LOG [--out LINE_CSV] [--samples CSV] [--ships leader|ai|player] [--near M] [--compare LINE_CSV]
 
 Boots disc.iso in PPSSPPSDL through tools/ppsspp/ppsspp_ctl.py (used as a library; hardware renderer, sound off,
 the ini put back afterwards), plays tools/ppsspp/routes/frontend.txt and vineta_k_start.txt with N DOWN presses
@@ -145,7 +145,17 @@ def port_main(a):
     for k in sorted(prog):
         print(f"ship {k}: {prog[k][0]:.0f} m along the track at flip {prog[k][1]}")
     span = None
-    if a.ships == "leader":
+    skip = player                     # AiLine leaves the player's own samples out, unless they are the line
+    if a.ships == "player":
+        # A human lap (tools/record_lap.sh): the player's samples within --near of the player's fastest whole pass.
+        passes = full_passes([r for r in rows if r[1] == player])
+        if not passes:
+            sys.exit(f"pp_lines: the player (ship {player}) never drove the whole track from one wrap to the next")
+        span = min(passes, key=lambda p: p[1] - p[0])
+        ships, skip = {player}, -1
+        what = (f"ship {player}, the player: its samples within {a.near:g} m of its fastest whole pass of the track "
+                f"(flips {span[0]} to {span[1]}, {(span[1] - span[0]) / 60.0:.1f} s; {len(passes)} whole passes)")
+    elif a.ships == "leader":
         leader = max(prog, key=lambda k: prog[k][0])
         passes = full_passes([r for r in rows if r[1] == leader])
         if not passes:
@@ -159,12 +169,12 @@ def port_main(a):
         ships, what = set(prog), f"the mean of the AI ships {', '.join(map(str, sorted(prog)))}"
     keep = None
     if span is not None:
-        fastest = AiLine(str(samples), player=player, ships=ships, span=span)
+        fastest = AiLine(str(samples), player=skip, ships=ships, span=span)
 
         def keep(d, x, z):
             fx, fz = fastest.at(d)
             return math.hypot(x - fx, z - fz) <= a.near
-    line = AiLine(str(samples), player=player, ships=ships, keep=keep)
+    line = AiLine(str(samples), player=skip, ships=ships, keep=keep)
     out = Path(a.out) if a.out else log.with_suffix(".line.csv")
     line.export(str(out))
     frames = [r[0] for r in rows]
@@ -192,7 +202,7 @@ def main():
     p.add_argument("track", nargs="?")
     p.add_argument("--port", metavar="LOG", help="make the line from a port log with PURE_WATCH_GRID=1 lines")
     p.add_argument("--samples", help="--port: the samples CSV (default LOG with .grid.csv)")
-    p.add_argument("--ships", choices=("leader", "ai"), default="leader")
+    p.add_argument("--ships", choices=("leader", "ai", "player"), default="leader")
     p.add_argument("--compare", metavar="LINE_CSV")
     p.add_argument("--near", type=float, default=15.0, help="--port: metres from the leader's fastest pass")
     p.add_argument("--downs", type=int, default=0)
