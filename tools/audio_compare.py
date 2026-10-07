@@ -27,7 +27,7 @@ sample-level view of a gap. Exit 0, or 2 on bad input.
 rate around the best match), and prints the time in A, the offset (A minus B) and the correlation (1 is identical).
 It finds a channel inside a mix: the port's music channel (PURE_AUDIO_WAV's ch2) in PPSSPP's dump, where the effects
 are louder than the music, matches at 0.3 to 0.7; the same offset at two times shows the two played the same samples
-in between. About a second per 4 s searched with LEN 2.
+in between. About half a second per second searched with LEN 2.
 
 --selftest writes two WAVs with known gaps and clipping to a temporary directory, runs the analysis on them and
 checks the figures it prints against the ones the files were made with: PASS (exit 0) or FAIL (exit 1). Pure Python

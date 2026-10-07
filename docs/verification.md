@@ -354,6 +354,36 @@ of +1,764,236, so the zeros were inserted, not skipped; in the idle main-menu ru
 768 frames into a 2944-frame buffer), so at least its start is silence the game handed to sceAudio (its music feed
 starved), not a late output call; the reruns logged no underrun on the music channel.
 
+## tools/audio_compare.py: the port against PPSSPP (task 041, 2026-10-07)
+
+```
+tools/audio_compare.py A.wav B.wav [--from S] [--from-b S] [--seconds N] [--floor RMS] [--block-ms MS] [--top N]
+                       [--quiet] [--detail S:E]
+tools/audio_compare.py A.wav B.wav --locate T:LEN:FROM:TO
+tools/audio_compare.py --selftest
+```
+
+Two WAVs side by side, typically PPSSPP's audio dump (`tools/ppsspp/ppsspp_ctl.py run --dump-audio`, docs/ppsspp.md)
+and the port's `PURE_AUDIO_WAV` capture of the same route. Each file has its own window start (`--from` for A,
+`--from-b` for B), since the two reach a scene at different times. Per whole second: each file's RMS, peak and
+clipped samples, `-` after a silent one (RMS at or under `--floor`, 100 as in `wavstats.py`), `<>` where only one is
+active; then each file's active seconds, peak (and dBFS), clipped samples and fraction, and its `--top` longest
+silences, runs of 10 ms blocks at or under the floor (`all zero` when every sample is 0). `--detail S:E` adds 100 ms
+rows for a stretch of the window, the sample-level view of a gap.
+
+PPSSPP's dump is the mix only, and in a race the effects are louder than the music, so a music gap does not show in
+the mix's level. `--locate T:LEN:FROM:TO` finds B's stretch from T to T+LEN inside A between FROM and TO by normalised
+cross-correlation (8 times decimated, then refined at the full rate) and prints the time in A, the offset and the
+correlation: the port's music channel (`<file>.ch2.wav`) found in PPSSPP's mix at 0.3 to 0.7. The same offset at two
+times means the two played the same samples in between; a different offset after a track change is the difference
+in the switch, to the sample. A 2 s template takes about half a second per second searched.
+
+`--selftest` (task 041's Verify) writes WAVs with known gaps, clipping and a hidden stretch and checks the figures,
+PASS or FAIL. The comparisons of differences 7 to 9, and the routes on both sides, are in docs/fidelity.md
+("Differences 7 to 9"). Two things to know when repeating them: the game picks the attract demo's tracks itself,
+differently from run to run, so demos compare by their figures rather than sample for sample; and a dump of a race
+includes PPSSPP's SAS reverb, which the port does not model (difference 12), about 1.4% more level in an idle race.
+
 Re-baselined 2026-10-07 after task 036 (environment and projection mapping): the Metal column of race_hud (0.0262),
 tt_hud (0.0229), fp_hud (0.0232), zone_hud (0.0122) and zone_change (0.0353). The Vulkan column is unchanged (it keeps
 mode 0), and `tools/gerec/metal_check.sh` runs the race A/B with `PURE_NO_TEXMAP=1` so both backends draw mode 0.

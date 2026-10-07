@@ -97,8 +97,24 @@ PROFILE keeps it that way (no task 006 run wrote one).
 | Sound | GameVolume | 0 (unless `--sound`) | silence |
 | Log (`--log`) | SCEUTIL, SCEDISP, MPEG, SCEIO = 5; SCEKERNEL, ME, ATRAC, HLE, SCEMODULE, LOADER, BOOT, SYSTEM, SCEGE, SCEAUDIO, SCESAS, SCECTRL, SCERTC = 4 | Debug / Info | HLE trace; SCEKERNEL at Debug writes ~20k lines/s (context switches) and slows the run |
 | controls.ini (`--savestate`) | Save State | 1-132 (F2) | hotkey for the blocked save-state path |
+| General, Sound (`--dump-audio WAV`) | DumpAudio, SaveLoadResetsAVdumping; Enable | True, False; True | PPSSPP's audio dump (task 041): moved to WAV at the end |
 
 Note the key is `SoftwareRenderer`, not `SoftwareRendering`.
+
+## Audio dumps (task 041, 2026-10-07)
+
+`run --dump-audio WAV` turns on PPSSPP's own audio dump for the session (`[General] DumpAudio = True`,
+`SaveLoadResetsAVdumping = False`, and `[Sound] Enable = True`, which the dump needs) and, after PPSSPP quits, moves
+the WAV it wrote to `WAV`. PPSSPP writes `<memstick>/PSP/AUDIO/UCUS98612_<date>_<time>.wav`: every audio update's mix
+of the sceAudio channels, clamped to 16 bits, 44.1 kHz stereo, from the first update after boot, on emulated time, and
+before its host volume and resampling, so the driver's default `GameVolume = 0` does not silence it (checked: the
+frontend route to frame 5257 gave 87.7 s of audio for 87.70 s of emulated time, with sound in it). It is the mix only,
+with no channel apart; PPSSPP closes the file when it shuts down, and the driver repairs the RIFF sizes if it did not
+(a killed run). `--keep-running` is refused with it. The report JSON gets `audio_dump` (path, PPSSPP's file, seconds).
+An emulated-time dump is the same however fast the host runs PPSSPP, so `--renderer hardware` is fine for it.
+docs/fidelity.md ("Differences 7 to 9") has the runs that compare it with the port's `PURE_AUDIO_WAV`;
+`routes/free_play_idle_end.txt` leaves the ship on the grid in Free Play past the race music's first track change
+and ends the session from the pause menu.
 
 ## Debugger events used (request -> response, as observed on 1.20.4)
 
