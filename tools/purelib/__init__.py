@@ -1,0 +1,14 @@
+"""The shared parts of the test tools (task 050): one copy of what tools/run_boot.py, tools/scorecard.py,
+tools/campaign_sweep.py, tools/fidelity_audit.py, tools/vfpu_probe.py, tools/pp_lines.py and tools/ai_seed_check.sh
+each used to carry.
+
+  purelib.port     the checkout and the binary, the environment of a test run, the scratch data directory and memory
+                   stick, the one-game guard, PureNative under a pty, a headless run through tools/run_boot.py
+  purelib.logs     the readers of a run's log: the [pure] ship, grid and exit lines, the [metal] exit lines, the
+                   [hle-stub] lines and the start-up list, the PURE_AUDIO_WAV files
+  purelib.ppsspp   PPSSPP shared with other tasks: one instance at a time, its memory stick free of a profile and left
+                   as it was found
+
+A tool puts tools/ on sys.path (as every tool does for tools/png.py) and imports `from purelib import port, logs`.
+Python 3 standard library only. docs/verification.md, "The shared runner".
+"""

@@ -37,12 +37,15 @@ reads (default LOG with `.line.csv`). --compare REF reports how far the new line
 line, over the lap: the lateral distance (across REF at the same track distance) and the distance between the two
 points of the same track distance, mean and maximum.
 """
-import argparse, base64, math, re, struct, sys, time
+import argparse, base64, math, struct, sys, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "ppsspp"))
+sys.path.insert(0, str(ROOT / "tools"))
 import ppsspp_ctl as pc  # noqa: E402
+# The port's grid lines and their reader, under the name this tool has always used.
+from purelib.logs import grid_samples as port_samples  # noqa: E402
 
 RECORD_POS = 0x08B72010
 STRIDE = 0x1C0
@@ -67,34 +70,7 @@ def records(data):
     return out
 
 
-GRID_RE = re.compile(r"\[pure\] grid frame (\d+) k=(\d+) clock=(\S+) pos=(\S+),(\S+),(\S+) vel=(\S+),(\S+),(\S+) "
-                     r"dist=(\S+) lap=(\d+)")
-PLAYER_RE = re.compile(r"\[pure\] ship frame \d+ player object \S+ index (\d+)")
 WRAP_M = 1000.0         # a drop in the distance this big is the once-a-lap wrap (tools/campaign_sweep.py)
-RACE_OVER = 0x10000     # lap field bit 16: that ship has finished (docs/tracks.md)
-
-
-def port_samples(log):
-    """The first race's grid samples of a port log: ([(frame, k, clock, x, y, z, vx, vy, vz, dist, lap)], player)."""
-    rows, player, races = [], 7, 0
-    with open(log, errors="replace") as f:
-        for line in f:
-            m = PLAYER_RE.search(line)
-            if m:
-                races += 1
-                if races > 1:
-                    break
-                player = int(m[1])
-                continue
-            m = GRID_RE.search(line)
-            if not m or races == 0:
-                continue
-            frame, k, lap = int(m[1]), int(m[2]), int(m[11])
-            vals = [float(v) for v in m.groups()[2:10]]
-            if vals[0] <= 0.0 or lap & RACE_OVER:
-                continue                # before GO, or that ship's race is over
-            rows.append((frame, k, *vals, lap))
-    return rows, player
 
 
 def progress(rows, player):
@@ -130,7 +106,6 @@ def full_passes(rows):
 
 
 def port_main(a):
-    sys.path.insert(0, str(ROOT / "tools"))
     from campaign_sweep import AiLine   # noqa: E402  (the follower's line, so the two agree)
     log = Path(a.port)
     rows, player = port_samples(log)

@@ -22,6 +22,9 @@ The data directory (task 034): PURE_DATA_DIR (settings.ini, pipeline caches, log
 so a test run never reads or writes the player's ~/Library/Application Support/pure-recomp/PureNative/ and settings
 changed while playing never reach a test. A new one starts with a settings.ini holding ui.menu_hint_seen=1 (the
 menu hint would sit over a window's first 12 s). The game itself comes from PURE_GAME_DIR (default game/).
+The clock (task 050): a run without a window and without --sound gets PURE_NO_BUSY_CLOCK=1 (the framework's
+busy-time charge off, so the run does not depend on the machine's load), unless the environment (or --env) names
+it; a window or --sound keeps the framework's charge, as a player has it.
 --frames N sets PURE_EXIT_AT_FRAME=N (the profile stops the runtime at that flip), raises the deadline to
 max(seconds, N/15) and exits 0 when the run ended there (`[pure] exit at frame` in the output).
 --script FILE joins the file's non-empty lines that do not start with `#` with `;` into PURE_INPUT_SCRIPT and
@@ -39,59 +42,16 @@ descriptor closes. Repeated identical lines are folded into "... (xN)" and the l
 20000) while the process keeps running until the deadline. The log always ends with the `[run_boot] exit` line, and
 its last 25 lines are echoed to stdout. Exit code is the game's, 0 after a --frames exit, or 124 on the deadline.
 """
-import argparse, os, pty, re, select, subprocess, sys, termios, time
+import argparse, os, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import png  # noqa: E402  (tools/png.py)
-
-FRAME_EXIT = "[pure] exit at frame"
-FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the frame exit before it is killed
-STUB_RE = re.compile(r"\[hle-stub\] (\S+)")
-RA_RE = re.compile(r"\bra=(0x[0-9A-Fa-f]+)")
-LIST_RE = re.compile(r"Unimplemented imports: (\d+) of (\d+)")
-# What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
-# over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings.
-SCRATCH_SETTINGS = "ui.menu_hint_seen=1\n"
-
-
-def scratch_data_dir(env, path):
-    """Sets PURE_DATA_DIR in env to path (relative to the checkout), made on first use with SCRATCH_SETTINGS and kept
-    between runs, unless env already names a data directory; returns the directory the run uses (task 034)."""
-    if env.get("PURE_DATA_DIR"):
-        return env["PURE_DATA_DIR"]
-    path = os.path.join(ROOT, path)
-    os.makedirs(path, exist_ok=True)
-    settings = os.path.join(path, "settings.ini")
-    if not os.path.exists(settings):
-        with open(settings, "w") as f:
-            f.write(SCRATCH_SETTINGS)
-    env["PURE_DATA_DIR"] = path
-    return path
-
-
-def silence(env, sound=False, window=True):
-    """PURE_NO_AUDIO=1 unless sound is asked for or env decides (task 034): env sets PURE_NO_AUDIO, or PURE_AUDIO_WAV
-    with a window. No audio device only: the game's sceAudio calls still run on the virtual clock and PURE_AUDIO_WAV
-    still captures them."""
-    if not sound and "PURE_NO_AUDIO" not in env and not (window and "PURE_AUDIO_WAV" in env):
-        env["PURE_NO_AUDIO"] = "1"
-
-
-def other_games():
-    """The PureNative processes running now (`pgrep -f build/.*/bin/PureNative`, kept when the executable itself is
-    PureNative, not a command line that mentions it), as (pid, command) pairs (task 034: one game at a time)."""
-    try:
-        pids = subprocess.run(["pgrep", "-f", "build/.*/bin/PureNative"], capture_output=True, text=True).stdout.split()
-    except OSError:
-        return []
-    games = []
-    for pid in pids:
-        def ps(field):
-            return subprocess.run(["ps", "-o", f"{field}=", "-p", pid], capture_output=True, text=True).stdout.strip()
-        if os.path.basename(ps("comm")) == "PureNative":
-            games.append((int(pid), ps("command")))
-    return games
+from purelib import port  # noqa: E402  (tools/purelib: the environment, the guard, the pty runner)
+from purelib.logs import RA_RE, STUB_RE, UNIMPL_RE as LIST_RE  # noqa: E402
+# Kept under their names here for the scripts that import them from run_boot (frame_regress.sh and
+# sas_reverb_check.sh call run_boot.other_games()).
+from purelib.port import FRAME_EXIT_GRACE, other_games, scratch_data_dir, silence  # noqa: E402,F401
 
 
 def parse(argv):
@@ -194,7 +154,6 @@ def main(argv=None):
     opts = parse(sys.argv[1:] if argv is None else argv)
     log = opts.log
     seconds = opts.seconds
-    exe = os.path.join(ROOT, "build", "arm64", "bin", "PureNative")
     env = dict(os.environ)
     env.setdefault("PURE_GAME_DIR", os.path.join(ROOT, "game"))
     env.setdefault("PURE_LIST_STUBS", "1")
@@ -227,114 +186,41 @@ def main(argv=None):
     if opts.stubs:
         env["PURE_LIST_STUBS"] = "1"
     extra = dict(kv.split("=", 1) for kv in opts.env)
-    asked = dict(env, **extra)          # --env counts as the environment for the two defaults below
+    asked = dict(env, **extra)          # --env counts as the environment for the defaults below
     silence(asked, opts.sound, window)
     scratch_data_dir(asked, opts.data_dir)
+    if not window and not opts.sound:
+        port.steady_clock(asked)
     env.update(asked)
-    os.makedirs(os.path.dirname(os.path.abspath(log)) or ".", exist_ok=True)
     shots_before = bmp_state(shots) if shots is not None else {}
 
-    # A pty for stdout and stderr: line-buffered stdio in the game, no "\r\n" translation on output.
-    master, slave = pty.openpty()
-    attrs = termios.tcgetattr(slave)
-    attrs[1] &= ~termios.OPOST
-    termios.tcsetattr(slave, termios.TCSANOW, attrs)
-    start = time.time()
-    p = subprocess.Popen([exe], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=slave, stderr=slave)
-
+    run = port.PtyRun(env, log, seconds, opts.max_lines)     # the game under a pty, its log folded as it comes
     stubs = Stubs()
-    last, repeat, written, tail = None, 0, 0, []
-    timed_out = frame_exit = False
-    deadline = start + seconds
-    with open(log, "w") as out:
-        def emit(line, always=False):
-            nonlocal written
-            if always:                     # the runner's own closing lines are written past the cap too
-                out.write(line + "\n")
-            elif written < max(opts.max_lines, 0):
-                out.write(line + "\n"); written += 1
-                if written == opts.max_lines: out.write(f"... log capped at {opts.max_lines} lines\n")
-            tail.append(line); del tail[:-25]
-
-        def flush_repeat():
-            nonlocal repeat
-            if repeat > 1: emit(f"    ... (x{repeat})")
-            repeat = 0
-
-        def take(raw):
-            nonlocal last, repeat, frame_exit, deadline
-            line = raw.decode("utf-8", "replace").rstrip("\r")
-            stubs.feed(line)
-            if not frame_exit and line.startswith(FRAME_EXIT):
-                frame_exit = True
-                deadline = min(deadline, time.time() + FRAME_EXIT_GRACE)
-            if line == last: repeat += 1; return
-            flush_repeat(); last = line; repeat = 1; emit(line)
-
-        buf = b""
-        def drain(timeout):
-            """Reads what the pty holds; returns False when nothing arrived within timeout."""
-            nonlocal buf
-            ready, _, _ = select.select([master], [], [], timeout)
-            if not ready:
-                return False
-            try:
-                chunk = os.read(master, 65536)
-            except OSError:
-                return False
-            if not chunk:
-                return False
-            buf += chunk
-            *lines, buf = buf.split(b"\n")
-            for raw in lines:
-                take(raw)
-            return True
-
-        try:
-            while p.poll() is None:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    timed_out = not frame_exit
-                    p.kill()
-                    break
-                drain(min(remaining, 0.25))
-        except BaseException:              # Ctrl-C or an error in here: do not leave the game running
-            p.kill()
-            raise
-        try:
-            p.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            p.kill(); p.wait()
-        # The game has exited; the slave is still open here, so what it wrote last is still in the pty.
-        drain_end = time.time() + 5.0
-        while drain(0.05) and time.time() < drain_end:
-            pass
-        os.close(slave); os.close(master)
-        if buf:
-            take(buf)
-        flush_repeat()
-        if timed_out:
-            emit(f"[run_boot] deadline {seconds:.0f}s reached, killed", True)
-        elif frame_exit and p.returncode < 0:
-            emit(f"[run_boot] killed {FRAME_EXIT_GRACE:.0f}s after the frame exit (shutdown hung)", True)
-        if opts.stubs:
-            listed, called = stubs.write(log + ".stubs.txt", log)
-            emit(f"[run_boot] stubs: {listed} unimplemented at start-up, {called} called -> {log}.stubs.txt", True)
-        if shots is not None:
-            converted, errors = convert_shots(shots, shots_before)
-            for e in errors:
-                emit(f"[run_boot] shots: cannot convert {e}", True)
-            names = ", ".join(os.path.splitext(n)[0] for n in converted[:8]) + (", ..." if len(converted) > 8 else "")
-            emit(f"[run_boot] shots: {len(converted)} new BMP(s) converted to PNG in {opts.shots}"
+    try:
+        while run.alive() and not run.killed:
+            for line in run.read(min(max(run.deadline - time.time(), 0.0), 0.25)):
+                stubs.feed(line)
+    except BaseException:              # Ctrl-C or an error in here: do not leave the game running
+        run.kill()
+        raise
+    for line in run.drain():           # the game has exited; what it wrote last is still in the pty
+        stubs.feed(line)
+    if run.timed_out:
+        run.emit(f"[run_boot] deadline {seconds:.0f}s reached, killed", True)
+    elif run.frame_exit and run.returncode < 0:
+        run.emit(f"[run_boot] killed {FRAME_EXIT_GRACE:.0f}s after the frame exit (shutdown hung)", True)
+    if opts.stubs:
+        listed, called = stubs.write(log + ".stubs.txt", log)
+        run.emit(f"[run_boot] stubs: {listed} unimplemented at start-up, {called} called -> {log}.stubs.txt", True)
+    if shots is not None:
+        converted, errors = convert_shots(shots, shots_before)
+        for e in errors:
+            run.emit(f"[run_boot] shots: cannot convert {e}", True)
+        names = ", ".join(os.path.splitext(n)[0] for n in converted[:8]) + (", ..." if len(converted) > 8 else "")
+        run.emit(f"[run_boot] shots: {len(converted)} new BMP(s) converted to PNG in {opts.shots}"
                  + (f" ({names})" if converted else ""), True)
-        if frame_exit:
-            code = 0
-        elif timed_out:
-            code = 124
-        else:
-            code = p.returncode if p.returncode >= 0 else 128 - p.returncode
-        emit(f"[run_boot] exit {code} after {time.time() - start:.1f}s, {written} lines", True)
-    print("\n".join(tail))
+    code = run.close("run_boot", signals=True)
+    print("\n".join(run.tail))
     return code
 
 

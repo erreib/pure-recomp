@@ -725,3 +725,42 @@ On 2026-10-07 (PPSSPP 1.20.4, JIT): `vcrsp.t` is unfused (both products rounded,
 `vfad` in lane order and `vmscl` one IEEE product on all, which the port gives on all. With the header copy of the
 Result of docs/tasks/048 the test mode reproduces every one and the default mode equals the PSP's rule on every one.
 The check runs in about 2.5 minutes over every set under `ref/vfpu`.
+
+# The shared runner: tools/purelib (task 050, 2026-10-07)
+
+The Python tools share one copy of the code that runs the game, waits its turn and reads the log: the package
+`tools/purelib/` (standard library only). A tool puts `tools/` on `sys.path`, as every tool does for `tools/png.py`,
+and imports `from purelib import port, logs`. Every function is documented in one line in the source. No command
+line, output or file layout of a tool changed with the move.
+
+| Module | Holds | Used by |
+|---|---|---|
+| `purelib.port` | `ROOT`, `EXE` (`build/arm64/bin/PureNative`) and `GAME` of the checkout the tool is in (a worktree runs its own build and game), `main_checkout()` for what a worktree never makes (the matrix of task 035); `clean_env` (a run's environment); `scratch_data_dir` and `silence` (task 034); `fresh_stick` (a game directory on an empty memory stick); `other_games`, `refuse` (the guard that will not start), `wait_game`, `wait_until` and `waited` (the guard that waits, and for how long); `PtyRun` (PureNative under a pty, the log folded as it comes); `headless_run` (one run through `tools/run_boot.py`: script, frames, shell, backend, paced-from, extra environment, shots, game and data directories; returns the exit code, the exit frame and the log); `run_tool` (another tool, its output to a file) | `run_boot.py` (`PtyRun`), `campaign_sweep.py` (`PtyRun`, the stick, the refusal), `scorecard.py` (`headless_run`, the wait), `fidelity_audit.py` (its cells' environment, `run_tool`) |
+| `purelib.logs` | the line formats and their readers: `[pure] ship` (`SHIP_RE`, `SHIP_T_RE`), `player object` (`PLAYER_RE`), `[pure] grid` (`GRID_RE`, `grid_samples`), `[pure] exit at frame` (`exit_frame`), `[hle-stub]` and the start-up list (`STUB_RE`, `UNIMPL_RE`, `unimplemented`, `HALT_RE`), the `[metal]` exit lines (`metal_exit`, `metal_pipelines`, `METAL_FPS_RE`), the GE exit list (`ge_ignored`), the audio capture's underruns and files (`UNDERRUN_RE`, `wav_files`, `wav_channel`) | the same tools and `pp_lines.py` |
+| `purelib.ppsspp` | PPSSPP's shared use: `wait_free` (no PPSSPPSDL running and no profile save on its memory stick, as the scorecard waited), `stick_snapshot` and `stick_restore` (what a run added to the stick moved out, changes reported) | `scorecard.py`, `vfpu_probe.py`, `ai_seed_check.sh` |
+
+Every headless port run the runner starts has `PURE_NO_BUSY_CLOCK=1` (`port.steady_clock`, from task 051's finding:
+the framework's busy-time charge made a headless run depend on the machine's load) unless its environment names the
+switch: `run_boot.py` without a window and without `--sound` (so the headless suite, `hud_check.sh --shell headless`
+and the scorecard's runs), the sweep's headless cells (the audit's too) and `--record-line`; a window or `--sound`
+keeps the charge, as a player has it.
+
+The tools' own rules moved as they were; the module holds each of them, it did not merge them:
+- The environment. `run_boot.py` and the sweep start from the whole environment (the sweep keeps `PURE_SHELL`,
+  `PURE_GE_BACKEND` and `PURE_PACED_FROM` from it). The audit's cells drop the `PURE_TRACE_*` switches and the four
+  switches it or the sweep sets per cell (`clean_env(drop=CELL_DROP)`) and pass the rest to the sweep. The
+  scorecard's runs drop every `PURE_*` and `PSPRECOMP_*` switch except `PURE_ROOT` and `PURE_MAIN_CHECKOUT`
+  (`clean_env()`).
+- One game at a time. The sweep refuses with exit 2 unless `--allow-parallel` (`refuse`, as `frame_regress.sh` does
+  in bash); the audit stops when its sweep refused; the scorecard waits (a poll every 10 s, at most an hour a wait,
+  then it runs anyway) and reports the time; `run_boot.py` and `hud_check.sh` do not check.
+- Exit codes. A game ended by a signal is 128 plus the signal in run_boot's exit line and status, and the negative
+  status in the sweep's `[sweep] exit` line (`PtyRun.code(signals=...)`).
+- PPSSPP. The scorecard, `vfpu_probe.py` and `ai_seed_check.sh` wait through `wait_free`; `save_interchange.sh` keeps
+  its bash wait (PPSSPP only, at most 30 minutes).
+
+Checked against the tools before the move (task 050's Result): every check of the brief gave the same result; the
+old `run_boot.py` and the sweep's old pty reader against `PtyRun` on a stand-in game, in six ways a run ends (frame
+exit, deadline, signal, an exit status, a slow writer, a 30,000-line flood), with and without the line cap, gave the
+same logs, lines, stdout and codes; `fidelity_audit.py --rescan` of the cached 46-cell matrix gave the same cells and
+tables; `pp_lines.py --port` on a grid log gave the same samples.

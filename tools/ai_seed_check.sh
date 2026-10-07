@@ -12,7 +12,7 @@
 #      ref/scorecard/trajectories/<track>.csv (task 044's), so the clock is the reference race's (PPSSPP repeats a
 #      race exactly); about 2.5 minutes of PPSSPP a circuit, which must be free (the tool waits as the scorecard does);
 #   2. runs `tools/scorecard.py --only trajectories --tracks ...` with SCORECARD_RACE_CLOCK=ref/race_clock, which
-#      gives each port run PURE_TEST_RACE_CLOCK (src/profile/pure_profile.cpp);
+#      gives each port run PURE_TEST_RACE_CLOCK (src/profile/test_hooks.cpp);
 #   3. PASSes when every circuit's player row and AI row are faithful (under 1.5 m over 20 s).
 # The references themselves (ref/scorecard/) are read, never retaken. Output in out/ai_seed_check/ by default.
 set -u
@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT / "tools" / "ppsspp"))
 import ppsspp_ctl as pc
 import scorecard as sc
 import pp_lines as pl
+from purelib import ppsspp as shared_ppsspp   # one PPSSPP at a time, its memory stick free of a profile
 
 SRAND = 0x088E0558
 FROM_TEAM_PICK, FROM_BILLBOARDS, FRAME_TIMER = 0x0880E160, 0x08860150, 0x08804428
@@ -53,7 +54,7 @@ def take(track, path):
     script = ("\n".join((sc.PP_ROUTES / f).read_text() for f in files)
               + f"\n{hold}:CROSS\n{hold + sc.PP_HOLD_VBLANKS}:\n")
     states = pc.parse_pad_script(script)
-    if not sc.wait_ppsspp():
+    if not shared_ppsspp.wait_free(sc.say):
         raise RuntimeError("PPSSPP did not become free")
     log = path.with_suffix(".ppsspp.log")
     rec = pl.RECORD_POS + sc.PLAYER * pl.STRIDE
