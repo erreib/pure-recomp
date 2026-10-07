@@ -224,6 +224,43 @@ python3 tools/ppsspp/ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.t
 |---|---|
 | audio/free_play_pause.wav | 6487ea241bb0608d0757683bbabd573e1f5b06830769d9f00f1e7a4b89bb0b70 |
 
+## Saves (task 045, 2026-10-07)
+
+`ref/saves/` holds the save folders `tools/save_interchange.sh` uses (git-ignored like the rest of `ref/`):
+
+- `ref/saves/ppsspp/UCUS98612P0000/`: PPSSPP's profile NAME0000 / AAA, written 2026-10-07 09:58 by PPSSPP 1.20.4
+  through the driver's routes `frontend.txt` + `save_yes.txt` + `save_dialog.txt` (YES on SAVE PROFILE; the CROSS at
+  5250 picks NEW DATA, P0000, in PPSSPP's save dialog; CIRCLE at 5400 closes "Save completed."; MAIN MENU by 5540),
+  then moved out of PPSSPP's memory stick. Remake it with `tools/save_interchange.sh --make-ppsspp-save` (the stick
+  must hold no `UCUS98612P*`). An earlier run of the same routes without `save_dialog.txt` gave a `PROFILE.BIN` whose
+  decrypted contents are identical.
+- `ref/saves/ppsspp/PPCD00001DLS001/`: PPSSPP's first-boot autosave (the online system's info), copied from its
+  memory stick, where trial 6 of task 006 wrote it on 2026-10-05.
+- `ref/saves/port-plain/UCUS98612P0000/`: a plain save written by the port before patch 0019 (batch/m2 at aa9128a,
+  `config/pad_scripts/main_menu.txt` headless on an empty stick, 2026-10-07 09:54): the kind of save every port build
+  wrote until then (SAVEDATA_PARAMS flag 0, `SAVEDATA_FILE_LIST` empty, `PROFILE.BIN` 41570 bytes plain).
+
+| File | SHA-256 |
+|---|---|
+| ppsspp/UCUS98612P0000/ICON0.PNG | 78cdec5c24671561c490a8096d26fb725794c42a31e3ffdcad1e6dc51d28c7e0 |
+| ppsspp/UCUS98612P0000/ICON1.PMF | ae2ba722b69a0abfd8b42cea909095c045599d7b2055797f0f851f578da21fba |
+| ppsspp/UCUS98612P0000/PARAM.SFO | 162c45976f78db8aa8e1ce11598eb5fd0e5074926e06b5a7e5eba26a50c6396b |
+| ppsspp/UCUS98612P0000/PIC1.PNG | 430218db46278245ae67a971a7f505fbbad2a1a270b80bf52b46cc9c3cb7df28 |
+| ppsspp/UCUS98612P0000/PROFILE.BIN | e4bae8420dccaa5ca82cdefa08ea626d2d49157bb99ca361044c6f4ad94edb8f |
+| ppsspp/UCUS98612P0000/SND0.AT3 | c558e377092cabc09b6e388fdc3734d4965fb3eb925c1cb46dc3266df80ac5ee |
+| ppsspp/PPCD00001DLS001/DATA1.BIN | 682bd939bbfd9654d782825c67521e88cdf3dea47708325d41f5742b43e4b26d |
+| ppsspp/PPCD00001DLS001/DATA2.BIN | 1f6944fb2a63d3708ac955adc1bfe3b3930d1d403c7b390c206ba83a2a239040 |
+| ppsspp/PPCD00001DLS001/ICON0.PNG | 1f9ecb8f0b5ddeef4f3a59c97555d172e2777fc6710b0778c230a0ba7e4edbac |
+| ppsspp/PPCD00001DLS001/PARAM.SFO | 4c7fed5aa76d3ecf76c8d817e8cfb26e5665e6f0e19da257de55a294cf372abc |
+| port-plain/UCUS98612P0000/ICON0.PNG | 78cdec5c24671561c490a8096d26fb725794c42a31e3ffdcad1e6dc51d28c7e0 |
+| port-plain/UCUS98612P0000/ICON1.PMF | ae2ba722b69a0abfd8b42cea909095c045599d7b2055797f0f851f578da21fba |
+| port-plain/UCUS98612P0000/PARAM.SFO | 2fa79983f704c645d419c4d5219d2b50cebaaeb81af31a64bb6010d19ae7bed0 |
+| port-plain/UCUS98612P0000/PIC1.PNG | 430218db46278245ae67a971a7f505fbbad2a1a270b80bf52b46cc9c3cb7df28 |
+| port-plain/UCUS98612P0000/PROFILE.BIN | a12efe59b001d5ef6a3c7be4564f9c5fc5797ba93cdde3c9c38f10dcb0371b2a |
+| port-plain/UCUS98612P0000/SND0.AT3 | c558e377092cabc09b6e388fdc3734d4965fb3eb925c1cb46dc3266df80ac5ee |
+
+Copy them into another worktree with `cp -Rp ~/dev/pure-recomp/ref/saves ref/` (the main checkout keeps the set).
+
 ## Task 044 additions (2026-10-07): the scorecard's references
 
 `tools/scorecard.py --refresh-references [CATEGORY]` takes the PPSSPP side of the accuracy scorecard (docs/scorecard.md,

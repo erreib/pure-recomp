@@ -425,6 +425,43 @@ mode 0), and `tools/gerec/metal_check.sh` runs the race A/B with `PURE_NO_TEXMAP
 
 Re-baselined again 2026-10-07 after task 037 (mipmaps): race_hud 0.0149, tt_hud 0.0112, fp_hud 0.0116, zone_hud 0.0121.
 
+## The save interchange check (task 045, 2026-10-07)
+
+```
+tools/save_interchange.sh [--port-only]
+tools/save_interchange.sh --check FOLDER FILE [PLAIN_OUT]
+tools/save_interchange.sh --make-ppsspp-save
+```
+
+Checks that saves move both ways between the port and PPSSPP (a PSP's stand-in) now that the port writes them in the
+PSP's own format, the save-data utility's no-key mode (patch 0019, docs/savedata.md "The PSP's format"). The port runs
+are headless, unpaced and silent on memory sticks of their own under `out/045/<step>/game`; the PPSSPP run is the
+driver's, real time, on PPSSPP's own memory stick, which the script leaves as it found it. About 3 minutes when PPSSPP
+is free; it waits (at most 20 minutes) while another PPSSPP runs, and never touches another process.
+
+| Step | What runs | Passes when |
+|---|---|---|
+| (a) PPSSPP to port | PPSSPP's NAME0000 (`ref/saves/ppsspp/UCUS98612P0000`, ref/README.md) alone on a fresh stick; `profile_load.txt` headless with `PURE_TRACE_SAVEDATA` to flip 3900 | LISTLOAD loads 41570 bytes and logs both hashes verified (mode 1); MAIN MENU within 0.05 of `ref/main_menu.png` at tol 24 (the suite's limit; 0.011); SET NAME's digits vary by 500 or more (1531: NAME0000); the game's PROFILE > SAVE writes P0000 back in mode 1, 41586 bytes, with "User name: NAME0000" in its PARAM.SFO (the game's own profile line), and that save verifies |
+| plain | the build before patch 0019's plain save (`ref/saves/port-plain/`), the same route | it loads as a plain save (flag 0) and shows as in (a); the game's save rewrites it in mode 1, and that verifies |
+| born | `main_menu.txt` headless on an empty stick, with SET NAME's shot at 2250 | NEW writes P0000 and the first-boot AUTOSAVE writes `PPCD00001DLS001` in mode 1; SET NAME on the empty stick is blank past NAME (variance 0, the control) |
+| (b) port to PPSSPP | (a)'s save (the round trip's) copied into PPSSPP's stick; `tools/ppsspp/routes/profile_load.txt` (LOAD, the load dialog, Enter, "Load completed.", Back, MAIN MENU, PROFILE > NEW > YES, SET NAME) | MAIN MENU at 3720 within 0.05 of `ref/main_menu.png`; SET NAME at 4560 varies by 500 or more, equals the port's SET NAME of (a) (tol 24, 0.02) and differs from the empty stick's; the stick holds what it held before |
+| (c) side by side | the port's NEW profile and the round trip's against PPSSPP's, the port's `PPCD00001DLS001` against PPSSPP's, each through the framework's `load_save` and hash checks (`out/045/savecheck`, built from `vendor/portablekit`'s save-data sources) | both sides verify (PARAM.SFO's hash, the data file's listed hash, decrypted); PARAM.SFO the same size, keys, formats, lengths and values apart from the bytes that cover the random header (the file's hash in `SAVEDATA_FILE_LIST`, the mode-1 hash at SAVEDATA_PARAMS 0x10); the flag byte equal; ICON0, ICON1, PIC1 and SND0 byte-equal. The decrypted contents are compared and every difference is listed (not a failure) |
+
+What (c) finds (2026-10-07): the two `PROFILE.BIN`s, decrypted, differ in 71 of 41570 bytes, all inside 69 words that
+hold addresses in the PSP's user RAM, the port's each 0x200 above PPSSPP's (0x08ECAF10 against 0x08ECAD10 and so on):
+the profile keeps pointers into the game's heap verbatim, and the port's heap sits 512 bytes higher at that point. The
+game sets them again when it loads a profile (the round trip's save, loaded from PPSSPP's and saved by the port, has
+the port's addresses), so they do not matter to a load either way. Nothing else differs: no timestamp, no counter.
+`DATA1.BIN` of `PPCD00001DLS001` is identical decrypted; `DATA2.BIN` beside it, which the game writes itself through
+sceIo (not the save utility), differs in nearly every byte (it is the game's own, enciphered by it) and is only
+reported.
+
+`--port-only` runs everything but (b) and exits 3 (never PASS), for when PPSSPP is busy for long. `--check FOLDER
+FILE [PLAIN_OUT]` puts one save folder through the same checks and writes the decrypted file (for any tool that has
+to read a profile's contents: the plain bytes of a mode-1 save are not on the stick any more). `--make-ppsspp-save`
+remakes PPSSPP's reference save with `frontend.txt` + `save_yes.txt` + `save_dialog.txt` and moves it out of PPSSPP's
+stick into `ref/saves/ppsspp/`.
+
 # The accuracy scorecard (task 044, 2026-10-07)
 
 ```

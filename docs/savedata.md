@@ -1,10 +1,11 @@
-# Save data (task 014, 2026-10-05; the save list, task 039, 2026-10-07)
+# Save data (task 014, 2026-10-05; the save list, task 039, and the PSP's format, task 045, 2026-10-07)
 
 How Wipeout Pure uses the memory stick on this port, from `PURE_TRACE_SAVEDATA=1` and `PURE_TRACE_IO=1` runs of
 `config/pad_scripts/main_menu.txt` (profile NEW), `config/pad_scripts/profile_load.txt` (profile LOAD) and probes of
 the PROFILE menu. The framework side is `vendor/portablekit/host/hle/hle_savedata.cpp` (the sceUtilitySavedata
-dialog), `host/ui/save_list.cpp` (the save list, patch 0015) and `host/save_data/savedata_store.cpp` (the folders).
-`tools/save_roundtrip.sh` checks the round trip.
+dialog), `host/ui/save_list.cpp` (the save list, patch 0015) and `host/save_data/savedata_store.cpp` (the folders;
+`savedata_crypto.cpp` the PSP's protection, patch 0019). `tools/save_roundtrip.sh` checks the round trip,
+`tools/save_interchange.sh` the move of saves between the port and PPSSPP (a PSP's stand-in) both ways.
 
 ## Folders
 
@@ -13,15 +14,16 @@ save, named game name + save name, files flat in the folder as on a PSP memory s
 
 | Folder | Written by | Files (bytes) |
 |---|---|---|
-| `UCUS98612P0000` (`P%04d`, 0000 to 0004) | profile NEW (save question YES) and PROFILE > SAVE: LISTSAVE | `PARAM.SFO` 4912, `PROFILE.BIN` 41570, `ICON0.PNG` 6742, `ICON1.PMF` 51200, `PIC1.PNG` 172944, `SND0.AT3` 97604 |
-| `PPCD00001DLS001` | first boot, before the PROFILE screen: AUTOSAVE of `DATA1.BIN`, then `DATA2.BIN` through sceIo | `PARAM.SFO` 4912, `DATA1.BIN` 768, `DATA2.BIN` 276, `ICON0.PNG` 1451 |
+| `UCUS98612P0000` (`P%04d`, 0000 to 0004) | profile NEW (save question YES) and PROFILE > SAVE: LISTSAVE | `PARAM.SFO` 4912, `PROFILE.BIN` 41586 (41570 bytes of data, enciphered; 41570 plain before patch 0019), `ICON0.PNG` 6742, `ICON1.PMF` 51200, `PIC1.PNG` 172944, `SND0.AT3` 97604 |
+| `PPCD00001DLS001` | first boot, before the PROFILE screen: AUTOSAVE of `DATA1.BIN`, then `DATA2.BIN` through sceIo | `PARAM.SFO` 4912, `DATA1.BIN` 784 (768 enciphered; 768 plain before patch 0019), `DATA2.BIN` 276 (the game's own file, plain), `ICON0.PNG` 1451 |
 | `UCUS98612G%x` | ghosts (time trial); not exercised yet | |
 | `UCUS98612D<PACK>` | download packs (`PI.WAD`), e.g. `UCUS98612DGAMMAPACK1`; never written by the game here | |
 
-The game's parameter block is 0x5DC bytes, the firmware 1.x layout with no key field, so it never asks for
-encryption: `PROFILE.BIN` is plain, as it would be on a PSP, and `SAVEDATA_FILE_LIST` (which lists only encrypted
-files) is all zeros. `PROFILE.BIN` starts with a word 2, the pilot name padded with spaces (`NAME0000  `) and the
-3-letter tag (`AAA`). `PARAM.SFO` of a profile: `TITLE` "Wipeout Pure", `SAVEDATA_TITLE` "Profile data",
+The game's parameter block is 0x5DC bytes, the firmware 1.x layout with no key field. A PSP writes such a save in the
+save-data utility's no-key mode (mode 1, below), and since patch 0019 so does the port: `PROFILE.BIN` is enciphered,
+`SAVEDATA_FILE_LIST` lists it with its hash, and `SAVEDATA_PARAMS` carries the flag 0x01 and PARAM.SFO's hash (task
+014 took the missing key field to mean a plain save; PPSSPP's saves showed otherwise, fidelity difference 5). Decrypted,
+`PROFILE.BIN` starts with a word 2, the pilot name padded with spaces (`NAME0000  `) and the 3-letter tag (`AAA`). `PARAM.SFO` of a profile: `TITLE` "Wipeout Pure", `SAVEDATA_TITLE` "Profile data",
 `SAVEDATA_DIRECTORY` "UCUS98612P0000", `SAVEDATA_DETAIL` "User name: NAME0000 / Gold medals awarded: 0 / Ranking:
 Rookie" (three lines). The brief's `DATA/PROFILE.BIN` does not exist: the PSP layout has no subfolder, and
 `PROFILE.BIN` sits beside `PARAM.SFO`.
@@ -146,6 +148,56 @@ PROFILE > SAVE still writes `P0000`, the recursive `ms0:` walks list the folder 
 its last frame. The folder is not in the game's LISTLOAD list (`P0000..P0004`), so it cannot appear among the
 profiles. Real packs (`PI.WAD`, XTEA plus a signature trailer, docs/research.md) are for later.
 
+## The PSP's format: mode 1 (patch 0019, task 045)
+
+A request that carries no game key (this game's 0x5DC-byte block has no key field; a longer block with a zero key is
+the same) is written by a PSP in the save-data utility's no-key mode, mode 1, with the console's fixed keys alone, as
+PPSSPP's saves of this game show. The framework had all of mode 1 (its reader and its keys, linked from
+`crypto_keys_builtin.cpp`, none of it in this repo) but wrote such a save plain. Since patch 0019:
+
+- `hle_savedata.cpp` marks a request without a key `no_key_mode` when the console's keys are available
+  (`savedata_keys_available()`); without them the save stays plain, as before.
+- `write_save` enciphers the data file in mode 1: a 16-byte header, then the data at its own length (`PROFILE.BIN`
+  41570 + 16 = 41586 bytes, `DATA1.BIN` 768 + 16 = 784, both as PPSSPP's), lists its hash in `SAVEDATA_FILE_LIST`
+  (13-byte name, 16-byte hash) and signs `SAVEDATA_PARAMS`: the flag byte 0x01, the mode-1 hash of the whole PARAM.SFO
+  at 0x10, and at 0x20 the slot a PSP fills with a hash of its own console key, which no other console checks (the
+  framework writes a filler there; PPSSPP's saves carry the same bytes). The other files are written as they were.
+- The data file's hash is a CMAC over the stored file in whole 16-byte blocks: a file whose length is not a multiple of
+  16 is hashed as if padded with zeros. PPSSPP's `PROFILE.BIN` (41586 bytes) matches its listed hash only that way;
+  the framework had only ever written padded files, so its own saves hash as before.
+- On the way in (LISTLOAD, LOAD, AUTOLOAD), an encrypted save has PARAM.SFO's hashes checked, then its data file
+  against the hash the list keeps for it, then is deciphered. A failed hash is logged (`[savedata] broken save in
+  <folder>: PARAM.SFO does not match its hashes in SAVEDATA_PARAMS`, or `PROFILE.BIN does not match its hash in
+  PARAM.SFO`) and the request gets 0x80110306 (the data is broken), as a PSP refuses it; a file the save lists no hash
+  for has nothing to be checked against and is read as it is. A good load logs, on a line of its own after `loaded
+  41570 bytes from ...`: `PROFILE.BIN: mode 1 (no game key), PARAM.SFO's hash verified, the file's hash in
+  SAVEDATA_FILE_LIST verified, decrypted`; a mode-1 save: `PROFILE.BIN: mode 1 (no game key), 41586 bytes, its hash
+  in SAVEDATA_FILE_LIST, PARAM.SFO signed`.
+- A plain save (SAVEDATA_PARAMS flag 0: every save the port wrote before patch 0019) still loads as it is
+  (`PURE_TRACE_SAVEDATA` logs `PROFILE.BIN: plain (SAVEDATA_PARAMS flag 0)`), and the game's next save of it (an
+  autosave after a race, PROFILE > SAVE) rewrites it in mode 1, so nobody loses a profile.
+- The menu's Import checks a save with the same hashes (`check_save_folder`), so a PSP's or PPSSPP's save imports;
+  Export copies a mode-1 save as it is. A plain save from before patch 0019 is exported plain: Export enciphers a
+  plain save only for a game with a key (mode 5), so such a profile goes to a PSP once the game has saved it again.
+
+## Moving saves between a PSP, PPSSPP and the port
+
+A save is one folder, the same on all three: copy the whole folder (`UCUS98612P0000` and its six files; the profile's
+slots are `P0000` to `P0004`), never a file of it alone, since PARAM.SFO holds the data file's hash.
+
+| From | To | Copy |
+|---|---|---|
+| a PSP's memory stick | the port | `PSP/SAVEDATA/UCUS98612P000N` from the stick (USB mode) into `<game dir>/ms0/PSP/SAVEDATA/` (the app's game dir; `game/` in a checkout), or pick the stick's root, its `PSP/SAVEDATA` or the folder in the menu's Import |
+| PPSSPP | the port | the same folder from PPSSPP's memory stick (`~/.config/ppsspp/PSP/SAVEDATA/` for the SDL build on macOS; *Memory Stick folder* in its settings otherwise) |
+| the port | a PSP or PPSSPP | `<game dir>/ms0/PSP/SAVEDATA/UCUS98612P000N` into the stick's `PSP/SAVEDATA/` (or the menu's Export, which writes a stick's layout) |
+
+The game finds the profile at PROFILE > LOAD (on a PSP and in PPSSPP the system's list, which shows its "User name:"
+line; in the port the save list, or the newest save without a window). A folder of the same name on the receiving
+side is replaced by the copy: move it aside first if it is to be kept (the menu's Import does that by itself, into
+`PSP/SAVEDATA/.backup/`). Renaming a folder to another slot was not tried: PARAM.SFO names the folder too, and its
+hash covers that. `PPCD00001DLS001` (the online system's info) need not be copied: every side writes its own at first
+boot.
+
 ## Running the check
 
 `tools/save_roundtrip.sh` (about 13 minutes, five windowed runs) uses its own stick, `out/014/game/ms0`, emptied
@@ -156,3 +208,12 @@ NAME shows NAME0000) and restart (`profile_list_load.txt`: the boot LOAD lists b
 it, SET NAME shows NAME1111), and check that P0000 was not written and that both folders hold their own pilots. The
 list's captures are `run4/list-save.png`, `run4/save-completed.png`, `run4/list-load.png`,
 `run4/list-load-p0000.png` and `run5/list-boot.png`.
+
+Since patch 0019 the round trip's `folder_check` fails its "PROFILE.BIN holds pilot" line (7 of its 73 checks, one per
+folder checked): it reads the pilot's name from `PROFILE.BIN` as plaintext, and the file is now enciphered as on a PSP.
+Every other check passes (2026-10-07). Task 045's Result proposes the change (the pilot read from
+`tools/save_interchange.sh --check`'s decryption); the script was outside that task.
+
+`tools/save_interchange.sh` (about 3 minutes; docs/verification.md, "The save interchange check") moves saves between
+the port and PPSSPP both ways on sticks of its own under `out/045/`, and leaves PPSSPP's stick as it found it.
+`tools/save_interchange.sh --check FOLDER PROFILE.BIN OUT` writes the decrypted profile of any save folder.

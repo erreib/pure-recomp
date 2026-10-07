@@ -76,9 +76,12 @@ variance() {
 # $FOLDER, $NAME). Exit code = failures.
 folder_check() {
   local folder=${1:-$FOLDER} pilot=${2:-$NAME}
-  python3 - "$SAVE/$folder" "$folder" "$pilot" <<'EOF'
+  # Since patch 0019 PROFILE.BIN is enciphered as on a PSP (mode 1): the framework's load path deciphers it.
+  rm -f "$OUT/$folder.plain"
+  tools/save_interchange.sh --check "$SAVE/$folder" PROFILE.BIN "$OUT/$folder.plain" > "$OUT/$folder.check.txt" 2>&1
+  python3 - "$SAVE/$folder" "$folder" "$pilot" "$OUT/$folder.plain" "$OUT/$folder.check.txt" <<'EOF'
 import os, struct, sys
-folder, expect_dir, expect_name = sys.argv[1:4]
+folder, expect_dir, expect_name, plain, report = sys.argv[1:6]
 fails = 0
 def ok(m): print("  ok    " + m)
 def bad(m):
@@ -115,13 +118,14 @@ for key in ("TITLE", "SAVEDATA_TITLE", "SAVEDATA_DIRECTORY"):
 print("        SAVEDATA_DETAIL = " + repr(sfo.get("SAVEDATA_DETAIL", "")))
 (ok if sfo.get("SAVEDATA_DIRECTORY") == expect_dir else bad)(f"PARAM.SFO SAVEDATA_DIRECTORY is {expect_dir}")
 (ok if f"User name: {expect_name}" in str(sfo.get("SAVEDATA_DETAIL", "")) else bad)(f"PARAM.SFO detail names the pilot {expect_name}")
-# SAVEDATA_FILE_LIST names encrypted files only. The game's request is 0x5DC bytes (no key field), so its saves
-# are plain and the list stays empty; PROFILE.BIN is checked as plaintext below.
+# SAVEDATA_FILE_LIST names encrypted files only: PROFILE.BIN since patch 0019 (mode 1, as a PSP writes it),
+# nothing in a plain save of an earlier build. PROFILE.BIN is checked as the framework deciphers it.
 listed = sfo.get("SAVEDATA_FILE_LIST", b"")
 listed = [listed[i:i + 13].split(b"\0")[0].decode("latin-1") for i in range(0, len(listed), 32) if listed[i:i + 1] not in (b"", b"\0")]
 print("        SAVEDATA_FILE_LIST = " + (", ".join(listed) if listed else "empty (plain save)"))
-if "PROFILE.BIN" in files:
-    prof = open(os.path.join(folder, "PROFILE.BIN"), "rb").read()
+(ok if "verdict PASS" in open(report).read() else bad)("PROFILE.BIN verifies and deciphers (tools/save_interchange.sh --check)")
+if "PROFILE.BIN" in files and os.path.exists(plain):
+    prof = open(plain, "rb").read()
     name = prof[4:15].split(b"\0")[0].decode("latin-1").strip()
     tag = prof[15:19].split(b"\0")[0].decode("latin-1")
     (ok if name == expect_name else bad)(f"PROFILE.BIN holds pilot {name!r}, tag {tag!r}")
