@@ -7,6 +7,7 @@ given frames, optionally saves a state, and quits. Python 3 standard library onl
 Usage (paths are relative to the current directory):
   ppsspp_ctl.py run [--pad SCRIPT | --pad-file FILE...] [--shot F:PNG]... [--gedump F:PPDMP]...
                     [--shots-every N [--shots-dir DIR]] [--until F] [--log FILE] [--savestate FILE] [--report JSON]
+                    [--dump-audio WAV]
   ppsspp_ctl.py launch [--log FILE] [--run]   boot the ISO with the debugger on and leave PPSSPP running
   ppsspp_ctl.py status                        print game.status, cpu.status and the current frame
   ppsspp_ctl.py shot PNG                      capture the next frame of the running game
@@ -87,6 +88,13 @@ DRIVER_SETTINGS = {
     },
 }
 MUTE_SETTINGS = {"Sound": {"GameVolume": "0"}}
+# --dump-audio (task 041): PPSSPP's own audio dump. With DumpAudio on, every audio update (the PSP's sceAudio
+# channels mixed and clamped to 16 bits, 44.1 kHz stereo, on emulated time from boot, before the host's volume and
+# resampling, so GameVolume 0 does not silence it) is appended to <memstick>/PSP/AUDIO/<DISCID>_<time>.wav. It needs
+# sound enabled; a save or load must not restart the file.
+DUMP_AUDIO_SETTINGS = {"General": {"DumpAudio": "True", "SaveLoadResetsAVdumping": "False"},
+                       "Sound": {"Enable": "True"}}
+AUDIODIR = MEMSTICK / "PSP/AUDIO"
 # --log: the categories named in the task at Debug (sceKernel at Info: Debug logs every context switch, 20k lines/s).
 HLE_LOG_LEVELS = {"SCEUTIL": 5, "SCEDISP": 5, "MPEG": 5, "SCEIO": 5, "SCEKERNEL": 4, "ME": 4, "ATRAC": 4,
                   "HLE": 4, "SCEMODULE": 4, "LOADER": 4, "BOOT": 4, "SYSTEM": 4, "SCEGE": 4, "SCEAUDIO": 4,
@@ -250,12 +258,12 @@ def backup_original():
             log(f"backed up {f.name} -> {orig}")
 
 
-def apply_driver_settings(port, renderer="software", hle_log=False, mute=True, savestate_key=False):
+def apply_driver_settings(port, renderer="software", hle_log=False, mute=True, savestate_key=False, dump_audio=False):
     ensure_config_exists()
     backup_original()
     ini = Ini(INI)
     changed = []
-    for group in [DRIVER_SETTINGS] + ([MUTE_SETTINGS] if mute else []):
+    for group in [DRIVER_SETTINGS] + ([MUTE_SETTINGS] if mute else []) + ([DUMP_AUDIO_SETTINGS] if dump_audio else []):
         for section, kv in group.items():
             for k, v in kv.items():
                 if k == "RemoteISOPort":
@@ -780,6 +788,54 @@ def save_state(pid, dest, timeout=20.0):
     return None, "no new .ppst appeared after pressing the Save State hotkey"
 
 
+def audio_dumps():
+    """The WAVs in PPSSPP's audio dump directory, with their modification times."""
+    return {p: p.stat().st_mtime for p in AUDIODIR.glob("*.wav")} if AUDIODIR.exists() else {}
+
+
+def fix_wav_sizes(path):
+    """Makes the RIFF and data sizes of a dump match the file, in case PPSSPP did not close it (a killed run).
+    Returns (data offset, data bytes)."""
+    with open(path, "r+b") as f:
+        raw = f.read(4096)
+        size = os.fstat(f.fileno()).st_size
+        if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+            die(f"{path} is not a RIFF WAVE file")
+        at = 12
+        while at + 8 <= len(raw):
+            cid, csize = raw[at:at + 4], struct.unpack_from("<I", raw, at + 4)[0]
+            if cid == b"data":
+                data = size - (at + 8)
+                data -= data % 4                    # whole stereo 16-bit frames
+                if csize != data:
+                    f.seek(at + 4)
+                    f.write(struct.pack("<I", data))
+                    f.seek(4)
+                    f.write(struct.pack("<I", size - 8))
+                    log(f"audio dump: data size {csize} rewritten as {data} (PPSSPP did not close the file)")
+                return at + 8, data
+            at += 8 + csize + (csize & 1)
+    die(f"{path} has no data chunk")
+
+
+def take_audio_dump(before, dest, report):
+    """Moves the WAV PPSSPP wrote during the run (new or grown since `before`) to `dest`."""
+    fresh = sorted((p for p, mt in audio_dumps().items() if before.get(p) != mt), key=lambda p: p.stat().st_mtime)
+    if not fresh:
+        report["audio_dump_error"] = f"no new WAV in {AUDIODIR} (DumpAudio needs [Sound] Enable = True)"
+        log(f"audio dump: {report['audio_dump_error']}")
+        return
+    src = fresh[-1]
+    offset, data = fix_wav_sizes(src)
+    Path(dest).parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), dest)
+    seconds = data / (44100 * 4)
+    report["audio_dump"] = {"path": str(Path(dest).resolve()), "ppsspp_file": str(src), "seconds": round(seconds, 2)}
+    log(f"audio dump: {src.name} ({seconds:.1f} s of 44.1 kHz stereo) -> {dest}")
+    for extra in fresh[:-1]:
+        log(f"audio dump: also new, left in place: {extra}")
+
+
 def parse_frame_path(spec):
     f, sep, p = spec.partition(":")
     if not sep or not f.isdigit() or not p:
@@ -817,8 +873,11 @@ def cmd_run(a):
               "renderer": a.renderer, "rtc_base": a.rtc, "frame_us": FRAME_US, "vblank1_us": VBLANK1_US,
               "captures": []}
     t_wall = time.time()
+    if a.dump_audio and a.keep_running:
+        die("--dump-audio needs PPSSPP to quit at the end (it closes the WAV then); drop --keep-running")
+    dumps_before = audio_dumps()
     with IniSession(a.keep_ini or a.keep_running, port=a.port, renderer=a.renderer, hle_log=bool(a.log),
-                    mute=not a.sound, savestate_key=bool(a.savestate)):
+                    mute=not a.sound, savestate_key=bool(a.savestate), dump_audio=bool(a.dump_audio)):
         p = launch(a.iso, a.log)
         dbg = None
         try:
@@ -874,6 +933,8 @@ def cmd_run(a):
                 clean = stop_process(p.pid, p)
                 report["quit"] = "clean" if clean else "killed"
                 log("PPSSPP quit cleanly" if clean else "PPSSPP had to be killed")
+                if a.dump_audio:
+                    take_audio_dump(dumps_before, a.dump_audio, report)
     report["wall_seconds"] = round(time.time() - t_wall, 1)
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True)
@@ -975,7 +1036,7 @@ def cmd_ini(a):
                 log(f"restored {f} from {orig.name}")
     else:
         ini = Ini(INI)
-        for group in (DRIVER_SETTINGS, MUTE_SETTINGS):
+        for group in (DRIVER_SETTINGS, MUTE_SETTINGS, DUMP_AUDIO_SETTINGS):
             for section, kv in group.items():
                 for k in kv:
                     print(f"[{section}] {k} = {ini.get(section, k)}")
@@ -1009,6 +1070,8 @@ def main():
     r.add_argument("--keep-ini", action="store_true", help="leave the driver settings in ppsspp.ini afterwards")
     r.add_argument("--keep-running", action="store_true", help="do not quit PPSSPP at the end")
     r.add_argument("--report", metavar="JSON", help="write a JSON report of the run")
+    r.add_argument("--dump-audio", metavar="WAV",
+                   help="PPSSPP's audio dump (DumpAudio): the PSP's mixed output from boot, moved to WAV at the end")
     r.set_defaults(fn=cmd_run)
 
     l = sub.add_parser("launch", help="boot with the debugger on and leave PPSSPP running (CPU stopped at boot)")

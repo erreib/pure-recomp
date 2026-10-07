@@ -1,0 +1,15 @@
+# PPSSPP route: Free Play on Vineta K with the ship left on the grid through the race music's first track change,
+# then END SESSION (task 041, 2026-10-07: the audio dumps of difference 8). Chain it after frontend.txt and
+# free_play_start.txt; frames are absolute vblank counts since boot:
+#   ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.txt --pad-file tools/ppsspp/routes/free_play_start.txt \
+#                     --pad-file tools/ppsspp/routes/free_play_idle_end.txt --until 29700 --dump-audio OUT.wav
+# Nothing is pressed after the race loads: the ship idles on the grid (no contact, no damage) while the music plays
+# from the race load (about vblank 6950) past its first track change (5:24 into it in the port, about vblank 26400
+# here). START pauses about 357 s after the race clock starts; DOWN, DOWN, CROSS pick END SESSION (CONTINUE,
+# RESTART, END SESSION), 80 vblanks apart as the sweep's 40 flips at 30 a second; with no lap done the session
+# ends on a fly-by with the RETURN TO MAIN MENU banner. The port's side: the same menus with free_play.txt's Cross
+# hold left out and START at flip 16700 (docs/fidelity.md, "Difference 8").
+28800:START, 28808:
+28880:DOWN, 28888:
+28960:DOWN, 28968:
+29040:CROSS, 29048:
