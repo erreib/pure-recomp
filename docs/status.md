@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-07. M1 to M8 done; M9, the organisation pass, finishing (task 053, the docs pass); then a
+Last updated: 2026-10-07 evening. M1 to M9 done (M9, the organisation pass, closed with task 053); then a
 simplification task, then the enhancements. The session-by-session resume notes are in
 [docs/history/sessions.md](history/sessions.md).
 
@@ -17,7 +17,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
 | M6 | native Metal backend | `tools/frame_regress.sh --shell metal --backend metal`; `tools/gerec/metal_check.sh` | done (tasks 021 to 027); Metal is the default on macOS (D-008) | 2026-10-06 |
 | M7 | v1.0 polish | `tools/bundle.sh && tools/bundle.sh --check out/029`; `tools/hud_check.sh` 61/61; controls documented | done: the app plays from Finder (tasks 028 to 031, 033, 042); open follow-ups below | 2026-10-07 |
 | M8 | fidelity: as close to 1:1 with the original as possible (D-009) | the sweep without halts or unimplemented features; PPSSPP comparisons within the suite's limits | done (tasks 035 to 048): the 14 differences fixed, explained or accepted (docs/fidelity.md); the scorecard: pictures, timing and audio faithful, saves and coverage close, trajectories differs (the AI rows, difference 13) | 2026-10-07 |
-| M9 | organisation: the code and docs simplified before enhancements (Erik) | each task's own proof of no change; `tools/docs_check.py` | tasks 049 to 052 merged; 053 (the docs pass) running; then the simplification task from 049's list | 2026-10-07 |
+| M9 | organisation: the code and docs simplified before enhancements (Erik) | each task's own proof of no change; `tools/docs_check.py` | **done** 2026-10-07: tasks 049 to 053 merged (the Metal backend by concern, the shared runner, the test hooks, nine patches by topic, the docs pass with `tools/docs_check.py`); the simplification task from 049's list is the first candidate after it | 2026-10-07 |
 
 ## Works
 
@@ -114,7 +114,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   shell change (docs/verification.md, "Which path for which change"); `python3 tools/docs_check.py` after a change
   that moves or renames a file, a tool or a patch. Merge: rerun the Verify, spot-read, `git merge --no-ff` into
   `batch/m2`, remove the worktree.
-- **Running.** Task 053, the docs pass (the last of the organisation pass). Next: the simplification task from task
+- **Running.** Nothing. M9 closed with task 053 (merged 7de2978). Next: the simplification task from task
   049's list (the follow-up above), measured by `tools/refactor_check.sh`; then the enhancements (D-009).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of

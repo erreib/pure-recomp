@@ -1015,7 +1015,7 @@ def report_others(sites, core):
             mark = " (the rule)" if rule48.get(kind) == name else (" (hw)" if HW_048.get(kind) == name else "")
             print(f"    {name + mark:34} {ok:8}/{tot} {100.0 * ok / max(tot, 1):8.3f}%")
         names = {"port": "the port (.port.csv)", "ppsspp": "the port, test mode", "psp": "the port, default mode",
-                 "pre0020": "the port before patch 0020"}
+                 "pre0020": "the port before the VFPU rounding patch (0009-vfpu-rounding; old 0020)"}
         tags = sorted({k for s_ in sites for k in s_[0].get("_ports", {})})
         for which in ["port"] + tags:
             label = names.get(which, f"the port, {which}")
@@ -1102,7 +1102,7 @@ def cmd_check(d, tag=None):
                      if have else ""))
             ml = mode_line(sites, g, tag)
             if ml:
-                print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0020'}: {ml}")
+                print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0009-vfpu-rounding (task 047's 0020)'}: {ml}")
             for p, got in bad[:20]:
                 print("    FAIL " + fmt_row(p, got))
             fails += len(bad)
@@ -1115,7 +1115,7 @@ def cmd_check(d, tag=None):
                   + (f"; the port (.port.csv) {port_ok}/{port_n} ({100.0 * port_ok / port_n:.3f}%)" if port_n else ""))
             ml = mode_line(sites, g, tag)
             if ml:
-                print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0020'}: {ml}")
+                print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0009-vfpu-rounding (task 047's 0020)'}: {ml}")
             for p, got in bad[:20]:
                 print("    FAIL " + other_fmt(p, got))
             fails += len(bad)

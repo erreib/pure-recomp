@@ -1,6 +1,6 @@
 # 053: The docs pass (the organisation pass, 5 of 5)
 
-Milestone: M9 organisation | Branch: task/053-docs-pass | Status: OPEN
+Milestone: M9 organisation | Branch: task/053-docs-pass | Status: MERGED (7de2978, 2026-10-07)
 
 ## Goal
 The reference docs grew a section per task: docs/fidelity.md is 1500 lines, docs/metal-backend.md 1375,
@@ -153,4 +153,21 @@ same.)
   time of 7 minutes and the Vulkan path's 19m 47s for 18 were measured).
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at 7de2978 (2026-10-07): `tools/docs_check.py` 31 files, 0 findings;
+race_hud 0.0148.
+
+Spot-read: the split docs (fidelity 1502 to 136 lines with its history at docs/history/fidelity.md; metal-backend
+1396 to 837; status 220 to 177 with the sessions' record at docs/history/sessions.md), the docs check's rules
+(paths, links with anchors, patch names, task numbers; the spike reports and the history files exempt where it makes
+sense), the README's layout and tools tables. The line-by-line move check (every non-empty old line found in the
+reference or its history, the edited ones listed) is the right proof for a docs move. Files outside May touch:
+none.
+
+Merged: 7de2978 into batch/m2.
+
+Notes: in this review, the printed old patch numbers in tools/scorecard.py, tools/vfpu_model.py and
+tools/vfpu_probe.py switched to the new names (so the next `scorecard.py --full` writes a name the docs check
+accepts), and CLAUDE.md's "tests live in tests/" sentence corrected (there is no tests/; the tools are the checks).
+Left as the worker found them: config/pad_scripts' two "after patch 0002" comments (config is read by the game,
+not by the check), the three comments inside the vendor tree, metal_check.sh's missing mip switch (task 040's
+follow-up).

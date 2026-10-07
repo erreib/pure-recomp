@@ -1035,7 +1035,7 @@ def compare_saves(port_dir, ref_dir, decrypted=True):
     rows.append(row(f"{DATA_FILE} (the data file): size", f"{a} bytes", f"{b} bytes",
                     "-" if a is None or b is None else f"{a - b:+d}", FAITHFUL if a == b else DIFFERS,
                     "faithful when the same size",
-                    "difference 5 (the PSP's savedata encryption, no-key mode): fixed by task 045, patch 0019"
+                    "difference 5 (the PSP's savedata encryption, no-key mode): fixed by task 045, patch 0007-savedata-list-and-no-key-mode (task 045)"
                     if a == b else "difference 5: the PSP's savedata encryption (no-key mode)"))
     if decrypted:
         rows.append(decrypted_row(port_dir, ref_dir))
@@ -1222,7 +1222,7 @@ Three marks stand in for a grade where none can be given and do not count toward
 (the PPSSPP side is missing: refresh it), `not measured` (no instrument exists) and `accepted (D-011)` (difference 6,
 the faster race loads, which Erik decided to keep). The two differences the audit left open for a decision:
 difference 6 (the race load) is that accepted row; difference 5 (saves plain where the PSP enciphers them) was fixed
-by task 045 (patch 0019), so the Saves rows compare enciphered saves, the data file by its decrypted contents.
+by task 045 (patch 0007-savedata-list-and-no-key-mode (task 045)), so the Saves rows compare enciphered saves, the data file by its decrypted contents.
 
 | Category | What is compared | Thresholds |
 |---|---|---|
