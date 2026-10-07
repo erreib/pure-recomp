@@ -5,13 +5,14 @@ project(PureRecomp VERSION 0.1.0 LANGUAGES C CXX)
 set(PSPRECOMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/portablekit portablekit)
 
+# The Metal GE backend's files, by concern (docs/metal-backend.md, "Files"; task 049).
+set(metal_backend_sources src/gpu/metal_backend.mm src/gpu/metal_targets.mm src/gpu/metal_textures.mm
+    src/gpu/metal_pipelines.mm src/gpu/metal_effects.mm src/gpu/metal_trace.mm src/gpu/metal_draw.mm)
+
 # Our profile. PROFILE_DIR is the repo root, so the corpus lives in generated/ and the player's files in game/
 # (both git-ignored), as docs/PROFILE_GUIDE.md in the framework lays out.
 # Our own main() (src/host/pure_main.cpp) runs ge_replay for `--replay` and the framework's main, compiled as
 # portablekit_main, otherwise (task 022).
-# The Metal GE backend's files, by concern (docs/metal-backend.md, "Files"; task 049).
-set(metal_backend_sources src/gpu/metal_backend.mm src/gpu/metal_targets.mm src/gpu/metal_textures.mm
-    src/gpu/metal_pipelines.mm src/gpu/metal_effects.mm src/gpu/metal_trace.mm src/gpu/metal_draw.mm)
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
