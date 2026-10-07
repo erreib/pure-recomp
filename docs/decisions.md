@@ -49,7 +49,8 @@ Status: accepted (Erik, 2026-10-05).
 
 ## D-003  2026-10-06  GE backend seam
 Context: the vendored VulkanRenderer fuses the window shell and the GE backend; the Metal backend (M6) must
-replace only the latter, and patches 0003-0008 now define what this game needs from a backend.
+replace only the latter, and the renderer patches of tasks 009 to 019 (now 0003-vulkan-renderer-fixes) define
+what this game needs from a backend.
 Decision: a `gpu::GeBackend` interface (docs/ge-backend.md) between the shell and the backend. The Vulkan
 renderer is adapted through a thin wrapper, not split or rewritten. The Metal backend is written against the
 interface, with a Metal presenter in the shell. `null` and `record` backends validate the split; ge_replay compares
@@ -77,9 +78,10 @@ Decision: a second interface, `host::Shell` (docs/ge-backend.md section 8), with
 adapting the existing renderer (no behaviour change: the regression suite is the gate), `HeadlessShell` reading the
 input script at pad level with no window, and `MetalShell` in our sources (task 027). The SDL pad sampling is shared
 code. `<prefix>_SHELL` selects; `<prefix>_NO_RENDER` keeps its meaning.
-Consequences: patch 0010 (task 026) is the second mechanical vendor patch of the series and an upstream candidate
-like 0009. Headless routes become possible but stay slow until the kernel's host-wait sleep is changed (patch 0011,
-Fable). The Metal presenter can show a Metal texture directly rather than through a read-back.
+Consequences: the shell seam (task 026; since task 052 part of patch 0004-ge-backend-and-shell-seams with the GE
+seam of task 021) is the second mechanical vendor change of the series and an upstream candidate like the first.
+Headless routes become possible but stay slow until the kernel's host-wait sleep is changed (Fable, after task
+026: patch 0005-kernel-host-waits-and-pacing). The Metal presenter can show a Metal texture directly rather than through a read-back.
 Alternatives: showing Metal pictures through MoltenVK's Metal-object import in the Vulkan shell (keeps one shell, but
 the port would still need Vulkan on macOS, against D-002's "native Metal"); a profile-level pad injection into
 sceCtrl for headless runs only (smaller, but a second input path to keep in step with the script format).
@@ -181,9 +183,9 @@ vmmul, the dot lanes of vcrsp and vqmul) by the PSP's rule, with contraction off
 translated instruction rounds on its own. PPSSPP's JIT rule is available as a test-only mode (`PURE_VFPU_DOT=ppsspp`)
 for the scorecard's trajectory rows and `tools/ai_seed_check.sh`, which compare against PPSSPP's references and would
 otherwise never be faithful by construction; a player's game never uses it.
-Consequences: patch 0020 (the codegen header and the Vtfm/Vmmul emitters), a regeneration and a full corpus rebuild;
-`tools/vfpu_probe.py port` and `tools/vfpu_model.py --check` verify the new code against the samples under both
-rules; docs/scorecard.md's Trajectories section says the AI rows run under the PPSSPP mode. The PSP rule's unmeasured
+Consequences: patch 0009-vfpu-rounding (task 047; the codegen header and the Vtfm/Vmmul emitters), a regeneration
+and a full corpus rebuild; `tools/vfpu_probe.py port` and `tools/vfpu_model.py --check` verify the new code against
+the samples under both rules; docs/scorecard.md's Trajectories section says the AI rows run under the PPSSPP mode. The PSP rule's unmeasured
 corners (subnormals, cancelling sums' sign, prefix constants past the encoded length) follow IEEE until a hardware
 sample says otherwise. The transcendentals stay as they are: the port's vrcp, vrsq and vsqrt match PPSSPP's JIT on
 every sample; the PSP's own vrcp is known to be inaccurate in its lowest bits and no hardware sample of it exists here.
