@@ -994,11 +994,26 @@ Patch 0017 also makes `RecordBackend::submit` record the texels of every mip lev
 `level_count` - 1 when the minification filter's bit 2 is on), each from its own address at its own size. Race frame
 6016 recorded through Metal now replays into Metal exactly without `PURE_NO_MIPMAPS` (0 pixels over tol 0; the
 recording is 8.9 MB, 611 Memory records against 283), where a recording of the same frame made with patch 0014's
-record backend replays 0.0119 off at tol 0. BLUE_RIDGE_LINE
+record backend replays 0.0119 off at tol 0. Blue Ridge's first race frame (the audit's route, flip 6016), the
+frame task 037 found 0.0913 off at tol 32, recorded the same way replays exactly too (0 pixels over tol 0, 974 draws);
+against PPSSPP it scores 0.024732 at tol 32 both before and after this task (27 pixels change, none by more than 8:
+its billboards).
 
 A Draw record ends with the colour test, dithering and CLIPENABLE (`kPixelBytes`, 31 bytes); a Draw that ends before
 them reads as no colour test, no dithering and CLIPENABLE off, so the older recordings replay as before. `gerec_dump.py`
 lists `ctest FUNCTION REFERENCE/MASK`, `dither ROWS` and `noclip`.
+
+On a recording made since patch 0017, Metal against Vulkan (`PureNative --replay ... --a vulkan --b metal --frames
+6016 --tol 24`, race frame 6016): 5149 pixels over tol 24 as built (the texture map modes and mip levels, which the
+Vulkan backend does not draw either), 3 with `PURE_NO_TEXMAP=1 PURE_NO_MIPMAPS=1` (with `PURE_NO_COLOR_TEST=1
+PURE_NO_DITHER=1` as well, still 3), 2 with `PURE_NO_DEPTH_CLAMP=1` too, task 025's figure. The one pixel the depth
+clamp moves in that configuration, (146,124), is a depth tie between two draws that the clamp's depth arithmetic
+(z times the z scale plus w times the offset, over 65535) rounds the other way from the viewport's; as built, no pixel
+of the frame or of the suite's 18 scenes moves with the clamp.
+
+The pre-warm list (`config/metal_pipelines.txt`) has none of the new keys: a race run makes 6 render pipelines on
+first use (four `sixteen=1`, two `color_test=1`), 1.2 ms at its first race frame and 0.24 ms later on this machine
+(`PURE_METAL_TRACE`), which the list could take with `PURE_METAL_PIPELINES_OUT`.
 
 ## What is not done yet
 
@@ -1281,3 +1296,16 @@ race_hud 0.0149, tt_hud 0.0112, fp_hud 0.0116, zone_hud 0.0121 and zone_change 0
 list of ignored GE commands is 40 long in every run (63 before: TEXADDR1 to 7, TEXBUFWIDTH1 to 7, TEXSIZE1 to 7,
 TEXLEVEL and TEXLODSLOPE left it); no run refused a level or printed a new `not emulated` line. "Mipmaps" has the
 Blue Ridge frame, the shimmer sequence and the decode counts.
+
+### Task 040
+
+`tools/verify_task.sh 040` (`tools/patches.sh check && tools/build.sh profile && tools/frame_regress.sh`, 2026-10-07,
+M4 Pro): 16 patches reproduce the vendor tree (0001 to 0015 and 0017; 0016 is reserved); the suite passes 18/18
+headless in 25 s, the 15 other scenes pixel for pixel as before (Zone's colour-tested draws change none of their pixels),
+race_hud 0.0148 (0.0149 before), tt_hud 0.0112 (0.0112), fp_hud 0.0113 (0.0116). Beyond the Verify line:
+`tools/frame_regress.sh --shell vulkan --backend vulkan` 18/18, every scene within 0.0005 of its vulkan column
+(19m 47s); `tools/hud_check.sh --shell headless` 61 of 61 shots with the HUD; `PURE_NO_COLOR_TEST=1 PURE_NO_DITHER=1
+PURE_NO_DEPTH_CLAMP=1` gives the 18 captures of the build before the task pixel for pixel, and each feature alone
+moves only the pixels "What changed on the screen" names (the depth clamp none); the framework's list of ignored GE
+commands is 30 long in every run (40 before: 0x1C, 0x20, 0x27, 0xD8 to 0xDA and 0xE2 to 0xE5 left it); no run printed
+a `not emulated` line. "The colour test, 16-bit writes and the depth clamp" has the dither check and the regions.
