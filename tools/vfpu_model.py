@@ -1,30 +1,42 @@
 #!/opt/homebrew/bin/python3
-"""The VFPU's rounding, modelled against PPSSPP's results (task 047).
+"""The VFPU's dot-product rounding, modelled against PPSSPP's results (task 047).
 
   vfpu_model.py --selftest            the arithmetic helpers, task 046's example and pspautotests' vector.expected
-  vfpu_model.py --check [DIR]         the chosen dot model over every dot sample in DIR (ref/vfpu): exit 0 when it
-                                      reproduces all of them, else the failing rows; the transcendental report
-  vfpu_model.py --report [DIR]        every candidate model over every sample, per instruction and lane count
+  vfpu_model.py --check [DIR]         every sample set under DIR (ref/vfpu: jit/, interp/): the rule for the PPSSPP
+                                      core that made it, per instruction; exit 0 when it reproduces every dot-product
+                                      sample, else the failing rows; then the transcendental report
+  vfpu_model.py --report [DIR]        every candidate model over every sample set, per instruction and lane count
   vfpu_model.py --search [DIR]        the parameter grid of the aligned-truncation family (model c)
 
-The samples are tools/vfpu_probe.py's: sites.json and one <ADDR>.csv a site with PPSSPP's source lanes and result
-lanes as bit patterns, and <ADDR>.port.csv with the port's results for the same rows (the corpus's own code, run by
-`vfpu_probe.py port`). Every model works on integers: a float is (sign, biased exponent, 24-bit significand), a
-product of two is exact (48 bits), and each model says where it rounds or truncates. Inputs with a zero exponent
-field are zero (the VFPU flushes subnormals, vfpu-docs' introduction), and so are results below the smallest normal.
+The samples are tools/vfpu_probe.py's: a directory with sites.json (which PPSSPP core made them, the sites, their
+prefixes) and one <ADDR>.csv a site with PPSSPP's source lanes and result lanes as bit patterns, and <ADDR>.port.csv
+with the port's results for the same rows (the corpus's own code, run by `vfpu_probe.py port`). Every model works on
+integers: a float is (sign, biased exponent, 24-bit significand), a product of two is exact (48 bits), and each model
+says where it rounds. Inputs with a zero exponent field are zero (the VFPU flushes subnormals, vfpu-docs'
+introduction), and so are results below the smallest normal.
 
-The dot-product models (n lanes; a vtfm or vmmul result lane is the same n-lane dot of a matrix row and a vector):
-  a      each product rounded to float, then summed in lane order with a rounding after each addition
-  b      the port: clang's contraction of the framework's C++ (the _ct vdot `s0*t0 + s1*t1 + s2*t2 + s3*t3` is
-         fma(s3,t3, fma(s2,t2, fma(s0,t0, s1*t1))); the vtfm and vmmul loops `sum += m*t` are an fma chain from 0)
-  exact  the exact sum rounded to nearest once (what the port gives when the fma chain happens not to round)
-  c      exact products aligned to the largest product exponent, kept with 23+N fraction bits there, the bits below
-         dropped (toward zero on each product's magnitude, or toward minus infinity on the signed value), summed
-         exactly, then rounded once (to nearest even, toward zero, or to nearest away); parameters N, the alignment
-         reference (the raw exponent sum of the operands, or the product's own normalised exponent), truncation, final
+The dot-product models over the n lanes the encoding names (a vtfm or vmmul result lane is the same n-lane dot of a
+matrix row and a vector):
+  a      unfused: each product rounded to float, then summed in lane order, rounding after each addition
+  chain  fused in lane order: r = s0*t0 rounded, then r = fma(s_i, t_i, r) for i = 1 .. n-1 (one rounding each)
+  b      the port today: clang's contraction of the framework's C++. The _ct vdot `s0*t0 + s1*t1 + s2*t2 + s3*t3`
+         is fma(s3,t3, fma(s2,t2, fma(s0,t0, s1*t1))) over a four-lane view (lane 1's product is the one rounded);
+         the vtfm and vmmul loops `float sum = 0; sum += m*t` are an fma chain from +0
+  exact  the exact sum rounded to nearest once
+  c      exact products aligned to the largest product exponent and kept with 23+N fraction bits there, the bits
+         below dropped (toward zero on each product's magnitude, or toward minus infinity on the signed value),
+         summed exactly, rounded once (to nearest even, toward zero, or to nearest away); parameters N, the alignment
+         reference (the raw exponent sum, or the product's own normalised exponent), truncation and final rounding.
+         c(N=2,raw,mag,rtz) is the only one of the grid that reproduces all 150 of pspautotests' vdot/vhdp results
+         from a real PSP (vector.expected) and is called `hw` below
   d1     products rounded to float, summed exactly, rounded once
   d2     products truncated to float, summed exactly, rounded once
-  d3     products rounded to float, summed as a tree ((p0+p1)+(p2+p3)) with a rounding after each addition
+  d3     products rounded to float, summed as a tree ((p0+p1)+(p2+p3)), rounding after each addition
+
+What the samples showed (docs/fidelity.md, difference 13): PPSSPP's JIT (CPU core 1, the core of every reference in
+ref/) computes vdot and vtfm as `chain` and vmmul as `a`, on 100 percent of the samples; the port's vdot differs from
+it only by its contraction order (lane 1's product rounded first instead of lane 0's), its vtfm only in the sign of
+an exact zero (its chain starts from +0), its vmmul by fusing. RULES holds the measured rule of each core.
 """
 import argparse, csv, json, math, random, re, struct, sys
 from fractions import Fraction
@@ -36,9 +48,14 @@ AUTOTESTS = Path.home() / "dev" / "scratch" / "pspautotests" / "tests" / "cpu" /
 
 DOT_KINDS = ("vdot", "vhdp", "vtfm", "vmmul")
 TRANS_KINDS = ("vsin", "vcos", "vrcp", "vrsq", "vsqrt", "vexp2", "vlog2", "vasin", "vnrcp", "vnsin", "vrexp2")
+HW = ("c", {"n": 2, "align": "raw", "trunc": "mag", "final": "rtz"})
 
-# The rule this task settles on (see docs/fidelity.md, difference 13): model c with these parameters.
-CHOSEN = ("c", {"n": 2, "align": "raw", "trunc": "mag", "final": "rne"})
+# The measured rule of each PPSSPP CPU core, per instruction kind: (model, params).
+RULES = {
+    1: {"name": "PPSSPP's JIT", "vdot": ("chain", None), "vhdp": ("chain", None), "vtfm": ("chain", None),
+        "vmmul": ("a", None)},
+    0: {"name": "PPSSPP's interpreter", "vdot": HW, "vhdp": HW, "vtfm": HW, "vmmul": HW},
+}
 
 
 # ------------------------------------------------------------------------------------------- float32 bits
@@ -241,8 +258,17 @@ def dot_c(s, t, n=2, align="raw", trunc="mag", final="rne"):
     return round_exact(total, top - 150 - n, final)
 
 
+def dot_chain(s, t):
+    """Fused in lane order: s0*t0 rounded, then one fma a lane (PPSSPP's JIT for vdot and vtfm)."""
+    acc = fmul(s[0], t[0])
+    for x, y in zip(s[1:], t[1:]):
+        acc = ffma(x, y, acc)
+    return acc
+
+
 MODELS = {
     "a": dot_a,
+    "chain": dot_chain,
     "exact": dot_exact,
     "d1": lambda s, t: dot_round_products(s, t, "rne"),
     "d2": lambda s, t: dot_round_products(s, t, "rtz"),
@@ -260,7 +286,8 @@ def model_fn(name, params=None):
 def model_label(name, params=None):
     if name != "c" or not params:
         return name
-    return f"c(N={params['n']},{params['align']},{params['trunc']},{params['final']})"
+    lab = f"c(N={params['n']},{params['align']},{params['trunc']},{params['final']})"
+    return lab + (" = hw" if params == HW[1] else "")
 
 
 # ------------------------------------------------------------------------------------------- samples
@@ -378,12 +405,11 @@ def evaluate(model, problems):
 
 
 def candidates():
-    out = [("a", None), ("exact", None), ("d1", None), ("d2", None), ("d3", None)]
+    out = [("a", None), ("chain", None), ("exact", None), ("d1", None), ("d2", None), ("d3", None), HW]
     for n in (0, 1, 2, 3, 4):
         out.append(("c", {"n": n, "align": "raw", "trunc": "mag", "final": "rne"}))
-    out.append(("c", {"n": 2, "align": "norm", "trunc": "mag", "final": "rne"}))
-    out.append(("c", {"n": 2, "align": "raw", "trunc": "floor", "final": "rne"}))
-    out.append(("c", {"n": 2, "align": "raw", "trunc": "mag", "final": "rtz"}))
+    out.append(("c", {"n": 2, "align": "norm", "trunc": "mag", "final": "rtz"}))
+    out.append(("c", {"n": 2, "align": "raw", "trunc": "floor", "final": "rtz"}))
     return out
 
 
@@ -519,75 +545,140 @@ def trans_report(sites, out=print):
 
 # ------------------------------------------------------------------------------------------- commands
 
+def datasets(d):
+    """The sample sets under d: d itself and its subdirectories that hold a sites.json, as (path, meta, sites)."""
+    d = Path(d)
+    out = []
+    for p in [d] + sorted(x for x in d.iterdir() if x.is_dir()) if d.exists() else []:
+        if (p / "sites.json").exists():
+            meta, sites = load(p)
+            if sites:
+                out.append((p, meta, sites))
+    return out
+
+
+def core_of(meta):
+    return meta.get("run", {}).get("cpu_core", 1)
+
+
+def set_title(path, meta):
+    run = meta.get("run", {})
+    core = core_of(meta)
+    rule = RULES.get(core, {}).get("name", f"core {core}")
+    offs = run.get("ships_off_reference_m") or {}
+    worst = max(offs.values()) if offs else None
+    return (f"{path}: {rule} (CPU core {core}), {run.get('track')} to race clock {run.get('end_clock', 0):.2f} s"
+            + (f"; the ships end {worst:.3f} m or less from the reference race" if worst is not None else ""))
+
+
+def trans_summary(sites, out=print):
+    """The transcendental instructions per mnemonic: the port's helper against PPSSPP, PPSSPP against the value."""
+    lines = trans_report(sites, out=lambda *_: None)
+    agg = {}
+    for L in lines:
+        a = agg.setdefault(L["mnemonic"], {"sites": 0, "lanes": 0, "port_differs": 0, "port_max": 0,
+                                            "true_differs": 0, "true_max": 0, "forms": {}})
+        a["sites"] += 1
+        a["lanes"] += L["lanes"]
+        a["port_differs"] += L["port_differs"]
+        a["port_max"] = max(a["port_max"], L["port_max_ulps"] or 0)
+        a["true_differs"] += L["ppsspp_vs_true_differs"]
+        a["true_max"] = max(a["true_max"], L["ppsspp_vs_true_max_ulps"] or 0)
+        for k, v in L["closed_forms"].items():
+            h, t = (int(x) for x in v.split("/"))
+            f = a["forms"].setdefault(k, [0, 0])
+            f[0] += h
+            f[1] += t
+    for mn, a in sorted(agg.items()):
+        out(f"  {mn:8} {a['sites']:3} sites, {a['lanes']:7} results: the port's helper differs on {a['port_differs']} "
+            f"(max {a['port_max']} ulp); PPSSPP differs from the true value (double precision) on "
+            f"{a['true_differs']} (max {a['true_max']} ulp); "
+            + "; ".join(f"{k}: {h}/{t}" for k, (h, t) in a["forms"].items()))
+    missing = [k for k in ("vsin", "vcos", "vrcp", "vrsq", "vexp2", "vlog2", "vasin") if k + ".s" not in agg
+               and not any(m.startswith(k + ".") for m in agg)]
+    if missing:
+        out(f"  not in these samples: {', '.join(missing)} (tools/vfpu_probe.py scan: vsin and vcos have two sites "
+            f"each, outside the race's code; vexp2, vlog2 and vasin none in the executable)")
+    return agg
+
+
 def cmd_report(d):
-    meta, sites = load(d)
-    groups = by_group(sites)
-    cands = candidates()
-    print(f"dot-product samples in {d}: " + ", ".join(f"{g} {len(v)}" for g, v in groups.items()))
-    print(f"{'model':34}" + "".join(f"{g[:22]:>24}" for g in groups))
-    for name, params in [("port", None)] + cands:
-        cells = []
+    for path, meta, sites in datasets(d):
+        print(set_title(path, meta))
+        groups = by_group(sites)
+        cands = candidates()
+        print("  " + ", ".join(f"{g} {len(v)}" for g, v in groups.items()))
+        print(f"  {'model':30}" + "".join(f"{g.split(' ')[0]:>22}" for g in groups))
+        for name, params in [("port", None)] + cands:
+            cells = []
+            for g, probs in groups.items():
+                if name == "port":
+                    have = [p for p in probs if p[6] is not None]
+                    ok, tot = sum(1 for p in have if p[6] == p[5]), len(have)
+                else:
+                    ok, tot, _ = evaluate(model_fn(name, params), probs)
+                cells.append(f"{100.0 * ok / max(tot, 1):.3f}%")
+            print(f"  {model_label(name, params):30}" + "".join(f"{c:>22}" for c in cells))
         for g, probs in groups.items():
-            if name == "port":
-                ok = sum(1 for p in probs if (p[6] if p[6] is not None else port_model(p[0])(p[3], p[4])) == p[5])
-                tot = len(probs)
-            else:
-                ok, tot, _ = evaluate(model_fn(name, params), probs)
-            cells.append(f"{ok}/{tot} {100.0 * ok / max(tot, 1):.3f}%")
-        print(f"{model_label(name, params):34}" + "".join(f"{c:>24}" for c in cells))
-    # the port's results against model b (is the emulation of the port right?)
-    for g, probs in groups.items():
-        have = [p for p in probs if p[6] is not None]
-        if have:
-            ok = sum(1 for p in have if port_model(p[0])(p[3], p[4]) == p[6])
-            print(f"model b against the port's own results, {g}: {ok}/{len(have)}")
-    print("transcendentals:")
-    trans_report(sites)
+            have = [p for p in probs if p[6] is not None]
+            if have:
+                ok = sum(1 for p in have if port_model(p[0])(p[3], p[4]) == p[6])
+                print(f"  model b against the port's own results, {g}: {ok}/{len(have)}")
+        print("  transcendentals, per site:")
+        trans_report(sites, out=lambda s: print("  " + s))
 
 
 def cmd_search(d, limit):
-    meta, sites = load(d)
-    groups = by_group(sites)
-    probs = [p for g in groups.values() for p in g[:limit]]
-    res = []
-    for n in range(0, 9):
-        for align in ("raw", "norm"):
-            for trunc in ("mag", "floor"):
-                for final in ("rne", "rtz", "rna"):
-                    params = {"n": n, "align": align, "trunc": trunc, "final": final}
-                    ok, tot, _ = evaluate(model_fn("c", params), probs)
-                    res.append((ok, model_label("c", params)))
-    res.sort(reverse=True)
-    for ok, lab in res[:20]:
-        print(f"{lab:34} {ok}/{len(probs)} {100.0 * ok / len(probs):.3f}%")
+    for path, meta, sites in datasets(d):
+        print(set_title(path, meta))
+        groups = by_group(sites)
+        probs = [p for g in groups.values() for p in g[:limit]]
+        res = []
+        for n in range(0, 9):
+            for align in ("raw", "norm"):
+                for trunc in ("mag", "floor"):
+                    for final in ("rne", "rtz", "rna"):
+                        params = {"n": n, "align": align, "trunc": trunc, "final": final}
+                        ok, tot, _ = evaluate(model_fn("c", params), probs)
+                        res.append((ok, model_label("c", params)))
+        res.sort(reverse=True)
+        for ok, lab in res[:10]:
+            print(f"  {lab:34} {ok}/{len(probs)} {100.0 * ok / len(probs):.3f}%")
 
 
 def cmd_check(d):
-    meta, sites = load(d)
-    groups = by_group(sites)
-    if not groups:
-        print(f"vfpu_model: no dot-product samples in {d}")
+    sets = datasets(d)
+    if not sets:
+        print(f"vfpu_model: no samples under {d} (tools/vfpu_probe.py sample)")
         return 1
-    name, params = CHOSEN
-    fn = model_fn(name, params)
-    print(f"chosen model: {model_label(name, params)}")
     fails = 0
-    for g, probs in groups.items():
-        ok, tot, bad = evaluate(fn, probs)
-        port_ok = sum(1 for p in probs if p[6] is not None and p[6] == p[5])
-        have_port = sum(1 for p in probs if p[6] is not None)
-        print(f"  {g:44} {ok}/{tot} reproduced ({100.0 * ok / tot:.3f}%); the port today {port_ok}/{have_port}")
-        for p, got in bad[:20]:
-            print("    FAIL " + fmt_row(p, got))
-        fails += len(bad)
-    print("transcendentals (the port's helper against PPSSPP):")
-    trans_report(sites)
-    print(f"vfpu_model --check: {'PASS' if not fails else f'FAIL ({fails} rows)'}")
+    for path, meta, sites in sets:
+        core = core_of(meta)
+        rule = RULES.get(core)
+        print(set_title(path, meta))
+        if rule is None:
+            print(f"  no rule for CPU core {core}")
+            fails += 1
+            continue
+        for g, probs in by_group(sites).items():
+            kind = probs[0][0]["kind"]
+            name, params = rule[kind]
+            ok, tot, bad = evaluate(model_fn(name, params), probs)
+            have = [p for p in probs if p[6] is not None]
+            port_ok = sum(1 for p in have if p[6] == p[5])
+            print(f"  {g:40} {model_label(name, params):24} {ok}/{tot} ({100.0 * ok / tot:.3f}%); "
+                  f"the port today {port_ok}/{len(have)} ({100.0 * port_ok / max(len(have), 1):.3f}%)")
+            for p, got in bad[:20]:
+                print("    FAIL " + fmt_row(p, got))
+            fails += len(bad)
+        print("  transcendentals (the port's helper against PPSSPP):")
+        trans_summary(sites)
+    print(f"vfpu_model --check: {'PASS' if not fails else f'FAIL ({fails} dot products)'}")
     return 0 if not fails else 1
 
 
 def autotest_cases():
-    """pspautotests vector.c's SVV dot products (vdot/vhdp .p .t .q over the first five test vectors) with the
+    """pspautotests vector.c's SVV dot products (vdot/vhdp .p .t .q over its first five test vectors) with the
     hardware's printed results (vector.expected)."""
     vecs = [(1.0, 2.0, 3.0, 4.0), (5.0, 6.0, -7.0, -8.0), (-1.0, -2.0, -3.0, -4.0), (-4.0, -5.0, 6.0, 7.0),
             (-0.1, 1000.0, float("inf"), 0.0)]
@@ -609,7 +700,7 @@ def autotest_cases():
                 t = [f2b(v) for v in vecs[j][:n]]
                 if op == "vhdp":
                     s = s[:-1] + [f2b(1.0)]
-                cases.append((f"{op}.{sz} v{i}.v{j}", s, t, vals[k]))
+                cases.append((f"{op}.{sz} v{i}.v{j}", s, t, vals[k], 4 not in (i, j)))
                 k += 1
     return cases
 
@@ -617,21 +708,18 @@ def autotest_cases():
 def selftest():
     fails = []
     rnd = random.Random(47)
-    # 1. round_pack against the platform's double-to-float conversion (round to nearest even), normal range only.
+    # 1. round_exact against the platform's double-to-float conversion (round to nearest even), normal range.
     for _ in range(20000):
         x = rnd.uniform(-1, 1) * 2.0 ** rnd.randint(-100, 100)
-        fr = Fraction(x)
         want = f2b(x)
         if (want >> 23) & 0xFF in (0, 255):
             continue
-        got = round_exact(fr.numerator * (1 << 60) // fr.denominator, -60) if fr.denominator > 1 << 60 else None
         mant, ex = math.frexp(x)
-        mi = int(mant * (1 << 53))
-        got = round_exact(mi, ex - 53)
+        got = round_exact(int(mant * (1 << 53)), ex - 53)
         if got != want:
-            fails.append(f"round_pack {x!r}: {got:08X} != {want:08X}")
+            fails.append(f"round_exact {x!r}: {got:08X} != {want:08X}")
             break
-    # 2. fmul/fadd against IEEE single arithmetic through doubles (exact products/sums of floats fit doubles mostly).
+    # 2. fmul/fadd against single-precision arithmetic through doubles (exact there for these ranges).
     for _ in range(20000):
         a = f2b(rnd.uniform(-4, 4) * 2.0 ** rnd.randint(-20, 20))
         b = f2b(rnd.uniform(-4, 4) * 2.0 ** rnd.randint(-20, 20))
@@ -641,38 +729,41 @@ def selftest():
         if abs(((a >> 23) & 0xFF) - ((b >> 23) & 0xFF)) < 25 and fadd(a, b) != f2b(b2f(a) + b2f(b)):
             fails.append(f"fadd {a:08X} {b:08X}")
             break
-    # 3. ffma against math.fma (double) rounded to float, where the double fma is exact in the float sense.
+    # 3. ffma: one rounding of the exact a*b+c, against Fraction where a double holds the exact value.
     for _ in range(5000):
         a, b, c = (f2b(rnd.uniform(-2, 2) * 2.0 ** rnd.randint(-8, 8)) for _ in range(3))
         exact = Fraction(b2f(a)) * Fraction(b2f(b)) + Fraction(b2f(c))
-        want = f2b(float(exact)) if exact else 0
-        # float(Fraction) rounds to nearest double; a double holds a*b+c exactly here (48+ bits apart at most 64)
-        if exact and Fraction(float(exact)) == exact and ffma(a, b, c) != want:
+        if exact and Fraction(float(exact)) == exact and ffma(a, b, c) != f2b(float(exact)):
             fails.append(f"ffma {a:08X} {b:08X} {c:08X}")
             break
-    # 4. task 046's example: the squared length of (-0.852767, 0.00194, 0.033974).
+    # 4. The port's model b against the corpus's own code: tools/vfpu_probe.py port's harness results are checked in
+    #    --report; here task 046's example, the squared length of (-0.852767, 0.00194, 0.033974).
     v = [0xBF5A4EEF, 0x3AFE5500, 0x3D0B28A3]
-    port, chosen = dot_port_ct(v, v), model_fn(*CHOSEN)(v, v)
-    if port != 0x3F3A766C:
-        fails.append(f"task 046 example: the port model gives {port:08X}, the port gave 3F3A766C")
-    if chosen != 0x3F3A766B:
-        fails.append(f"task 046 example: the chosen model gives {chosen:08X}, PPSSPP gave 3F3A766B")
-    # 5. pspautotests' hardware results for vdot and vhdp (integer and near-integer operands, infinities).
+    if dot_port_ct(v, v) != 0x3F3A766C:
+        fails.append(f"task 046 example: model b gives {dot_port_ct(v, v):08X}, the port gave 3F3A766C")
+    if dot_chain(v, v) != 0x3F3A766B:
+        fails.append(f"task 046 example: chain gives {dot_chain(v, v):08X}, PPSSPP gave 3F3A766B")
+    # 5. pspautotests' results from a real PSP for vdot and vhdp. The hardware model must give all 150; every rule
+    #    must give the cases whose operands are integers (vectors 0 to 3: exact in every model).
     cases = autotest_cases()
     if cases is None:
         print(f"selftest: {AUTOTESTS / 'vector.expected'} not found; skipped the hardware cases")
     else:
-        for name, params in [CHOSEN, ("a", None), ("exact", None)]:
+        for name, params in [HW, ("chain", None), ("a", None), ("exact", None)]:
             fn = model_fn(name, params)
-            bad = 0
-            for label, s, t, want in cases:
+            bad, bad_int = [], []
+            for label, s, t, want, integer in cases:
                 got = special_dot(s, t) if any(is_special(x) for x in s + t) else fn(s, t)
                 if f"{b2f(got):f}" != want:
-                    bad += 1
-                    if name == CHOSEN[0]:
-                        fails.append(f"vector.expected {label}: {model_label(name, params)} prints {b2f(got):f}, "
-                                     f"the PSP {want}")
-            print(f"selftest: vector.expected {len(cases) - bad}/{len(cases)} with {model_label(name, params)}")
+                    bad.append(f"{label} {b2f(got):f} (PSP {want})")
+                    if integer:
+                        bad_int.append(label)
+            print(f"selftest: vector.expected {len(cases) - len(bad)}/{len(cases)} with {model_label(name, params)}"
+                  + (f"; differs on {', '.join(bad)}" if bad else ""))
+            if (name, params) == HW and bad:
+                fails.append(f"vector.expected: the hardware model misses {len(bad)}")
+            if bad_int:
+                fails.append(f"vector.expected: {model_label(name, params)} misses integer cases {bad_int}")
     for f in fails:
         print("selftest FAIL: " + f)
     print("vfpu_model --selftest: " + ("PASS" if not fails else "FAIL"))

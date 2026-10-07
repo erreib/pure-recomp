@@ -48,6 +48,7 @@ TASK046_SITES = (0x089196B8, 0x08926E08)   # the two vdot.t sites task 046 compa
 UNARY = {16: "vrcp", 17: "vrsq", 18: "vsin", 19: "vcos", 20: "vexp2", 21: "vlog2", 22: "vsqrt", 23: "vasin",
          24: "vnrcp", 26: "vnsin", 28: "vrexp2"}
 DOT_KINDS = ("vdot", "vhdp", "vmmul", "vtfm")
+CORES = {0: "interpreter", 1: "JIT", 2: "IR interpreter", 3: "JIT using IR"}
 
 
 def say(msg):
@@ -251,10 +252,14 @@ def stick_restore(before):
         say(f"memory stick: warning: {name} disappeared during the run")
 
 
-def ppsspp_race(track, logfile, breakpoints, seconds, wall_limit=1800.0):
+def ppsspp_race(track, logfile, breakpoints, seconds, cpu_core=None, wall_limit=3600.0):
     """The reference route for `track` with log-only breakpoints logging from READY: breakpoints is a list of
-    (address, logFormat[, span_us]); with a span a breakpoint logs only for that long after READY. Runs until the
-    player's race clock reaches `seconds`. Returns a summary dict."""
+    (address, logFormat[, (start_us, length_us)]); with a span a breakpoint logs only from start_us after READY for
+    length_us. Runs until the player's race clock reaches `seconds`. Returns a summary dict.
+
+    PPSSPP's interpreter (CPU core 0) stops at a log-only breakpoint as at any other (checked 2026-10-07), so with
+    that core the probe steps instead: every breakpoint stops the CPU, the probe reads the registers its logFormat
+    names (cpu.getAllRegs), writes the line PPSSPP would have logged to <log>.steps.log and resumes."""
     import base64
     import ppsspp_ctl as pc
     import pp_lines as pl
@@ -272,6 +277,14 @@ def ppsspp_race(track, logfile, breakpoints, seconds, wall_limit=1800.0):
     try:
         with pc.IniSession(False, port=pc.DEFAULT_PORT, renderer="hardware", hle_log=False, mute=True,
                            savestate_key=False):
+            ini = pc.Ini(pc.INI)
+            if cpu_core is not None:
+                # For this session only (IniSession puts the previous ini back afterwards): 0 the interpreter, 1 the
+                # JIT (this machine's setting, which every reference of ref/ was taken with), 2 the IR interpreter.
+                ini.set("CPU", "CPUCore", str(cpu_core))
+                ini.save()
+            out["cpu_core"] = int(pc.Ini(pc.INI).get("CPU", "CPUCore") or -1)
+            say(f"PPSSPP's CPU core: {out['cpu_core']} ({CORES.get(out['cpu_core'], '?')})")
             proc = pc.launch(pc.DEFAULT_ISO, str(logfile))
             dbg = None
             try:
@@ -285,18 +298,50 @@ def ppsspp_race(track, logfile, breakpoints, seconds, wall_limit=1800.0):
                 # already compiled (the first coverage run, armed at READY, saw none of the ship update's calls).
                 arm = int(pc.vblank_us(hold))
                 out["armed_usec"], out["armed_vblank"] = arm, hold
+                stepping = out["cpu_core"] == 0
+                out["stepping"] = stepping
+                names_at = {bp[0]: re.findall(r"\{(S\d{3}):x\}", bp[1]) for bp in breakpoints}
+                steps = open(Path(str(logfile) + ".steps.log"), "w") if stepping else None
+                vidx, nstops, last_check = None, 0, 0.0
                 for bp in breakpoints:
                     addr, fmt = bp[0], bp[1]
                     span = bp[2] if len(bp) > 2 else None
-                    cond = f"usec >= 0x{arm:x}" + (f" && usec < 0x{arm + span:x}" if span else "")
-                    dbg.request("cpu.breakpoint.add", address=addr, enabled=False, log=True, logFormat=fmt,
-                                condition=cond)
-                say(f"{len(breakpoints)} log breakpoints armed at boot, logging from vblank {hold} (READY)")
+                    if span:
+                        start, length = span
+                        cond = f"usec >= 0x{arm + start:x} && usec < 0x{arm + start + length:x}"
+                    else:
+                        cond = f"usec >= 0x{arm:x}"
+                    if stepping:
+                        dbg.request("cpu.breakpoint.add", address=addr, enabled=True, condition=cond)
+                    else:
+                        dbg.request("cpu.breakpoint.add", address=addr, enabled=False, log=True, logFormat=fmt,
+                                    condition=cond)
+                say(f"{len(breakpoints)} {'stepping' if stepping else 'log'} breakpoints armed at boot, active from "
+                    f"vblank {hold} (READY)")
                 dbg.resume()
                 clock, end = 0.0, None
                 while True:
                     if time.time() - t0 > wall_limit:
                         raise RuntimeError("wall-clock limit reached")
+                    if stepping:
+                        try:
+                            ev = dbg.wait_event("cpu.stepping", 0.5)
+                        except TimeoutError:
+                            st = dbg.request("cpu.status")      # a stop whose event went missing
+                            ev = {"pc": st["pc"], "ticks": st["ticks"]} if st["stepping"] else None
+                        if ev is not None and ev.get("pc") in names_at:
+                            cat = dbg.request("cpu.getAllRegs")["categories"][2]
+                            if vidx is None:
+                                vidx = {n: i for i, n in enumerate(cat["registerNames"])}
+                            vals = cat["uintValues"]
+                            steps.write(f"BKP PC={ev['pc']:08x}: VP {ev['ticks'] // 222} "
+                                        + " ".join(f"{vals[vidx[n]]:x}" for n in names_at[ev["pc"]]) + "\n")
+                            dbg.drop("cpu.resume")
+                            dbg.send("cpu.resume")
+                            nstops += 1
+                            if time.time() - last_check < 2.0:
+                                continue
+                        last_check = time.time()
                     frame = pc.frame_at_us(dbg.usec())
                     if frame < hold:
                         time.sleep(min(2.0, max(0.05, (hold - frame) / 60 * 0.8)))
@@ -310,11 +355,21 @@ def ppsspp_race(track, logfile, breakpoints, seconds, wall_limit=1800.0):
                             end = (clock,) + struct.unpack_from("<3f", raw, 0)
                             dbg.pause()
                             out["end_usec"] = dbg.usec()
+                            blk = base64.b64decode(dbg.request("memory.read", address=pl.RECORD_POS,
+                                                               size=8 * pl.STRIDE)["base64"])
+                            ships = {k: struct.unpack_from("<3f", blk, k * pl.STRIDE)
+                                     + (struct.unpack_from("<f", blk, k * pl.STRIDE + 0x1C)[0],)
+                                     for k in range(8)}
                             break
+                    if stepping:
+                        continue                           # a stop meanwhile is the next event of the loop
                     if frame > hold + 1500 and clock <= 0.0:
                         raise RuntimeError("no race clock: the route did not reach a race")
                     time.sleep(0.25)
             finally:
+                if steps:
+                    steps.close()
+                    out["stops"] = nstops
                 if dbg:
                     dbg.close()
                 pc.stop_process(proc.pid, proc)
@@ -322,12 +377,19 @@ def ppsspp_race(track, logfile, breakpoints, seconds, wall_limit=1800.0):
         stick_restore(before)
     out["end_clock"], out["end_player"] = end[0], list(end[1:])
     out["wall_seconds"] = round(time.time() - t0, 1)
-    ref = sc.read_pp_samples(sc.REF / "trajectories" / f"{track}.csv").get(sc.PLAYER, [])
-    if ref:
-        import math
-        q = sc.interp(ref, [p[0] for p in ref], end[0])
+    # Is this the reference race? Every ship's position at the end against the scorecard's PPSSPP reference (task
+    # 044's, taken without breakpoints) at the same clock: the probe's breakpoints must not change the race.
+    import math
+    refs = sc.read_pp_samples(sc.REF / "trajectories" / f"{track}.csv")
+    offs = {}
+    for k, (x, y, z, c) in ships.items():
+        ref = refs.get(k, [])
+        q = sc.interp(ref, [p_[0] for p_ in ref], c) if ref else None
         if q:
-            out["player_off_reference_m"] = round(math.dist(end[1:], q), 4)
+            offs[k] = round(math.dist((x, y, z), q), 4)
+    if sc.PLAYER in offs:
+        out["player_off_reference_m"] = offs[sc.PLAYER]
+    out["ships_off_reference_m"] = offs
     return out
 
 
@@ -345,7 +407,7 @@ def cmd_cover(a):
         say(f"reusing {log}")
     else:
         say(f"covering {len(sites)} sites on {a.track} to race clock {a.seconds} s")
-        info = ppsspp_race(a.track, log, bps, a.seconds)
+        info = ppsspp_race(a.track, log, bps, a.seconds, a.cpu_core)
     hits = {}
     for line in open(log, errors="replace"):
         m = BKP_RE.search(line)
@@ -399,14 +461,15 @@ def cmd_sample(a):
     all_sites = {s["addr"]: s for s in scan()}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    have_cov = (out / "coverage.csv").exists() and (out / "coverage.json").exists()
+    cov = next((d for d in (out, out.parent) if (d / "coverage.csv").exists() and (d / "coverage.json").exists()),
+               None)
     if a.sites in ("auto", "all"):
-        if not have_cov:
-            sys.exit(f"vfpu_probe: {out / 'coverage.csv'} missing: run `cover` first or name the sites")
-        addrs = pick_sites(out, a.sites, a.per_kind, a.min_hits)
+        if cov is None:
+            sys.exit(f"vfpu_probe: no coverage.csv in {out} or {out.parent}: run `cover` first or name the sites")
+        addrs = pick_sites(cov, a.sites, a.per_kind, a.min_hits)
     else:
         addrs = [int(x, 16) for x in a.sites.split(",")]
-    rates = coverage_rates(out) if have_cov else {}
+    rates = coverage_rates(cov) if cov else {}
     sites = []
     for x in addrs:
         if x not in all_sites:
@@ -421,10 +484,12 @@ def cmd_sample(a):
         plan.setdefault(s["addr"], {"op": None, "res": []})["op"] = s
         for nxt in s["next"]:
             plan.setdefault(nxt, {"op": None, "res": []})["res"].append(s)
-    # A hot site logs for a shorter time after READY, so that it gives about --cap rows (its rate from the coverage
-    # run); the task 046 sites and every site under the cap log for the whole run. A breakpoint serving several
-    # sites logs for the longest of their spans.
-    full = (a.seconds + 4.0) * 1e6                   # READY to GO is about 3 s
+    # A hot site logs for a shorter time, from GO on (READY + 200 vblanks, 3.3 s; much of the race's code runs only
+    # once the ships move), so that it gives about --cap rows (its rate from the coverage run); the task 046 sites
+    # and every site under the cap log from READY for the whole run. A breakpoint serving several sites logs for the
+    # longest of their spans.
+    full = (a.seconds + 4.0) * 1e6
+    go = int(200 * 16683.3)
     span = {}
     for s_ in sites:
         rate = rates.get(s_["addr"], (0.0, None))[0]
@@ -443,20 +508,22 @@ def cmd_sample(a):
             regs += p["op"]["s"] + p["op"]["t"]
             spans.append(span[p["op"]["addr"]])
         fmt = "VP {usec:d} " + " ".join(f"{{{scalar_name(r)}:x}}" for r in regs)
-        bps.append((addr, fmt, None if None in spans else max(spans)))
+        bps.append((addr, fmt, None if None in spans else (go, max(spans))))
     WORK.mkdir(parents=True, exist_ok=True)
-    log = WORK / f"sample_{a.track}.log"
+    log = WORK / f"sample_{a.track}_{out.name}.log"
     if a.reuse_log and log.exists():
         old = json.loads((out / "sites.json").read_text()) if (out / "sites.json").exists() else {}
         info = old.get("run", {"track": a.track})
         say(f"reusing {log}")
     else:
         say(f"sampling {len(sites)} sites ({len(bps)} breakpoints) on {a.track} to race clock {a.seconds} s")
-        info = ppsspp_race(a.track, log, bps, a.seconds)
+        info = ppsspp_race(a.track, log, bps, a.seconds, a.cpu_core)
     rows = {s["addr"]: [] for s in sites}
     pending = None               # (site, usec, operand words) of the line just before
     lines = dropped = 0
-    for line in open(log, errors="replace"):
+    steps = Path(str(log) + ".steps.log")
+    src = steps if info.get("stepping") else log
+    for line in open(src, errors="replace"):
         m = BKP_RE.search(line)
         if not m or m[2] != "VP":
             continue
@@ -509,6 +576,7 @@ def cmd_sample(a):
         f"player {info.get('player_off_reference_m')} m from the reference at {info.get('end_clock')} s")
     if not a.keep_log:
         log.unlink(missing_ok=True)
+        steps.unlink(missing_ok=True)
 
 
 # ------------------------------------------------------------------------------------------- the port's side
@@ -617,6 +685,8 @@ def main():
         s.add_argument("--out", default=str(OUT))
         s.add_argument("--keep-log", action="store_true", help="keep PPSSPP's log in out/vfpu_probe/")
         s.add_argument("--reuse-log", action="store_true", help="parse the kept log again instead of running")
+        s.add_argument("--cpu-core", type=int, choices=[0, 1, 2, 3],
+                       help="PPSSPP's CPU core for the run (default: the ini's, 1 the JIT on this machine)")
         s.set_defaults(fn=fn)
         if name == "cover":
             s.add_argument("--kinds")
