@@ -18,8 +18,10 @@
 //              a texture with mip levels (task 037) is a mipmapped texture, each level decoded from its own
 //              address, sampled at the level the GE's rule (TEXLEVEL) picks.
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
-//              blend, the write masks, the alpha test, the depth test and the stencil; clears; scissor;
-//              the GE viewport folded into clip space; back-face culling.
+//              blend, the write masks, the alpha test, the colour test, the depth test and the stencil; clears;
+//              scissor; the GE viewport folded into clip space; back-face culling. A draw into a 5650, 5551 or
+//              4444 target blends in the shader and keeps the format's bits, dithered when the GE says (task
+//              040); with CLIPENABLE on, depth is clamped as the GE clamps it, and MINZ/MAXZ tested.
 //              Transformed draws get the GE's per-vertex lighting and fog (ge.vert's, in the shaders), and
 //              transformed sprites are expanded on the screen after projection, as the GE draws them.
 //   frames     one command buffer a frame, committed at the flip. present_image() names the display
@@ -123,8 +125,9 @@ struct VertexUniforms {
     std::array<float, 16> texture_matrix{};
     std::array<float, 4> viewer{};
     std::array<float, 4> uv_remap{1.0f, 1.0f, 0.0f, 0.0f};
+    std::array<float, 4> depth{};  // the depth clamp (task 040): the GE's z scale and offset, MINZ, MAXZ
 };
-static_assert(sizeof(VertexUniforms) == 240u, "VertexUniforms must match metal_shaders.h");
+static_assert(sizeof(VertexUniforms) == 256u, "VertexUniforms must match metal_shaders.h");
 
 struct Light {
     std::array<float, 4> position{};
@@ -162,8 +165,17 @@ struct FragmentUniforms {
     // y the part of the level D (in 1/16 levels) that does not change across the draw, z and w level 0's size.
     std::array<float, 4> level{};
     std::array<float, 4> level_range{};  // x: the highest D, 16 x (levels - 1)
+    std::array<std::uint32_t, 4> color_test{};  // the colour test (task 040): function, reference, mask
+    // A draw into a 16-bit target (task 040), which blends in the shader: x 1 when blended, y and z the GE's source
+    // and destination factors, w its equation; the FIX colours; the dither matrix's rows; x the target's format and
+    // y 1 when the draw dithers.
+    std::array<std::uint32_t, 4> blend{};
+    std::array<float, 4> fix_source{};
+    std::array<float, 4> fix_destination{};
+    std::array<std::uint32_t, 4> dither{};
+    std::array<std::uint32_t, 4> target{};
 };
-static_assert(sizeof(FragmentUniforms) == 112u, "FragmentUniforms must match metal_shaders.h");
+static_assert(sizeof(FragmentUniforms) == 208u, "FragmentUniforms must match metal_shaders.h");
 
 // FragmentUniforms::level.x: how the level is chosen. None samples level 0 with the derivatives Metal takes (a
 // texture without levels); the others are TEXLEVEL's modes 0 to 2 plus one, the level computed in the shader.
@@ -400,6 +412,10 @@ struct RenderKey {
     bool dual_source{};
     bool textured{};
     bool alpha_test{};
+    bool color_test{};  // task 040: the colour test in the fragment function
+    // Task 040: a 5650, 5551 or 4444 target: ge_fragment_16, which blends in the shader (the pipeline does not) and
+    // keeps the format's bits, dithered when the draw says.
+    bool sixteen{};
     auto operator<=>(const RenderKey &) const = default;
 };
 
@@ -434,7 +450,8 @@ std::string to_text(const RenderKey &key) {
         << " destination=" << unsigned{key.destination} << " operation=" << unsigned{key.operation}
         << " write_mask=" << unsigned{key.write_mask} << " alpha_destination=" << unsigned{key.alpha_destination}
         << " dual_source=" << unsigned{key.dual_source} << " textured=" << unsigned{key.textured}
-        << " alpha_test=" << unsigned{key.alpha_test};
+        << " alpha_test=" << unsigned{key.alpha_test} << " color_test=" << unsigned{key.color_test}
+        << " sixteen=" << unsigned{key.sixteen};
     return out.str();
 }
 
@@ -469,13 +486,25 @@ bool take_field(const std::map<std::string, unsigned> &fields, const char *name,
     return true;
 }
 
+// A field added after the list was first written (task 040's color_test and sixteen): 0 when the line has none.
+template <typename T>
+bool take_later_field(const std::map<std::string, unsigned> &fields, const char *name, T &out, unsigned largest) {
+    if (fields.find(name) == fields.end()) {
+        out = T{};
+        return true;
+    }
+    return take_field(fields, name, out, largest);
+}
+
 bool from_fields(const std::map<std::string, unsigned> &fields, RenderKey &key) {
     return take_field(fields, "blend", key.blend, 1u) && take_field(fields, "source", key.source) &&
            take_field(fields, "destination", key.destination) && take_field(fields, "operation", key.operation) &&
            take_field(fields, "write_mask", key.write_mask) &&
            take_field(fields, "alpha_destination", key.alpha_destination) &&
            take_field(fields, "dual_source", key.dual_source, 1u) && take_field(fields, "textured", key.textured, 1u) &&
-           take_field(fields, "alpha_test", key.alpha_test, 1u);
+           take_field(fields, "alpha_test", key.alpha_test, 1u) &&
+           take_later_field(fields, "color_test", key.color_test, 1u) &&
+           take_later_field(fields, "sixteen", key.sixteen, 1u);
 }
 
 bool from_fields(const std::map<std::string, unsigned> &fields, DepthStencilKey &key) {
@@ -527,6 +556,10 @@ struct Stats {
     std::uint64_t mipmapped_draws{}; // draws that sampled a texture with levels
     std::uint64_t framebuffer_textures{};
     std::uint64_t texture_mapped{};  // draws whose texture coordinates came from the texture matrix or the normals
+    std::uint64_t color_tested{};    // draws with the colour test (task 040)
+    std::uint64_t sixteen_bit{};     // draws into 5650, 5551 and 4444 targets, which keep the format's bits
+    std::uint64_t dithered{};        // of those, the ones the GE dithers
+    std::uint64_t depth_clamped{};   // transformed draws with CLIPENABLE's depth clamp
     std::uint64_t copies{};
     std::uint64_t uploads{};
     std::uint64_t waits{};
@@ -639,18 +672,10 @@ public:
                 return false;
             }
             vertex_function_ = [library_ newFunctionWithName:@"ge_vertex"];
-            // By kTextured | kAlphaTest << 1, then the same with the second output for dual-source blending.
-            for (std::uint32_t variant = 0; variant < fragment_functions_.size(); ++variant) {
-                MTLFunctionConstantValues *values = [MTLFunctionConstantValues new];
-                const bool textured = (variant & 1u) != 0u;
-                const bool alpha_test = (variant & 2u) != 0u;
-                [values setConstantValue:&textured type:MTLDataTypeBool atIndex:0];
-                [values setConstantValue:&alpha_test type:MTLDataTypeBool atIndex:1];
-                fragment_functions_[variant] =
-                    [library_ newFunctionWithName:(variant & 4u) != 0u ? @"ge_fragment_dual" : @"ge_fragment"
-                                   constantValues:values
-                                            error:&failure];
-                if (fragment_functions_[variant] == nil) {
+            // By kTextured | kAlphaTest << 1, then the same with the second output for dual-source blending: the
+            // eight made here; those with the colour test or for a 16-bit target (task 040) on first use.
+            for (std::uint32_t variant = 0; variant < 8u; ++variant) {
+                if (fragment_function(variant, &failure) == nil) {
                     error = std::string("the fragment function does not specialise: ") +
                             (failure != nil ? failure.localizedDescription.UTF8String : "no message");
                     return false;
@@ -708,6 +733,16 @@ public:
             no_texture_map_ = portablekit::env("NO_TEXMAP") != nullptr;
             // Ours (task 037): every texture uploaded and sampled at level 0 alone, as before the mip levels.
             no_mipmaps_ = portablekit::env("NO_MIPMAPS") != nullptr;
+            // Ours (task 040), each restoring what the backend drew before: every fragment kept (no colour test);
+            // 5650, 5551 and 4444 targets written at 8 bits a channel by the pipeline's blend, never dithered; every
+            // transformed draw clipped at both depth planes, MINZ and MAXZ unread.
+            no_color_test_ = portablekit::env("NO_COLOR_TEST") != nullptr;
+            no_dither_ = portablekit::env("NO_DITHER") != nullptr;
+            no_depth_clamp_ = portablekit::env("NO_DEPTH_CLAMP") != nullptr;
+            // Ours (task 040), for looking at a target the game draws but does not show (the 565 billboard target):
+            // each flip presents the target drawn last at this address instead of the display.
+            if (const char *show = portablekit::env("METAL_SHOW_TARGET"); show != nullptr && *show != '\0')
+                show_target_ = static_cast<std::uint32_t>(std::strtoul(show, nullptr, 0));
             // The framework's traces, as the Vulkan backend reads them: a line per copy of the stencil into the
             // alpha, and per depth write-back.
             trace_stencil_copy_ = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
@@ -903,6 +938,8 @@ public:
             if (trace_file_ != nullptr) pure::metal::trace_flip(frames_);
             frame_draws_ = 0u;
             Target *shown = latest_target_at(GuestMemory::canonical(display_address));
+            if (show_target_ != 0u)
+                if (Target *named = latest_target_at(GuestMemory::canonical(show_target_)); named != nullptr) shown = named;
             if (shown == nullptr) shown = last_drawn_;
             presented_ = shown;
             // The next write_back_frame() stores this picture (as the Vulkan backend stores at each flip the
@@ -1268,6 +1305,9 @@ private:
         line("frames", stats_.frames);
         line("depths", stats_.depths);
         std::cout << "\n";
+        std::cout << "[metal] colour test: " << stats_.color_tested << " draws; 16-bit targets: " << stats_.sixteen_bit
+                  << " draws (" << stats_.dithered << " dithered); depth clamp: " << stats_.depth_clamped
+                  << " draws\n";
     }
 
     void report() {
@@ -2073,6 +2113,24 @@ private:
         key.destination = static_cast<std::uint8_t>(out_destination);
     }
 
+    // A draw into a 16-bit target (task 040) blends in the shader (ge_fragment_16) with the GE's own factors and
+    // equation, the FIX colours and doubled factors exact; the pipeline does not blend.
+    static void shader_blend(const BlendState &blend, FragmentUniforms &fragment) {
+        if (!blend.enabled) return;
+        fragment.blend = {1u, blend.source_factor & 0xFu, blend.destination_factor & 0xFu, blend.equation & 7u};
+        fragment.fix_source = unpack_color(blend.fixed_source);
+        fragment.fix_destination = unpack_color(blend.fixed_destination);
+    }
+
+    // Whether the shader's blend reads the destination's alpha (DA, 1-DA, 2DA or 1-2DA on either side), which is
+    // the PSP's stencil.
+    static bool shader_blend_reads_destination_alpha(const FragmentUniforms &fragment, std::uint8_t write_mask) {
+        const auto reads = [](std::uint32_t factor) { return factor == 4u || factor == 5u || factor == 8u || factor == 9u; };
+        return fragment.blend[0] != 0u && fragment.blend[3] < 3u &&
+               (write_mask & (MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue)) != 0u &&
+               (reads(fragment.blend[1]) || reads(fragment.blend[2]));
+    }
+
     // Whether a blend reads the fragment's alpha (SA or 1-SA on either side, the doubled forms drawn single),
     // so the fragment cannot hand over the stencil value as its alpha without dual-source blending.
     static bool blend_reads_source_alpha(const RenderKey &key, std::uint8_t write_mask) {
@@ -2194,12 +2252,39 @@ private:
         }
     }
 
+    // The fragment function by kTextured | kAlphaTest << 1 | dual source << 2 | kColorTest << 3 | 16-bit target << 4
+    // (ge_fragment, ge_fragment_dual or ge_fragment_16, specialised), made on first use.
+    id<MTLFunction> fragment_function(std::uint32_t variant, NSError **failure = nullptr) {
+        variant &= 31u;
+        if (fragment_functions_[variant] != nil) return fragment_functions_[variant];
+        MTLFunctionConstantValues *values = [MTLFunctionConstantValues new];
+        const bool textured = (variant & 1u) != 0u;
+        const bool alpha_test = (variant & 2u) != 0u;
+        const bool color_test = (variant & 8u) != 0u;
+        [values setConstantValue:&textured type:MTLDataTypeBool atIndex:0];
+        [values setConstantValue:&alpha_test type:MTLDataTypeBool atIndex:1];
+        [values setConstantValue:&color_test type:MTLDataTypeBool atIndex:2];
+        NSString *name = (variant & 16u) != 0u ? @"ge_fragment_16"
+                         : (variant & 4u) != 0u ? @"ge_fragment_dual"
+                                                 : @"ge_fragment";
+        NSError *error = nil;
+        fragment_functions_[variant] = [library_ newFunctionWithName:name constantValues:values error:&error];
+        if (fragment_functions_[variant] == nil) {
+            std::cout << "[metal] the fragment function " << name.UTF8String << " " << variant
+                      << " does not specialise: " << (error != nil ? error.localizedDescription.UTF8String : "no message")
+                      << "\n";
+            if (failure != nullptr) *failure = error;
+        }
+        return fragment_functions_[variant];
+    }
+
     // The descriptor of a render pipeline: what render_pipeline() makes on first use and the pre-warm ahead of it.
     MTLRenderPipelineDescriptor *pipeline_descriptor(const RenderKey &key) {
         MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
         descriptor.vertexFunction = vertex_function_;
-        descriptor.fragmentFunction = fragment_functions_[(key.textured ? 1u : 0u) | (key.alpha_test ? 2u : 0u) |
-                                                          (key.dual_source ? 4u : 0u)];
+        descriptor.fragmentFunction = fragment_function((key.textured ? 1u : 0u) | (key.alpha_test ? 2u : 0u) |
+                                                        (key.dual_source ? 4u : 0u) | (key.color_test ? 8u : 0u) |
+                                                        (key.sixteen ? 16u : 0u));
         // With dual-source blending the colour blend's source alpha is the fragment's own, from the second
         // output, while the first output's alpha is the stencil value the target stores.
         const auto colour_factor = [&](std::uint8_t factor) {
@@ -2359,6 +2444,17 @@ private:
         VertexUniforms vertex{};
         std::uint32_t blend_color = 0u;
         const bool textured = call.texture.enabled && !call.clear_mode;
+        // A 5650, 5551 or 4444 target keeps the format's bits of every write, dithered when the GE says (task 040):
+        // ge_fragment_16 blends and quantises; clears keep the bits undithered.
+        const bool sixteen = !no_dither_ && call.target.color_format < 3u;
+        if (sixteen) {
+            key.render.sixteen = true;
+            const bool dithered = call.dither.enabled && !call.clear_mode;
+            fragment.target = {call.target.color_format, dithered ? 1u : 0u, 0u, 0u};
+            fragment.dither = call.dither.rows;
+            ++stats_.sixteen_bit;
+            if (dithered) ++stats_.dithered;
+        }
         id<MTLTexture> texture = white_;
         std::uint32_t sampler = 0u;
         Target *source = nullptr;
@@ -2431,7 +2527,9 @@ private:
                 stencil_reference = color >> 24u;
             }
         } else {
-            translate_blend(call.blend, key.render, fragment, blend_color);
+            // A 16-bit target blends in the shader (task 040); any other through the pipeline's blend.
+            if (sixteen) shader_blend(call.blend, fragment);
+            else translate_blend(call.blend, key.render, fragment, blend_color);
             // Whole colour channels the write mask keeps are not written; the alpha, the PSP's stencil, only
             // by the stencil operations.
             std::uint8_t mask = MTLColorWriteMaskNone;
@@ -2446,13 +2544,19 @@ private:
             if (stored >= 0) {
                 mask |= MTLColorWriteMaskAlpha;
                 fragment.stencil = {1u, static_cast<std::uint32_t>(stored), 0u, 0u};
-                // A colour blend that reads the source alpha reads the fragment's own from the second output.
-                key.render.dual_source = blend_reads_source_alpha(key.render, mask);
+                // A colour blend that reads the source alpha reads the fragment's own from the second output (the
+                // shader's own blend reads it directly).
+                key.render.dual_source = !sixteen && blend_reads_source_alpha(key.render, mask);
             }
             key.render.write_mask = mask;
             key.render.alpha_test = call.alpha_test.enabled && call.alpha_test.function != 1u;
             fragment.alpha_test = {call.alpha_test.function, call.alpha_test.reference & 0xFFu,
                                    call.alpha_test.mask & 0xFFu, 0u};
+            // The colour test (task 040), ALWAYS compiled out as the alpha test's.
+            key.render.color_test = !no_color_test_ && call.color_test.enabled && (call.color_test.function & 3u) != 1u;
+            fragment.color_test = {call.color_test.function & 3u, call.color_test.reference & 0x00FFFFFFu,
+                                   call.color_test.mask & 0x00FFFFFFu, 0u};
+            if (key.render.color_test) ++stats_.color_tested;
             // The GE writes depth only where it tests it.
             key.depth.compare = static_cast<std::uint8_t>(call.depth.test_enabled ? to_compare(call.depth.function)
                                                                                   : MTLCompareFunctionAlways);
@@ -2485,6 +2589,8 @@ private:
 
         // Positions: screen pixels in through mode; the GE viewport folded into clip space otherwise.
         MTLViewport viewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0};
+        // CLIPENABLE's depth clamp (task 040) for transformed draws; without it, Metal clips at both planes.
+        const bool clamp_depth = !call.through && call.clip_enabled && !no_depth_clamp_;
         vertex.mode = {call.through ? 1u : 0u, sprite_corners_ != 0u ? kClipPositions : 0u,
                        (fogged ? kFog : 0u) | (lit ? kLighting : 0u), 0u};
         if (!call.through) {
@@ -2499,11 +2605,23 @@ private:
             } else {
                 vertex.screen = {1.0f, 0.0f, -1.0f, 0.0f};
             }
-            if (vp.z_scale != 0.0f) {
-                // The shader hands over z in [0, w] for the PSP's [-w, w]; this applies the GE's z scale
-                // and offset, reversed when the game set a reversed range.
-                viewport.znear = std::clamp((vp.z_offset - vp.z_scale) / 65535.0, 0.0, 1.0);
-                viewport.zfar = std::clamp((vp.z_offset + vp.z_scale) / 65535.0, 0.0, 1.0);
+            if (clamp_depth) {
+                // CLIPENABLE on (task 040): the shader computes the GE's screen z, clamps it per vertex and hands
+                // it over as depth z / 65535 in a viewport of 0..1; the near plane and MINZ/MAXZ are clip
+                // distances, and Metal does not clip at the depth range's ends (depthClipMode clamp).
+                vertex.mode[3] = 1u;
+                vertex.depth = {vp.z_scale, vp.z_offset, static_cast<float>(call.depth.range_near),
+                                static_cast<float>(call.depth.range_far)};
+                ++stats_.depth_clamped;
+            } else {
+                if (!call.clip_enabled && !no_depth_clamp_)
+                    not_emulated("CLIPENABLE off on a transformed draw (drawn clipped at both depth planes)", 0u);
+                if (vp.z_scale != 0.0f) {
+                    // The shader hands over z in [0, w] for the PSP's [-w, w]; this applies the GE's z scale
+                    // and offset, reversed when the game set a reversed range.
+                    viewport.znear = std::clamp((vp.z_offset - vp.z_scale) / 65535.0, 0.0, 1.0);
+                    viewport.zfar = std::clamp((vp.z_offset + vp.z_scale) / 65535.0, 0.0, 1.0);
+                }
             }
         }
         const bool cull = call.culling_enabled && !no_cull_ && !call.through && type == MTLPrimitiveTypeTriangle &&
@@ -2512,7 +2630,9 @@ private:
         // Into the target's pass (after the texture, whose copy may have ended it).
         begin_pass(target);
         // A blend that reads the destination's alpha reads the PSP's stencil.
-        if (alpha_stale_ && blend_reads_destination_alpha(key.render)) resolve_stencil_alpha("destination alpha read");
+        const bool reads_destination_alpha = sixteen ? shader_blend_reads_destination_alpha(fragment, key.render.write_mask)
+                                                     : blend_reads_destination_alpha(key.render);
+        if (alpha_stale_ && reads_destination_alpha) resolve_stencil_alpha("destination alpha read");
         if (!follows) alpha_stale_ = true;
         if (key.depth.stencil) ++stats_.stencil_draws;
         if (target.guest_words.empty() || target.last_drawn_frame != frames_) snapshot_guest_words(memory, target);
@@ -2540,6 +2660,12 @@ private:
             [encoder_ setViewport:viewport];
             bound_.viewport = viewport;
             bound_.viewport_set = true;
+        }
+        const MTLDepthClipMode depth_clip = clamp_depth ? MTLDepthClipModeClamp : MTLDepthClipModeClip;
+        if (!bound_.depth_clip_set || bound_.depth_clip != depth_clip) {
+            [encoder_ setDepthClipMode:depth_clip];
+            bound_.depth_clip = depth_clip;
+            bound_.depth_clip_set = true;
         }
         const MTLScissorRect rect{scissor.x, scissor.y, scissor.width, scissor.height};
         if (!bound_.scissor_set || bound_.scissor.x != rect.x || bound_.scissor.y != rect.y ||
@@ -2649,6 +2775,11 @@ private:
                 std::cout << " opaque";
             if (call.alpha_test.enabled)
                 std::cout << " at " << call.alpha_test.function << " ref " << call.alpha_test.reference;
+            if (call.color_test.enabled)
+                std::cout << " ctest " << call.color_test.function << " ref " << std::hex << call.color_test.reference
+                          << " mask " << call.color_test.mask << std::dec;
+            if (call.dither.enabled && call.target.color_format < 3u) std::cout << " dither";
+            if (!call.through && !call.clip_enabled) std::cout << " noclip";
             if (call.depth.test_enabled) std::cout << " z " << call.depth.function << (call.depth.write_enabled ? " w" : "");
             if (call.stencil.enabled) std::cout << " stencil " << call.stencil.function;
             if (call.color_write_mask != 0u) std::cout << " cmask " << std::hex << call.color_write_mask << std::dec;
@@ -2721,6 +2852,8 @@ private:
         bool blend_color_set{};
         std::uint32_t stencil_reference{};
         bool stencil_reference_set{};
+        MTLDepthClipMode depth_clip{MTLDepthClipModeClip};
+        bool depth_clip_set{};
     };
 
     bool ready_{};
@@ -2728,7 +2861,8 @@ private:
     id<MTLCommandQueue> queue_;
     id<MTLLibrary> library_;
     id<MTLFunction> vertex_function_;
-    std::array<id<MTLFunction>, 8> fragment_functions_{};  // by kTextured | kAlphaTest << 1 | dual source << 2
+    // By kTextured | kAlphaTest << 1 | dual source << 2 | kColorTest << 3 | 16-bit target << 4 (fragment_function()).
+    std::array<id<MTLFunction>, 32> fragment_functions_{};
     std::array<id<MTLSamplerState>, 48> samplers_{};
     id<MTLTexture> white_;
     id<MTLBuffer> readback_;          // the presented picture, read back (picture_)
@@ -2789,6 +2923,10 @@ private:
     bool no_cull_{};
     bool no_texture_map_{};
     bool no_mipmaps_{};
+    bool no_color_test_{};
+    bool no_dither_{};
+    bool no_depth_clamp_{};
+    std::uint32_t show_target_{};  // PURE_METAL_SHOW_TARGET: the target each flip presents instead of the display
     bool trace_stencil_copy_{};
     bool trace_depth_{};
     bool depth_announced_{};

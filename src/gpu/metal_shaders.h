@@ -10,7 +10,10 @@
 // functions, the alpha test by the GE's numbering (0 NEVER, 1 ALWAYS: patch 0005) and the FIX source factor;
 // the stencil value stored as the target's alpha instead of the fragment's, with the fragment's own alpha handed
 // to a source-alpha blend as a second output (dual-source blending, ge_fragment_dual) as patches 0004 and 0006 do
-// (task 025). The colour test, logic ops and colour doubling are not in the draw state.
+// (task 025). Task 040 added the colour test, the writes into 16-bit targets (ge_fragment_16: the blend done in the
+// shader on the target's colour, the dither matrix's offset, and the target's own bits kept) and the depth clamp of
+// CLIPENABLE (the near plane and MINZ/MAXZ as clip distances, each vertex's screen z clamped). Logic ops and colour
+// doubling are not in the draw state.
 //
 // The structs below are laid out exactly as their C++ twins in metal_backend.mm (static_asserts there).
 #pragma once
@@ -48,6 +51,9 @@ struct VertexUniforms {
     float4 viewer;        // xyz: the viewer's direction in world space (the view matrix's third column, normalized)
     float4 uv_remap;      // modes 1 and 2: the texture's coordinates into the image sampled, uv * xy + zw (a target
                           // sampled as a texture covers part of it); identity otherwise
+    // The depth clamp (task 040), for transformed draws with mode.w 1 (CLIPENABLE on): x and y the GE viewport's z
+    // scale and offset, z and w MINZ and MAXZ.
+    float4 depth;
 };
 
 // One of the GE's lights: Light in metal_backend.mm. Colours are 0..1.
@@ -90,6 +96,15 @@ struct FragmentUniforms {
     // TEXLEVEL's modes), y the part of D (1/16 levels) that is the same across the draw, zw level 0's size.
     float4 level;
     float4 level_range;   // x: the highest D, 16 x (levels - 1)
+    uint4 color_test;     // the colour test (task 040): x the GE function (0 NEVER, 2 EQUAL, 3 NOTEQUAL; 1 ALWAYS is
+                          // compiled out), y the reference, z the mask, both 0x00BBGGRR
+    // A draw into a 16-bit target (ge_fragment_16, task 040), which blends in the shader:
+    uint4 blend;          // x: 1 when blended, y: the GE's source factor, z: its destination factor, w: the equation
+    float4 fix_source;    // rgb: FIXA
+    float4 fix_destination;  // rgb: FIXB
+    uint4 dither;         // DITH0 to DITH3: the matrix's rows for y & 3, four signed 4-bit offsets each, x & 3's at
+                          // bits 4 x (x & 3)
+    uint4 target;         // x: the target's format (0 5650, 1 5551, 2 4444), y: 1 when the draw dithers
 };
 
 // What ge_fragment_dual hands the blend: the colour with the stored alpha, and the fragment's own alpha as the
@@ -99,9 +114,11 @@ struct DualOutput {
     float4 source [[color(0), index(1)]];
 };
 
-// Specialisation: a pipeline without a texture or an alpha test has neither in its fragment function.
+// Specialisation: a pipeline without a texture, an alpha test or a colour test has none of them in its fragment
+// function.
 constant bool kTextured [[function_constant(0)]];
 constant bool kAlphaTest [[function_constant(1)]];
+constant bool kColorTest [[function_constant(2)]];
 
 struct Varyings {
     float4 position [[position]];
@@ -110,6 +127,18 @@ struct Varyings {
     float3 specular;      // a separate specular term, added after texturing
     float fog;            // 1 clear, 0 fogged
     float point_size [[point_size]];
+};
+
+// What ge_vertex hands on: Varyings, and the clip distances of the depth clamp (task 040), which the fragment
+// functions do not read: [0] the near plane, [1] MINZ, [2] MAXZ, each kept where it is not negative.
+struct VertexOut {
+    float4 position [[position]];
+    float3 uv;
+    float4 color;
+    float3 specular;
+    float fog;
+    float point_size [[point_size]];
+    float clip_distance [[clip_distance]] [3];
 };
 
 // The GE's per-vertex lighting, as ge.vert evaluates it, in world space: emissive, plus the global ambient
@@ -224,17 +253,18 @@ float3 map_texture(const GeVertex v, constant VertexUniforms &u, constant Lighti
     return float3(fma(st, u.uv_remap.xy, u.uv_remap.zw), 1.0f);
 }
 
-vertex Varyings ge_vertex(uint vid [[vertex_id]],
-                          const device GeVertex *vertices [[buffer(0)]],
-                          constant VertexUniforms &u [[buffer(1)]],
-                          constant LightingUniforms &l [[buffer(2)]]) {
+vertex VertexOut ge_vertex(uint vid [[vertex_id]],
+                           const device GeVertex *vertices [[buffer(0)]],
+                           constant VertexUniforms &u [[buffer(1)]],
+                           constant LightingUniforms &l [[buffer(2)]]) {
     const GeVertex v = vertices[vid];
-    Varyings out;
+    VertexOut out;
     out.uv = float3(fma(v.uv, u.uv_transform.xy, u.uv_transform.zw), 1.0f);
     out.color = unpack_unorm4x8_to_float(v.color);
     out.specular = float3(0.0f);
     out.fog = 1.0f;
     out.point_size = 1.0f;
+    for (uint i = 0; i < 3u; ++i) out.clip_distance[i] = 1.0f;
     if (u.mode.x != 0u) {
         // Screen pixels to clip space; a pixel's centre is at +0.5, as the PSP samples it.
         out.position = float4(v.position.x * (2.0f / 480.0f) - 1.0f,
@@ -256,6 +286,20 @@ vertex Varyings ge_vertex(uint vid [[vertex_id]],
     out.position = float4(fma(clip.x, u.screen.x, clip.w * u.screen.y),
                           fma(clip.y, u.screen.z, clip.w * u.screen.w),
                           (clip.z + clip.w) * 0.5f, clip.w);
+    if (u.mode.w != 0u) {
+        // CLIPENABLE on (task 040; PPSSPP's hardware notes, "Z Clipper", "Clipping enabled", "MinZ and MaxZ", "Z
+        // Clamp"): the GE clips at the near plane (z = -w) only, clamps each vertex's screen z to 0..65535 before it
+        // is interpolated, and leaves the far side to the per-pixel MINZ/MAXZ test. Metal does not clip z here
+        // (MTLDepthClipModeClamp, a viewport of 0..1); the near plane and the MINZ/MAXZ test are clip distances on
+        // the screen z, which, like the depth, is linear across the screen. zw is that z times w; a vertex behind
+        // the near plane keeps it unclamped, so the near plane's clipper interpolates it as the GE does.
+        float zw = fma(clip.z, u.depth.x, clip.w * u.depth.y);
+        if (clip.w > 0.0f && clip.z >= -clip.w) zw = clamp(zw, 0.0f, 65535.0f * clip.w);
+        out.position.z = zw / 65535.0f;
+        out.clip_distance[0] = clip.z + clip.w;
+        out.clip_distance[1] = zw - u.depth.z * clip.w;
+        out.clip_distance[2] = u.depth.w * clip.w - zw;
+    }
     return out;
 }
 
@@ -318,6 +362,22 @@ float4 shade(Varyings in, constant FragmentUniforms &u, texture2d<float> image, 
     // touches alpha.
     color.rgb = min(color.rgb + in.specular, float3(1.0f));
     if (u.fog.w != 0.0f) color.rgb = mix(u.fog.rgb, color.rgb, saturate(in.fog));
+    if (kColorTest) {
+        // The colour test (task 040): the fragment's 8-bit colour under the mask against the reference under the
+        // mask, after fog, as the alpha test below; a fragment that fails writes nothing (no colour, depth or
+        // stencil).
+        const uint3 c = uint3(rint(saturate(color.rgb) * 255.0f));
+        const uint value = (c.r | (c.g << 8u) | (c.b << 16u)) & u.color_test.z;
+        const uint reference = u.color_test.y & u.color_test.z;
+        bool passed = true;
+        switch (u.color_test.x) {
+        case 0u: passed = false; break;
+        case 2u: passed = value == reference; break;
+        case 3u: passed = value != reference; break;
+        default: break;
+        }
+        if (!passed) discard_fragment();
+    }
     if (kAlphaTest) {
         // The GE's own numbering, as the depth test's: 0 NEVER, 1 ALWAYS, EQUAL, NOTEQUAL, LESS,
         // LEQUAL, GREATER, GEQUAL, on the 8-bit alpha and reference under the mask.
@@ -354,6 +414,89 @@ fragment float4 ge_fragment(Varyings in [[stage_in]],
                             texture2d<float> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
     return stored(shade(in, u, image, image_sampler), u);
+}
+
+// The GE's blend factors for the shader's own blend (ge_fragment_16): the source side's 0 and 1 are the
+// destination colour and one minus it, the destination side's the source colour and one minus it; then SA, 1-SA,
+// DA, 1-DA, the doubled 2SA, 1-2SA, 2DA, 1-2DA (not clamped: PPSSPP's hardware notes, "8-bit color products") and
+// 10 FIX. Others are ONE on the source side and ZERO on the destination side, as metal_backend.mm's translate_blend.
+float3 ge_factor(uint factor, bool source_side, float4 source, float4 destination, float3 fix) {
+    switch (factor) {
+    case 0u: return source_side ? destination.rgb : source.rgb;
+    case 1u: return 1.0f - (source_side ? destination.rgb : source.rgb);
+    case 2u: return float3(source.a);
+    case 3u: return float3(1.0f - source.a);
+    case 4u: return float3(destination.a);
+    case 5u: return float3(1.0f - destination.a);
+    case 6u: return float3(2.0f * source.a);
+    case 7u: return float3(1.0f - 2.0f * source.a);
+    case 8u: return float3(2.0f * destination.a);
+    case 9u: return float3(1.0f - 2.0f * destination.a);
+    case 10u: return fix;
+    default: return float3(source_side ? 1.0f : 0.0f);
+    }
+}
+
+// The GE's blend of the fragment with the target's colour, unclamped: ADD, SUBTRACT (source minus destination),
+// REVERSE SUBTRACT, MIN, MAX and ABSDIFF (the last three on the colours without factors); 6 and 7 as ADD.
+float3 ge_blend(float4 source, float4 destination, constant FragmentUniforms &u) {
+    switch (u.blend.w) {
+    case 3u: return min(source.rgb, destination.rgb);
+    case 4u: return max(source.rgb, destination.rgb);
+    case 5u: return abs(source.rgb - destination.rgb);
+    default: break;
+    }
+    const float3 a = source.rgb * ge_factor(u.blend.y, true, source, destination, u.fix_source.rgb);
+    const float3 b = destination.rgb * ge_factor(u.blend.z, false, source, destination, u.fix_destination.rgb);
+    switch (u.blend.w) {
+    case 1u: return a - b;
+    case 2u: return b - a;
+    default: return a + b;
+    }
+}
+
+// What a 16-bit target keeps of a colour (task 040): the colour in 8-bit steps, plus, when the draw dithers, the
+// dither matrix's offset for the pixel (row y & 3, column x & 3, a signed 4-bit value), clamped once to 0..255; then
+// the top bits of each channel the format has (5650: 5, 6 and 5; 5551: 5; 4444: 4), stored as the 8-bit value they
+// expand to by repeating their bits, which the RGBA8 target holds and the 16-bit store packs back exactly.
+float3 sixteen_bit(float3 rgb, float2 pixel, constant FragmentUniforms &u) {
+    float3 value = rint(rgb * 255.0f);
+    if (u.target.y != 0u) {
+        const uint2 at = uint2(pixel) & 3u;
+        const uint nibble = (u.dither[at.y] >> (4u * at.x)) & 15u;
+        value += float(int(nibble ^ 8u) - 8);
+    }
+    const uint3 c = uint3(clamp(value, 0.0f, 255.0f));
+    uint3 kept;
+    switch (u.target.x) {
+    case 0u: {  // 5650
+        const uint3 top = c >> uint3(3u, 2u, 3u);
+        kept = uint3((top.r << 3u) | (top.r >> 2u), (top.g << 2u) | (top.g >> 4u), (top.b << 3u) | (top.b >> 2u));
+        break;
+    }
+    case 1u: {  // 5551
+        const uint3 top = c >> 3u;
+        kept = (top << 3u) | (top >> 2u);
+        break;
+    }
+    default:  // 4444
+        kept = (c >> 4u) * 17u;
+        break;
+    }
+    return float3(kept) / 255.0f;
+}
+
+// A draw into a 5650, 5551 or 4444 target (task 040). The PSP blends, dithers and keeps the format's bits in that
+// order, so the blend is done here on the target's colour ([[color(0)]], Apple GPUs' programmable blending) and the
+// pipeline does not blend. The alpha, the PSP's stencil, is what stored() says, as for the other targets.
+fragment float4 ge_fragment_16(Varyings in [[stage_in]],
+                               constant FragmentUniforms &u [[buffer(0)]],
+                               texture2d<float> image [[texture(0)]],
+                               sampler image_sampler [[sampler(0)]],
+                               float4 destination [[color(0)]]) {
+    const float4 color = shade(in, u, image, image_sampler);
+    const float3 rgb = u.blend.x != 0u ? ge_blend(color, destination, u) : color.rgb;
+    return stored(float4(sixteen_bit(rgb, in.position.xy, u), color.a), u);
 }
 
 // A draw that stores a stencil value under a blend that reads the source alpha (patch 0006's kAlphaDual): the
