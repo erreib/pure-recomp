@@ -1,6 +1,6 @@
 # 036: Environment and projection texture mapping (fidelity difference 1)
 
-Milestone: M8 | Branch: task/036-environment-mapping | Status: OPEN
+Milestone: M8 | Branch: task/036-environment-mapping | Status: MERGED 2026-10-07 (934ccdd)
 
 ## Goal
 The most visible difference in docs/fidelity.md: reflective surfaces (the ship's hull and canopy, always on screen;
@@ -189,4 +189,21 @@ Open questions:
    in `ge_record_format.hpp` is updated.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun from the main checkout on the merged build, 2026-10-07: thirteen patches reproduce vendor at 8b0c3fe;
+the headless suite 18/18 with the race scenes at the new values exactly (race_hud 0.0262, tt_hud 0.0229, fp_hud
+0.0232, zone_hud 0.0122, zone_change 0.0353; the frontend unchanged) and `race_hud` against `ref/vineta_k_start.png`
+0.0262 under the 0.032 limit. The suite's Metal column was re-baselined to those values (28fab19) and the race A/B in
+`tools/gerec/metal_check.sh` runs with `PURE_NO_TEXMAP=1`, since the Vulkan path keeps mode 0. `verify_task.sh 036`
+itself exited 2 in a retry loop while the save-list worker held the machine; the same checks were run directly with
+the suite's `--allow-parallel`.
+Spot-read: patch 0013 (`TextureMapState` from TEXMAPMODE and TEXSHADELS, the Draw record's fields appended, the
+Vulkan path's comment), `map_texture` in the MSL (mode 1 through the texture matrix with the chosen source and a
+per-pixel divide, mode 2 from the world-space normal and the two shade lights by the hardware notes), the lighting
+block filled for mapped draws, `PURE_NO_TEXMAP`.
+Merged: 934ccdd into batch/m2.
+Notes: the worker's departure from the brief (no scale and offset in modes 1 and 2, as the hardware notes say) is
+accepted; the suite cannot tell the two apart and the notes are the reference. Open questions kept as follow-ups in
+docs/status.md: a mode 1 picture check (Vineta K's projected plane is off screen in the suite's frame), reversed
+normals in mode 2, the lighting's specular viewer (world +z in task 024's port against the view matrix's third
+column), and docs/ge-backend.md section 6's Draw record description (updated here by hand? no: left to the next
+seam doc edit).

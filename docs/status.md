@@ -88,6 +88,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | The app bundle does not carry `config/metal_pipelines.txt`, so the installed app makes its render pipelines on first use (about 135 ms at the first race load on a cold shader cache; nothing inside a race) | task 033 | `tools/bundle.sh`: copy it into `Contents/Resources` where the backend looks; with the next bundle rebuild |
 | The vblank-timed present (task 033) ends the 8/25 ms pairing on a 120 Hz display but adds about 5.5 ms of latency on average; `PURE_METAL_PACE=0` presents at once | task 033 | Erik to judge by playing |
 | Weather tracks (Sebenco Climb, Sinucit, any FxWeather track) cannot be compared frame to frame against PPSSPP: the mist's phase differs by the run's menu timing (task 038) | task 038 | for the scorecard: compare with the two mist draws left out on both sides, or a mist-substituted replay; the bisection readers (a full DrawCall parser on gerec_dump.py, a register reader on ppdmp.py, a .gerec draw patcher) were scratch scripts worth a tool |
+| Texture mapping follow-ups (task 036): no picture check of mode 1 yet (Vineta K's projected plane is off screen in the suite's frame); reversed normals in mode 2 not settled by the notes; the lighting's specular half-vector uses world +z where the notes give the view matrix's third column (the race uses no specular); docs/ge-backend.md section 6's Draw record description predates patch 0013 | task 036 | small; a frame with the projected plane on screen; the specular viewer when a lit specular draw is found |
 | Erik's recorded lap (`tools/pad_record.py`) to replace the AI-line follower where it struggles | session 2 | the command and keys are in the Resume notes |
 
 ## Resume (session 4, 2026-10-06)
@@ -112,8 +113,9 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   tools on scratch data directories, silent runs; Verify rerun PASS). Merged: 033 (frame-time trace, pipeline pre-warming, vblank-timed presents; the remaining dips are the
   game's own two-vblank stretches, routed to 035 item 6; Verify rerun PASS). **D-009 (Erik, 2026-10-06): fidelity before enhancements; the
   pause-menu redesign is dropped.** Merged: 035, the M8 fidelity audit (two workers; the matrix loop finished on its own; Verify rerun PASS,
-  18/18 scenes). Running: 036 (environment and projection mapping), 039 (the save list). Merged: 038 (the brightness is the
-  weather mist's phase; not a difference). Then 037 (mipmaps, after 036), 040 (colour test, dither, clamp, after 037), 041 (hitches and audio,
+  18/18 scenes). Merged: 036 (environment and projection mapping, patch 0013: the race scenes vs PPSSPP 0.012 to 0.035 now; the
+  suite's Metal column re-baselined), 038 (the brightness is the weather mist's phase; not a difference). Running: 037
+  (mipmaps), 039 (the save list). Then 037 (mipmaps, after 036), 040 (colour test, dither, clamp, after 037), 041 (hitches and audio,
   alone on the machine). Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
   trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
   coverage, a VFPU differential test) before any enhancement. The game's own unlock code on MAIN MENU: LEFT, RIGHT,

@@ -1,6 +1,6 @@
 # 038: Surfaces 1.5 times too bright on Sebenco Climb and Sinucit (fidelity difference 3)
 
-Milestone: M8 | Branch: task/038-surface-brightness | Status: OPEN
+Milestone: M8 | Branch: task/038-surface-brightness | Status: MERGED 2026-10-07 (ed23ec5)
 
 ## Goal
 Sebenco Climb's long concrete wall and Sinucit's overhang are about 1.5 times brighter than on the PSP: wall pixels
@@ -166,4 +166,14 @@ Open questions:
   these would make the next bisection quicker, but `tools/` was outside this task's May touch.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun from the main checkout, 2026-10-07: the headless suite 18/18 (docs and routes only changed; run after the
+036 merge on the same build). The two weather references (`ref/sebenco_climb_hud.*`, `ref/sinucit_hud.*`) were copied
+into the main checkout's `ref/`.
+Spot-read: docs/fidelity.md's "Difference 3: the weather mist" (the field-by-field table, the `--cut` series, the
+mist-substituted replay, the menu-delay table), the two capture routes.
+Merged: ed23ec5 into batch/m2.
+Notes: PARTIAL accepted as done: the finding is complete and there is nothing to fix. Difference 3 closes as a
+comparison artifact (the game's weather phase from its random generator and camera drift, which depends on menu
+timing); weather tracks need a mist-aware comparison for the scorecard, and the scratch bisection readers are worth a
+tool: both in docs/status.md Follow-ups. The texture placement in VRAM differing from PPSSPP (the asset load order,
+difference 6) is noted there too.
