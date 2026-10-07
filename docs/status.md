@@ -132,7 +132,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   Merged 2026-10-07: 042 (the pre-warm list over 16 cells, the app ships it, the bundle check silent and checking
   the pre-warm; Verify rerun PASS) and 043 (the SAS reverb, patch 0018, 17 patches; two constants fitted to PPSSPP,
   D-010; Verify rerun PASS). The app at out/release-macos/stage is repacked from the merged tree with both. Running:
-  044 (the accuracy scorecard). Still open for Erik: differences 5 and 6. Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
+  044 (the accuracy scorecard). Erik 2026-10-07: 5 → task 045 (running: saves in the PSP's own format, patch 0019); 6 → D-011, the faster loads stay. Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
   trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
   coverage, a VFPU differential test) before any enhancement. The game's own unlock code on MAIN MENU: LEFT, RIGHT,
   LEFT, L, R, L, RIGHT, LEFT, RIGHT, R, L, R (sets the profile byte the test switch stands in for).

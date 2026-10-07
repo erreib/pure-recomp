@@ -12,6 +12,7 @@
 | D-008 | 2026-10-06 | Metal shell and Metal backend are the default on macOS; Vulkan stays the portable path, selectable | accepted |
 | D-009 | 2026-10-06 | Priority: as close to 1:1 with the original as possible before any enhancement; the host pause menu stays the framework's | accepted (Erik) |
 | D-010 | 2026-10-07 | The SAS reverb's two constants are fitted to PPSSPP's output (the formula at 44.1 kHz, the sends at half), not taken from the documentation | accepted |
+| D-011 | 2026-10-07 | Load times stay the port's own (no UMD read timing): fidelity difference 6 closed as accepted | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -132,3 +133,14 @@ the two constants and is the one check that does not route through the emulator.
 exercises (RevParam's mapping for ECHO and DELAY, PIPE as "Half Echo", type -1 as OFF) are named in the patch's row.
 Status: accepted.
 
+## D-011  2026-10-07  Load times stay the port's own
+Context: fidelity difference 6 (task 035): the loading screens before a race last about 0.3 s of game time in the
+port against about 1.5 s in PPSSPP, because the port reads the disc image at the host's speed while PPSSPP emulates
+a UMD drive's read timing. Being faithful here would mean emulating the drive's seek and transfer times, which PPSSPP
+itself only approximates.
+Decision (Erik): leave the faster loads. The difference stays in docs/fidelity.md as accepted, not as a task; the
+scorecard reports the load length with the grade "accepted (D-011)" rather than "differs".
+Consequences: nothing reads the disc with a delay; a later ad hoc multiplayer, if any, would need its own view of
+load timing between peers. If a game behaviour ever turns out to depend on the load's length (a timer that runs
+during it), that is a new finding, not this decision.
+Status: accepted.
