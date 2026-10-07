@@ -462,7 +462,7 @@ to read a profile's contents: the plain bytes of a mode-1 save are not on the st
 remakes PPSSPP's reference save with `frontend.txt` + `save_yes.txt` + `save_dialog.txt` and moves it out of PPSSPP's
 stick into `ref/saves/ppsspp/`.
 
-# The accuracy scorecard (task 044, 2026-10-07)
+## The accuracy scorecard (task 044, 2026-10-07)
 
 ```
 tools/scorecard.py [--quick | --full] [--only CATEGORY[,CATEGORY...]] [--out DIR] [--tracks TRACK[,...]]
@@ -546,7 +546,7 @@ holds a profile save, and lists every file with its SHA-256 in `ref/scorecard/ma
 fail the run. `--selftest` checks every grader, the parsers and the report on synthetic inputs (PASS in about a
 second).
 
-# The VFPU dot-product check (task 047, 2026-10-07)
+## The VFPU dot-product check (task 047, 2026-10-07)
 
 ```
 tools/vfpu_probe.py cover [--track T] [--seconds S]          # once: which sites a race runs (ref/vfpu/coverage.csv)
@@ -603,3 +603,24 @@ the port (model b) reproduces every one of them.
 all of them, else prints up to 20 failing rows a group (operands, PPSSPP's result, the model's and the port's). It
 then reports the transcendental instructions. About 10 s. `--report` runs every candidate model over every set
 (about 70 s for the JIT set). The samples are git-ignored; ref/README.md has the commands and their hashes.
+
+### The two rounding modes of patch 0020 (D-013)
+
+The port's generated code rounds dot products as a real PSP does by default and as PPSSPP's JIT does under the test
+mode (`PURE_VFPU_DOT=ppsspp`, or `PURE_TEST_RACE_CLOCK`, which implies it). Both are checked against the recorded
+samples by recomputing the port side with the probe's harness under each mode:
+
+```sh
+for mode in ppsspp psp; do
+  rm -rf out/vfpu_$mode && mkdir -p out/vfpu_$mode && cp -R ref/vfpu/jit out/vfpu_$mode/jit && cp ref/vfpu/coverage.* out/vfpu_$mode/
+  PURE_VFPU_DOT=$mode python3 tools/vfpu_probe.py port out/vfpu_$mode/jit
+done
+python3 tools/vfpu_model.py --report out/vfpu_ppsspp     # the "port" row must read 100% in every column
+```
+
+and, for the default mode, the port's results against the hardware model (`vfpu_model.model_fn("c", vfpu_model.HW[1])`)
+over `vfpu_model.dot_rows(...)` of `out/vfpu_psp/jit`, which must agree on every row. On 2026-10-07 after the corpus
+rebuild: the test mode 100 percent at vdot.t (466447), vdot.q (7506), vtfm3.t (255222), vtfm4.q (59064) and vmmul.q
+(384704); the default mode equal to the hardware rule on every one of the same 1172943 dot products. The probe's
+harness compiles the header, so the check runs without a game; the vtfm and vmmul sites need the regenerated corpus
+(`tools/regen.sh`), since their code is emitted inline.

@@ -283,6 +283,8 @@ const RaceClock &race_clock() {
         }
         c.on = c.team.has_value() || c.race.has_value() || c.frames.size() > 1u;
         if (!c.on) std::cout << "[pure] PURE_TEST_RACE_CLOCK=" << c.path << " holds no seed and no frame times; ignored\n";
+        // The reference race is PPSSPP's: its dot-product rounding too (D-013).
+        psprecomp::AllegrexContext::vfpu_dot_mode() = 1u;
         return c;
     }();
     return clock;
@@ -483,6 +485,14 @@ void wrap_flip_counter(HleRegistrar &hle) {
         watch_words(rt, frames);
         apply_paced_from(frames);
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
+        // PURE_VFPU_DOT=ppsspp|psp (test only, D-013): the dot-product rounding, PPSSPP's JIT or the PSP's (the
+        // default; PURE_TEST_RACE_CLOCK selects PPSSPP's by itself).
+        static const bool vfpu_dot_set = [] {
+            if (const char *m = env("VFPU_DOT"); m != nullptr && *m != '\0')
+                psprecomp::AllegrexContext::vfpu_dot_mode() = std::strcmp(m, "ppsspp") == 0 ? 1u : 0u;
+            return true;
+        }();
+        (void)vfpu_dot_set;
         static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE"),
                           grid = env_on("WATCH_GRID");
         watch_movie(rt, frames);

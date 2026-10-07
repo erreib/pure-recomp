@@ -1323,6 +1323,42 @@ around them rather than at the dot product they log, but a breakpoint cannot sho
 the end-to-end test is the port with the rule against the reference race (`tools/ai_seed_check.sh --tracks` over the
 12 circuits, after the corpus rebuild).
 
+### The codegen's rule (patch 0020, D-013, 2026-10-07)
+
+`AllegrexContext::vfpu_dot` (patch 0020) rounds dot products as the real PSP does by default and as PPSSPP's JIT does
+under the test mode (`PURE_VFPU_DOT=ppsspp`, implied by `PURE_TEST_RACE_CLOCK`); `vdot`, `vhdp`, the dot lanes of
+`vcrsp` and `vqmul`, and the Vtfm and Vmmul emitters of the codegen use it, and the generated units are compiled
+with `-ffp-contract=off`. Checked on the samples after the corpus rebuild (docs/verification.md, "The two rounding
+modes"): under the test mode the port reproduces 100 percent of PPSSPP's `vdot.t`, `vdot.q`, `vtfm3.t`, `vtfm4.q` and
+`vmmul.q` results (1172943 dot products); under the default it equals the hardware rule on every one of them. The
+suite is unchanged (18/18; the race frames move by at most 0.0016 as the AI's positions shift).
+
+`tools/ai_seed_check.sh` over the 12 circuits with the race clock pinned, before and after the patch (AI row: when
+the ships first part by 1 m, and the largest distance over 20 s):
+
+| Circuit | AI before | AI after | Player after |
+|---|---|---|---|
+| Vineta K | 13.45 s, 4.05 m (close) | 17.65 s, 3.15 m (close) | 0.02 m |
+| Modesto Heights | 10.94 s, 135.11 m | 10.94 s, 135.10 m | 0.16 m |
+| Chenghou Project | 12.04 s, 103.47 m | 12.85 s, 103.41 m | 0.12 m |
+| Blue Ridge | 9.49 s, 140.13 m | 12.76 s, 101.73 m | 0.16 m |
+| Sinucit | 3.60 s, 280.70 m | 5.86 s, 53.29 m | 0.00 m |
+| Citta Nuova | 8.17 s, 83.86 m | 8.22 s, 233.18 m | 0.10 m |
+| Sebenco Climb | 3.05 s, 92.98 m | 3.05 s, 96.02 m | 0.07 m |
+| Sol 2 | 6.91 s, 423.60 m | 6.86 s, 227.96 m | 0.00 m |
+| Karbonis | 9.56 s, 6.47 m | 14.08 s, 7.45 m | **12.08 s, 23.84 m (was 0.00 m)** |
+| Sagarmatha | 16.35 s, 6.19 m | 16.35 s, 6.19 m | 0.18 m |
+| Manor Top | 11.20 s, 52.35 m | 11.20 s, 63.52 m | 0.11 m |
+| Mandrashee | never, 0.46 m (faithful) | never, 0.98 m (faithful) | 0.00 m |
+
+So the dot products were not the whole story: with them PPSSPP-exact, the AI still parts on ten circuits, and
+Karbonis' player now parts at 12 s where it did not before. What changed beside the dot products is what the samples
+never covered: the cross and quaternion products (`execute_vfpu_cross_quat`, 108 sites, now through `vfpu_dot` with
+the chain from lane 0 where clang's contraction of the old expression rounded another product), `vfad`/`vavg`
+(`execute_vfpu_horizontal`, 61 sites, now unfused), and anything else the corpus's contraction used to fuse. The next
+measurement (task 048) samples those kinds the same way and finds PPSSPP's rounding for them; the test mode's
+promise, equal rounding for the comparison, holds only once every kind the race runs is measured.
+
 ## Difference 14: the Karbonis contact (task 046, 2026-10-07)
 
 The scorecard's Karbonis player row (34.07 m by 20 s) was read as a contact response that differs. The race records

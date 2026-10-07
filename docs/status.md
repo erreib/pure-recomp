@@ -147,8 +147,11 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   still parts over a 1-ulp VFPU dot product in the codegen). Merged 2026-10-07: 047 (the probe and the rule: PPSSPP's JIT fuses vdot/vtfm in lane order
   and leaves vmmul unfused, its own compiler's doing; the real PSP, from pspautotests, truncates aligned products with
   two extra bits; the port fuses from another lane). D-013: the port rounds as the PSP, PPSSPP's rule is a test mode.
-  Running (Fable): patch 0020 in the codegen header and the Vtfm/Vmmul emitters, regeneration, full corpus rebuild,
-  `vfpu_model.py --check` under both rules, `tools/ai_seed_check.sh --tracks`; then the organisation pass.
+  Patch 0020 landed 2026-10-07 (Fable): `vfpu_dot` rounds as the PSP (default) or as PPSSPP's JIT (test
+  mode), the Vtfm/Vmmul emitters use it, the corpus is compiled with `-ffp-contract=off`; 19 patches; both modes 100
+  percent on the 1.17 million samples; suite 18/18. The AI rows still part on ten circuits and Karbonis' player
+  parts at 12 s under the test mode: the cross/quaternion products and vfad/vavg were never sampled. Running: 048
+  (sample those kinds, find PPSSPP's rounding for them). Then the organisation pass.
   Open for Erik: a finer virtual-time answer than the kernel's 1 ms starvation tick. Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
   trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
   coverage, a VFPU differential test) before any enhancement. The game's own unlock code on MAIN MENU: LEFT, RIGHT,

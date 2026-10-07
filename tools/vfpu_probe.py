@@ -647,6 +647,7 @@ def cmd_port(a):
         cases.append((j, fn, len(s_regs), len(d_regs)))
     src.append("int main(int argc, char **argv) {\n  if (argc < 4) return 2;\n"
                "  std::uint32_t in[64], out[64]; static AllegrexContext ctx{};\n"
+               "  if (const char *m = std::getenv(\"PURE_VFPU_DOT\")) AllegrexContext::vfpu_dot_mode() = std::strcmp(m, \"ppsspp\") == 0 ? 1u : 0u;\n"
                "  FILE *f = std::fopen(argv[2], \"r\"), *g = std::fopen(argv[3], \"w\");\n"
                "  if (!f || !g) return 3;\n  char line[4096];\n  std::fgets(line, sizeof line, f);\n")
     for j, fn, ns, nd in cases:

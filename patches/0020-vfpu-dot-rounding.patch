@@ -1,0 +1,243 @@
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 0f0c0e7..2af20fc 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -287,7 +287,9 @@ function(portablekit_add_game target)
+                 set(generated_options "/O${PSPRECOMP_GENERATED_OPT_LEVEL};/Ob0;/bigobj")
+             endif()
+         else()
+-            set(generated_options "-O${PSPRECOMP_GENERATED_OPT_LEVEL};-g0")
++            # -ffp-contract=off: every translated instruction rounds on its own, as the VFPU and the FPU do
++            # (D-013); a fused multiply-add across two of them would not.
++            set(generated_options "-O${PSPRECOMP_GENERATED_OPT_LEVEL};-g0;-ffp-contract=off")
+         endif()
+         set_source_files_properties(${generated} PROPERTIES COMPILE_OPTIONS "${generated_options}")
+     else()
+@@ -558,7 +560,7 @@ inline constexpr const char *kBuildLabel = \"${PORTABLEKIT_BUILD_LABEL}\";
+         elseif(MSVC)
+             target_compile_options(${variant_target} PRIVATE /O${PSPRECOMP_GENERATED_OPT_LEVEL} /bigobj)
+         else()
+-            target_compile_options(${variant_target} PRIVATE -O${PSPRECOMP_GENERATED_OPT_LEVEL} -g0)
++            target_compile_options(${variant_target} PRIVATE -O${PSPRECOMP_GENERATED_OPT_LEVEL} -g0 -ffp-contract=off)
+         endif()
+         set_target_properties(${variant_target} PROPERTIES
+             JOB_POOL_COMPILE psprecomp_generated
+diff --git a/include/psprecomp/allegrex_context.hpp b/include/psprecomp/allegrex_context.hpp
+index a32c3a2..4030436 100644
+--- a/include/psprecomp/allegrex_context.hpp
++++ b/include/psprecomp/allegrex_context.hpp
+@@ -742,6 +742,95 @@ struct alignas(16) AllegrexContext {
+         write_vfpu_vector_with_destination_prefix(result, destination_register, length);
+     }
+ 
++    // The VFPU's dot product (D-013, task 047). Mode 0, the PSP's own rounding, measured on a real PSP
++    // (pspautotests' vector tests, the only rule that gives all 150 results): each lane's product is exact (48 bits,
++    // a raw exponent sum, not normalised), a zero or subnormal operand makes the lane zero, the products are aligned
++    // to the largest exponent and kept to 25 fraction bits there (two beyond a float's 23) with the rest dropped
++    // from the magnitude, summed exactly, and the sum is cut to 24 significant bits toward zero; below the smallest
++    // normal the result is a signed zero, beyond the largest finite it is infinity, and an exact zero sum is +0.
++    // Lanes with an infinity or a NaN take the IEEE path, unfused. Mode 1, test only (PURE_TEST_RACE_CLOCK and
++    // PURE_VFPU_DOT=ppsspp): PPSSPP's JIT, which fuses a vector dot product in lane order (lane 0's product
++    // rounded, one fused multiply-add per further lane) and leaves a matrix element unfused from +0, so that the
++    // scorecard's trajectory rows can compare the port with PPSSPP's references on equal rounding.
++    enum class VfpuDotKind : std::uint8_t { Vector, MatrixElement };
++
++    static std::uint8_t &vfpu_dot_mode() noexcept {
++        static std::uint8_t mode = 0u;
++        return mode;
++    }
++
++    static float vfpu_dot_ieee_unfused(const float *s, const float *t, std::uint32_t n) noexcept {
++#if defined(__clang__)
++#pragma clang fp contract(off)
++#endif
++        float r = 0.0f;
++        for (std::uint32_t i = 0u; i < n; ++i) {
++            const float p = s[i] * t[i];
++            r = r + p;
++        }
++        return r;
++    }
++
++    static float vfpu_dot_ppsspp(const float *s, const float *t, std::uint32_t n, VfpuDotKind kind) noexcept {
++#if defined(__clang__)
++#pragma clang fp contract(off)
++#endif
++        if (kind == VfpuDotKind::MatrixElement || n == 0u) return vfpu_dot_ieee_unfused(s, t, n);
++        float r = s[0] * t[0];
++        for (std::uint32_t i = 1u; i < n; ++i) r = std::fma(s[i], t[i], r);
++        return r;
++    }
++
++    static float vfpu_dot_psp(const float *s, const float *t, std::uint32_t n) noexcept {
++        struct Product { bool negative; int exponent; std::uint64_t significand; };
++        Product products[4]{};
++        std::uint32_t count = 0u;
++        int top = 0;
++        for (std::uint32_t i = 0u; i < n; ++i) {
++            const std::uint32_t sb = std::bit_cast<std::uint32_t>(s[i]);
++            const std::uint32_t tb = std::bit_cast<std::uint32_t>(t[i]);
++            const std::uint32_t es = (sb >> 23u) & 0xFFu, et = (tb >> 23u) & 0xFFu;
++            if (es == 0xFFu || et == 0xFFu) return vfpu_dot_ieee_unfused(s, t, n);
++            if (es == 0u || et == 0u) continue;
++            const std::uint64_t ms = (sb & 0x7FFFFFu) | 0x800000u, mt = (tb & 0x7FFFFFu) | 0x800000u;
++            const int exponent = static_cast<int>(es) + static_cast<int>(et) - 127;
++            products[count++] = {((sb ^ tb) >> 31u) != 0u, exponent, ms * mt};
++            if (count == 1u || exponent > top) top = exponent;
++        }
++        if (count == 0u) return 0.0f;
++        std::int64_t total = 0;
++        for (std::uint32_t i = 0u; i < count; ++i) {
++            const int shift = top - products[i].exponent + 21;
++            const std::uint64_t v = shift >= 64 ? 0u : (products[i].significand >> shift);
++            total += products[i].negative ? -static_cast<std::int64_t>(v) : static_cast<std::int64_t>(v);
++        }
++        if (total == 0) return 0.0f;
++        const bool negative = total < 0;
++        const std::uint64_t magnitude = negative ? static_cast<std::uint64_t>(-total) : static_cast<std::uint64_t>(total);
++        const int bits = 64 - std::countl_zero(magnitude);
++        const int biased = top - 152 + bits - 1 + 127;
++        if (biased <= 0) return negative ? -0.0f : 0.0f;
++        if (biased >= 255) return negative ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
++        const std::uint32_t m24 = bits > 24 ? static_cast<std::uint32_t>(magnitude >> (bits - 24))
++                                            : static_cast<std::uint32_t>(magnitude << (24 - bits));
++        return std::bit_cast<float>((negative ? 0x80000000u : 0u) | (static_cast<std::uint32_t>(biased) << 23u) | (m24 & 0x7FFFFFu));
++    }
++
++    static float vfpu_dot(const float *s, const float *t, std::uint32_t n,
++                          VfpuDotKind kind = VfpuDotKind::Vector) noexcept {
++        if (n > 4u) n = 4u;
++        return vfpu_dot_mode() == 1u ? vfpu_dot_ppsspp(s, t, n, kind) : vfpu_dot_psp(s, t, n);
++    }
++
++    // The dot product over a four-lane prefix view: the encoded lanes, extended to four when a prefix constant
++    // put a value in a lane past them (unmeasured; the PSP rule ignores zeros either way).
++    static float vfpu_dot_prefixed(const float *s, const float *t, std::uint32_t n) noexcept {
++        std::uint32_t lanes = n;
++        for (std::uint32_t i = n; i < 4u; ++i)
++            if (s[i] != 0.0f || t[i] != 0.0f) lanes = 4u;
++        return vfpu_dot(s, t, lanes);
++    }
++
+     template <std::uint32_t DestinationScalarRegister, std::uint32_t SourceRegister,
+               std::uint32_t TargetRegister, std::uint32_t Length>
+     PSPRECOMP_CONTEXT_FORCEINLINE void execute_vfpu_vdot_ct() noexcept {
+@@ -753,10 +842,7 @@ struct alignas(16) AllegrexContext {
+         // VDOT prefix semantics use a four-lane view even for a shorter encoded vector.
+         apply_vfpu_source_prefix_ct<4u, 0u>(source);
+         apply_vfpu_source_prefix_ct<4u, 1u>(target);
+-        const float result[1]{
+-            source[0] * target[0] + source[1] * target[1] +
+-            source[2] * target[2] + source[3] * target[3]
+-        };
++        const float result[1]{vfpu_dot_prefixed(source, target, Length)};
+         write_vfpu_vector_with_destination_prefix_ct<DestinationScalarRegister, 1u>(result);
+     }
+ 
+@@ -776,10 +862,7 @@ struct alignas(16) AllegrexContext {
+         apply_vfpu_source_prefix(source, 4u, 0u);
+         apply_vfpu_source_prefix(target, 4u, 1u);
+ 
+-        float result[1]{0.0f};
+-        for (std::uint32_t lane = 0u; lane < 4u; ++lane) {
+-            result[0] += source[lane] * target[lane];
+-        }
++        const float result[1]{vfpu_dot_prefixed(source, target, length)};
+         write_vfpu_vector_with_destination_prefix(result, destination_scalar_register, 1u);
+     }
+ 
+@@ -811,10 +894,7 @@ struct alignas(16) AllegrexContext {
+         vfpu_ctrl[0] = original_source_prefix;
+         apply_vfpu_source_prefix(target, 4u, 1u);
+ 
+-        float sum = 0.0f;
+-        for (std::uint32_t lane = 0u; lane < 4u; ++lane) {
+-            sum += source[lane] * target[lane];
+-        }
++        float sum = vfpu_dot_prefixed(source, target, length);
+         if (std::isnan(sum)) sum = std::fabs(sum);
+ 
+         const float result[1]{sum};
+@@ -907,30 +987,34 @@ struct alignas(16) AllegrexContext {
+         if (length == 3u) { // VCRSP.T
+             // X/Y are produced directly from the unprefixed inputs.  The PSP
+             // applies rewritten S/T prefixes only to the final dot-product lane.
+-            result[0] = source[1] * target[2] - source[2] * target[1];
+-            result[1] = source[2] * target[0] - source[0] * target[2];
++            {
++                const float s0[2]{source[1], source[2]}, t0[2]{target[2], -target[1]};
++                const float s1[2]{source[2], source[0]}, t1[2]{target[0], -target[2]};
++                result[0] = vfpu_dot(s0, t0, 2u);
++                result[1] = vfpu_dot(s1, t1, 2u);
++            }
+ 
+             // Forced T view: [T.y, -T.x, T.w, T.z], while retaining the
+             // original constant/absolute controls.
+             vfpu_ctrl[1] = (vfpu_ctrl[1] & ~kSwizzleAndNegateMask) | 0x000200B1u;
+             apply_vfpu_source_prefix(target, 4u, 1u);
+             apply_vfpu_source_prefix(source, 4u, 0u);
+-            result[2] = source[0] * target[0] + source[1] * target[1] +
+-                        source[2] * target[2] + source[3] * target[3];
++            result[2] = vfpu_dot(source, target, 4u);
+         } else if (length == 4u) { // VQMUL.Q
+-            result[0] = source[0] * target[3] + source[1] * target[2] -
+-                        source[2] * target[1] + source[3] * target[0];
+-            result[1] = -source[0] * target[2] + source[1] * target[3] +
+-                         source[2] * target[0] + source[3] * target[1];
+-            result[2] = source[0] * target[1] - source[1] * target[0] +
+-                        source[2] * target[3] + source[3] * target[2];
++            {
++                const float t0[4]{target[3], target[2], -target[1], target[0]};
++                const float t1[4]{-target[2], target[3], target[0], target[1]};
++                const float t2[4]{target[1], -target[0], target[3], target[2]};
++                result[0] = vfpu_dot(source, t0, 4u);
++                result[1] = vfpu_dot(source, t1, 4u);
++                result[2] = vfpu_dot(source, t2, 4u);
++            }
+ 
+             // Forced T view: [-T.x, -T.y, -T.z, T.w], retaining constants/abs.
+             vfpu_ctrl[1] = (vfpu_ctrl[1] & ~kSwizzleAndNegateMask) | 0x000700E4u;
+             apply_vfpu_source_prefix(target, 4u, 1u);
+             apply_vfpu_source_prefix(source, 4u, 0u);
+-            result[3] = source[0] * target[0] + source[1] * target[1] +
+-                        source[2] * target[2] + source[3] * target[3];
++            result[3] = vfpu_dot(source, target, 4u);
+         } else if (length == 2u) {
+             result[0] = 0.0f;
+             // Pair form can source lane 2 through S-prefix swizzling.
+diff --git a/tools/codegen_main.cpp b/tools/codegen_main.cpp
+index a59d9dd..e3f03ed 100644
+--- a/tools/codegen_main.cpp
++++ b/tools/codegen_main.cpp
+@@ -528,16 +528,13 @@ std::string emit_regular(const psprecomp::DecodedInstruction &d, std::uint32_t p
+             << "      constexpr std::uint32_t vfpu_input_length = " << input_length << "u;\n"
+             << "      for (std::uint32_t i = 0; i < 4u; ++i) vfpu_target[i] = i < vfpu_input_length ? vfpu_target_raw[i] : 0.0f;\n"
+             << "      if (vfpu_side - 1u >= vfpu_input_length) vfpu_target[vfpu_side - 1u] = 1.0f;\n"
+-            << "      for (std::uint32_t row = 0; row + 1u < vfpu_side; ++row) {\n"
+-            << "        float sum = 0.0f;\n"
+-            << "        for (std::uint32_t column = 0; column < vfpu_side; ++column) sum += vfpu_matrix[row * 4u + column] * vfpu_target[column];\n"
+-            << "        vfpu_result[row] = sum;\n"
+-            << "      }\n"
++            << "      for (std::uint32_t row = 0; row + 1u < vfpu_side; ++row)\n"
++            << "        vfpu_result[row] = ctx.vfpu_dot(&vfpu_matrix[row * 4u], vfpu_target, vfpu_side);\n"
+             << "      float vfpu_final_row[4]{vfpu_matrix[(vfpu_side - 1u) * 4u + 0u], vfpu_matrix[(vfpu_side - 1u) * 4u + 1u],\n"
+             << "                              vfpu_matrix[(vfpu_side - 1u) * 4u + 2u], vfpu_matrix[(vfpu_side - 1u) * 4u + 3u]};\n"
+             << "      ctx.apply_vfpu_source_prefix(vfpu_final_row, 4u, 0u);\n"
+             << "      ctx.apply_vfpu_source_prefix(vfpu_target, 4u, 1u);\n"
+-            << "      for (std::uint32_t column = 0; column < 4u; ++column) vfpu_result[vfpu_side - 1u] += vfpu_final_row[column] * vfpu_target[column];\n"
++            << "      vfpu_result[vfpu_side - 1u] = ctx.vfpu_dot_prefixed(vfpu_final_row, vfpu_target, vfpu_side);\n"
+             << "      const std::uint32_t vfpu_destination_prefix = ctx.vfpu_ctrl[2];\n"
+             << "      const std::uint32_t vfpu_last_lane = vfpu_side - 1u;\n"
+             << "      ctx.vfpu_ctrl[2] = ((vfpu_destination_prefix & (1u << 8u)) << vfpu_last_lane) |\n"
+@@ -566,9 +563,8 @@ std::string emit_regular(const psprecomp::DecodedInstruction &d, std::uint32_t p
+             << "      ctx.read_vfpu_matrix(vfpu_t, " << target << "u, " << side << "u);\n"
+             << "      for (std::uint32_t a = 0; a < " << side << "u; ++a) {\n"
+             << "        for (std::uint32_t b = 0; b < " << side << "u; ++b) {\n"
+-            << "          float sum = 0.0f;\n"
+-            << "          for (std::uint32_t c = 0; c < " << side << "u; ++c) sum += vfpu_s[b * 4u + c] * vfpu_t[a * 4u + c];\n"
+-            << "          vfpu_d[a * 4u + b] = sum;\n"
++            << "          vfpu_d[a * 4u + b] = ctx.vfpu_dot(&vfpu_s[b * 4u], &vfpu_t[a * 4u], " << side
++            << "u, psprecomp::AllegrexContext::VfpuDotKind::MatrixElement);\n"
+             << "        }\n"
+             << "      }\n"
+             << "      ctx.write_vfpu_matrix(vfpu_d, " << destination << "u, " << side << "u);\n"
