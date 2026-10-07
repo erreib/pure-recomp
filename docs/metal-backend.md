@@ -1,7 +1,7 @@
 # The Metal GE backend (tasks 023 to 025, 2026-10-06)
 
 `PURE_GE_BACKEND=metal` draws the game with Metal, natively, behind the GE backend seam of D-003
-(`docs/ge-backend.md`). It is `src/gpu/metal_backend.mm`, in our sources, and registers itself as `metal`. Task
+(`docs/ge-backend.md`). It is `src/gpu/metal_backend.mm` and the files beside it ("Files"), registered as `metal`. Task
 023 built its skeleton (device, targets, textures, the draws of the 2D frontend, clears, blending, the alpha test,
 captures) and proved it on the frame regression suite's three frontend scenes, which it draws within a few pixels
 of PPSSPP: the language page, the title screen and the profile screen. Task 024 added the 3D draws: the GE's
@@ -61,23 +61,44 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 
 ## Files
 
+The backend is split by concern (task 049, 2026-10-07): one class, `MetalGeBackend : portablekit::gpu::GeBackend`,
+declared in a header and defined in seven Objective-C++ files (ARC), each opening with a comment that says what it
+owns. Before task 049 it was all `metal_backend.mm` (2975 lines) with the shaders as a string in `metal_shaders.h`;
+the split moved code without changing it (`tools/refactor_check.sh` below).
+
 | File | What |
 |---|---|
-| `src/gpu/metal_backend.mm` | `MetalGeBackend : portablekit::gpu::GeBackend` and its `BackendRegistration("metal", ...)`. Objective-C++ with ARC |
-| `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036), the mip level (task 037), and the colour test, the 16-bit writes (`ge_fragment_16`) and the depth clamp (task 040) are ours, from PPSSPP's hardware notes |
+| `src/gpu/metal_backend.mm` | the backend proper: `initialize` (device, shaders, samplers, the switches) and `shutdown`, `submit`, the flip (`present_image`) and `capture_frame`, the frame's command buffers, render passes and vertex space (`commit`, `end_encoder`, `begin_pass`, `allocate`, the read-back blits), `not_emulated`, and the `BackendRegistration("metal", ...)`. Its opening comment is the backend's overview |
+| `src/gpu/metal_backend.hpp` | the class: its members grouped under a heading per concern that names the file defining them, its data members, and the eight helpers more than one file uses (`unpack_color`, `not_emulated`, `to_compare`, `stored_reference`, `stencil_alpha`, `alpha_follows_stencil`, `format_name`, `texture_bits`), each with the file that defines it |
+| `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target`, `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm` |
+| `src/gpu/metal_targets.mm` | "Targets" and "Guest memory": the target cache (`target_for`, `latest_target_at`, the guest-word snapshot), a texture bind found in a target (`find_framebuffer_texture`, patch 0003) and the copy a draw samples of the target it draws into; `block_transfer`, `read_back_framebuffer`, `write_back_frame`, `write_back_depth` and the stores into guest memory; `upload_frame` |
+| `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule |
+| `src/gpu/metal_pipelines.mm` | "The pipeline key" and "The pre-warm list": the fragment-function variants, `render_pipeline` and `depth_state` (made on first use or taken from the pre-warm), the GE-to-Metal compare and stencil tables, the list's text form and parser, `start_prewarm`, the pipelines' exit line and `PURE_METAL_PIPELINES_OUT` |
+| `src/gpu/metal_effects.mm` | "The stencil and the alpha": what a draw leaves in its target's alpha, `resolve_stencil_alpha`, the blend checks for dual-source blending and for that copy; the blend of a 16-bit target in the shader (task 040). The bloom chain has no code of its own: targets drawn into and sampled ("The bloom chain") |
+| `src/gpu/metal_draw.mm` | "How a draw is drawn": `draw`, from the `DrawCall` to the encoder, with the primitives expanded on the CPU (`expand`, transformed sprites), the blend factors (`translate_blend`), the lighting block, the texture mapping mode, the state set when it changed, and `PURE_METAL_LOG`'s line |
+| `src/gpu/metal_trace.mm` | "Frame times": `PURE_METAL_TRACE`'s rows, the line every 600 frames, the exit lines of the stencil, guest memory, the colour test, 16-bit targets and the depth clamp |
+| `src/gpu/shaders/ge.metal` | the shaders, plain MSL: `ge_vertex`, `ge_fragment`, `ge_fragment_dual`, `ge_fragment_16`; ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036), the mip level (task 037), and the colour test, the 16-bit writes and the depth clamp (task 040) are ours, from PPSSPP's hardware notes |
+| `src/gpu/shaders/embed.cmake` | the build step that turns `ge.metal` into `build/<preset>/generated_metal/ge_metal.hpp`: the file's text byte for byte as a raw string, `pure::metal::kShaderSource`, which `initialize` compiles. Rerun by the build whenever `ge.metal` changes |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
+| `tools/refactor_check.sh` | (task 049) the proof that a change moved code and changed no picture: the frame regression suite's 18 scenes captured before the change (`--before`, on the starting commit) and after, compared at `--tol 0`, plus the backend's exit counts per route; PASS only at 0 differing pixels everywhere |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
 | `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), and the frame trace's hook through which the shell reports its presents (task 033, "Frame times"). Objective-C++ with ARC |
 | `config/metal_pipelines.txt` | the render pipelines and depth-stencil states made at start (task 033, "The pre-warm list"); since task 042 it covers the campaign and the app carries a copy in `Contents/Resources` |
 | `tools/frame_times.py` | the frame trace's summary (task 033, "Frame times") |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
-| `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the four `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
+| `CMakeLists.txt` | the backend's seven files in `metal_backend_sources`, the sources in `portablekit_add_game(... SOURCES ...)`, every `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, the shader embedding step and its directory on the include path, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
 
 Built without Xcode, in the shape of the Bouncer's backend (`~/dev/bouncer-recomp/docs/metal-backend.md`): the
-`.mm` goes through the same `/usr/bin/clang++` and ccache as every other source of `tools/build.sh profile`, and
-the shaders are compiled when the backend starts (`newLibraryWithSource`, `MTLMathModeSafe`), so the machine needs
-only the Metal compiler that comes with macOS. A compile error is the message `initialize` returns.
+`.mm` files go through the same `/usr/bin/clang++` and ccache as every other source of `tools/build.sh profile`, and
+the shaders are compiled when the backend starts (`newLibraryWithSource`, `MTLMathModeSafe`) from the text the build
+embedded, so the machine needs only the Metal compiler that comes with macOS and no build reads a shader file at run
+time. A compile error is the message `initialize` returns.
+
+New code goes in the file of its concern, with its declaration in `metal_backend.hpp` under that file's heading; a
+type or helper more than one file uses goes in `metal_types.hpp` or the header's helper list. The code lives in
+`pure::gpu::metal_backend` (a named namespace, since the class is shared between files); file-local helpers stay in
+each file's anonymous namespace.
 
 ## How a draw is drawn
 
@@ -656,7 +677,7 @@ The rules are PPSSPP's hardware notes' (<https://www.ppsspp.org/docs/psp-hardwar
 modes, and <https://www.ppsspp.org/docs/psp-hardware/gpu/lighting/>, "Shade mapping"), read as documentation; no
 PPSSPP code was read for them:
 
-| Mode | The GE | In `ge_vertex` (`map_texture` in `metal_shaders.h`) |
+| Mode | The GE | In `ge_vertex` (`map_texture` in `shaders/ge.metal`) |
 |---|---|---|
 | 0, the UVs | u' = u x scale + offset (8- and 16-bit UVs divided by 128 and 32768 first) | as before: `uv_transform` |
 | 1, the texture matrix | (s, t, q) = the source times the 4x3 texture matrix (three rows and the translation row, each component a row sum); the source is the position, the UV, the normalized normal or the normal, as TEXPROJMAP says (0 to 3); per pixel s/q and t/q | `texture_matrix * float4(source, 1)`, the source the vertex's object-space position, (u, v, 0), the normal normalized (a zero normal stays zero) or the normal as decoded; s, t and q interpolated, and the fragment function divides s and t by q (`FragmentUniforms::texture.w`) |
@@ -828,7 +849,7 @@ number of textures decoded does not change; each texture with levels adds its le
 The sampler's mip filter (bits 4 and 5 of the sampler index) follows `min_filter` bit 1. `set_level_rule` puts the
 mode, the part of D that is the same for the whole draw (0 for auto, the bias for constant, 16 + log16(slope) + bias
 for slope) and level 0's size in `FragmentUniforms::level`, and 16 x (levels - 1) in `level_range`. In
-`sample_texture` (`metal_shaders.h`) q is `position.w` (Metal hands the fragment 1/w there) times the texture
+`sample_texture` (`shaders/ge.metal`) q is `position.w` (Metal hands the fragment 1/w there) times the texture
 matrix's q, s and t are the coordinates times that q, so their `dfdx`/`dfdy` are the GE's plane gradients, and D is
 the table's with the same float-bits log16; the texel is `sample(..., level(clamp(D, 0, range) / 16))`. A draw
 without levels samples as before, with Metal's own derivatives on a texture of one level.
@@ -951,7 +972,7 @@ In PPSSPP's dumps of the race frames:
 
 ### The colour test
 
-`shade()` in `metal_shaders.h` tests after fog, where the alpha test is done: the fragment's colour in 8-bit steps
+`shade()` in `shaders/ge.metal` tests after fog, where the alpha test is done: the fragment's colour in 8-bit steps
 under the mask, against the reference under the mask, and `discard_fragment` when the function says so, which writes
 no colour, depth or stencil. The function constant `kColorTest` (a field of `RenderKey`) compiles it into the draws
 that have it; ALWAYS is compiled out, as for the alpha test. The documentation does not give the order of fog and the

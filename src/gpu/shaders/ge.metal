@@ -1,5 +1,6 @@
-// The Metal GE backend's shaders (metal_backend.mm), as MSL source compiled when the backend starts:
-// the machine needs no Xcode for it, only the Metal compiler that comes with macOS.
+// The Metal GE backend's shaders (metal_backend.mm), as MSL source compiled when the backend starts: the machine
+// needs no Xcode for it, only the Metal compiler that comes with macOS. The build embeds this file in the program
+// as a string (embed.cmake beside it, task 049), so the program reads nothing from the checkout at run time.
 //
 // Ported from the framework's GLSL (vendor/portablekit/host/gpu/shaders/ge.vert and ge.frag, MIT):
 // through-mode and transformed vertices, the GE's per-vertex lighting (four lights, the material colours
@@ -15,16 +16,12 @@
 // CLIPENABLE (the near plane and MINZ/MAXZ as clip distances, each vertex's screen z clamped). Logic ops and colour
 // doubling are not in the draw state.
 //
-// The structs below are laid out exactly as their C++ twins in metal_backend.mm (static_asserts there).
-#pragma once
+// The structs below are laid out exactly as their C++ twins in metal_types.hpp (static_asserts there).
 
-namespace pure::metal {
-
-inline const char *const kShaderSource = R"metal(
 #include <metal_stdlib>
 using namespace metal;
 
-// One vertex as the backend writes it: GpuVertex in metal_backend.mm.
+// One vertex as the backend writes it: GpuVertex in metal_types.hpp.
 struct GeVertex {
     float4 position;   // through mode: screen pixels and z 0..65535; transformed: object space, or the PSP's
                        // clip space for the corners of a transformed sprite (VertexUniforms::mode.y)
@@ -34,7 +31,7 @@ struct GeVertex {
     float4 normal;     // xyz, object space
 };
 
-// VertexUniforms in metal_backend.mm.
+// VertexUniforms in metal_types.hpp.
 struct VertexUniforms {
     float4x4 transform;   // projection * view * world, column major as the GE's matrices
     // The GE viewport folded into clip space for a 480x272 target (transformed draws):
@@ -56,7 +53,7 @@ struct VertexUniforms {
     float4 depth;
 };
 
-// One of the GE's lights: Light in metal_backend.mm. Colours are 0..1.
+// One of the GE's lights: Light in metal_types.hpp. Colours are 0..1.
 struct Light {
     float4 position;      // xyz: the direction towards the light for a directional one, else its position
     float4 direction;     // xyz: a spot light's axis
@@ -69,7 +66,7 @@ struct Light {
                           // 1 diffuse and specular, 2 powered diffuse)
 };
 
-// LightingUniforms in metal_backend.mm: the lights, the material and the fog a lit or fogged draw reads.
+// LightingUniforms in metal_types.hpp: the lights, the material and the fog a lit or fogged draw reads.
 struct LightingUniforms {
     float4x4 world;
     float4 ambient;            // the global ambient light, rgba
@@ -83,7 +80,7 @@ struct LightingUniforms {
     Light lights[4];
 };
 
-// FragmentUniforms in metal_backend.mm.
+// FragmentUniforms in metal_types.hpp.
 struct FragmentUniforms {
     float4 fix;           // rgb: the FIX source factor the colour is multiplied by; w: 1 when it is
     uint4 texture;        // x: texture function (TFX), y: 1 alpha from the texture (TCC), z: 1 texel alpha is one,
@@ -278,11 +275,11 @@ vertex VertexOut ge_vertex(uint vid [[vertex_id]],
     // Fog runs linearly from 1 (clear) to 0 (fogged) with view-space z, which is negative in front of the
     // camera: (z + end) * scale.
     if ((u.mode.z & 1u) != 0u) out.fog = (dot(u.view_z, float4(lit.position.xyz, 1.0f)) + l.fog.x) * l.fog.y;
-    // Modes 1 and 2 (never set for sprite corners: metal_backend.mm draws those with their UVs).
+    // Modes 1 and 2 (never set for sprite corners: metal_draw.mm draws those with their UVs).
     if (u.texture_map.x != 0u) out.uv = map_texture(v, u, l);
     const float4 clip = u.mode.y != 0u ? v.position : u.transform * float4(v.position.xyz, 1.0f);
     // PSP clip space follows OpenGL with z in [-w, w]; Metal clips z against [0, w]. The GE's z scale and
-    // offset are the viewport's znear and zfar (metal_backend.mm).
+    // offset are the viewport's znear and zfar (metal_draw.mm).
     out.position = float4(fma(clip.x, u.screen.x, clip.w * u.screen.y),
                           fma(clip.y, u.screen.z, clip.w * u.screen.w),
                           (clip.z + clip.w) * 0.5f, clip.w);
@@ -304,7 +301,7 @@ vertex VertexOut ge_vertex(uint vid [[vertex_id]],
 }
 
 // The GE's logarithm for the mip level, in 1/16 levels: the float's exponent and the top four bits of its mantissa
-// (a piecewise linear log2, floored to 1/16), of |x|. ge_log16 in metal_backend.mm.
+// (a piecewise linear log2, floored to 1/16), of |x|. ge_log16 in metal_textures.mm.
 float ge_log16(float x) {
     return float(int((as_type<uint>(x) >> 19u) & 0xFFFu) - 127 * 16);
 }
@@ -419,7 +416,7 @@ fragment float4 ge_fragment(Varyings in [[stage_in]],
 // The GE's blend factors for the shader's own blend (ge_fragment_16): the source side's 0 and 1 are the
 // destination colour and one minus it, the destination side's the source colour and one minus it; then SA, 1-SA,
 // DA, 1-DA, the doubled 2SA, 1-2SA, 2DA, 1-2DA (not clamped: PPSSPP's hardware notes, "8-bit color products") and
-// 10 FIX. Others are ONE on the source side and ZERO on the destination side, as metal_backend.mm's translate_blend.
+// 10 FIX. Others are ONE on the source side and ZERO on the destination side, as metal_draw.mm's translate_blend.
 float3 ge_factor(uint factor, bool source_side, float4 source, float4 destination, float3 fix) {
     switch (factor) {
     case 0u: return source_side ? destination.rgb : source.rgb;
@@ -511,6 +508,3 @@ fragment DualOutput ge_fragment_dual(Varyings in [[stage_in]],
     out.source = float4(color.a);
     return out;
 }
-)metal";
-
-} // namespace pure::metal
