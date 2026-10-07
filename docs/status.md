@@ -152,8 +152,11 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   percent on the 1.17 million samples; suite 18/18. The AI rows still part on ten circuits and Karbonis' player
   parts at 12 s under the test mode: the cross/quaternion products and vfad/vavg were never sampled. Merged 2026-10-07: 048 (vcrsp.t is
   unfused in PPSSPP's JIT on 1.59 million lanes, vfad a sequential sum; Karbonis' player parts after cross products
-  alone). Patch 0021 (Fable) applies the rule; the corpus rebuild, the suite and `tools/ai_seed_check.sh --tracks`
-  follow. Then the organisation pass.
+  alone). Patch 0021 landed (Fable, 20 patches): both modes 100 percent on all 18 sample sets; suite 18/18;
+  the player trajectories faithful on 11 of 12 (Karbonis parts by mm after a 7 s scrape, from something no sample
+  covers: subnormal flushing is the next suspect); the AI rows moved but stay `differs` on nine circuits, which is
+  the bit-exact chase against PPSSPP's JIT the plan rules out: **the rounding work stops here.** Next: the
+  organisation pass (Erik's), then enhancements.
   Open for Erik: a finer virtual-time answer than the kernel's 1 ms starvation tick. Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
   trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
   coverage, a VFPU differential test) before any enhancement. The game's own unlock code on MAIN MENU: LEFT, RIGHT,

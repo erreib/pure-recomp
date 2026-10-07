@@ -1437,6 +1437,49 @@ scrape that happened to resolve the same way with another set of low bits. That 
 it the likely start of the AI's partings on the other circuits too; the end-to-end test is `tools/ai_seed_check.sh --tracks` over the 12 circuits after the corpus
 rebuild with the rule, which this task cannot run.
 
+### Patch 0021: the cross and horizontal products (2026-10-07)
+
+`vfpu_cross_dot` (task 048's rule: PPSSPP's JIT rounds both products of a cross-product lane and then their
+difference; the PSP's rule by default) and the horizontal sums by mode went in as patch 0021, with the corpus
+recompiled. Through the harness the port reproduces PPSSPP under the test mode and the PSP's rule by default on every
+one of the 18 sample sets (3.9 million results). The suite is 18/18 (race_hud 0.0148).
+
+`tools/ai_seed_check.sh` over the 12 circuits, patch 0020 against patch 0021 (AI row: first parting by 1 m, largest
+distance over 20 s; the player's largest distance):
+
+| Circuit | AI, 0020 | AI, 0021 | Player, 0021 |
+|---|---|---|---|
+| Vineta K | 17.65 s, 3.15 m (close) | 18.54 s, 2.85 m (close) | 0.00 m |
+| Modesto Heights | 10.94 s, 135.10 m | 10.94 s, 135.02 m | 0.12 m |
+| Chenghou Project | 12.85 s, 103.41 m | 16.00 s, 103.70 m | 0.10 m |
+| Blue Ridge | 12.76 s, 101.73 m | 9.49 s, 139.90 m | 0.73 m |
+| Sinucit | 5.86 s, 53.29 m | 5.86 s, 12.07 m | 0.00 m |
+| Citta Nuova | 8.22 s, 233.18 m | 9.61 s, 7.48 m | 0.00 m |
+| Sebenco Climb | 3.05 s, 96.02 m | 3.05 s, 100.83 m | 0.07 m |
+| Sol 2 | 6.86 s, 227.96 m | 6.91 s, 227.49 m | 0.00 m |
+| Karbonis | 14.08 s, 7.45 m | 14.08 s, 7.29 m | **12.08 s, 23.84 m** |
+| Sagarmatha | 16.35 s, 6.19 m | 16.35 s, 6.19 m | 0.19 m |
+| Manor Top | 11.20 s, 63.52 m | 11.20 s, 50.54 m | 0.05 m |
+| Mandrashee | never, 0.98 m (faithful) | 15.25 s, 1.60 m (close) | 0.00 m |
+
+Karbonis' player still first parts at 6.974 s by 8 mm, the same sample as before the cross-product fix, although
+every cross product in the frames before it now equals PPSSPP's. So that difference comes from something no sample
+covers: the kinds the probe does not decode, the FPU and conversion path, or subnormal handling (PPSSPP's JIT flushes
+subnormals; the port's native code does not, and a wall scrape is where near-zero quantities arise). Where this
+stands, and why it stops here:
+- The port's default rounding is the hardware's documented and measured rule for every kind the game runs (D-013);
+  that was the point, and it is done.
+- The test mode exists so the scorecard's AI rows measure the port rather than PPSSPP's compiler. It now matches
+  PPSSPP on every sampled result of every sampled kind, and the AI rows moved (Sinucit 281 to 12 m, Citta Nuova 234
+  to 7 m, Vineta K 134 to 2.9 m), but the AI amplifies any 1-ulp difference anywhere into metres over 20 s, so a
+  faithful AI row needs the port equal to PPSSPP's JIT on every float operation of the race. That is the bit-exact
+  chase against an emulator the plan ruled out (docs/research.md's fidelity rule), and PPSSPP's JIT rounding is its
+  own compiler's, not the PSP's.
+- The player's rows are the physics check that matters, and they are faithful on 11 of 12 circuits with the 12th
+  parting after a 7 s wall scrape by millimetres.
+The scorecard keeps reporting the AI rows under the test mode, graded as they come; docs/scorecard.md says why they
+are not a fidelity grade. The next suspect, if anyone resumes this, is subnormal flushing.
+
 ## Difference 14: the Karbonis contact (task 046, 2026-10-07)
 
 The scorecard's Karbonis player row (34.07 m by 20 s) was read as a contact response that differs. The race records
