@@ -637,6 +637,41 @@ def load_length(flips, press_us):
     return None
 
 
+def pp_stretch_times(log, stretches):
+    """PPSSPP's stretches (fidelity_audit's summary) in race time from GO, and the race time its flip log covers."""
+    race = [(u, c) for u, c in ((int(m[2]), float(m[3] or 0)) for m in map(fa.PP_LOG_RE.search, open(
+        log, errors="replace")) if m and m[1] == "FLIP") if c > 0.0]
+    if not race:
+        return [math.inf] * len(stretches), 0.0
+    start = race[0][0]
+    return [(pc.vblank_us(s["vblank"]) - start) / 1e6 for s in stretches], (race[-1][0] - start) / 1e6
+
+
+def port_stretch_times(log, stretches):
+    """The port's stretches (scan_log's, first race) in race time from GO, and the race time its ship lines cover
+    up to the finish."""
+    times, start, last = {}, None, None
+    with open(log, errors="replace") as f:
+        for line in f:
+            m = SHIP_RE.match(line)
+            if not m:
+                continue
+            frame, t, clock, lap = int(m[1]), int(m[2]), float(m[3]), int(m[6])
+            if clock <= 0.0:
+                if start is not None:
+                    break                     # the next race
+                continue
+            if lap & 0x10000:
+                break
+            start = t if start is None else start
+            times[frame] = t
+            last = t
+    if start is None:
+        return [math.inf] * len(stretches), 0.0
+    return ([(times.get(s["flip"], math.inf) - start) / 1e6 if s.get("race", 1) == 1 else math.inf
+             for s in stretches], (last - start) / 1e6)
+
+
 def port_flip_times(log):
     out = []
     with open(log, errors="replace") as f:
@@ -762,15 +797,23 @@ def cat_timing(ctx):
                         "no port race log (the matrix's cell or --full's sweep cell)"))
     else:
         summ = json.loads(pp_sum.read_text())
-        pps = summ["stretches"]
-        d = len(port_st) - len(pps)
+        pp_times, pp_cover = pp_stretch_times(REF / "timing" / "ppsspp" / "vineta_k" / "ppsspp.log", summ["stretches"])
+        port_times, port_cover = port_stretch_times(port_log, port_st)
+        window = min(pp_cover, port_cover)
+        pps = [s for s, t in zip(summ["stretches"], pp_times) if t < window]
+        pst = [s for s, t in zip(port_st, port_times) if t < window]
+        d = len(pst) - len(pps)
         laps = ", ".join(f"{t:.1f}" for t in summ.get("laps", []))
-        rows.append(row("two-vblank stretches over a follower-driven Vineta K race", port_txt,
+        state = summ.get("outcome") or summ.get("error", "?")
+        rows.append(row(f"two-vblank stretches over a follower-driven Vineta K race (its first {window:.0f} s, the "
+                        "race time both runs cover)",
+                        f"{len(pst)} ({', '.join(str(s['flips']) for s in pst)} flips)",
                         f"{len(pps)} ({', '.join(str(s['flips']) for s in pps)} flips), {ref_note(pp_sum)}", f"{d:+d}",
                         grade_low(abs(d), STRETCH_FAITHFUL + 1, STRETCH_CLOSE + 1), srule,
-                        f"port: {port_src}; PPSSPP: {summ.get('outcome')} (laps {laps} s, {summ.get('contacts')} "
-                        "contacts); where they fall follows the weapons and the follower's put-backs, which differ run "
-                        "to run on both", {"port": len(port_st), "ppsspp": len(pps)}))
+                        f"port: {port_src}, {port_cover:.0f} s of race; PPSSPP: {state} (laps {laps} s, "
+                        f"{summ.get('contacts')} contacts), {pp_cover:.0f} s of race; where they fall follows the "
+                        "weapons and the follower's put-backs, which differ run to run on both",
+                        {"port": len(pst), "ppsspp": len(pps), "window_s": window}))
     # The race load (difference 6, accepted by D-011).
     if "vineta_k" in ctx.race_runs:
         log = ctx.race_runs["vineta_k"][0]
@@ -975,7 +1018,54 @@ def build_sfo(entries):
             + vals)
 
 
-def compare_saves(port_dir, ref_dir):
+def guest_word(v):
+    return 0x08800000 <= v < 0x0A000000          # an address in the PSP's user RAM
+
+
+def compare_plain(a, b):
+    """Two decrypted data files: (bytes differing, the differing 4-byte words, how many of them hold a user-RAM address
+    on both sides)."""
+    n = min(len(a), len(b))
+    diff = sum(1 for i in range(n) if a[i] != b[i]) + abs(len(a) - len(b))
+    words = sorted({i // 4 for i in range(n) if a[i] != b[i]})
+    addr = sum(1 for w in words if 4 * w + 4 <= n and guest_word(struct.unpack_from("<I", a, 4 * w)[0])
+               and guest_word(struct.unpack_from("<I", b, 4 * w)[0]))
+    return diff, len(words), addr
+
+
+def decrypt(folder, out):
+    """The data file through the framework's own load path (tools/save_interchange.sh --check, task 045): its hashes
+    verified and the plain bytes written to `out`; (bytes or None, the checker's last lines)."""
+    tool = ROOT / "tools" / "save_interchange.sh"
+    if not tool.exists():
+        return None, "tools/save_interchange.sh is missing (task 045)"
+    r = subprocess.run([str(tool), "--check", str(folder), DATA_FILE, str(out)], cwd=ROOT, capture_output=True,
+                       text=True, env=clean_env())
+    lines = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.strip()]
+    if r.returncode != 0 or not Path(out).exists():
+        return None, "; ".join(lines[-3:])
+    return Path(out).read_bytes(), "; ".join(ln for ln in lines if "verified" in ln or "verdict" in ln or "flag" in ln)
+
+
+def decrypted_row(port_dir, ref_dir):
+    rule = ("faithful when identical; close when the only differing words hold user-RAM addresses on both sides (the "
+            "profile keeps heap pointers verbatim; the game sets them again on a load); differs otherwise")
+    measure = f"{DATA_FILE}: the contents, decrypted by the framework's load path with both hashes checked"
+    with tempfile.TemporaryDirectory() as tmp:
+        a, an = decrypt(port_dir, Path(tmp) / "port.bin")
+        b, bn = decrypt(ref_dir, Path(tmp) / "ppsspp.bin")
+    if a is None or b is None:
+        return row(measure, "-" if a is None else f"{len(a)} bytes", "-" if b is None else f"{len(b)} bytes", "-",
+                   DIFFERS if (a is None) != (b is None) else NOT_MEASURED, rule,
+                   f"port: {an}; PPSSPP: {bn}")
+    diff, words, addr = compare_plain(a, b)
+    grade = FAITHFUL if diff == 0 else CLOSE if words and addr == words else DIFFERS
+    return row(measure, f"{len(a)} bytes ({an})", f"{len(b)} bytes", f"{diff} bytes in {words} words, {addr} of "
+               "them user-RAM addresses on both sides", grade, rule, "tools/save_interchange.sh --check (task 045)",
+               {"bytes": diff, "words": words, "address_words": addr})
+
+
+def compare_saves(port_dir, ref_dir, decrypted=True):
     rows = []
     pf = {p.name: p.stat().st_size for p in Path(port_dir).iterdir() if p.is_file()}
     rf = {p.name: p.stat().st_size for p in Path(ref_dir).iterdir() if p.is_file()}
@@ -991,10 +1081,13 @@ def compare_saves(port_dir, ref_dir):
                         "-" if a is None or b is None else f"{a - b:+d}", FAITHFUL if a == b else DIFFERS,
                         "faithful when the same size"))
     a, b = pf.get(DATA_FILE), rf.get(DATA_FILE)
-    rows.append(row(f"{DATA_FILE} (the data file): size only", f"{a} bytes (plain)", f"{b} bytes (encrypted)",
+    rows.append(row(f"{DATA_FILE} (the data file): size", f"{a} bytes", f"{b} bytes",
                     "-" if a is None or b is None else f"{a - b:+d}", FAITHFUL if a == b else DIFFERS,
                     "faithful when the same size",
-                    "difference 5: the PSP's savedata encryption (no-key mode); open, task 045 is on it"))
+                    "difference 5 (the PSP's savedata encryption, no-key mode): fixed by task 045, patch 0019"
+                    if a == b else "difference 5: the PSP's savedata encryption (no-key mode)"))
+    if decrypted:
+        rows.append(decrypted_row(port_dir, ref_dir))
     try:
         ps = parse_sfo((Path(port_dir) / "PARAM.SFO").read_bytes())
         rs = parse_sfo((Path(ref_dir) / "PARAM.SFO").read_bytes())
@@ -1009,7 +1102,7 @@ def compare_saves(port_dir, ref_dir):
             if key == "SAVEDATA_FILE_LIST":
                 a = ", ".join(a) if a else "empty"
                 b = ", ".join(b) if b else "empty"
-                note = "the list of encrypted files: difference 5 (open, task 045)" if not same else ""
+                note = "the list of encrypted files: difference 5" if not same else ""
             rows.append(row(f"PARAM.SFO {key}", repr(a), repr(b), "the same" if same else "differs",
                             FAITHFUL if same else DIFFERS, "faithful when equal", note))
     a, b = Path(port_dir) / "ICON0.PNG", Path(ref_dir) / "ICON0.PNG"
@@ -1587,18 +1680,18 @@ def selftest():
         for i in range(600):                       # 10 s at one vblank a flip, then a 30-flip stretch, then 5 s
             frame += 1
             clock += 1 / 60.0 if i > 0 else 0.0
-            lines.append(f"[pure] ship frame {frame} t={us} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
+            lines.append(f"[pure] ship frame {frame} t={us + frame * 16683} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
                          f"dist=1.000 lap=0 shield=100.000")
         for i in range(30):
             frame += 1
             clock += 2 / 60.0
-            lines.append(f"[pure] ship frame {frame} t={us} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
+            lines.append(f"[pure] ship frame {frame} t={us + frame * 16683} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
                          f"dist=1.000 lap=1 shield=100.000")
         clock = 0.0
         for i in range(300):                       # the lap clock restarts at the line
             frame += 1 if i != 150 else 121        # a pause: no line for 120 flips, the clock standing still
             clock += 1 / 60.0
-            lines.append(f"[pure] ship frame {frame} t={us} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
+            lines.append(f"[pure] ship frame {frame} t={us + frame * 16683} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
                          f"dist=1.000 lap=1 shield=100.000")
         lines.append(f"[pure] ship frame {frame + 1} t={us} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
                      f"dist=1.000 lap=65537 shield=100.000")
@@ -1607,6 +1700,17 @@ def selftest():
         flips, secs, _ = race_rate(log)
         check(flips == 927 and abs(secs - (598 / 60 + 1.0 + 299 / 60)) < 0.005,
               f"flips per race second: {flips} flips over {secs:.3f} s with a stretch, a lap restart and a pause")
+        st = [{"flip": 6611, "race": 1, "flips": 30}, {"flip": 6200, "race": 2, "flips": 3}]
+        pt, pcover = port_stretch_times(log, st)
+        check(abs(pt[0] - 609 * 0.016683) < 1e-6 and pt[1] == math.inf and abs(pcover - (frame - 6002) * 0.016683) < 1e-6,
+              "stretch times: the port's from GO by the ship lines' t, a second race's left out")
+        plog = tmp / "pp.log"
+        go = pc.vblank_us(7393)
+        plog.write_text("\n".join(f"x BKP PC=08a42ffc: FLIP {int(go + (i - 10) * 16683.3)} clock "
+                                  f"{max(0.0, (i - 10) / 60.0):.6f}" for i in range(11, 1000)) + "\n")
+        qt, qcover = pp_stretch_times(plog, [{"vblank": 7393 + 600}])
+        check(abs(qt[0] - 10.0) < 0.02 and abs(qcover - 988 * 16683.3 / 1e6) < 0.02,
+              f"stretch times: PPSSPP's from its flip log ({qt[0]:.3f} s; {qcover:.2f} s covered)")
         # The load: flips at two vblanks, a 200 ms gap, 57 fade flips at two vblanks, then one vblank a flip.
         v = 16683.3
         t, fl = 0.0, []
@@ -1673,9 +1777,16 @@ def selftest():
                                                      ("TITLE", "WIPEOUT PURE")]))
             (d / DATA_FILE).write_bytes(b"\0" * size)
             png.write_png(str(d / "ICON0.PNG"), 2, 2, 3, bytes(12))
-        rows = compare_saves(tmp / "port", tmp / "pp")
+        plain_a = bytearray(64)
+        plain_b = bytearray(64)
+        struct.pack_into("<I", plain_a, 8, 0x08ECAF10)
+        struct.pack_into("<I", plain_b, 8, 0x08ECAD10)
+        check(compare_plain(bytes(plain_a), bytes(plain_b)) == (1, 1, 1) and compare_plain(b"\0" * 8, b"\0" * 8)
+              == (0, 0, 0) and compare_plain(b"\1\0\0\0", b"\2\0\0\0") == (1, 1, 0),
+              "saves: decrypted contents, the differing words that hold user-RAM addresses")
+        rows = compare_saves(tmp / "port", tmp / "pp", decrypted=False)
         g = {r["measure"]: r["grade"] for r in rows}
-        check(g["the save folder's files"] == FAITHFUL and g[f"{DATA_FILE} (the data file): size only"] == DIFFERS
+        check(g["the save folder's files"] == FAITHFUL and g[f"{DATA_FILE} (the data file): size"] == DIFFERS
               and g["PARAM.SFO SAVEDATA_FILE_LIST"] == DIFFERS and g["PARAM.SFO TITLE"] == FAITHFUL
               and g["ICON0.PNG, byte for byte"] == FAITHFUL and g["PARAM.SFO SAVEDATA_DETAIL"] == FAITHFUL,
               "saves: names, the data file's size, the file list, the fields, ICON0.PNG")
