@@ -52,17 +52,3 @@ index 19f72db..7b01f0b 100644
      }
      void get(BlockTransfer &v) {
          v.source = u32(), v.source_stride = u32(), v.source_x = u32(), v.source_y = u32();
-diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 3b74b29..2b35583 100644
---- a/host/gpu/vulkan_renderer.cpp
-+++ b/host/gpu/vulkan_renderer.cpp
-@@ -6204,6 +6204,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
-                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
-                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
-     // Through-mode texture coordinates are in texels, transformed ones in [0,1].
-+    // Every draw takes its vertex UVs here (texture map mode 0): the texture
-+    // matrix and environment map modes (DrawCall::texture_map) are not drawn
-+    // by this renderer.
-     push.uv_transform = call.through && call.texture.width != 0u
-                             ? std::array<float, 4>{1.0f / static_cast<float>(call.texture.width),
-                                                    1.0f / static_cast<float>(call.texture.height), 0.0f, 0.0f}

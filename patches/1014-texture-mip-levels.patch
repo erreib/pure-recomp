@@ -75,17 +75,3 @@ index 7b01f0b..1547f3b 100644
      }
      void get(BlockTransfer &v) {
          v.source = u32(), v.source_stride = u32(), v.source_x = u32(), v.source_y = u32();
-diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 2b35583..3017e75 100644
---- a/host/gpu/vulkan_renderer.cpp
-+++ b/host/gpu/vulkan_renderer.cpp
-@@ -3870,6 +3870,9 @@ std::uint16_t update_max_seen_v(std::uint16_t seen, std::uint16_t drawn, bool th
- 
- } // namespace
- 
-+// Level 0 only: the mip levels the GE names (TextureState::level_count and
-+// levels) are neither decoded nor sampled by this renderer, which samples every
-+// texture at its full size.
- VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemory &memory, const DrawCall &call) {
-     const TextureState &state = call.texture;
-     const TextureKeyInput input{state.address,

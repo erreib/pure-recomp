@@ -100,18 +100,3 @@ index 25c0922..b864fe7 100644
                  if (indexed(call.texture.format))
                      record_memory(memory, call.texture.clut_address, 512u * (call.texture.clut_format == 3u ? 4u : 2u));
              }
-diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 3017e75..523a8ba 100644
---- a/host/gpu/vulkan_renderer.cpp
-+++ b/host/gpu/vulkan_renderer.cpp
-@@ -6203,6 +6203,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
-     const float wrap_flags = no_texture_clamp ? 0.0f
-                                               : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
-                                                     (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
-+    // The alpha test only: the colour test (DrawCall::color_test) is not
-+    // drawn by this renderer, nor dithering (DrawCall::dither: 16-bit targets
-+    // are drawn at 8 bits a channel), nor CLIPENABLE's depth clamp
-+    // (DrawCall::clip_enabled: every draw is clipped at both depth planes).
-     push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
-                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
-                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
