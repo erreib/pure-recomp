@@ -96,7 +96,96 @@ that stops every later cell (report it and continue with `--resume` after a rest
 than six hours (report the per-cell times and stop at the 30th cell with the rest listed as not run).
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+The work ran over two sessions. The first wrote the audit tool, the PPSSPP routes and captures, the twelve suite
+scenes and the analysis in docs/fidelity.md, and started the 46-cell matrix. It was cut off at 21:51 on 2026-10-06,
+and the matrix loop finished on its own at 23:06. The second session, in a new worktree:
+- read the cells again with the current collectors (`--rescan`, which adds the hitches) and folded the finished
+  matrix into docs/fidelity.md: every cell with its outcome, a per-mode summary, the line table, the ignored-GE table
+  (65 commands in 14 features), the audio table, the stretches per cell and the differences list;
+- made the twelve suite references again, because the first worktree's git-ignored captures were lost with it. All
+  12 PNGs and 9 GE dumps came out byte-identical to the hashes in ref/README.md;
+- added the brief's missing Zone 1 zone-change frame (`zone_change`: port flip 5679 against PPSSPP vblank 7528,
+  captured twice byte-identical; Metal scored 0.0649 in three runs, Vulkan 0.0818 in one windowed run, limit 0.10);
+- corrected the burst labels. A burst asking for every vblank of a 30-fps scene falls behind, so `tt_hud.png` and
+  `fp_hud.png` are vblank 7340, not 7302, and `zone_hud.png` is 6694, not 6668. The same check showed that a capture
+  on a menu before the load does not move the race;
+- ran two hitch cells again. The hitches came back at other places, so difference 7 is now "to check" and no longer
+  put down to the busy machine;
+- made `--resume`, `--report` and `--list` end with a completeness line.
+
+Changed (on the branch, since c105a66): tools/fidelity_audit.py (new), tools/frame_regress.sh (13 new SCENES rows),
+tools/ppsspp/routes/ (16 new routes), ref/README.md, docs/fidelity.md (new), docs/verification.md, README.md. src/,
+vendor/, patches/ and config/ are untouched.
+
+Verify output (last 20 lines; `tools/verify_task.sh 035` at c9ce1e2, 2026-10-07 00:11, which is b898098 since the
+branch was rebased onto batch/m2's docs-only 16fbef2; the three `--quick` cells were PASS, PASS, PASS; the commits
+after it change docs only):
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0374   0.10   32    0.0379 -0.0005  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0617   0.12   32    0.0617 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0620   0.11   32    0.0620 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0348   0.09   32    0.0348 +0.0000  PASS
+zone_change   5679    0.0649   0.10   32    0.0649 +0.0000  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 24s)
+verify 035: PASS
+```
+
+Counts:
+- Cells: 46 of 46 run. 36 PASS, 10 STALL (all the follower's, at four places: Sinucit's fork, Manor Top, Karbonis at
+  Phantom, a wedge on Chenghou Project), 0 HALT. `tools/fidelity_audit.py --resume` prints `46 of 46 cells have a
+  result (36 PASS, 10 STALL); complete`.
+- Features listed: 3 distinct log lines (all audio-capture underruns: no `[hle-stub]`, `unsupported`, `Runtime
+  stopped` or `[metal] not emulated/implemented` line in any cell), 65 GE commands the framework ignores (in 14
+  features), and 26 imports with no implementation, none of them called.
+- Scenes added: 13 to the suite (now 18 scenes), out of 31 new PPSSPP references. The other 18 (OPTIONS, CONTROLS,
+  the 11 other circuits' first race frames, the pause menu, the results panel, the save dialog twice, Zone's end
+  panel) have no port route in `config/pad_scripts/`.
+- Differences found: 11, ordered by visibility in docs/fidelity.md:
+  1. environment mapping;
+  2. mipmaps;
+  3. Sebenco Climb's and Sinucit's surfaces too bright;
+  4. a second profile overwrites the first, with no save dialog;
+  5. unencrypted saves;
+  6. shorter loads;
+  7. race hitches (to check);
+  8. music gaps at track changes and at Free Play's finish (to check);
+  9. clipping in the attract demo (to check);
+  10. the colour test;
+  11. dithering and depth clamp.
+
+The two-vblank stretches of item 6 are the game's own: FxScreen's full-screen flash sets the lock countdown, and
+PPSSPP has the same stretches, of the same lengths.
+
+Open questions:
+- Captures: the new PPSSPP captures are git-ignored and exist only in this worktree's `ref/`. The main checkout's
+  `ref/` has the five originals. Copy `ref/*.png ref/*.ppdmp` there before running the suite in the main checkout,
+  or it exits 2 with "ref/single_player.png missing".
+- Lost with the first worktree: the 18 references outside the suite, the Beta and Classic GE dumps and the dump
+  readers. Their hashes and commands are still in ref/README.md and docs/fidelity.md.
+- Matrix results: in this worktree's `out/fidelity/` (657 MB). The Verify's own runs of the three quick cells are in
+  `out/fidelity-verify-quick/`.
+- Difference 7 (hitches of 102 to 295 ms in 12 cells, at no fixed place): the port, the sweep's pty reader or the
+  machine. Check on an idle machine in a run like a player's, with `PURE_METAL_TRACE`.
+- Differences 8 and 9 need PPSSPP's audio dump (`DumpAudio`), which was not taken.
+- Difference 3's cause lies upstream of both backends and is not found yet.
+- Which event makes the 38-to-39-flip flash is not known, and PPSSPP's race never showed the 31-flip put-back flash.
+- Three render pipelines of the 30-fps result and standings screens are missing from `config/metal_pipelines.txt`.
+- Medal counting is untested: no cell won a medal.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
