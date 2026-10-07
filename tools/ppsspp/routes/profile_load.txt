@@ -1,0 +1,22 @@
+# PPSSPP route: cold boot -> PROFILE > LOAD -> the system's load dialog -> MAIN MENU -> PROFILE > NEW > YES -> SET NAME
+# (task 045, 2026-10-07). The memory stick (~/.config/ppsspp/PSP/SAVEDATA) must hold one profile, UCUS98612P0000:
+# tools/save_interchange.sh puts the port's there for the run and takes it out again. Measured with the port's
+# NAME0000 (mode 1):
+#   ~2850 PROFILE (LOAD/NEW/DELETE), ~2920 the load dialog fades in (the game's list, P0000 to P0004: one entry, the
+#   save's icon, "Wipeout Pure", date, 366 KB, "Profile data", "User name: NAME0000", gold medals, ranking),
+#   ~3120 "Load completed." until Back, ~3420 MAIN MENU (help text fully typed by ~3690: 0 pixels from
+#   ref/main_menu.png at 3720), ~3900 PROFILE (a loaded profile's long list: NEW, LOAD, SAVE, DELETE, OPTIONS,
+#   SETTINGS, PROGRESS, RECORDS, STATS; NEW highlighted), ~4200 WARNING ("The profile will now be created...", YES),
+#   ~4500 SET NAME, filled with the loaded name. The run should end there, before any NEW save.
+700:CROSS, 708:                   # LANGUAGE SELECTION: ENGLISH
+1700:CROSS, 1708:                 # memory-stick notice
+2400:START, 2408:                 # skip the intro movie
+2700:START, 2708:                 # title: PRESS START BUTTON -> PROFILE
+2900:CROSS, 2908:                 # PROFILE: LOAD -> the load dialog
+3100:CROSS, 3108:                 # the dialog: Enter on the profile -> "Load completed."
+3300:CIRCLE, 3308:                # Back closes the dialog -> MAIN MENU
+3750:DOWN, 3758:                  # MAIN MENU: SINGLE PLAYER -> MULTIPLAYER
+3810:DOWN, 3818:                  # -> PROFILE
+3870:CROSS, 3878:                 # -> the PROFILE menu, NEW highlighted
+4170:CROSS, 4178:                 # NEW -> WARNING, YES highlighted
+4470:CROSS, 4478:                 # YES -> SET NAME
