@@ -545,3 +545,61 @@ holds a profile save, and lists every file with its SHA-256 in `ref/scorecard/ma
 (the commands are there too). A row whose reference is missing says `no reference` and names the command; it does not
 fail the run. `--selftest` checks every grader, the parsers and the report on synthetic inputs (PASS in about a
 second).
+
+# The VFPU dot-product check (task 047, 2026-10-07)
+
+```
+tools/vfpu_probe.py cover [--track T] [--seconds S]          # once: which sites a race runs (ref/vfpu/coverage.csv)
+tools/vfpu_probe.py sample --out ref/vfpu/jit --sites all --cap 5000 --seconds 12
+tools/vfpu_probe.py sample --out ref/vfpu/interp --cpu-core 0 --cap 1500 --seconds 12 --sites ADDR,...
+tools/vfpu_probe.py port ref/vfpu/jit                        # the port's results for the same operands
+python3 tools/vfpu_model.py --selftest && python3 tools/vfpu_model.py --check ref/vfpu
+```
+
+The check behind difference 13's last step (docs/fidelity.md, "The dot-product rule, measured"): PPSSPP's VFPU
+results at the game's own instructions, and a model that reproduces every one of them.
+
+**The sites.** `scan` decodes EBOOT.ELF and keeps the instructions the corpus has code for (its `L_XXXXXXXX` labels,
+so decoded data is left out): 711 sites of `vdot`, `vtfm`, `vmmul`, `vrcp`, `vrsq`, `vsqrt`, `vsin` and `vcos`
+(`vhdp` decodes only in data, which the corpus has no code for; `vexp2`, `vlog2` and `vasin` do not occur at all).
+`cover` found 205 of them executed from READY to 3.2 s of race clock on Vineta K, 1.4 million hits; `vsin` and `vcos`
+(two sites each) were not among them.
+
+**The PPSSPP side.** The route is the scorecard's reference route (`frontend.txt`, `vineta_k_start.txt`, Cross held
+from READY), so the race is the one the scorecard's references and the race clocks of task 046 come from. Log-only
+breakpoints (`cpu.breakpoint.add` with `log` and a `logFormat`; PPSSPP's expressions take the scalar names S000 to
+S733) sit on each site, logging its source lanes, and on the next instruction, logging the destination lanes; a pair
+counts only when the two lines are consecutive in PPSSPP's log. Three things the debugger taught:
+- A breakpoint added while the CPU runs never fires in a block the JIT has already compiled (the first coverage run,
+  armed at READY, saw 47 sites and none of the ship update's). The probe adds every breakpoint at boot with the
+  condition `usec >= READY` (and an end for the hot sites), which keeps them silent through the menus.
+- `cpu.getAllRegs` offers the GPRs, the FPU and the 128 VFPU scalars, not the prefix registers; the probe reads the
+  `vpfx` words in front of each site from the code (`sites.json`). None of the sampled sites has a prefix.
+- With the interpreter (`--cpu-core 0`) a log-only breakpoint stops the CPU like any other; the probe then reads the
+  registers with `cpu.getAllRegs` at each stop and resumes (about 90 stops a second, so that run samples 27 sites).
+
+The breakpoints change PPSSPP's AI race a little (the player's ship ends within 1 mm of the reference at 12 s in
+every run): every ship's end position against the scorecard's reference race at the same clock, the largest of the
+seven AI ships:
+
+| Breakpoints (JIT) | Largest AI offset at 12.1 s |
+|---|---|
+| one, on code the race never runs (the measure's floor) | 0.055 m |
+| four, on integer instructions next to the two task 046 `vdot.t` sites | 0.550 m |
+| four, on those two `vdot.t` sites and the instructions after them | 0.560 m |
+| 330, on the 195 sampled sites and the instructions after them | 8.040 m |
+
+A breakpoint beside a `vdot` moves the race as much as one on it, so it is the breakpoints' place in the JIT's blocks,
+not a different `vdot`, that moves it; each logged row is still one execution's operands and result.
+
+**The port side.** `port` builds, for every sampled site, the corpus's own block of that instruction
+(`generated/generated_unit_*.cpp`, between its label and its `goto`) into one program with the corpus's flags
+(`/usr/bin/clang++ -O2 -std=gnu++20 -arch arm64`), loads PPSSPP's operands into an `AllegrexContext`, runs it and
+writes the destination lanes: the port's results on PPSSPP's operands, without a port run. The model's emulation of
+the port (model b) reproduces every one of them.
+
+**The model.** `--check` takes each sample set under `ref/vfpu`, the rule of the PPSSPP core that made it
+(`vfpu_model.py` `RULES`) and the instruction, and counts the dot products the rule reproduces; it exits 0 when it is
+all of them, else prints up to 20 failing rows a group (operands, PPSSPP's result, the model's and the port's). It
+then reports the transcendental instructions. About 10 s. `--report` runs every candidate model over every set
+(about 70 s for the JIT set). The samples are git-ignored; ref/README.md has the commands and their hashes.

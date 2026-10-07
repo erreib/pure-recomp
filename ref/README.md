@@ -320,3 +320,39 @@ read from VRAM.
 | scorecard/trajectories/vineta_k.run2.csv | 317891 | e0c58472cd30cffe48a633d2568f1d21402a283b750fb1f6eea043c5814cb7e0 | 2026-10-07 10:15 | PPSSPP, Vineta K again: the AI ships' determinism check |
 | scorecard/trajectories/vineta_k.run2.flips.txt | 56200 | 43c98e6ee42fb574d04e96646717369d90a54500d04c6a6184e4677f2b9d45d4 | 2026-10-07 10:15 | the second run's flips |
 <!-- scorecard references: end -->
+
+## Task 047 (2026-10-07): PPSSPP's VFPU samples
+
+`ref/vfpu/` (docs/verification.md, "The VFPU dot-product check"; docs/fidelity.md, difference 13): PPSSPP 1.20.4's
+operands and results at the game's VFPU dot-product and transcendental instructions over the scorecard's Vineta K race
+(`frontend.txt` + `vineta_k_start.txt`, Cross from vblank 7213), from READY to 12 s of race clock. Each set directory
+holds `sites.json` (the sites, their lanes, prefixes and rows, the run's CPU core and every ship's end offset from
+`scorecard/trajectories/vineta_k.csv`), one `<ADDR>.csv` a site (PPSSPP's bits) and one `<ADDR>.port.csv` (the port's
+results for the same operands, from `tools/vfpu_probe.py port`, which change with the codegen). A digest is the
+SHA-256 of `shasum -a 256` over the set's files in name order (`cd ref/vfpu/jit && ls *.csv | grep -v port | sort |
+xargs shasum -a 256 | shasum -a 256`).
+
+```
+P=/opt/homebrew/bin/python3
+$P tools/vfpu_probe.py cover --seconds 3                                   # coverage.csv, coverage.json; 2.5 min
+$P tools/vfpu_probe.py sample --out ref/vfpu/jit --sites all --cap 5000 --seconds 12          # 3.5 min
+$P tools/vfpu_probe.py sample --out ref/vfpu/interp --cpu-core 0 --cap 1500 --seconds 12 --sites \
+  089196B8,08926E08,08823DB8,08930074,08929A74,0891B11C,0882375C,08827504,088AE970,08887C04,08893674,08886A70,\
+088AF05C,08934758,088F1144,088AF030,0886A37C,088C9F88,088F11A0,088936CC,08927230,08929A6C,08827570,088437E8,08824BB4,\
+089196BC,08930078                                                           # 22 min (the interpreter is stepped)
+$P tools/vfpu_probe.py port ref/vfpu/jit && $P tools/vfpu_probe.py port ref/vfpu/interp
+```
+
+| File or set | Size | SHA-256 | Made |
+|---|---|---|---|
+| vfpu/coverage.csv | 26382 | 8d403fb525abff6a837b7350779cb47d864bf9b3c7d922a6b48ff8a2e5d782ea | 2026-10-07 14:16, JIT, 711 sites, 205 run to 3.2 s of race clock |
+| vfpu/coverage.json | 411 | 806f48673cff16b1a655128bec43e76a66f6ac92bbf3782c739c6ced89a0bc12 | the same run |
+| vfpu/jit/sites.json | 114424 | 6a12c13395db313b773ff46e9b5713224d9d9bc0d2252ffe328ff0d8d516f436 | 2026-10-07 14:44, CPU core 1 (JIT), 195 sites, 812229 rows |
+| vfpu/jit/*.csv (195, not port) | 67855107 | digest d6c7e4c6ef9d8e25c40e6244e7f3c6000d364293418d7111cdb4a6630b8ecb5b | the same run |
+| vfpu/jit/*.port.csv (195) | | digest aafa9b5cc955d05136f9d6986e13082bda4d2e70434718232964fc6b1771e1d5 | `port`, on the corpus in generated/ of 2026-10-07 (before the dot-product change) |
+| vfpu/interp/sites.json | 19713 | 9fd78a712681861736107bfdcb95bee0177074a59b2c2036264bd21eb684803b | 2026-10-07 15:15, CPU core 0 (interpreter), 27 sites, 60086 rows |
+| vfpu/interp/*.csv (27, not port) | 7796062 | digest 01b2d42218c16fe243f455b56290e55521b385b4099409ed0dc9051c08c4121a | the same run |
+| vfpu/interp/*.port.csv (27) | | digest a05aea6f8f3604dd5f0b4ee39c6082540dc15e39b80e8a71624dfb0d0aac530e | `port`, on the corpus in generated/ of 2026-10-07 (before the dot-product change) |
+
+PPSSPP's memory stick held `PPCD00001DLS001` only, before and after every run; each run's ini was put back (CPU core
+1, the machine's setting, after the interpreter's).
