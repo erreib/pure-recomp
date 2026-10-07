@@ -49,6 +49,18 @@ SCENES='
    profile    frontend.txt                   2100   ref/profile.png         24   0.07   0.054   0.0000  # vulkan task 006: downscale edges, as lang; metal task 023: 0 px
    main_menu  main_menu.txt                  4700   ref/main_menu.png       24   0.05   0.033   0.0106  # vulkan task 006: help text caught mid-typing; metal task 023
    race_hud   main_menu.txt+single_race.txt  6016   ref/vineta_k_start.png  32   0.10   0.067   0.0379  # vulkan task 011 review: first full-HUD frame, bloom and shadows on, runs 0.063-0.086 (the AI grid varies); metal task 025
+   single_player      main_menu.txt+single_race.txt  4765  ref/single_player.png      24  0.07   -       0.0000  # task 035: SINGLE PLAYER (SINGLE RACE highlighted); PPSSPP frame 5850 of frontend.txt+vineta_k_start.txt
+   class_select       main_menu.txt+single_race.txt  4990  ref/class_select.png       24  0.07   -       0.0000  # task 035: CLASS SELECTION (VECTOR); PPSSPP 6050
+   league_select      main_menu.txt+single_race.txt  5185  ref/league_select.png      24  0.07   -       0.0000  # task 035: LEAGUE SELECTION (ALPHA); PPSSPP 6250
+   track_select       main_menu.txt+single_race.txt  5390  ref/track_select.png       24  0.07   -       0.0000  # task 035: TRACK SELECTION (VINETA K, length and records); PPSSPP 6450
+   team_select        main_menu.txt+single_race.txt  5600  ref/team_select.png        24  0.07   -       0.0000  # task 035: TEAM SELECTION (FEISAR, the wireframe ship); PPSSPP 6690
+   tt_track_select    main_menu.txt+time_trial.txt   5375  ref/tt_track_select.png    24  0.07   -       0.0000  # task 035: the Time Trial TRACK SELECTION (records, bronze/silver/gold); PPSSPP 6650 of time_trial_start.txt
+   tt_hud             main_menu.txt+time_trial.txt   5890  ref/tt_hud.png             32  0.10   -       0.0617  # task 035: the Time Trial first full-HUD frame on Vineta K (CURRENT, BEST, BRONZE TIME); PPSSPP 7302
+   fp_track_select    main_menu.txt+free_play.txt    5375  ref/fp_track_select.png    24  0.07   -       0.0000  # task 035: the Free Play TRACK SELECTION (records, length, height); PPSSPP 6650 of free_play_start.txt
+   fp_hud             main_menu.txt+free_play.txt    5890  ref/fp_hud.png             32  0.10   -       0.0620  # task 035: the Free Play first full-HUD frame on Vineta K; PPSSPP 7302
+   tournament_select  main_menu.txt+tournament.txt   5185  ref/tournament_select.png  24  0.07   -       0.0000  # task 035: TOURNAMENT SELECTION (ALPHA, its four tracks); PPSSPP 6450 of tournament_start.txt
+   zone_track_select  main_menu.txt+zone.txt         4975  ref/zone_track_select.png  24  0.07   -       0.0000  # task 035: the Zone TRACK SELECTION (PRO TOZO, targets); PPSSPP 6250 of zone_start.txt
+   zone_hud           main_menu.txt+zone.txt         5260  ref/zone_hud.png           32  0.06   -       0.0348  # task 035: the Zone 1 first frame with the HUD (SCORE, ZONE 0); PPSSPP 6668
 '
 EXTRA_FLIPS=30
 
