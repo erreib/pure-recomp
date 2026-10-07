@@ -1,9 +1,11 @@
 # boot -> title -> profile LOAD -> MAIN MENU -> PROFILE > SAVE -> PROFILE > NEW > YES -> SET NAME. Measured 2026-10-05
 # (task 014) on a memory stick that holds the profile main_menu.txt creates (UCUS98612P0000, name NAME0000).
-# The profile list on a PSP is the system's sceUtilitySavedata LISTLOAD dialog. The framework draws no dialog and
-# confirms the first listed save that exists, so there is no list on screen and no Cross to press on it: an extra
-# Cross there lands on MAIN MENU > SINGLE PLAYER. The loaded name shows instead on SET NAME, which the game fills
-# with the current profile's name ("NAME0000"; a fresh stick shows "NAME"). The run ends there, before any NEW save.
+# The profile list on a PSP is the system's sceUtilitySavedata LISTLOAD dialog. With one save on the stick the port
+# loads it without showing the list (task 039), so there is no Cross to press on it: an extra Cross there lands on
+# MAIN MENU > SINGLE PLAYER. The loaded name shows instead on SET NAME, which the game fills with the current
+# profile's name ("NAME0000"; a fresh stick shows "NAME"). The run ends there, before any NEW save.
+# PROFILE > SAVE is a LISTSAVE, which in a window would show the save list (one save beside four free slots): the
+# `save P0000` step answers it as a player writing the profile back over its own slot would (task 039).
 # Screens: LISTLOAD at 2100, MAIN MENU by 2300, PROFILE menu by 2750 (focus NEW), LISTSAVE at 2900 (focus stays on
 # SAVE), WARNING by 3350, SET NAME by 3650.
 700:pad a
@@ -17,6 +19,7 @@
 2500:pad a
 2800:pad dpdown
 2840:pad dpdown
+2880:save P0000
 2900:pad a
 3200:pad dpup
 3240:pad dpup

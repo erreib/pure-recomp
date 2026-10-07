@@ -1,0 +1,20 @@
+# A window only (the save list is the interface's). On a memory stick that holds two profiles (two_profiles.txt's:
+# NAME0000 in UCUS98612P0000, NAME1111 in P0001, the newer): boot -> title -> profile LOAD -> the save list, on the
+# newest save, P0001 (shot list-boot) -> Cross loads it ("Load completed.") -> Cross -> MAIN MENU (shot menu-loaded)
+# -> PROFILE > NEW > YES -> SET NAME, pre-filled with the loaded NAME1111 (shot name-p0001). Ends there, before any
+# save. Measured 2026-10-07 (task 039) in the Metal window.
+700:pad a
+1600:pad a
+1650:pad a
+1800:pad start
+2100:pad a
+2160:shot list-boot
+2200:pad a
+2250:pad a
+2480:shot menu-loaded
+2500:pad dpdown
+2550:pad dpdown
+2600:pad a
+2900:pad a
+3150:pad a
+3350:shot name-p0001
