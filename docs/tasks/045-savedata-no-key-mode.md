@@ -1,6 +1,6 @@
 # 045: Saves in the PSP's own format (fidelity difference 5)
 
-Milestone: M8 | Branch: task/045-savedata-no-key-mode | Status: OPEN
+Milestone: M8 | Branch: task/045-savedata-no-key-mode | Status: MERGED (1bbd6bd, 2026-10-07; PARTIAL resolved by the round-trip fix ff53240)
 
 ## Goal
 A PSP (and PPSSPP) encrypts Wipeout Pure's saves in the save-data utility's no-key mode (mode 1): the game's
@@ -216,4 +216,24 @@ Open questions:
 
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at ff53240 (2026-10-07), in two parts because the scorecard worker held the
+machine: `tools/verify_task.sh 045` ran patches check (18), the build, the save round trip (PASS, every folder check
+with the deciphered profile) and the interchange (a, plain, b, c all PASS, verdict PASS on every pair) and was refused
+at the last step by the one-game guard; `tools/frame_regress.sh --only race_hud` then passed on its own (0.0148).
+PPSSPP's memory stick holds only PPCD00001DLS001 afterwards.
+
+Spot-read: patch 0019 (mode 1 chosen only when the keys are available and the request has no key; the data file at
+its own length with the 16-byte header; PARAM.SFO's hashes checked before the file's; a failed hash returns
+0x80110306; plain saves load as flag 0; no key material, every key by slot through `crypto_keys()`), the hash
+alignment change (a file not a multiple of 16 hashed as zero-padded: the framework's own files were always padded so
+nothing changes for them, and PPSSPP's file verifies only this way), tools/save_interchange.sh (the stick restored by
+a trap; the checker built from the vendor sources, printing no key or hash value). Files outside May touch: none.
+
+Merged: 1bbd6bd into batch/m2; the worker's proposed change to tools/save_roundtrip.sh applied from the main checkout
+as ff53240 (the brief had put that tool off limits, which is why the worker reported PARTIAL).
+
+Notes: accepted the aligned-length hashing as the documented reading: the scheme and keys are untouched and both
+directions verify. Export of a pre-0019 plain save stays plain until the game's next save rewrites it in mode 1
+(follow-up). The 69 heap pointers the profile stores verbatim sit 0x200 higher in the port than in PPSSPP: a
+start-up or allocator layout difference, harmless for saves, recorded as a follow-up. The incident on the shared
+PPSSPP stick (10:58) was reported to the scorecard worker, which redoes the affected reference.
