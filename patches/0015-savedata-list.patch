@@ -720,10 +720,10 @@ index 1d1a682..517ffd7 100644
      return layer.take_menu_toggle() || touched;
 diff --git a/host/ui/save_list.cpp b/host/ui/save_list.cpp
 new file mode 100644
-index 0000000..ff70885
+index 0000000..ab5a5ad
 --- /dev/null
 +++ b/host/ui/save_list.cpp
-@@ -0,0 +1,480 @@
+@@ -0,0 +1,491 @@
 +#include "ui/save_list.hpp"
 +
 +#include "ui/layer.hpp"
@@ -964,16 +964,27 @@ index 0000000..ff70885
 +        text(draw, psp, 11.0f, psp.at(8, 200), kWhite,
 +             entry.savedata_title + "\n" + entry.date + "\n" + std::to_string(entry.size_kb) + " KB");
 +    const float size = 13.0f;
-+    const float wrap = psp.px(254.0f);
-+    const ImVec2 measured = text_size(psp, size, message, wrap);
-+    const float half = measured.y / psp.scale * 0.5f;
++    // Each line centred on x 334, as the PSP sets its messages.
++    std::vector<std::string> lines;
++    for (std::size_t start = 0;;) {
++        const std::size_t end = message.find('\n', start);
++        lines.push_back(message.substr(start, end == std::string::npos ? std::string::npos : end - start));
++        if (end == std::string::npos) break;
++        start = end + 1u;
++    }
++    const float line_height = text_size(psp, size, "Ag").y / psp.scale;
++    const float half = line_height * static_cast<float>(lines.size()) * 0.5f;
 +    float top = 136.0f - half;
 +    float bottom = 136.0f + half;
 +    if (yes_no) {
 +        top -= 10.0f;
 +        bottom += 10.0f;
 +    }
-+    text(draw, psp, size, {psp.at(334, 0).x - measured.x * 0.5f, psp.at(0, top).y}, kWhite, message, wrap);
++    for (std::size_t i = 0; i < lines.size(); ++i) {
++        const ImVec2 measured = text_size(psp, size, lines[i]);
++        const float y = top + line_height * static_cast<float>(i);
++        text(draw, psp, size, {psp.at(334, 0).x - measured.x * 0.5f, psp.at(0, y).y}, kWhite, lines[i]);
++    }
 +    if (yes_no) {
 +        const float y = bottom - 9.0f;
 +        const float choice_x = s.yes ? 302.0f : 366.0f;
