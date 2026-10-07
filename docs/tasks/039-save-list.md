@@ -1,6 +1,6 @@
 # 039: The save list: a second profile must not overwrite the first (fidelity difference 4)
 
-Milestone: M8 | Branch: task/039-save-list | Status: OPEN
+Milestone: M8 | Branch: task/039-save-list | Status: MERGED 2026-10-07 (0aa3802)
 
 ## Goal
 Creating a second profile silently overwrites the first, and LOAD offers no choice: the framework answers the game's
@@ -142,4 +142,15 @@ Open questions:
 - **The layout was not checked against the PSP reference pictures.** `ref/save_dialog.png` and `ref/save_completed.png` are not in the checkout's `ref/`. The layout follows PPSSPP's `PSPSaveDialog` and the description in docs/fidelity.md.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build (fourteen patches at the time: 0001 to 0013 and 0015),
+2026-10-07: `tools/save_roundtrip.sh` all five runs including the two-profile legs, the headless suite 18/18.
+Spot-read: patch 0015's `hle_savedata.cpp` (the three-way answer: a scripted `save`, the list in a window, the
+defaults that overwrite and delete nothing; mode 7 as the game's delete; the request VISIBLE while the list is up
+and the game drawing behind it, as on the PSP), `host/ui/save_list.cpp`, the `save` action in both shells, the
+round trip's new runs and routes.
+Merged: 0aa3802 into batch/m2 (patches/README and docs/fidelity.md rows combined by hand). The CMake line for the
+new screen file was outside May-touch and unavoidable.
+Notes: the brief said "over the paused game"; the worker's finding that the PSP keeps the game running behind the
+system dialog is the faithful one and is what landed. Open questions in docs/status.md Follow-ups: SAVE's focus on
+the first free slot where a PSP would sit on the current slot, a full stick headless, the dialog's look against
+`ref/save_dialog.png`.
