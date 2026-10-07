@@ -100,8 +100,9 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | Erik's recorded lap (`tools/pad_record.py`) to replace the AI-line follower where it struggles | session 2 | the command and keys are in the Resume notes |
 
 ## Resume (session 4, 2026-10-06)
-- `main` = (Erik's ninth fast-forward, 2026-10-07, the commit below): tasks 003, 016 to 045 merged, patches 0001 to 0015
-  and 0017 to 0019, D-003, D-007 to D-012, the M8 audit, its fix round, the reverb, PSP-format saves and the scorecard. `batch/m2` continues from there. Remote: `origin` =
+- `main` = (Erik's tenth fast-forward, 2026-10-07 evening, the commit below): tasks 003, 016 to 048 merged, patches 0001 to
+  0015 and 0017 to 0021, D-003, D-007 to D-013; the M8 audit and fix round, the reverb, PSP-format saves, the scorecard,
+  the AI's start, and the VFPU rounding by the PSP's rule. `batch/m2` continues from there. Remote: `origin` =
   https://dev.eriksmedia.com/erreib/pure-recomp.git (private GitLab, created 2026-10-06 by Erik's push of `main`);
   Erik pushes, nobody else (the session's permissions deny pushes; CLAUDE.md forbids them for workers).
 - Merge gate: `tools/frame_regress.sh` (5 scenes, 7 min) after any renderer change; `tools/verify_task.sh NNN` reruns a
