@@ -269,29 +269,6 @@ def cmd_scan(a):
 
 # ------------------------------------------------------------------------------------------- PPSSPP runs
 
-def stick_snapshot():
-    import ppsspp_ctl as pc
-    d = pc.MEMSTICK / "PSP" / "SAVEDATA"
-    return {p.name: p.stat().st_mtime for p in d.iterdir()} if d.exists() else {}
-
-
-def stick_restore(before):
-    """Anything the run added to PPSSPP's SAVEDATA goes to out/vfpu_probe/savedata-moved/; changes are reported."""
-    import shutil
-    import ppsspp_ctl as pc
-    d = pc.MEMSTICK / "PSP" / "SAVEDATA"
-    after = stick_snapshot()
-    for name in sorted(set(after) - set(before)):
-        dest = WORK / "savedata-moved" / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(d / name), str(dest))
-        say(f"memory stick: the run wrote {name}; moved to {dest}")
-    for name in sorted(n for n in before if n in after and after[n] != before[n]):
-        say(f"memory stick: warning: {name} changed during the run")
-    for name in sorted(set(before) - set(after)):
-        say(f"memory stick: warning: {name} disappeared during the run")
-
-
 def ppsspp_race(track, logfile, breakpoints, seconds, cpu_core=None, wall_limit=3600.0):
     """The reference route for `track` with log-only breakpoints logging from READY: breakpoints is a list of
     (address, logFormat[, (start_us, length_us)]); with a span a breakpoint logs only from start_us after READY for
@@ -304,13 +281,14 @@ def ppsspp_race(track, logfile, breakpoints, seconds, cpu_core=None, wall_limit=
     import ppsspp_ctl as pc
     import pp_lines as pl
     import scorecard as sc
+    from purelib import ppsspp as shared_ppsspp     # one PPSSPP at a time, its memory stick left as found
     files, hold = sc.pp_routes(track)
     script = ("\n".join((sc.PP_ROUTES / f).read_text() for f in files)
               + f"\n{hold}:CROSS\n{hold + sc.PP_HOLD_VBLANKS}:\n")
     states = pc.parse_pad_script(script)
-    if not sc.wait_ppsspp():
+    if not shared_ppsspp.wait_free(sc.say):
         raise RuntimeError("PPSSPP did not become free")
-    before = stick_snapshot()
+    before = shared_ppsspp.stick_snapshot()
     rec = pl.RECORD_POS + sc.PLAYER * pl.STRIDE
     t0 = time.time()
     out = {"track": track, "route": files, "ready_vblank": hold}
@@ -414,7 +392,8 @@ def ppsspp_race(track, logfile, breakpoints, seconds, cpu_core=None, wall_limit=
                     dbg.close()
                 pc.stop_process(proc.pid, proc)
     finally:
-        stick_restore(before)
+        # Anything the run added to PPSSPP's SAVEDATA goes to out/vfpu_probe/savedata-moved/; changes are reported.
+        shared_ppsspp.stick_restore(before, WORK / "savedata-moved", say)
     out["end_clock"], out["end_player"] = end[0], list(end[1:])
     out["wall_seconds"] = round(time.time() - t0, 1)
     # Is this the reference race? Every ship's position at the end against the scorecard's PPSSPP reference (task
