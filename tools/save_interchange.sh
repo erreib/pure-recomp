@@ -179,25 +179,29 @@ if [ "${1:-}" = --check ]; then
 fi
 
 # --- PPSSPP: one instance, one memory stick, shared with other work --------------------------------------------------
-# wait_ppsspp: until no PPSSPPSDL runs (another worker's run is never touched), at most 20 minutes.
+# wait_ppsspp: until no PPSSPPSDL runs (another worker's run is never touched), at most 30 minutes.
 wait_ppsspp() {
   local waited=0
   while pgrep -x PPSSPPSDL > /dev/null; do
-    [ $waited -eq 0 ] && echo "        PPSSPP is busy (pid $(pgrep -x PPSSPPSDL | tr '\n' ' ')); waiting"
-    [ $waited -ge 1200 ] && return 1
-    sleep 15; waited=$((waited + 15))
+    [ $waited -eq 0 ] && echo "        PPSSPP is busy (pid $(pgrep -x PPSSPPSDL | paste -sd ' ' -)); waiting"
+    [ $waited -ge 1800 ] && return 1
+    sleep 5; waited=$((waited + 5))
   done
   return 0
 }
 
-# ppsspp_run LOG ARGS...: one driver run; retried (after a wait) when another PPSSPP got there first.
+# ppsspp_run LOG ARGS...: one driver run once PPSSPP is free; retried (after a wait) when another PPSSPP got there
+# first. PPSSPP_STAGE and PPSSPP_UNSTAGE name commands run just before the launch and after a refused one: whatever a
+# run puts on PPSSPP's shared stick goes there only for the run itself, never while someone else's PPSSPP runs.
 ppsspp_run() {
   local log=$1; shift
   local try
-  for try in 1 2 3; do
-    wait_ppsspp || { echo "        PPSSPP stayed busy for 20 minutes"; return 1; }
+  for try in 1 2 3 4 5; do
+    wait_ppsspp || { echo "        PPSSPP stayed busy for 30 minutes"; return 1; }
+    ${PPSSPP_STAGE:-true}
     python3 tools/ppsspp/ppsspp_ctl.py run "$@" > "$log" 2>&1 && return 0
     grep -q "already running" "$log" || return 1
+    ${PPSSPP_UNSTAGE:-true}
   done
   return 1
 }
@@ -400,14 +404,18 @@ if [ $PORT_ONLY -eq 1 ]; then
   echo "        not run (--port-only)"
 elif [ -d "$PPSSPP_SAVEDATA" ]; then
   found=$(ls "$PPSSPP_SAVEDATA" | sort | paste -sd ' ' -)
-  for f in "$PPSSPP_SAVEDATA"/UCUS98612P*; do
-    [ -e "$f" ] || continue
-    echo "        PPSSPP's stick holds $(basename "$f"); moved aside to $OUT/b/stick-before/ and put back afterwards"
-    mv "$f" "$OUT/b/stick-before/"
-  done
-  wait_ppsspp
-  cp -Rp "$OUT/port-roundtrip/$PROFILE" "$PPSSPP_SAVEDATA/$PROFILE" && touch "$OUT/b/copied"
-  before=$(cd "$PPSSPP_SAVEDATA/$PROFILE" && shasum -a 256 * | shasum -a 256 | cut -c1-16)
+  # Just before the launch, with PPSSPP free: any profile save there moves aside, and the port's goes in.
+  stage_save() {
+    local f
+    for f in "$PPSSPP_SAVEDATA"/UCUS98612P*; do
+      [ -e "$f" ] || continue
+      echo "        PPSSPP's stick holds $(basename "$f"); moved aside to $OUT/b/stick-before/ and put back afterwards"
+      mv "$f" "$OUT/b/stick-before/"
+    done
+    cp -Rp "$OUT/port-roundtrip/$PROFILE" "$PPSSPP_SAVEDATA/$PROFILE" && touch "$OUT/b/copied"
+  }
+  PPSSPP_STAGE=stage_save PPSSPP_UNSTAGE=restore_stick
+  before=$(cd "$OUT/port-roundtrip/$PROFILE" && shasum -a 256 * | shasum -a 256 | cut -c1-16)
   if ppsspp_run "$OUT/b/ppsspp.log" --pad-file $R/profile_load.txt --until 4600 \
        --shot 3000:$OUT/b/shots/load-list.png --shot 3150:$OUT/b/shots/load-completed.png \
        --shot 3720:$OUT/b/shots/menu-loaded.png --shot 4560:$OUT/b/shots/name-loaded.png \
@@ -421,6 +429,7 @@ elif [ -d "$PPSSPP_SAVEDATA" ]; then
   shots_check "$OUT/b/shots/menu-loaded.png" "$OUT/b/shots/name-loaded.png" "PPSSPP:"
   # The name itself: PPSSPP's SET NAME against the port's in (a) (the same NAME0000), and against the port's empty
   # stick ("NAME"), the control.
+  PPSSPP_STAGE= PPSSPP_UNSTAGE=
   if python3 tools/imgdiff.py "$OUT/b/shots/name-loaded.png" "$OUT/a/shots/name-loaded.png" --tol 24 --max-frac 0.02 \
        > "$OUT/b/name.txt" 2>&1; then
     ok "PPSSPP's SET NAME equals the port's with PPSSPP's save, NAME0000 ($(cut -d' ' -f1-3 "$OUT/b/name.txt"))"
