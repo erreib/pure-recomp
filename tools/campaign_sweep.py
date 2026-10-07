@@ -20,12 +20,12 @@ runs the cell in a window to watch it, the race paced as before and the menus un
 Every cell is silent (PURE_NO_AUDIO=1) unless --sound, which also keeps the whole run paced (PURE_PACED_FROM=0) so
 the menus sound right, or the environment sets PURE_NO_AUDIO (or PURE_AUDIO_WAV in a window); and every cell uses
 the data directory out/data/campaign_sweep (settings.ini, pipeline caches), never the player's, unless the
-environment sets PURE_DATA_DIR (tools/run_boot.py, scratch_data_dir and silence). The sweep refuses to start while
-another PureNative runs (one game at a time: task 032 saw a second game beside a windowed cell delay its boot and
-break its menu route), naming it, unless --allow-parallel.
-The tool runs the game itself under a pty, the way tools/run_boot.py does, and writes the log line by line: it
-steers from the `[pure] ship` lines as they come, and run_boot's block-buffered log reaches a reader up to 50
-flips late. Its input script is
+environment sets PURE_DATA_DIR (tools/purelib's scratch_data_dir and silence, as tools/run_boot.py). The sweep
+refuses to start while another PureNative runs (one game at a time: task 032 saw a second game beside a windowed
+cell delay its boot and break its menu route), naming it, unless --allow-parallel.
+The tool runs the game itself under a pty (tools/purelib's PtyRun, as tools/run_boot.py does) and writes the log line
+by line: it steers from the `[pure] ship` lines as they come, and run_boot's block-buffered log reaches a reader up
+to 50 flips late. Its input script is
   config/pad_scripts/main_menu.txt   cold boot to MAIN MENU (shot steps dropped)
   the mode's race route              MAIN MENU to the race, the track picked by N DOWN presses (docs/tracks.md),
                                      Cross held from the countdown for the whole budget
@@ -116,15 +116,15 @@ out/sweep/summary.txt, a table with one row per cell ever run (the latest outcom
 every N flips from the race start (named t<frame>), for tuning. --out DIR writes everything (the game directory and
 the summary too) under DIR instead of out/sweep, so two tuning runs can go side by side.
 """
-import argparse, datetime, fcntl, math, os, pty, re, select, shutil, subprocess, sys, termios, time
+import argparse, datetime, fcntl, math, os, re, shutil, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
 import png  # noqa: E402  (tools/png.py)
-import run_boot  # noqa: E402  (tools/run_boot.py: the scratch data directory, silence, one game at a time)
+from purelib import port  # noqa: E402  (tools/purelib: the environment, the memory stick, the guard, the pty runner)
+from purelib.logs import FRAME_RE, HALT_RE, PLAYER_RE, SHIP_RE  # noqa: E402,F401  (the probe's lines)
 
-EXE = os.path.join(ROOT, "build", "arm64", "bin", "PureNative")
 MENU_ROUTE = "config/pad_scripts/main_menu.txt"
 DRIVE_DIR = "config/pad_scripts/drive"
 LINES_DIR = "out/lines"
@@ -213,14 +213,7 @@ MODES = {
                    "frames": {"alpha": 80000}},
 }
 
-SHIP_RE = re.compile(r"\[pure\] ship frame (\d+) t=\d+ clock=(\S+) pos=(\S+),(\S+),(\S+) vel=(\S+),(\S+),(\S+) "
-                     r"kmh=(\S+) dist=(\S+) lap=(\d+)(?: shield=(\S+))?")
-PLAYER_RE = re.compile(r"\[pure\] ship frame (\d+) player object (\S+) index (\d+)")   # a new race's ship
-FRAME_RE = re.compile(r"\[pure\] frame (\d+)")
 SCRIPT_RE = re.compile(r"\[script\] frame (\d+): shot (\S+)")
-HALT_RE = re.compile(r"\[hle-stub\]|unsupported|Runtime stopped")
-FRAME_EXIT = "[pure] exit at frame"
-FRAME_EXIT_GRACE = 15.0         # seconds the runtime gets to shut down after the frame exit
 
 # The results panel (out/sweep/single_race-vineta_k/f16856.png, 2026-10-05: "BAD LUCK... 8TH", LAP 1-3, TOTAL,
 # ENTER TAG) is drawn over a moving replay of the race, so the screen is never still; its TOTAL label is. In
@@ -701,92 +694,6 @@ class DistTable:
         return self._last_per_axis(acts)
 
 
-class Port:
-    """PureNative under a pty (line-buffered stdout, as tools/run_boot.py runs it), its output folded into the log
-    as it arrives."""
-
-    def __init__(self, env, log_path, seconds, max_lines):
-        self.master, self.slave = pty.openpty()
-        attrs = termios.tcgetattr(self.slave)
-        attrs[1] &= ~termios.OPOST
-        termios.tcsetattr(self.slave, termios.TCSANOW, attrs)
-        self.start = time.time()
-        self.deadline = self.start + seconds
-        self.p = subprocess.Popen([EXE], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=self.slave,
-                                  stderr=self.slave)
-        self.log = open(log_path, "w", buffering=1)
-        self.buf = b""
-        self.last, self.repeat, self.written, self.max_lines = None, 0, 0, max_lines
-        self.frame_exit = self.timed_out = False
-
-    def _emit(self, line):
-        if self.written < self.max_lines:
-            self.log.write(line + "\n")
-            self.written += 1
-            if self.written == self.max_lines:
-                self.log.write(f"... log capped at {self.max_lines} lines\n")
-
-    def _take(self, raw, out):
-        line = raw.decode("utf-8", "replace").rstrip("\r")
-        if not self.frame_exit and line.startswith(FRAME_EXIT):
-            self.frame_exit = True
-            self.deadline = min(self.deadline, time.time() + FRAME_EXIT_GRACE)
-        out.append(line)
-        if line == self.last:
-            self.repeat += 1
-            return
-        if self.repeat > 1:
-            self._emit(f"    ... (x{self.repeat})")
-        self.last, self.repeat = line, 1
-        self._emit(line)
-
-    def read(self, timeout):
-        """The lines that arrive within timeout; kills the game at the deadline."""
-        out = []
-        if self.p.poll() is None and time.time() > self.deadline:
-            self.timed_out = not self.frame_exit
-            self.p.kill()
-        ready, _, _ = select.select([self.master], [], [], timeout)
-        if ready:
-            try:
-                chunk = os.read(self.master, 65536)
-            except OSError:
-                chunk = b""
-            self.buf += chunk
-            *lines, self.buf = self.buf.split(b"\n")
-            for raw in lines:
-                self._take(raw, out)
-        return out
-
-    def alive(self):
-        return self.p.poll() is None
-
-    def close(self):
-        """Waits for the game, drains the pty and closes the log; returns (exit code, the last lines)."""
-        try:
-            self.p.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self.p.kill()
-            self.p.wait()
-        out = []
-        end = time.time() + 5.0
-        while time.time() < end:
-            got = self.read(0.05)
-            if not got:
-                break
-            out += got
-        os.close(self.slave)
-        os.close(self.master)
-        if self.buf:
-            self._take(self.buf, out)
-        if self.repeat > 1:
-            self._emit(f"    ... (x{self.repeat})")
-        code = 0 if self.frame_exit else 124 if self.timed_out else self.p.returncode
-        self.log.write(f"[sweep] exit {code} after {time.time() - self.start:.1f}s, {self.written} lines\n")
-        self.log.close()
-        return code, out
-
-
 def region_variance(path, region):
     """Largest per-channel variance of a region (tools/imgdiff.py --region --min-variance)."""
     opts = argparse.Namespace(a=path, region=region, min_variance=0.0)
@@ -971,20 +878,10 @@ def tail_text(tail):
 def prepare_game_dir(cell):
     """out/sweep/game/<cell>: EBOOT.ELF and disc.iso linked to game/, an empty memory stick (one per cell, so cells
     of different tracks can run side by side)."""
-    game = os.path.join(ROOT, OUT, "game", cell)
-    os.makedirs(game, exist_ok=True)
-    for name in ("EBOOT.ELF", "disc.iso"):
-        target = os.path.join(ROOT, "game", name)
-        if not os.path.exists(target):
-            sys.exit(f"campaign_sweep: {target} is missing (tools/setup_game.sh)")
-        link = os.path.join(game, name)
-        if os.path.islink(link) or os.path.exists(link):
-            os.remove(link)
-        os.symlink(target, link)
-    ms0 = os.path.join(game, "ms0")
-    shutil.rmtree(ms0, ignore_errors=True)
-    os.makedirs(os.path.join(ms0, "PSP", "SAVEDATA"))
-    return game
+    try:
+        return str(port.fresh_stick(os.path.join(ROOT, OUT, "game", cell)))
+    except FileNotFoundError as e:
+        sys.exit(f"campaign_sweep: {e}")
 
 
 def write_tuned(path, cell, sent, laps_done, opts):
@@ -1048,8 +945,8 @@ def cell_environment(opts, paced_from):
     elif not env.get("PURE_GE_BACKEND"):
         env["PURE_GE_BACKEND"] = "vulkan" if shell == "vulkan" else "metal"
     env.setdefault("PURE_PACED_FROM", str(paced_from))
-    run_boot.silence(env, opts.sound, window=shell != "headless")
-    run_boot.scratch_data_dir(env, DATA_DIR)
+    port.silence(env, opts.sound, window=shell != "headless")
+    port.scratch_data_dir(env, DATA_DIR)
     return env
 
 
@@ -1095,7 +992,7 @@ def run_cell(mode, track, opts):
           f"{', unlock all (test switch)' if unlock else ''}; shell {env['PURE_SHELL']}, backend "
           f"{env['PURE_GE_BACKEND']}, paced from flip {env['PURE_PACED_FROM'] or '(the shell decides)'}"
           f"{', sound on' if 'PURE_NO_AUDIO' not in env else ''}, data {env['PURE_DATA_DIR']}", flush=True)
-    port = Port(env, log, max(60.0, exit_frame / 15.0), opts.max_lines)
+    run = port.PtyRun(env, log, max(60.0, exit_frame / 15.0), opts.max_lines, line_buffered=True)
     trace = open(os.path.join(out, f"{cell}.trace.csv"), "w", buffering=1)
     trace.write("frame,clock,lap,dist,x,z,kmh,lx,offset,psi,thrust,airbrake,shield,race\n")
     # Flip-counted waits keep their times in the 30-flip modes.
@@ -1366,7 +1263,7 @@ def run_cell(mode, track, opts):
             on_results(path, name)
 
     while True:
-        for text in port.read(0.05):
+        for text in run.read(0.05):
             handle(text)
         outcome = state["outcome"]
         if state["halt"] and outcome is None:
@@ -1426,21 +1323,22 @@ def run_cell(mode, track, opts):
                 analyse(name, path)
             except (OSError, ValueError):
                 pass
-        if not port.alive():
+        if not run.alive():
             break
 
-    code, rest = port.close()
+    rest = run.drain()
+    code = run.close("sweep")
     for text in rest:
         handle(text)
     trace.close()
-    elapsed = time.time() - port.start
+    elapsed = time.time() - run.start
     outcome, detail = state["outcome"], state["detail"]
     if state["halt"] and outcome != "PASS":
         outcome, detail = "HALT", state["halt"]
     if outcome is None:
         if not race.started and not done:
             outcome, detail = "NO RACE", "no race clock in the probe: the menu route did not reach the race"
-        elif port.timed_out:
+        elif run.timed_out:
             outcome, detail = "TIMEOUT", f"wall-clock deadline reached (exit {code})"
         else:
             outcome, detail = "TIMEOUT", f"flip budget {frames} used up"
@@ -1516,7 +1414,7 @@ def record_line(mode, track, opts):
     os.makedirs(shots)
     unlock = opts.unlock_all or needs_unlock(mode, track, opts.cls)
     env = dict(os.environ)
-    run_boot.scratch_data_dir(env, DATA_DIR)
+    port.scratch_data_dir(env, DATA_DIR)
     env.update({"PURE_GAME_DIR": prepare_game_dir(cell), "PURE_LIST_STUBS": "1", "PURE_STRICT_HLE": "1",
                 "PURE_SHELL": "headless", "PURE_GE_BACKEND": "metal", "PURE_NO_RENDER": "1", "PURE_NO_AUDIO": "1",
                 "PURE_EXIT_AT_FRAME": str(m["throttle"] + frames),
@@ -1528,13 +1426,14 @@ def record_line(mode, track, opts):
         env["PURE_TEST_UNLOCK_ALL"] = "1"
     print(f"[sweep] {cell}: recording the AI line headless to flip {m['throttle'] + frames}"
           f"{', unlock all (test switch)' if unlock else ''}", flush=True)
-    port = Port(env, log, 900.0, max(opts.max_lines, 8 * (frames + 2000)))
+    run = port.PtyRun(env, log, 900.0, max(opts.max_lines, 8 * (frames + 2000)), line_buffered=True)
     halt = None
-    while port.alive():
-        for text in port.read(0.2):
+    while run.alive():
+        for text in run.read(0.2):
             if halt is None and HALT_RE.search(text) and "PURE_EXIT_AT_FRAME" not in text:
                 halt = text.strip()
-    code, rest = port.close()
+    rest = run.drain()
+    code = run.close("sweep")
     for text in rest:
         if halt is None and HALT_RE.search(text) and "PURE_EXIT_AT_FRAME" not in text:
             halt = text.strip()
@@ -1542,7 +1441,7 @@ def record_line(mode, track, opts):
         if name.endswith(".bmp"):
             w, h, c, data = png.read_bmp(os.path.join(shots, name))
             png.write_png(os.path.join(shots, name[:-4] + ".png"), w, h, c, data)
-    print(f"[sweep] {cell}: exit {code} after {time.time() - port.start:.0f} s{f'; HALT: {halt}' if halt else ''}",
+    print(f"[sweep] {cell}: exit {code} after {time.time() - run.start:.0f} s{f'; HALT: {halt}' if halt else ''}",
           flush=True)
     cmd = [sys.executable, os.path.join(ROOT, "tools", "pp_lines.py"), "--port", log, "--out", opts.record_line,
            "--samples", os.path.join(out, f"{cell}.grid.csv")] + (["--compare", opts.line] if opts.line else [])
@@ -1661,10 +1560,7 @@ def main(argv=None):
         line.export(opts.export_line)
         print(f"{src}: {line.length:.0f} m, {line.covered:.0%} of the bins sampled -> {opts.export_line}")
         return 0
-    others = [] if opts.allow_parallel else run_boot.other_games()
-    if others:
-        print("campaign_sweep: another PureNative is running; one game at a time (--allow-parallel starts anyway):\n"
-              + "\n".join(f"  pid {pid}: {command}" for pid, command in others), flush=True)
+    if port.refuse("campaign_sweep", opts.allow_parallel):
         return 2
     os.makedirs(os.path.join(ROOT, OUT), exist_ok=True)
     if opts.record_line:
