@@ -683,6 +683,12 @@ line, output or file layout of a tool changed with the move.
 | `purelib.logs` | the line formats and their readers: `[pure] ship` (`SHIP_RE`, `SHIP_T_RE`), `player object` (`PLAYER_RE`), `[pure] grid` (`GRID_RE`, `grid_samples`), `[pure] exit at frame` (`exit_frame`), `[hle-stub]` and the start-up list (`STUB_RE`, `UNIMPL_RE`, `unimplemented`, `HALT_RE`), the `[metal]` exit lines (`metal_exit`, `metal_pipelines`, `METAL_FPS_RE`), the GE exit list (`ge_ignored`), the audio capture's underruns and files (`UNDERRUN_RE`, `wav_files`, `wav_channel`) | the same tools and `pp_lines.py` |
 | `purelib.ppsspp` | PPSSPP's shared use: `wait_free` (no PPSSPPSDL running and no profile save on its memory stick, as the scorecard waited), `stick_snapshot` and `stick_restore` (what a run added to the stick moved out, changes reported) | `scorecard.py`, `vfpu_probe.py`, `ai_seed_check.sh` |
 
+Every headless port run the runner starts has `PURE_NO_BUSY_CLOCK=1` (`port.steady_clock`, from task 051's finding:
+the framework's busy-time charge made a headless run depend on the machine's load) unless its environment names the
+switch: `run_boot.py` without a window and without `--sound` (so the headless suite, `hud_check.sh --shell headless`
+and the scorecard's runs), the sweep's headless cells (the audit's too) and `--record-line`; a window or `--sound`
+keeps the charge, as a player has it.
+
 The tools' own rules moved as they were; the module holds each of them, it did not merge them:
 - The environment. `run_boot.py` and the sweep start from the whole environment (the sweep keeps `PURE_SHELL`,
   `PURE_GE_BACKEND` and `PURE_PACED_FROM` from it). The audit's cells drop the `PURE_TRACE_*` switches and the four
