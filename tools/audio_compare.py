@@ -2,7 +2,7 @@
 """Two 16-bit PCM WAVs side by side: per-second activity, the longest silences, peaks and clipping (task 041).
 
   tools/audio_compare.py A.wav B.wav [--from S] [--from-b S] [--seconds N] [--floor RMS] [--block-ms MS]
-                         [--top N] [--quiet]
+                         [--top N] [--quiet] [--detail S:E]
   tools/audio_compare.py --selftest
 
 Made to compare the port's capture (PURE_AUDIO_WAV, the mix or one channel) with PPSSPP's audio dump
@@ -17,7 +17,9 @@ as tools/wavstats.py counts it) and `<>` at the end of a row where one file is a
 summary for each file: the active seconds, the peak (and in dBFS), the clipped samples (at -32768 or 32767) and
 their fraction, and its --top (default 5) longest silences: runs of --block-ms (default 10 ms) blocks whose RMS is at
 or under the floor, with `all zero` when every sample of the run is 0 (a dropout or digital silence, rather than a
-quiet passage). --quiet leaves out the per-second rows. Exit 0, or 2 on bad input.
+quiet passage). --quiet leaves out the per-second rows. --detail S:E adds rows of ten blocks (100 ms by default)
+from S to E seconds after the window starts, each file's RMS and `z` when every sample of the row is 0: the
+sample-level view of a gap. Exit 0, or 2 on bad input.
 
 --selftest writes two WAVs with known gaps and clipping to a temporary directory, runs the analysis on them and
 checks the figures it prints against the ones the files were made with: PASS (exit 0) or FAIL (exit 1). Pure Python
@@ -43,6 +45,7 @@ def parse(argv):
     p.add_argument("--block-ms", type=float, default=10.0)
     p.add_argument("--top", type=int, default=5)
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--detail", metavar="S:E")
     p.add_argument("--selftest", action="store_true")
     opts = p.parse_args(argv)
     if not opts.selftest and (opts.a is None or opts.b is None):
@@ -156,6 +159,20 @@ def report(a, b, opts, out=print):
         runs = t.silences()[:opts.top]
         listed = "; ".join(t.describe_silence(r) for r in runs) if runs else "none"
         out(f"{name}: longest silences (blocks of {t.block_ms:.0f} ms at rms <= {t.floor:g}): {listed}")
+    if getattr(opts, "detail", None):
+        start, _, end = opts.detail.partition(":")
+        first, last = int(float(start) * 1000 / a.block_ms), int(float(end) * 1000 / a.block_ms)
+        out(f"{'+s':>8} | {'A rms':>6}   | {'B rms':>6}   (rows of 10 blocks of {a.block_ms:.0f} ms)")
+        for k in range(first, last, 10):
+            cells = []
+            for t in (a, b):
+                part = t.blocks[k:k + 10]
+                if not part:
+                    cells.append(f"{'':6}  ")
+                    continue
+                rms = math.sqrt(sum(r * r for r, _ in part) / len(part))
+                cells.append(f"{rms:6.0f} {'z' if all(z for _, z in part) else ' '}")
+            out(f"{k * a.block_ms / 1000:8.2f} | {cells[0]} | {cells[1]}")
     differ = sum(1 for k in range(min(len(a.seconds), len(b.seconds)))
                  if (a.seconds[k][0] > a.floor) != (b.seconds[k][0] > b.floor))
     out(f"seconds where one is active and the other silent: {differ}")
