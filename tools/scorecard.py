@@ -26,12 +26,12 @@ reference` (the PPSSPP side has not been taken: --refresh-references), `not meas
   coverage      the campaign matrix's cell results (tools/fidelity_audit.py; reused from out/035-wip/fidelity, never
                 run here), the 278 imports by state, the GE commands the framework still ignores
 
---quick (the default; a few minutes) runs pictures, timing, saves and coverage, timing from the matrix's cached cells.
---full adds trajectories and audio (15 headless port runs) and runs one sweep cell per mode for timing (Single
-Race, Time Trial and Free Play on Vineta K, Zone 1; Tournament stays the matrix's): about 25 minutes. --only runs
-the named categories (with --full's sources, or --quick's beside --quick). Results go to DIR (default
-out/scorecard): scorecard.json,
-scorecard.md and every run's route, log and capture; a --full run of every category also writes docs/scorecard.md.
+--quick (the default; about a minute and a half) runs pictures, timing, saves and coverage, timing from the
+matrix's cached cells. --full adds trajectories and audio (13 headless port runs) and runs one sweep cell per mode
+for timing (Single Race, Time Trial and Free Play on Vineta K, Zone 1; Tournament stays the matrix's): about 18
+minutes. --only runs the named categories (with --full's sources, or --quick's beside --quick). Results go to DIR
+(default out/scorecard): scorecard.json, scorecard.md and every run's route, log and capture; a --full run of
+every category also writes docs/scorecard.md.
 --tracks limits the trajectory and audio circuits (a check, not a scorecard).
 
 --refresh-references [CATEGORY] takes the PPSSPP side through tools/ppsspp/ppsspp_ctl.py (as a library, and its
@@ -580,16 +580,41 @@ def cat_trajectories(ctx):
                             "-", NO_REF, ""))
             continue
         pp = read_pp_samples(ref)
-        rows.append(trajectory_row(name, compare_series(port.get(player, []), pp.get(PLAYER, [])),
-                                   f"PPSSPP, {ref_note(ref)}"))
+        cmp = compare_series(port.get(player, []), pp.get(PLAYER, []))
+        r = trajectory_row(name, cmp, f"PPSSPP, {ref_note(ref)}")
+        if cmp["first_over"] is not None:
+            a, b = nearest_ai(port, player, cmp["first_over"]), nearest_ai(pp, PLAYER, cmp["first_over"])
+            r["note"] += (f"; at {cmp['first_over']:.2f} s the nearest AI ship is {fmt(a, 1)} m away in the port, "
+                          f"{fmt(b, 1)} m in PPSSPP")
+        rows.append(r)
         if ai:
             per = {k: compare_series(port.get(k, []), pp.get(k, [])) for k in range(8) if k != player}
             k, w = max(per.items(), key=lambda kv: kv[1]["max"])
             firsts = [c["first_over"] for c in per.values() if c["first_over"] is not None]
             merged = dict(w, first_over=min(firsts) if firsts else None,
                           samples=sum(c["samples"] for c in per.values()))
-            rows.append(trajectory_row(name, merged, f"PPSSPP, {rel(ref)}", f"the 7 AI ships (worst: ship {k})"))
+            r = trajectory_row(name, merged, f"PPSSPP, {rel(ref)}", f"the 7 AI ships (worst: ship {k})")
+            r["note"] += ("; each side repeats its own AI from run to run (checked: PPSSPP on Vineta K, the port headless "
+                          "on Karbonis and Sinucit), so this is another race, not noise")
+            rows.append(r)
     return rows
+
+
+def nearest_ai(ships, player, c):
+    """The distance from the player to the nearest AI ship at race clock c (None without positions)."""
+    me = ships.get(player)
+    if not me:
+        return None
+    p = interp(me, [q[0] for q in me], c)
+    best = None
+    for k, s in ships.items():
+        if k == player or not s:
+            continue
+        q = interp(s, [x[0] for x in s], c)
+        if p and q:
+            d = math.dist(p, q)
+            best = d if best is None else min(best, d)
+    return best
 
 
 # -------------------------------------------------------------------------------------------------------- timing
@@ -635,6 +660,10 @@ def load_length(flips, press_us):
                 return None
             return (after[i - FADE_FLIPS] - press_us) / 1e6, (after[i] - press_us) / 1e6
     return None
+
+
+def stretch_text(stretches):
+    return f"{len(stretches)} ({', '.join(str(s['flips']) for s in stretches)} flips)" if stretches else "0"
 
 
 def pp_stretch_times(log, stretches):
@@ -807,8 +836,7 @@ def cat_timing(ctx):
         state = summ.get("outcome") or summ.get("error", "?")
         rows.append(row(f"two-vblank stretches over a follower-driven Vineta K race (its first {window:.0f} s, the "
                         "race time both runs cover)",
-                        f"{len(pst)} ({', '.join(str(s['flips']) for s in pst)} flips)",
-                        f"{len(pps)} ({', '.join(str(s['flips']) for s in pps)} flips), {ref_note(pp_sum)}", f"{d:+d}",
+                        stretch_text(pst), f"{stretch_text(pps)}, {ref_note(pp_sum)}", f"{d:+d}",
                         grade_low(abs(d), STRETCH_FAITHFUL + 1, STRETCH_CLOSE + 1), srule,
                         f"port: {port_src}, {port_cover:.0f} s of race; PPSSPP: {state} (laps {laps} s, "
                         f"{summ.get('contacts')} contacts), {pp_cover:.0f} s of race; where they fall follows the "
@@ -1023,14 +1051,19 @@ def guest_word(v):
 
 
 def compare_plain(a, b):
-    """Two decrypted data files: (bytes differing, the differing 4-byte words, how many of them hold a user-RAM address
-    on both sides)."""
+    """Two decrypted data files: (bytes differing, the differing words, how many of them hold a user-RAM address on
+    both sides). A differing byte belongs to an address word when some 4 bytes around it read as one on both sides
+    (the profile's words need not sit on 4-byte boundaries of the file); the other differing bytes are grouped by
+    4-byte boundaries."""
     n = min(len(a), len(b))
     diff = sum(1 for i in range(n) if a[i] != b[i]) + abs(len(a) - len(b))
-    words = sorted({i // 4 for i in range(n) if a[i] != b[i]})
-    addr = sum(1 for w in words if 4 * w + 4 <= n and guest_word(struct.unpack_from("<I", a, 4 * w)[0])
-               and guest_word(struct.unpack_from("<I", b, 4 * w)[0]))
-    return diff, len(words), addr
+    words = set()
+    for i in (i for i in range(n) if a[i] != b[i]):
+        start = next((s for s in range(max(0, i - 3), min(i, n - 4) + 1)
+                      if guest_word(struct.unpack_from("<I", a, s)[0]) and guest_word(struct.unpack_from("<I", b, s)[0])),
+                     None)
+        words.add(("addr", start) if start is not None else ("raw", i // 4))
+    return diff, len(words), sum(1 for w in words if w[0] == "addr")
 
 
 def decrypt(folder, out):
@@ -1289,8 +1322,9 @@ once and kept under `ref/scorecard/`, hashes in `ref/README.md`) or with the gam
 `faithful`, `close` or `differs`, by the threshold in its last column; a category's grade is its worst graded row.
 Three marks stand in for a grade where none can be given and do not count towards the category's: `no reference`
 (the PPSSPP side is missing: refresh it), `not measured` (no instrument exists) and `accepted (D-011)` (difference 6,
-the faster race loads, which Erik decided to keep). Difference 5 (saves are plain where the PSP encrypts them) is
-open and graded `differs` until task 045 lands.
+the faster race loads, which Erik decided to keep). The two differences the audit left open for a decision:
+difference 6 (the race load) is that accepted row; difference 5 (saves plain where the PSP enciphers them) was fixed
+by task 045 (patch 0019), so the Saves rows compare enciphered saves, the data file by its decrypted contents.
 
 | Category | What is compared | Thresholds |
 |---|---|---|
@@ -1298,11 +1332,11 @@ open and graded `differs` until task 045 lands.
 | Trajectories | per circuit (12, Vector, unlock switch), the player's ship with Cross held from the countdown and no steering: PPSSPP's race records (sampled as `tools/pp_lines.py` does, each read twice and kept when both agree) against the port's `PURE_WATCH_GRID` records, clock-aligned (the port's positions interpolated at PPSSPP's race clocks) | the first clock more than 1 m apart is reported; graded on the largest distance over the first 20 s: faithful under 1.5 m, close under 5 m. The AI ships only if two PPSSPP runs of Vineta K agree at every common clock (under 0.01 m) |
 | Timing | flips per race-clock second per mode (60 in Single Race and Tournament, 30 in Time Trial, Free Play and Zone); the two-vblank stretches of a follower-driven Vineta K race against PPSSPP's (`tools/fidelity_audit.py --ppsspp-race`); the race load | flips: faithful within 2% of 60 or 30, close within 5% (the stretches, the game's own, lower the 60-fps modes by half their share of the race clock); stretches: faithful when the counts differ by at most 1, close by at most 3; the load: accepted (D-011) |
 | Audio | the main menu's music over 60 s (L pressed every 20 s keeps the attract demo away; it makes no sound); one Single Race per league (Vineta K, Sinucit, Sagarmatha), Cross held, 60 s from GO: the port's `PURE_AUDIO_WAV` against PPSSPP's audio dump | correlation (`audio_compare.py --locate`, the port's music in PPSSPP's mix): faithful at 0.6 or more, close at 0.3; RMS ratio: faithful within 0.95 to 1.05, close within 0.9 to 1.1; seconds where both mixes or neither are active: faithful at 98% or more, close at 90%; clipping: faithful when the port's clipped share is at most PPSSPP's + 0.0001, close at + 0.001 |
-| Saves | the profile `tools/save_roundtrip.sh`'s first run makes (`main_menu.txt` on an empty stick; made here headless) against PPSSPP's save of the same profile (NAME0000, `save_yes.txt`) | names, sizes, PARAM.SFO's fields and ICON0.PNG's bytes: faithful when equal (ICON0.PNG close when only the encoding differs), differs otherwise; the data file by size only |
+| Saves | the profile `tools/save_roundtrip.sh`'s first run makes (`main_menu.txt` on an empty stick; made here headless) against PPSSPP's save of the same profile (NAME0000, `save_yes.txt`) | names, sizes, PARAM.SFO's fields and ICON0.PNG's bytes: faithful when equal (ICON0.PNG close when only the encoding differs), differs otherwise; the data file by size, and by its contents decrypted through the framework's load path (`tools/save_interchange.sh --check`, task 045): faithful when identical, close when only words holding user-RAM addresses differ |
 | Coverage | the matrix's 46 cells (`tools/fidelity_audit.py`'s cell results, reused from `out/035-wip/fidelity`, never run here), the 278 imports by state, the GE commands the framework still ignores (this run's exit list), the functions entered | halts, stubs, unsupported instructions, skipped draws: faithful at 0; imports: close while a constant or a documentation-only answer stands in; GE: close while every command left is one no draw of the game uses |
 
-Run it: `python3 tools/scorecard.py --quick` (pictures, timing from the matrix's cells, saves, coverage; a few
-minutes) or `--full` (all six, with fresh sweep cells for timing; about 25 minutes; a full run of every category
+Run it: `python3 tools/scorecard.py --quick` (pictures, timing from the matrix's cells, saves, coverage; about a
+minute and a half) or `--full` (all six, with fresh sweep cells for timing; about 18 minutes; a full run of every category
 rewrites this file). `--only CATEGORY[,...]` runs some. Refresh the PPSSPP side: `python3 tools/scorecard.py
 --refresh-references [CATEGORY]` (about an hour for all; docs/verification.md, "The accuracy scorecard").
 """
@@ -1668,6 +1702,9 @@ def selftest():
     check(trajectory_row("T", c, "ref")["grade"] == CLOSE and
           trajectory_row("T", compare_series(port, []), "ref")["grade"] == DIFFERS, "trajectory rows graded")
     a = {0: [(1.0, 0, 0, 0), (2.0, 1, 0, 0)], 7: [(1.0, 5, 5, 5)]}
+    ships = {7: [(1.0, 0, 0, 0), (1.05, 10, 0, 0)], 0: [(1.0, 3, 4, 0), (1.05, 13, 4, 0)], 1: [(1.0, 50, 0, 0)]}
+    check(abs(nearest_ai(ships, 7, 1.025) - 5.0) < 1e-9 and nearest_ai({}, 7, 1.0) is None,
+          "trajectory: the nearest AI ship at a clock")
     check(first_lap([(0.5, 0, 0, 0), (1.0, 1, 0, 0), (1.0, 1, 0, 0), (60.0, 2, 0, 0), (0.4, 9, 0, 0), (0.5, 9, 0, 0)])
           == [(0.5, 0, 0, 0), (1.0, 1, 0, 0), (60.0, 2, 0, 0)], "trajectory: the samples end at the lap clock's restart")
     check(deterministic(a, a, [0]) == (2, 0.0) and deterministic(a, {0: [(1.0, 0, 0.5, 0)]}, [0])[1] == 0.5,
@@ -1781,7 +1818,9 @@ def selftest():
         plain_b = bytearray(64)
         struct.pack_into("<I", plain_a, 8, 0x08ECAF10)
         struct.pack_into("<I", plain_b, 8, 0x08ECAD10)
-        check(compare_plain(bytes(plain_a), bytes(plain_b)) == (1, 1, 1) and compare_plain(b"\0" * 8, b"\0" * 8)
+        struct.pack_into("<I", plain_a, 23, 0x08F301B0)     # off the 4-byte grid, two bytes differ in one word
+        struct.pack_into("<I", plain_b, 23, 0x08F2FFB0)
+        check(compare_plain(bytes(plain_a), bytes(plain_b)) == (3, 2, 2) and compare_plain(b"\0" * 8, b"\0" * 8)
               == (0, 0, 0) and compare_plain(b"\1\0\0\0", b"\2\0\0\0") == (1, 1, 0),
               "saves: decrypted contents, the differing words that hold user-RAM addresses")
         rows = compare_saves(tmp / "port", tmp / "pp", decrypted=False)

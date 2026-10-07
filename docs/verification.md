@@ -479,8 +479,8 @@ with every run's route, log, captures and WAVs under `<out>/runs/`; a `--full` r
 
 | Mode | Categories | Port runs | Time on this Mac |
 |---|---|---|---|
-| `--quick` (the default) | pictures, timing (from the matrix's cells), saves, coverage | the suite, three extra race frames, a short race for the load, a profile | about 2 minutes |
-| `--full` | all six | also 12 straight-on races (three with `PURE_AUDIO_WAV`), the main menu with `PURE_AUDIO_WAV`, four sweep cells (Single Race, Time Trial and Free Play on Vineta K, Zone 1; races paced) | about 25 minutes |
+| `--quick` (the default) | pictures, timing (from the matrix's cells), saves, coverage | the suite, three extra race frames, a short race for the load, a profile | about a minute and a half |
+| `--full` | all six | also 12 straight-on races (three with `PURE_AUDIO_WAV`), the main menu with `PURE_AUDIO_WAV`, four sweep cells (Single Race, Time Trial and Free Play on Vineta K, Zone 1; races paced) | about 18 minutes |
 | `--only CATEGORY,...` | the named ones, with `--full`'s sources (or `--quick`'s beside `--quick`) | | |
 
 Every port run is `tools/run_boot.py --shell headless --backend metal` on an empty memory stick of its own
@@ -524,8 +524,11 @@ How each category measures:
   do too; the RMS ratio of the race mixes is reported, not graded.
 - **Saves.** `tools/save_roundtrip.sh`'s first run, `main_menu.txt` on an empty stick (NEW, NAME0000, AAA, SAVE
   PROFILE YES), made headless in seconds (the script itself runs five windowed runs in 13 minutes and has no option for
-  one), against PPSSPP's save of the same profile (`ref/scorecard/saves/UCUS98612P0000`). The data file, PROFILE.BIN,
-  is compared by size only and `SAVEDATA_FILE_LIST` lists it only in PPSSPP's: difference 5, open (task 045).
+  one), against PPSSPP's save of the same profile (`ref/scorecard/saves/UCUS98612P0000`). Since task 045 (patch
+  0019) both write PROFILE.BIN enciphered in the save utility's mode 1, so it is compared by size and by its contents,
+  each side decrypted through the framework's own load path with both hashes checked (`tools/save_interchange.sh
+  --check`): close when the only differing words hold user-RAM addresses on both sides (the profile keeps heap
+  pointers verbatim, task 045's finding; the game sets them again on a load).
 - **Coverage.** The cell results of `tools/fidelity_audit.py` from `out/035-wip/fidelity` (this checkout's, else the
   main checkout's, else `out/fidelity`); without them the rows say which command makes them (about 4 hours; the
   scorecard never runs the matrix). The 278 imports by state from `config/imports.csv`, the start-up list of
