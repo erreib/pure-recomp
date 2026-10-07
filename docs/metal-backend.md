@@ -1100,7 +1100,7 @@ tools/hud_check.sh --shell headless`, 2026-10-07, M4 Pro): 14 patches reproduce 
 race_hud 0.0149, tt_hud 0.0112, fp_hud 0.0116, zone_hud 0.0121 and zone_change 0.0353 (the metal column: 0.0262,
 0.0229, 0.0232, 0.0122, 0.0353); hud_check 61 of 61 shots with the HUD. Beyond the Verify line:
 `tools/frame_regress.sh --shell vulkan --backend vulkan` 18/18, every scene within 0.0005 of its vulkan column
-(19m 48s); `PURE_NO_MIPMAPS=1` gives the 18 captures of the build before the task pixel for pixel; the framework's
+(19m 48s); `tools/hud_check.sh` (the Metal shell, windowed) 61 of 61; `PURE_NO_MIPMAPS=1` gives the 18 captures of the build before the task pixel for pixel; the framework's
 list of ignored GE commands is 40 long in every run (63 before: TEXADDR1 to 7, TEXBUFWIDTH1 to 7, TEXSIZE1 to 7,
 TEXLEVEL and TEXLODSLOPE left it); no run refused a level or printed a new `not emulated` line. "Mipmaps" has the
 Blue Ridge frame, the shimmer sequence and the decode counts.
