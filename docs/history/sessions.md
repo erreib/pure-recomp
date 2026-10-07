@@ -138,3 +138,25 @@ were, old patch numbers marked "old":
 | M6 | native Metal backend | `tools/frame_regress.sh --shell metal --backend metal` passes 5/5; `tools/gerec/metal_check.sh` passes (Metal against Vulkan on the team and race recordings) | **done** 2026-10-06: GE seam (021, old patch 0009), ge_replay (022), Metal backend (023 frontend, 024 lighting/fog/sprites/culling, 025 stencil as alpha, bloom chain, read-backs, write-backs), shell seam (026, old patch 0010), headless pace (old patch 0011), Metal shell (027, old patch 0012). Metal-only suite: lang 0.0002, title 0.0002, profile 0.0002, main_menu 0.0106, race_hud 0.0364 (Vulkan path: 0.054, 0.030, 0.054, 0.033, 0.067); race frame 6016 within 2 px of Vulkan at scale 1; 60 fps in the race under the Metal shell | 2026-10-06 |
 | M8 | fidelity: as close to 1:1 with the original as possible (D-009) | the whole sweep without halts or unimplemented features; PPSSPP comparisons on every track and mode within the suite's limits | **audited and fixed** 2026-10-07: tasks 036 to 041 merged (old patches 0013 to 0015 and 0017: environment and projection mapping, mipmaps, the save list, the colour test, dithering and the depth clamp); race scenes vs PPSSPP 0.011 to 0.035; differences 3, 7, 8 and 9 are the game's own or the harness's; open: 5 (save encryption) and 6 (UMD timing) await Erik, 12 (the SAS reverb the framework drops), the pre-warm list. Audit (task 035, docs/fidelity.md): 46 cells, no halt, no stub, no unsupported instruction, no skipped draw; 18 suite scenes vs PPSSPP pass; the two-vblank stretches are the game's own (PPSSPP too); 11 differences listed and briefed as tasks 036 to 041 (environment mapping, mipmaps, the save list, colour test/dither/clamp, the hitch and audio checks; difference 3, the brightness, closed by task 038 as the weather mist's phase, not the port's); 5 (save encryption) and 6 (UMD timing) await Erik's call | 2026-10-07 |
 | M7 | v1.0 polish | `tools/bundle.sh && tools/bundle.sh --check out/029` passes; `tools/hud_check.sh` 61/61; controls documented | **playable from Finder** 2026-10-06: 028 (Metal by default), 030 (controls doc + checker), 029 (`Wipeout Pure.app` through the framework's packer, 88 MB, signed ad hoc, no game data; first-run setup takes the ISO), 031 (the Metal window's race HUD fixed). Open: the follow-ups (menu text, Info.plist copyright, a mid-race suite scene), then the enhancements | 2026-10-06 |
+
+## Lessons, written 2026-10-07 after M9
+
+- **Briefs carried wrong facts three times**: the GE register numbers for the colour test and dithering (task 040),
+  the depth clamp's polarity (040), and the PSP "truncation" rule for dot products (046 to 047), which was PPSSPP's
+  compiler's behaviour, not the hardware's. Each cost a worker hours of verification against a false premise; each
+  was caught because the brief named the documentation to read and the worker read it. Keep naming the sources.
+- **The rounding chase ran one task too long.** Patch 0020 (the PSP's rule) was the goal and was right; the
+  test-mode chase to make the scorecard's AI rows faithful against PPSSPP's JIT was never achievable, since any
+  1-ulp difference anywhere amplifies through the AI, and it was only stated after two corpus rebuilds. State the
+  stopping rule in the brief.
+- **Verify lines chosen badly** made two tasks report PARTIAL for nothing: a check whose own pass rule could not hold
+  (every AI row faithful) and a tool outside the task's May touch that the task's change broke. A Verify line must
+  be achievable by the task's own scope.
+- **Usage limits cut workers four times mid-task.** Each resumed with its context intact because it had committed
+  early and often; the dispatch text now says so.
+- **The one-game guard serialised parallel workers' verifies**; retry loops absorbed it. Headless runs were also
+  sensitive to machine load through the kernel's busy-time charge until task 051 found it and task 050 pinned the
+  clock.
+- **The machine itself was a variable**: a loaded host with the swap full made one audit's hitch finding uncertain
+  until it was redone in a window. Say what else ran.
+

@@ -56,3 +56,6 @@ commit. For vendor changes: `tools/patches.sh export NNNN-slug`, then add the ro
 ## Conventions
 C++20. Log lines carry a tag: `[guest]` game stdout, `[pure]` our profile, `[hle-stub]` unimplemented import,
 `[io]` `[kernel]` `[mpeg]` `[render]` `[pacing]` framework traces. There is no tests/ directory: the checks are the tools under tools/ (docs/verification.md lists them).
+
+Read docs/approach.md first in a new session: what the asset is, how the work is split, and what substitutes for
+the memory a solo author would have.
