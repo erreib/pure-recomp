@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
+Last updated: 2026-10-07, M8 fidelity complete; M9 organisation pass running (see "Resume" below)
 
 ## Milestones
 
