@@ -20,7 +20,29 @@ Plus the static analysis behind the two-vblank stretches (task 033's follow-up):
 that write the frame object's lock fields (`out/035/limiter_writers.txt`, `out/035/fxscreen.txt` in the worktree;
 the commands are under "The two-vblank stretches").
 
-<!-- MATCHES -->
+## What matches
+
+To read the list below in proportion, what the audit found the same as the original:
+
+- **No halt anywhere.** No cell of the matrix printed `[hle-stub]`, `unsupported` or a `Runtime stopped` of its own;
+  no `[metal] ... not emulated` or `not implemented` line appeared. The 26 imports without an implementation were
+  never called.
+- **The frontend, pixel for pixel.** Every menu compared (SINGLE PLAYER, CLASS, LEAGUE, TRACK and TEAM SELECTION,
+  both 30-fps modes' TRACK SELECTION, TOURNAMENT SELECTION, Zone's TRACK SELECTION, OPTIONS, CONTROLS) differs from
+  PPSSPP in 0 pixels at tol 24; the HUD (labels, digits, bars) matches on every track's first race frame; the pause
+  menu, the results panel and Zone's end panel have PPSSPP's layout and fonts.
+- **The game's logic and timing.** The same follower drove Vineta K in PPSSPP and in the port to laps within 1.5 s
+  of each other and the same 45 contacts; Zone 1 with Cross held ends in both at TOTAL ZONES CLEAR 6, TOP SPEED
+  405.07 (PPSSPP) and 404.68 (port), SCORE 4292 and 4291, and the end panels differ in 1.8% of the pixels; the race
+  start runs the same 57 frames at two vblanks; the two-vblank stretches are the game's own and PPSSPP has them too
+  (below).
+- **Saves round-trip.** The autosaves after a Single Race and after the tournament's races write the profile, and a
+  reboot that LOADs it shows the records the races set and the play times.
+- **Audio keeps going.** Every race has its mix, its music and its effects active in every second from the start,
+  with clipping in at most 0.014% of the samples, the only gaps being the game's own between music tracks (below).
+- **Every circuit reachable.** All 12 circuits race in Single Race at Vector and Phantom and in Time Trial, Free Play
+  on each league, the tournaments and the four Zone tracks; where the follower fails (Sinucit's fork, Manor Top's
+  bend, a wedge on Chenghou Project) the game itself behaves.
 
 <!-- MATRIX -->
 
@@ -41,24 +63,38 @@ not whether it changes anything: the first value is the reset value in every cel
 on was read from PPSSPP's GE dumps, which hold the complete state of every draw (`out/035/gestate.py`, a reader on
 top of `tools/ppsspp/ppdmp.py`; draws of the frame, clears left out):
 
-<!-- GESTATE -->
+| PPSSPP dump (the first full-HUD frame of each race, the TEAM screen) | draws | textured | with mip levels | environment map (TEXMAPMODE 2) | texture matrix (TEXMAPMODE 1) | colour test | dither | depth clamp | fogged |
+|---|---|---|---|---|---|---|---|---|---|
+| Vineta K | 866 | 845 | 621 | 96 | 40 | 6 | 60 | 860 | 558 |
+| Modesto Heights | 806 | 787 | 656 | 81 | 0 | 11 | 58 | 800 | 535 |
+| Chenghou Project | 982 | 960 | 755 | 71 | 0 | 14 | 20 | 976 | 696 |
+| Blue Ridge | 970 | 949 | 830 | 67 | 0 | 3 | 25 | 964 | 690 |
+| Sinucit | 609 | 590 | 499 | 46 | 0 | 4 | 8 | 603 | 0 |
+| Sebenco Climb | 974 | 955 | 699 | 59 | 0 | 9 | 6 | 968 | 708 |
+| Sol 2 | 803 | 782 | 584 | 125 | 0 | 6 | 95 | 797 | 529 |
+| TEAM SELECTION | 67 | 40 | 0 | 0 | 0 | 0 | 0 | 67 | 0 |
+
+(Fog is drawn by the port; it is in the table for scale. Every textured draw of these frames uses the modulate
+texture function, so TEXENVCOLOR never matters there.)
 
 What that means for the picture, from the most draws to the fewest:
 
-- **Mipmaps.** Most of the race's textures carry two to five mip levels (TEXADDR1 to 4, TEXSIZE1 to 4, TEXLEVEL
-  mode 2 "slope" with a per-draw LOD slope, TEXLODSLOPE), and the PSP picks a smaller level as a surface recedes.
-  The port always samples level 0, so distant textures (grandstand crowds, the track's far surface, building
-  windows) are sharper and shimmer in motion where the PSP's are smooth: the clearest single difference in the race
-  shots (the Blue Ridge pair below).
-- **Environment and projection mapping** (TEXMAPMODE 2 and 1, TEXSHADELS): about a tenth of a race frame's draws
-  take their texture coordinates from the normals (a reflection) or from the texture matrix. The port draws them
-  with the vertices' own coordinates, so the ships' hulls and canopies and the shiny roofs lose or misplace their
-  reflections (the ship crops below).
-- **Dithering** (DITHERENABLE, DITH1 to 4): 60 draws of the race frame. The PSP dithers when it writes 16-bit
-  colour; most race targets are 32-bit, where it does nothing. Small.
-- **The colour test** (COLORTESTENABLE, COLORTEST, COLORREF, COLORTESTMASK): 6 draws of the race frame. A drawn
-  pixel whose colour matches the reference is discarded on the PSP and kept by the port. Which 6 draws, and
-  whether they show, is open.
+- **Mipmaps.** 70 to 87% of a race frame's textured draws carry two to five mip levels (TEXADDR1 to 4, TEXSIZE1
+  to 4, TEXLEVEL mode 2 "slope" with a per-draw LOD slope, TEXLODSLOPE), and the PSP picks a smaller level as a
+  surface recedes. The port always samples level 0, so distant textures (grandstand crowds, the track's far surface,
+  building windows) are sharper and shimmer in motion where the PSP's are smooth: the clearest single difference in
+  the race shots (Blue Ridge's grandstand, "The differences"). The levels themselves are plain reductions: decoded
+  from the Sebenco Climb dump (`out/035/miplevels.py`), a wall texture's four levels have the same mean colour.
+- **Environment and projection mapping** (TEXMAPMODE 2 and 1, TEXSHADELS): 7 to 16% of a race frame's draws take
+  their texture coordinates from the normals (a reflection) or, on Vineta K, from the texture matrix. The port draws
+  them with the vertices' own coordinates, so the ships' hulls and canopies, glass buildings and shiny roofs lose or
+  misplace their reflections.
+- **Dithering** (DITHERENABLE, DITH1 to 4): 6 to 95 draws a race frame. The PSP dithers when it writes 16-bit
+  colour; most race targets are 32-bit, where it does nothing, and the 565 billboard target is the exception. Small.
+- **The colour test** (COLORTESTENABLE, COLORTEST, COLORREF, COLORTESTMASK): 3 to 14 draws a race frame, always
+  "not equal to black" with the full mask: the PSP drops the pixels that come out pure black. They draw into the
+  565 billboard target (the screens beside the track) and a few small objects of the scene. The port keeps those
+  black pixels; no difference was found in the shots, so this one is a check rather than a known defect.
 - **Depth clamp** (CLIPENABLE): set for every 3D draw. The PSP clamps depth to the range instead of clipping
   against the far plane; the port clips. Shows only where geometry crosses the depth range's ends.
 - **Regions, flat shading, logic ops, morph weights, patches, the GE init's undocumented F0 to F9**: written a few
@@ -314,4 +350,33 @@ enhancement (the countdown store could be skipped, as the 60-fps cheat skips the
 Open: the 31-flip put-back flash was measured only in the port (PPSSPP's race never left the track), and why the
 follower at Phantom triggers one at about 150 m of Vineta K each lap was not looked into.
 
-<!-- DIFFERENCES -->
+## The differences
+
+Ordered by what a player would notice first. Each row is a candidate task; "size" is a guess (small: a day or less
+in one file; medium: a feature across the backend or the framework's state; large: a subsystem).
+
+| # | What a player sees | Where | Evidence | Suspected cause | Size |
+|---|---|---|---|---|---|
+| 1 | Reflective surfaces look wrong: the ship's hull and canopy (always on screen), glass buildings, shiny roofs show the reflection texture stretched over the model instead of a reflection | every race and Zone, all the time; Sol 2's glass buildings and Sinucit's overhang most (0.12 of those frames) | the ship crops (port against PPSSPP on Modesto Heights, Zone's ship); 46 to 125 draws a race frame with TEXMAPMODE 2 in PPSSPP's dumps; TEXMAPMODE and TEXSHADELS in the framework's ignored list in every cell | backend feature: environment mapping (texture coordinates from the normals and the TEXSHADELS lights) and projection mapping (TEXMAPMODE 1, 40 draws on Vineta K) not carried by the framework's GE state (`ge_state.cpp`), not drawn by the Metal backend | medium |
+| 2 | Distant textures are sharp and shimmer while moving (crowds, track surface, windows), where the PSP's are smooth | every race, worst on wide open tracks (Blue Ridge's grandstands) | the Blue Ridge crop; 70 to 87% of textured race draws carry mip levels in PPSSPP's dumps; TEXADDR1 to 7, TEXSIZE1 to 7, TEXLEVEL, TEXLODSLOPE ignored in every cell | backend feature: mipmaps (upload the levels the GE names, pick the level by the GE's LOD rule: TEXLEVEL mode 2 with the per-draw slope) | medium |
+| 3 | Some surfaces are about 1.5 times brighter than on the PSP: Sebenco Climb's long concrete wall, Sinucit's overhang | Sebenco Climb (0.32 of the first race frame differs), Sinucit (0.12) | wall pixels (113, 125, 126) in the port against (70, 81, 83) in PPSSPP; the draws are unlit, fogged, vertex-coloured CLUT4 textures; turning the port's fog or lighting off does not change them, and the mip levels have the same mean colour | unknown: a backend difference on unlit vertex-coloured draws is the first suspect; bisect by replaying PPSSPP's dump of the frame (`out/035/pp/dumps/sebenco_climb_hud.ppdmp`, draw 198) | small to medium (finding it) |
+| 4 | Creating a second profile silently overwrites the first; LOAD offers no choice | the PROFILE menu, any player with more than one profile | `PURE_TRACE_SAVEDATA`: the second LISTSAVE (`overwrite=0`) writes P0000 again; PPSSPP shows the system save list (`ref/save_dialog.png`) | framework: `hle_savedata.cpp` answers LISTSAVE with the first listed name and LISTLOAD with the first save, with no dialog | medium (a list dialog in the framework's UI), small for the data loss alone (LISTSAVE with `overwrite=0` to the first free name) |
+| 5 | A save from a PSP (or PPSSPP) does not load, and a port save would not load on a PSP | the memory stick | PPSSPP's `PROFILE.BIN` is 41586 bytes of ciphertext with the file in `SAVEDATA_FILE_LIST`; the port's 41570 bytes plain | framework: the PSP's savedata encryption (no-key mode) is not done | medium |
+| 6 | Loading screens before a race are shorter than on the PSP (about 0.3 s of game time against 1.5 s in PPSSPP) | every race load | `PURE_TRACE_CALLS` on `sceDisplaySetFrameBuf` against PPSSPP's flip log | framework: file reads complete at once in emulated time, where PPSSPP (like the UMD) takes time over them; arguably welcome, but not 1:1 | small |
+| 7 | A gap of about 2 s in the race music when it changes tracks, with a 10 to 60 ms underrun as the next starts | all long races, at about 525 s of game time (after 5:24 of race music) | music channel zero runs of 177 ms and 2.15 s at 524.7 and 525.1 s and an underrun at 527.3 s, the same in six cells | unknown: the game's track change, or the framework's sceAtrac feeding the new track late; compare with PPSSPP's audio dump (`DumpAudio`) | small (to check) |
+| 8 | The attract demo's sound clips | the main menu left for 30 s | 3474 clipped samples in the sceSas channel over two demos, none to speak of in the scripted races | unknown: the framework's SAS mix level, or the PSP clips too | small (to check) |
+| 9 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework | framework GE state: the colour test | small |
+| 10 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state | small each |
+
+Not differences, though they looked like ones:
+
+- The two-vblank stretches (task 033): the game's own, and PPSSPP's (above).
+- Zone's pace: a PPSSPP run with a capture every vblank seemed to count zones three times as fast, but a run with no
+  capture during the race ends exactly as the port does (TOTAL ZONES CLEAR 6, SCORE 4292 against 4291): PPSSPP's
+  captures moved its timing, not the port's.
+- Hitches of 80 to 295 ms with underruns on both audio channels in three cells (Blue Ridge, Mandrashee, Sagarmatha
+  at Vector): the cells ran while PPSSPP's software renderer and Ghidra loaded the machine, and a paced run whose
+  process stalls catches the emulated clock up with real time at once. A player on a busy machine would see the
+  same; the port's own timing is not involved.
+- The follower's stalls (Sinucit's fork, Manor Top's bend, a wedge against a wall on Chenghou Project at 4149 m):
+  the game puts the ship back or holds it as it should; the test driver cannot get past.

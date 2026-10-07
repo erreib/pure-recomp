@@ -67,6 +67,7 @@ FULL = ([("single_race", t, "vector") for t in ALL_TRACKS] + [("single_race", t,
         + [("zone", z, "vector") for z in cs.ZONES])
 STRETCH_MIN = 3                 # flips in a row at two vblanks that make a stretch (task 033's rule)
 TWO_VBLANK_US = 25000           # a race flip whose virtual time step exceeds this waited two vblanks (16683 us one)
+HITCH_US = 45000                # one that exceeds this waited three or more: a hitch
 LEAGUE_AT = 5180                # Single Race's league pick; Time Trial and Free Play show LEAGUE SELECTION then too
 EXTENDED_MPS = 30.0             # budget speed for the extended 30-flip cells (the follower is slower there)
 
@@ -207,7 +208,8 @@ def normalise(text):
 def scan_log(path, fps=60):
     """The findings of one sweep log (see the module doc). With fps 30 (Time Trial, Free Play, Zone: two vblanks a
     flip throughout) no stretches are looked for."""
-    found = {"features": {}, "ignored": {}, "stretches": [], "tracks": [], "saves": [], "exit": {}, "min_fps": None,
+    found = {"features": {}, "ignored": {}, "stretches": [], "hitches": [], "tracks": [], "saves": [], "exit": {},
+             "min_fps": None,
              "unimplemented": None, "stopped": None, "race_start_s": None, "end_s": None, "races": 0}
     feats = found["features"]
 
@@ -253,6 +255,11 @@ def scan_log(path, fps=60):
                         found["race_start_s"] = t / 1e6
                 if race_on:
                     found["end_s"] = t / 1e6
+                if (race_on and prev is not None and frame == prev[0] + 1 and clock > 0.0 and lap < 0x10000
+                        and t - prev[1] > HITCH_US):
+                    # A flip three vblanks or more after the one before: the game held up, or the host (paced, the
+                    # kernel's clock then catches up with real time at once, and the audio channels underrun).
+                    found["hitches"].append((frame, round((t - prev[1]) / 1000), round(t / 1e6, 1), round(dist)))
                 if (fps == 60 and race_on and prev is not None and frame == prev[0] + 1 and clock > 0.0
                         and lap < 0x10000):
                     if t - prev[1] > TWO_VBLANK_US:
@@ -470,10 +477,10 @@ def write_tables(cells, opts):
             f"Written {time.strftime('%Y-%m-%d %H:%M')}; {sum(1 for _c, r in recs if r)} of {len(recs)} cells run. "
             "Each cell: tools/campaign_sweep.py headless on the Metal backend, `--no-damage`, the unlock switch where "
             "a new profile lacks the track or class; `(extended)`: the league pick added by this tool. Stretches: "
-            "runs of race flips at two vblanks (count, seconds in all). Audio: active fraction of the mix from the "
+            "runs of race flips at two vblanks (count, seconds in all); hitches: race flips 45 ms or more after the one before. Audio: active fraction of the mix from the "
             "race start, then the music channel's, and clipping.", "",
             "| cell | outcome | flip | laps | race s | wall s | track loaded | halts, stubs, warnings | GE ignored | "
-            "stretches | min fps | pipelines not listed | audio mix / music / clip | saves | detail |",
+            "stretches; hitches | min fps | pipelines not listed | audio mix / music / clip | saves | detail |",
             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for (mode, track, cls), r in recs:
         name = cell_label(mode, track, cls)
@@ -485,6 +492,9 @@ def write_tables(cells, opts):
         warns = sum(feats.values()) - halts
         st = r.get("stretches", [])
         st_text = f"{len(st)} ({sum(s['seconds'] for s in st):.1f} s)" if st else "0"
+        hz = r.get("hitches", [])
+        if hz:
+            st_text += f"; {len(hz)} hitch{'es' if len(hz) > 1 else ''} (longest {max(h[1] for h in hz)} ms)"
         fps = r.get("min_fps")
         wav = r.get("wav") or {}
         audio = (f"{wav['mix']['active']:.2f} / {wav.get('music', {}).get('active', float('nan')):.2f} / "
@@ -795,7 +805,8 @@ def main(argv=None):
             rec = load(opts.out, name)
             if not rec or not rec.get("log") or not os.path.exists(os.path.join(ROOT, rec["log"])):
                 continue
-            for k in ("features", "ignored", "stretches", "tracks", "saves", "underruns", "exit", "min_fps", "unimplemented",
+            for k in ("features", "ignored", "stretches", "hitches", "tracks", "saves", "underruns", "exit", "min_fps",
+                      "unimplemented",
                       "unimplemented_list", "stopped", "race_start_s", "end_s", "races"):
                 rec.pop(k, None)
             rec.update(scan_log(os.path.join(ROOT, rec["log"]), cs.MODES[c[0]].get("fps", 60)))
