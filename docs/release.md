@@ -1,10 +1,10 @@
 # The macOS app (task 029)
 
 `Wipeout Pure.app` is the game as a player gets it: double-click it, choose the disc image the first time, play. It
-holds the program, the libraries it loads, the licences and an icon, and nothing of the game: the first-run setup
-makes what the game needs from the player's own image, in the player's data directory. The framework packs it
-(`vendor/portablekit/scripts/release_macos.sh`, its `docs/RELEASING.md`); this repository brings what is its own
-(`packaging/`, `LICENSE`) and wraps the steps in `tools/bundle.sh`.
+holds the program, the libraries it loads, the licences and an icon, and nothing of the game: the first-run setup makes
+what the game needs from the player's own image, in the player's data directory. The framework packs it
+(`vendor/portablekit/scripts/release_macos.sh`, `vendor/portablekit/docs/RELEASING.md`); this repository brings what is
+its own (`packaging/`, `LICENSE`) and wraps the steps in `tools/bundle.sh`.
 
 ## Build and bundle
 
@@ -79,21 +79,10 @@ executable's SHA-256, then copies the image into the data directory (the default
 "Wipeout Pure.app/Contents/MacOS/Wipeout Pure" --install IMAGE [--in-place]   # no screens: set up and exit
 ```
 
-Fixed the same day by 16718e6 (the profile names the plain `BOOT.BIN`): the setup finishes, and `tools/bundle.sh
---check` runs it. What task 029 found before the fix:
-
-**The setup cannot finish yet (2026-10-06, task 029).** It copies the image, then fails with "The prepared executable
-does not match the supported one" and leaves only `disc.iso.part`. The framework's installer prepares the executable
-from the profile's `executable_path_on_disc`, `PSP_GAME/SYSDIR/EBOOT.BIN`, which on this disc is encrypted (`~PSP`,
-SHA-256 `02287685...`, the profile's `encrypted_executable_sha256`), and decrypts it with the profile's key for tag
-0x08000000, which `src/profile/pure_profile.cpp` leaves empty ("not filled in yet"), so the result never matches
-`executable_sha256`. The disc also carries the plain executable, `PSP_GAME/SYSDIR/BOOT.BIN` (`\x7FELF`, SHA-256
-`9033e4dd...` = `executable_sha256`, what `tools/setup_game.sh` puts in `game/EBOOT.ELF` and the corpus is generated
-from). Either change to the profile fixes it: `executable_path_on_disc = "PSP_GAME/SYSDIR/BOOT.BIN"` (the installer
-then takes the plain file as it is: `inspect` accepts a plain executable whose SHA-256 the profile knows, and
-`prepare_executable` returns a plain ELF unchanged; no key involved), or the tag key in `decryption_key`. Until then
-the app shows its setup screen on first start (the picture task 029 captured through `open`), and a data directory
-laid out as the installer would leave it plays (below).
+The profile names the plain executable the disc carries beside the encrypted `EBOOT.BIN`
+(`executable_path_on_disc = "PSP_GAME/SYSDIR/BOOT.BIN"` in `src/profile/pure_profile.cpp`), whose SHA-256 it knows, so
+the installer takes it as it is, with no key (16718e6, task 029's review). What the setup did before that:
+[the record](history/release.md#the-setup-before-16718e6-task-029-2026-10-06).
 
 ## The data directory
 
@@ -108,19 +97,13 @@ application names), or `PURE_DATA_DIR` when it is set:
 | `ms0/` | the memory stick: saves in `ms0/PSP/SAVEDATA/` |
 | `pipeline_cache.bin`, `pipeline_keys.bin` | the Vulkan path's pipeline cache, when it has run |
 
-After a copying setup the directory holds about 245 MiB: the image, 252,968,960 bytes (241 MiB; task 029's setup
-copied all of it into `out/029/data/disc.iso.part` before the failure above), the 3.6 MB executable and
-`settings.ini`. With `--in-place` it holds only the executable and `settings.ini`. The developer build reads the same
-directory first, so an installation there is also what `build/arm64/bin/PureNative` plays unless `PURE_GAME_DIR`
+After a copying setup the directory holds about 245 MiB: the image, 252,968,960 bytes (241 MiB), the 3.6 MB executable
+and `settings.ini`. With `--in-place` it holds only the executable and `settings.ini`. The developer build reads the
+same directory first, so an installation there is also what `build/arm64/bin/PureNative` plays unless `PURE_GAME_DIR`
 names another game directory, as `tools/run_boot.py` does.
 
-Task 029 checked the rest of the path with such a directory made by hand, as `--install IMAGE --in-place` leaves it
-(`out/029/standin/data`: `EBOOT.ELF` a link to `game/EBOOT.ELF`, `settings.ini` with `disc_image=` the image's
-path; nothing copied): the bundled executable with only `PURE_DATA_DIR` and the frontend route's variables played it
-in the Metal shell and backend to frame 2200 (`Executable: .../out/029/standin/data/EBOOT.ELF`), the title shot
-0.000237 from `ref/title.png` (the suite's Metal value is 0.0002); `open "Wipeout Pure.app"` with the same `--env`
-did the same (0.000237); and with `PURE_SHELL=vulkan PURE_GE_BACKEND=vulkan` the bundled loader found the bundle's
-MoltenVK manifest and MoltenVK 1.4.2 drew the language screen 0.054 from `ref/frontend.png` (the Vulkan value 0.054).
+`tools/bundle.sh --check` plays an installation the same way (below); how task 029 first played a hand-made one, on
+both paths: [the record](history/release.md#a-hand-made-installation-task-029-2026-10-06).
 
 ## The Vulkan path from the app
 
@@ -173,4 +156,3 @@ closed; with Mute the app opens it as a player's app does. The setup run opens n
   and `THIRD_PARTY_NOTICES.md` give the actual terms (GPL-2.0-or-later for the combination).
 - The setup's welcome screen says the disc image "the PlayStation 3 release carries it", a sentence the framework
   wrote for another game (`host/ui/setup_screens.cpp`); a vendor patch would make it a profile field.
-- (Resolved by 16718e6.) The setup did not finish with task 029's profile (above, "First run: the setup").
