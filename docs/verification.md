@@ -138,6 +138,37 @@ The deliberate regression (2026-10-06, the Vulkan path): `tools/frame_regress.sh
 alpha path darkens the whole track. race_hud then scores 0.3053 (delta +0.238), so it fails with
 `out/regress-nostencil/race_hud.diff.png` written, and the suite exits 1.
 
+## The scenes task 035 added (2026-10-06)
+
+Twelve more PPSSPP scenes (task 035, docs/fidelity.md "PPSSPP references beyond the five"; captures and commands
+in `ref/README.md`), each reachable by a route the suite already has, so they add three runs (the Time Trial, Free
+Play, Tournament and Zone routes; the Single Race menus share the race route's run). Headless the whole suite now
+takes about 23 s.
+
+| Scene | Route (`config/pad_scripts/`) | Frame | Reference (PPSSPP vblank) | Tol | Limit | Vulkan measured | Metal measured |
+|---|---|---|---|---|---|---|---|
+| `single_player` | `main_menu.txt` + `single_race.txt` | 4765 | `ref/single_player.png` (5850) | 24 | VLIM | VSP | 0.0000 |
+| `class_select` | the same | 4990 | `ref/class_select.png` (6050) | 24 | VLIM | VCS | 0.0000 |
+| `league_select` | the same | 5185 | `ref/league_select.png` (6250) | 24 | VLIM | VLS | 0.0000 |
+| `track_select` | the same | 5390 | `ref/track_select.png` (6450) | 24 | VLIM | VTS | 0.0000 |
+| `team_select` | the same | 5600 | `ref/team_select.png` (6690) | 24 | VLIM | VTE | 0.0000 |
+| `tt_track_select` | `main_menu.txt` + `time_trial.txt` | 5375 | `ref/tt_track_select.png` (6650) | 24 | VLIM | VTT | 0.0000 |
+| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7302) | 32 | VLIMH | VTH | 0.0617 |
+| `fp_track_select` | `main_menu.txt` + `free_play.txt` | 5375 | `ref/fp_track_select.png` (6650) | 24 | VLIM | VFT | 0.0000 |
+| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7302) | 32 | VLIMH | VFH | 0.0620 |
+| `tournament_select` | `main_menu.txt` + `tournament.txt` | 5185 | `ref/tournament_select.png` (6450) | 24 | VLIM | VTO | 0.0000 |
+| `zone_track_select` | `main_menu.txt` + `zone.txt` | 4975 | `ref/zone_track_select.png` (6250) | 24 | VLIM | VZT | 0.0000 |
+| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6668) | 32 | VLIMZ | VZH | 0.0348 |
+
+- The menus match PPSSPP exactly on the Metal backend (0 pixels over tol 24): the frontend's 2D draws at 480x272.
+  Each frame sits inside a run of identical port frames, away from the blinking cursor's changes.
+- The three race scenes are the first frame with the HUD fully faded in (as `race_hud` is): CURRENT, BEST and the
+  bronze time in Time Trial and Free Play, SCORE and ZONE in Zone. The player is alone in those modes, so the frames
+  do not vary from run to run: three headless runs gave the same fraction to four places in every new scene. What
+  differs from PPSSPP there is the 3D (docs/fidelity.md: the mip levels, the environment-mapped ship).
+- Matching a race scene needs care on the PPSSPP side: a capture made during a load moves the race in emulated time
+  (`ref/README.md`), so these references come from runs with no capture before the race.
+
 ## Re-baselining the limits
 
 Change a limit only for a reason that is understood and written down. A renderer fix that brings a scene closer to

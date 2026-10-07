@@ -97,6 +97,7 @@ capture between the last menu press and the scene; where the table says "burst",
 | the pause menu, Vineta K, about 450 frames after GO | pause.png | vineta_k_start.txt + vineta_k_hold_cross.txt + pause.txt | 7880 | burst L |
 | the results panel after a three-lap Vineta K race | results_vineta_k.png | (`tools/fidelity_audit.py --ppsspp-race vineta_k`) | finish + 240 | the race driver |
 | the system save dialog: the list, and Save completed | save_dialog.png, save_completed.png | save_yes.txt | 5200, 5400 | burst M |
+| Zone 1's end panel (SHIP DESTROYED, TOTAL ZONES CLEAR 6), Cross held | zone_end.png | zone_start.txt | 11000 | run N |
 
 ```
 P=/opt/homebrew/bin/python3; R=tools/ppsspp/routes; C=tools/ppsspp/ppsspp_ctl.py
@@ -123,6 +124,8 @@ $P $C run --pad-file $R/frontend.txt --pad-file $R/unlock_all.txt --pad-file $R/
 # burst L (copy f07880.png), burst M (copy f05200.png and f05400.png; then move ~/.config/ppsspp/PSP/SAVEDATA/UCUS98612P0000 away)
 $P $C run --pad-file $R/frontend.txt --pad-file $R/vineta_k_start.txt --pad-file $R/vineta_k_hold_cross.txt --pad-file $R/pause.txt --until 7960 --shots-every 4 --shots-from 7840 --shots-dir out/ppsspp/pause
 $P $C run --pad-file $R/frontend.txt --pad-file $R/save_yes.txt --until 6200 --shots-every 10 --shots-from 5100 --shots-dir out/ppsspp/saveyes
+# run N: sparse captures, none during the load
+$P $C run --pad-file $R/frontend.txt --pad-file $R/zone_start.txt --until 11400 --shot 7500:out/ppsspp/z/f07500.png --shot 8500:out/ppsspp/z/f08500.png --shot 9500:out/ppsspp/z/f09500.png --shot 10500:out/ppsspp/z/f10500.png --shot 11000:ref/zone_end.png --shot 11300:out/ppsspp/z/f11300.png
 # the results panel: out/fidelity/ppsspp/vineta_k/shots/r<finish+240>.png of
 python3 tools/fidelity_audit.py --ppsspp-race vineta_k
 ```
@@ -178,3 +181,4 @@ of `time_trial_start.txt` with a capture and GE dump at 6650 and one at 7302 put
 | results_vineta_k.png | d8567f3654d8397d27876e19e91e8570d0b7d6588c1f1e70a452d9e48e16b940 |
 | save_dialog.png | b1664e284c5e5795dc86ad32ebac44bf271fb2df198779e80e5290c5ebb539b0 |
 | save_completed.png | 536f89bc31f5e753a6a988a5fca5924d76ffada82316816ae7775561afaa660d |
+| zone_end.png | a20fcb80d2823f818a9d915ca6c38b972aaac56eb5c58c40b5e46a559374425f |

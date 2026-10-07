@@ -95,7 +95,43 @@ capture during a load makes the load end sooner in emulated time and moves every
 apart). Every race reference was therefore taken in a run with no capture between the route's last menu press and
 the scene.
 
-<!-- REF_TABLE -->
+Fractions are the share of pixels differing by more than the tolerance (`tools/imgdiff.py`), both at 480x272. Port
+flips are of the headless Metal run; "+ steps" are presses added to the named `config/pad_scripts/` routes.
+
+| Scene | PPSSPP (route after frontend.txt, vblank) | Port (route, flip) | Tol | Fraction | In the suite |
+|---|---|---|---|---|---|
+| SINGLE PLAYER | vineta_k_start.txt, 5850 | main_menu.txt + single_race.txt, 4765 | 24 | 0.0000 | `single_player` |
+| CLASS SELECTION | vineta_k_start.txt, 6050 | the same, 4990 | 24 | 0.0000 | `class_select` |
+| LEAGUE SELECTION | vineta_k_start.txt, 6250 | the same, 5185 | 24 | 0.0000 | `league_select` |
+| TRACK SELECTION | vineta_k_start.txt, 6450 | the same, 5390 | 24 | 0.0000 | `track_select` |
+| TEAM SELECTION | vineta_k_start.txt, 6690 | the same, 5600 | 24 | 0.0000 | `team_select` |
+| Time Trial TRACK SELECTION | time_trial_start.txt, 6650 | main_menu.txt + time_trial.txt, 5375 | 24 | 0.0000 | `tt_track_select` |
+| Time Trial, first full HUD, Vineta K | time_trial_start.txt, 7302 | the same, 5890 | 32 | 0.0617 | `tt_hud` |
+| Free Play TRACK SELECTION | free_play_start.txt, 6650 | main_menu.txt + free_play.txt, 5375 | 24 | 0.0000 | `fp_track_select` |
+| Free Play, first full HUD, Vineta K | free_play_start.txt, 7302 | the same, 5890 | 32 | 0.0620 | `fp_hud` |
+| TOURNAMENT SELECTION | tournament_start.txt, 6450 | main_menu.txt + tournament.txt, 5185 | 24 | 0.0000 | `tournament_select` |
+| Zone TRACK SELECTION | zone_start.txt, 6250 | main_menu.txt + zone.txt, 4975 | 24 | 0.0000 | `zone_track_select` |
+| Zone 1, first frame with the HUD | zone_start.txt, 6668 | the same, 5260 | 32 | 0.0348 | `zone_hud` |
+| Zone 1's end panel (TOTAL ZONES CLEAR 6, TOP SPEED 405.07 / 404.68, SCORE 4292 / 4291) | zone_start.txt, 11000 | the matrix's `zone-zone_1` end shot | 32 | 0.0181 | no (the sweep's shot) |
+| OPTIONS | options_controls.txt, 6550 | main_menu.txt + 4700, 4740 DOWN, 4800 Cross, 4950 to 5040 four DOWN, 5100 Cross; 5155 | 24 | 0.0000 | no route |
+| CONTROLS | options_controls.txt, 6900 | the same + 5300 Cross; 5375 | 24 | 0.0000 | no route |
+| Modesto Heights, first full HUD | vineta_k_start.txt + track_down1.txt, 7158 | main_menu.txt + single_race.txt + 5380 DOWN; 6016 | 32 | 0.0388 | no route |
+| Chenghou Project, first full HUD | + track_down2.txt, 7158 | + 5380, 5410 DOWN; 6016 | 32 | 0.0326 | no route |
+| Blue Ridge, first full HUD | + track_down3.txt, 7158 | + 5380, 5410, 5440 DOWN; 6016 | 32 | 0.0534 | no route |
+| Sinucit, first full HUD | unlock_all + unlock_race_beta, 7662 | the sweep's picks with `PURE_TEST_UNLOCK_ALL=1`; 6016 | 32 | 0.1163 | no route |
+| Citta Nuova | + unlock_track_down1, 7664 | 6018 | 32 | 0.0374 | no route |
+| Sebenco Climb | + unlock_track_down2, 7670 | 6018 | 32 | 0.3207 | no route |
+| Sol 2 | + unlock_track_down3, 7652 | 6018 | 32 | 0.1188 | no route |
+| Karbonis | unlock_all + unlock_race_classic, 7636 | 6016 | 32 | 0.0312 | no route |
+| Sagarmatha | + unlock_track_down1, 7638 | 6016 | 32 | 0.0338 | no route |
+| Manor Top | + unlock_track_down2, 7640 | 6016 | 32 | 0.0645 | no route |
+| Mandrashee | + unlock_track_down3, 7640 | 6016 | 32 | 0.0622 | no route |
+| The pause menu, Vineta K | vineta_k_start + vineta_k_hold_cross + pause.txt, 7880 | main_menu.txt + single_race.txt + 6700 `pad start`; 6720 | 32 | 0.1185 (the menu itself identical; the race behind it 0.2 s apart: 0:07.4 against 0:07.6) | no route |
+| The results panel after Vineta K | `--ppsspp-race vineta_k`, finish + 240 | the matrix's `single_race-vineta_k` results shot | 32 | 0.74 (two different races: the panel's layout, fonts, LR/RR marks and yellow best lap the same, the times and the replay behind differ) | no |
+| The system save dialog | save_yes.txt, 5200 and 5400 | none: the port draws no dialog | | | no |
+
+The race-start scenes of the other tracks differ from PPSSPP by the 3D only (the HUD, its labels and digits, match):
+see "The differences" for what. Sebenco Climb, Sol 2 and Sinucit stand out (0.32, 0.12, 0.12).
 
 ### The Beta and Classic circuits in PPSSPP: the game's own unlock code
 
