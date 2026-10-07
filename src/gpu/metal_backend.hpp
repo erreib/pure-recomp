@@ -114,7 +114,7 @@ private:
     static void shader_blend(const BlendState &blend, FragmentUniforms &fragment);
     static bool shader_blend_reads_destination_alpha(const FragmentUniforms &fragment, std::uint8_t write_mask);
 
-    // The frame trace (PURE_METAL_TRACE) and the counts printed every 600 frames and at exit (metal_backend.mm)
+    // The frame trace (PURE_METAL_TRACE) and the counts printed every 600 frames and at exit (metal_trace.mm)
     void open_trace(const char *path);
     void end_trace_interval();
     Stats since(const Stats &before) const;

@@ -10,7 +10,7 @@ add_subdirectory(vendor/portablekit portablekit)
 # Our own main() (src/host/pure_main.cpp) runs ge_replay for `--replay` and the framework's main, compiled as
 # portablekit_main, otherwise (task 022).
 # The Metal GE backend's files, by concern (docs/metal-backend.md, "Files"; task 049).
-set(metal_backend_sources src/gpu/metal_backend.mm)
+set(metal_backend_sources src/gpu/metal_backend.mm src/gpu/metal_trace.mm)
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
