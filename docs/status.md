@@ -13,7 +13,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
 | M4 | audio and video | `wavstats.py` active ≥ 0.9 from the first music (main menu) and over the race window; movies play (patch 0002) | **done** (task 013): music loops seamlessly, effects over music in the race, no clipping; `PURE_AUDIO_WAV` + `tools/wavstats.py` | 2026-10-05 |
 | M5 | saves and the whole campaign | `tools/campaign_sweep.py` cells PASS; `tools/save_roundtrip.sh` passes | **every mode and every track reached** (tasks 016 to 018, 032): all 12 circuits start a race and 10 finish three laps to the results screen (Sinucit and Manor Top stall where the test driver leaves the road), all 4 Zone tracks run to SHIP DESTROYED; Time Trial, Free Play and the Alpha Tournament to their end screens; the test-only unlock switch opens every class and league; racing lines recorded from the port's own AI; save round trip passes. Open for M8: classes above Vector, the other modes' higher leagues, the two follower stalls, multiple profiles' save list | 2026-10-06 |
 | M6 | native Metal backend | `tools/frame_regress.sh --shell metal --backend metal` passes 5/5; `tools/gerec/metal_check.sh` passes (Metal against Vulkan on the team and race recordings) | **done** 2026-10-06: GE seam (021, patch 0009), ge_replay (022), Metal backend (023 frontend, 024 lighting/fog/sprites/culling, 025 stencil as alpha, bloom chain, read-backs, write-backs), shell seam (026, patch 0010), headless pace (patch 0011), Metal shell (027, patch 0012). Metal-only suite: lang 0.0002, title 0.0002, profile 0.0002, main_menu 0.0106, race_hud 0.0364 (Vulkan path: 0.054, 0.030, 0.054, 0.033, 0.067); race frame 6016 within 2 px of Vulkan at scale 1; 60 fps in the race under the Metal shell | 2026-10-06 |
-| M8 | fidelity: as close to 1:1 with the original as possible (D-009) | the whole sweep without halts or unimplemented features; PPSSPP comparisons on every track and mode within the suite's limits | open: audit brief after 033 | |
+| M8 | fidelity: as close to 1:1 with the original as possible (D-009) | the whole sweep without halts or unimplemented features; PPSSPP comparisons on every track and mode within the suite's limits | **audited** 2026-10-07 (task 035, docs/fidelity.md): 46 cells, no halt, no stub, no unsupported instruction, no skipped draw; 18 suite scenes vs PPSSPP pass; the two-vblank stretches are the game's own (PPSSPP too); 11 differences listed and briefed as tasks 036 to 041 (environment mapping, mipmaps, the brightness bisection, the save list, colour test/dither/clamp, the hitch and audio checks); 5 (save encryption) and 6 (UMD timing) await Erik's call | 2026-10-07 |
 | M7 | v1.0 polish | `tools/bundle.sh && tools/bundle.sh --check out/029` passes; `tools/hud_check.sh` 61/61; controls documented | **playable from Finder** 2026-10-06: 028 (Metal by default), 030 (controls doc + checker), 029 (`Wipeout Pure.app` through the framework's packer, 88 MB, signed ad hoc, no game data; first-run setup takes the ISO), 031 (the Metal window's race HUD fixed). Open: the follow-ups (menu text, Info.plist copyright, a mid-race suite scene), then the enhancements | 2026-10-06 |
 
 ## Works
@@ -110,14 +110,13 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   unlock-all switch, racing lines from the port's own AI, every track in the sweep). Merged: 034 (faster tests: the suite headless on Metal in 10 s, a sweep cell in 199 s with only the race paced,
   tools on scratch data directories, silent runs; Verify rerun PASS). Merged: 033 (frame-time trace, pipeline pre-warming, vblank-timed presents; the remaining dips are the
   game's own two-vblank stretches, routed to 035 item 6; Verify rerun PASS). **D-009 (Erik, 2026-10-06): fidelity before enhancements; the
-  pause-menu redesign is dropped.** Running: 035, the M8 fidelity audit; its first worker was cut by the usage limit, the matrix loop finished on
-  its own (46 cells: 36 pass, 10 driver stalls; results kept in out/035-wip/), and a continuation worker is
-  finishing the write-up and the Verify. Erik, 2026-10-06: finish this round first; then consider an
-  accuracy scorecard (pictures, trajectory divergence per track with the AI seed pinned, timing, audio correlation,
-  save files byte for byte, coverage, a VFPU differential test) before any enhancement. The audit's scope: every halt and unimplemented GE
-  feature over the whole sweep, PPSSPP comparisons beyond the five scenes, the 30-fps modes and higher classes on
-  every track, audio and saves, the PSP system dialogs the framework replaces). Erik played the first track on the
-  app 2026-10-06: "incredibly good start", frame-rate dips here and there.
+  pause-menu redesign is dropped.** Merged: 035, the M8 fidelity audit (two workers; the matrix loop finished on its own; Verify rerun PASS,
+  18/18 scenes). Running: 036 (environment and projection mapping), 038 (the surface-brightness bisection), 039 (the
+  save list). Then 037 (mipmaps, after 036), 040 (colour test, dither, clamp, after 037), 041 (hitches and audio,
+  alone on the machine). Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
+  trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
+  coverage, a VFPU differential test) before any enhancement. The game's own unlock code on MAIN MENU: LEFT, RIGHT,
+  LEFT, L, R, L, RIGHT, LEFT, RIGHT, R, L, R (sets the profile byte the test switch stands in for).
 - M5 breadth still open: higher classes/leagues, the other tracks in Time Trial/Free Play (budgets 11000 untested),
   a Zone racing line (a PPSSPP lap of PRO TOZO logged with `tools/pp_lines.py`), Erik's recorded lap
   (`tools/pad_record.py`), the save-list dialog for multiple profiles.

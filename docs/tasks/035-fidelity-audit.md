@@ -1,6 +1,6 @@
 # 035: The fidelity audit: every difference from the original, measured and listed (M8)
 
-Milestone: M8 | Branch: task/035-fidelity-audit | Status: OPEN (dispatch after task 033; headless, one game at a time)
+Milestone: M8 | Branch: task/035-fidelity-audit | Status: MERGED 2026-10-07 (a75099a)
 
 ## Goal
 D-009: the port as close to 1:1 with the original as possible before any enhancement. This task measures where it is
@@ -188,4 +188,19 @@ Open questions:
 - Medal counting is untested: no cell won a medal.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build, 2026-10-07 (`tools/verify_task.sh 035`): the three
+quick cells PASS (Vineta K Single Race, Zone 1, Time Trial Vineta K; `3 of 3 cells have a result; complete`), the
+headless suite 18/18 in 24 s (the thirteen new scenes at their measured values, zone_change 0.0649). The new PPSSPP
+references and GE dumps were copied into the main checkout's `ref/` first (18 PNGs); the matrix results are kept in
+`out/035-wip/fidelity/` (658 MB).
+Spot-read: `tools/fidelity_audit.py` (the cell list, `--resume`, `--rescan`, the collectors, the completeness line),
+the thirteen SCENES rows and their routes, ref/README.md (hashes and capture commands), docs/fidelity.md (the
+matrix, the feature table: 65 GE commands in 14 features ignored by the framework, 26 imports never called; the
+references; audio; saves; the two-vblank finding; the differences list).
+Merged: a75099a into batch/m2 (clean).
+Notes: the work ran over two workers (the first cut by the usage limit with the matrix loop still running; the loop
+finished on its own; the second rebuilt the lost references byte-identical to the recorded hashes and folded the
+matrix in). The differences list became tasks 036 to 041 (docs/tasks/); differences 5 (save encryption: Sony's
+hash keys) and 6 (UMD read timing) wait for Erik's call. The 18 references outside the suite need port routes
+before they can join it (a follow-up). The hitches of difference 7 came back at other places on a rerun, so they are
+"to check", not the machine's.
