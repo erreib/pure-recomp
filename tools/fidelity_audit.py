@@ -49,7 +49,10 @@ Beta and Classic leagues (DOWN from 5180 on TOURNAMENT SELECTION) with their fou
 the opened TrackStartup.xml shows whether the pick held.
 
 Between cells the tool waits while <out>/hold exists (another game can run then, one at a time) and stops when
-<out>/stop exists. Exit 0 when every cell of the invocation ran (whatever its outcome), 2 on bad arguments.
+<out>/stop exists. The last line it prints (also after --report and --list) says how many cells of the list have a
+result, by outcome, and whether the list is complete or which cells are still to run: `--resume` on a finished
+matrix runs nothing and says `46 of 46 cells have a result (...); complete`. Exit 0 when every cell of the
+invocation ran (whatever its outcome), 2 on bad arguments.
 """
 import argparse, json, math, os, re, struct, subprocess, sys, time
 
@@ -752,6 +755,20 @@ def ppsspp_stretches(log_path):
     return out, len(race)
 
 
+def list_state(cells, opts):
+    """One line on the list: how many of its cells have a result, by outcome, and whether it is complete (every cell
+    run) or which cells are still to run."""
+    recs = [(cell_label(*c), load(opts.out, cell_label(*c))) for c in cells]
+    counts = {}
+    for _n, r in recs:
+        if r:
+            counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
+    missing = [n for n, r in recs if not r]
+    by = ", ".join(f"{n} {k}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1])) or "none"
+    state = "complete" if not missing else f"{len(missing)} not run: {', '.join(missing)}"
+    return f"[audit] {len(recs) - len(missing)} of {len(recs)} cells have a result ({by}); {state}"
+
+
 def sweep_cell(argv):
     """--sweep-cell -- ARGS: the sweep's main() with MODES extended (extend_modes)."""
     extend_modes()
@@ -797,6 +814,7 @@ def main(argv=None):
             r = load(opts.out, cell_label(*c))
             print(f"{cell_label(*c)}{' (extended)' if is_extended(c[0], c[1]) else ''}: "
                   f"{r['outcome'] if r else 'not run'}")
+        print(list_state(cells, opts))
         return 0
     if opts.rescan:
         # The logs read again with this version of the collectors (the outcome and the audio kept).
@@ -816,6 +834,7 @@ def main(argv=None):
     if opts.report:
         for p in write_tables(cells, opts):
             print(p)
+        print(list_state(cells, opts))
         return 0
     todo = cells
     if opts.only:
@@ -843,6 +862,7 @@ def main(argv=None):
         write_tables(cells, opts)
     m, f = write_tables(cells, opts)
     print(f"[audit] {ran} cells run; tables: {os.path.relpath(m, ROOT)}, {os.path.relpath(f, ROOT)}", flush=True)
+    print(list_state(cells, opts), flush=True)
     return 0
 
 
