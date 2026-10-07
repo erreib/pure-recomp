@@ -382,7 +382,42 @@ in the switch, to the sample. A 2 s template takes about half a second per secon
 PASS or FAIL. The comparisons of differences 7 to 9, and the routes on both sides, are in docs/fidelity.md
 ("Differences 7 to 9"). Two things to know when repeating them: the game picks the attract demo's tracks itself,
 differently from run to run, so demos compare by their figures rather than sample for sample; and a dump of a race
-includes PPSSPP's SAS reverb, which the port does not model (difference 12), about 1.4% more level in an idle race.
+includes PPSSPP's SAS reverb, which the port models since task 043 (patch 0018; before it, PPSSPP's idle race mix had
+about 1.4% more level).
+
+## The SAS reverb check (task 043, 2026-10-07)
+
+```
+tools/sas_reverb_check.sh [--out DIR] [--env KEY=VAL ...] [--allow-parallel]
+```
+
+Plays the Free Play pause route headless and unpaced with `PURE_AUDIO_WAV` (about 20 s; the run is the port's side of
+task 041's Free Play idle: `main_menu.txt` and `free_play.txt` without its Cross hold, so the ship idles on Vineta
+K's grid, START at flip 16700, to flip 16800, on an empty memory stick in `<out>/game`) and compares the sound after
+the pause with PPSSPP's dump of the same route, `ref/audio/free_play_pause.wav` (ref/README.md: the command, about 8
+minutes, and its SHA-256; START at vblank 28800). At the pause the game stops the music, holds the effects at one
+level for 70 to 150 ms, then keys them off; what sounds after that is the reverb's tail. In each mix the tail starts
+at the first 10 ms block after START whose RMS is under 0.6 of the median of the five blocks before it, once those
+five are all under 0.7 of the median level of the 0.5 s before START (the music has stopped, so the drop is the
+held effects' end, not the music's). START's time: PPSSPP's from its vblank timing, the port's from the virtual time
+of the first sceSas call the run logs after the script's START (it traces `__sceSasRevEVOL`, which the race calls
+every frame). It prints both starts and the RMS of ten 100 ms steps from there, and checks the first five: PASS (exit
+0) when each of the port's is non-zero and within a factor of 2 of PPSSPP's, else FAIL (exit 1); exit 2 when the
+reference or the build is missing or another PureNative runs (one game at a time; `--allow-parallel` starts
+anyway). `<out>` (default `out/sas_reverb`) keeps the route, the log, the WAVs and `summary.txt`. `--env` passes the
+A/B switches: `--env PURE_NO_REVERB=1` (the port before task 043) and `--env PURE_SAS_REVERB_SPU_RATE=1` (the SPU's own
+22050 Hz) both FAIL.
+
+| Port | 0-100 ms | 100-200 | 200-300 | 300-400 | 400-500 | 500-1000 ms | Result |
+|---|---|---|---|---|---|---|---|
+| PPSSPP's dump | 383 | 194 | 116 | 60 | 31 | 16, 8, 4, 2, 1 | |
+| patch 0018 (the default) | 487 (1.27) | 234 (1.20) | 131 (1.13) | 63 (1.05) | 35 (1.13) | 18, 9, 5, 2, 1 | PASS |
+| `PURE_NO_REVERB=1` | 254 (0.66) | 0 | 0 | 0 | 0 | 0 | FAIL |
+| `PURE_SAS_REVERB_SPU_RATE=1` | 607 (1.59) | 416 (2.14) | 358 (3.09) | 267 (4.42) | 211 (6.83) | 158 to 42 | FAIL |
+
+(port/PPSSPP in brackets; the port's held effects end at 558.085 s, 150 ms after START at 557.935 s, PPSSPP's at
+480.609 s, 130 ms after 480.479 s.) The first step of the port without the reverb is the last 10 ms of the held
+effects' fade; from there it is exact zeros.
 
 Re-baselined 2026-10-07 after task 036 (environment and projection mapping): the Metal column of race_hud (0.0262),
 tt_hud (0.0229), fp_hud (0.0232), zone_hud (0.0122) and zone_change (0.0353). The Vulkan column is unchanged (it keeps

@@ -1,0 +1,575 @@
+diff --git a/host/audio/sas_core.cpp b/host/audio/sas_core.cpp
+index 4f61b3b..34a532d 100644
+--- a/host/audio/sas_core.cpp
++++ b/host/audio/sas_core.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include <algorithm>
+ #include <bit>
++#include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <map>
+@@ -109,19 +110,295 @@ struct RenderTrace {
+     std::uint64_t key_ons{};
+     std::int32_t peak{};
+     std::uint32_t voices{};
++    std::uint64_t reverb_ns{};  // host time spent in the reverb
+ };
+ RenderTrace &trace() {
+     static RenderTrace state;
+     return state;
+ }
+ 
++[[nodiscard]] bool reverb_disabled() {
++    static const bool disabled = portablekit::env("NO_REVERB") != nullptr;
++    return disabled;
++}
++
++// The reverb presets of the SPU documentation (psx-spx, "SPU Reverb Examples"),
++// the 32 registers 1F801DC0h..1F801DFEh in order, and the work area each needs
++// in bytes. The SAS numbers them as the PlayStation libraries do; PIPE is the
++// table psx-spx calls "Half Echo" (the one left over, and the only one whose
++// work area, 3C00h bytes, fits no other name), ECHO its "Chaos Echo".
++struct ReverbPreset {
++    std::array<std::uint16_t, 32> regs;
++    std::uint32_t bytes;
++};
++constexpr std::array<ReverbPreset, SasReverb::kTypeCount> kReverbPresets{{
++    // 0 OFF
++    {{0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0001, 0x0001, 0x0001, 0x0001,
++      0x0001, 0x0001, 0x0000, 0x0000, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0000, 0x0000, 0x0001, 0x0001,
++      0x0001, 0x0001, 0x0000, 0x0000},
++     0x10},
++    // 1 ROOM
++    {{0x007D, 0x005B, 0x6D80, 0x54B8, 0xBED0, 0x0000, 0x0000, 0xBA80, 0x5800, 0x5300, 0x04D6, 0x0333, 0x03F0, 0x0227,
++      0x0374, 0x01EF, 0x0334, 0x01B5, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x01B4, 0x0136,
++      0x00B8, 0x005C, 0x8000, 0x8000},
++     0x26C0},
++    // 2 STUDIO SMALL
++    {{0x0033, 0x0025, 0x70F0, 0x4FA8, 0xBCE0, 0x4410, 0xC0F0, 0x9C00, 0x5280, 0x4EC0, 0x03E4, 0x031B, 0x03A4, 0x02AF,
++      0x0372, 0x0266, 0x031C, 0x025D, 0x025C, 0x018E, 0x022F, 0x0135, 0x01D2, 0x00B7, 0x018F, 0x00B5, 0x00B4, 0x0080,
++      0x004C, 0x0026, 0x8000, 0x8000},
++     0x1F40},
++    // 3 STUDIO MEDIUM
++    {{0x00B1, 0x007F, 0x70F0, 0x4FA8, 0xBCE0, 0x4510, 0xBEF0, 0xB4C0, 0x5280, 0x4EC0, 0x0904, 0x076B, 0x0824, 0x065F,
++      0x07A2, 0x0616, 0x076C, 0x05ED, 0x05EC, 0x042E, 0x050F, 0x0305, 0x0462, 0x02B7, 0x042F, 0x0265, 0x0264, 0x01B2,
++      0x0100, 0x0080, 0x8000, 0x8000},
++     0x4840},
++    // 4 STUDIO LARGE
++    {{0x00E3, 0x00A9, 0x6F60, 0x4FA8, 0xBCE0, 0x4510, 0xBEF0, 0xA680, 0x5680, 0x52C0, 0x0DFB, 0x0B58, 0x0D09, 0x0A3C,
++      0x0BD9, 0x0973, 0x0B59, 0x08DA, 0x08D9, 0x05E9, 0x07EC, 0x04B0, 0x06EF, 0x03D2, 0x05EA, 0x031D, 0x031C, 0x0238,
++      0x0154, 0x00AA, 0x8000, 0x8000},
++     0x6FE0},
++    // 5 HALL
++    {{0x01A5, 0x0139, 0x6000, 0x5000, 0x4C00, 0xB800, 0xBC00, 0xC000, 0x6000, 0x5C00, 0x15BA, 0x11BB, 0x14C2, 0x10BD,
++      0x11BC, 0x0DC1, 0x11C0, 0x0DC3, 0x0DC0, 0x09C1, 0x0BC4, 0x07C1, 0x0A00, 0x06CD, 0x09C2, 0x05C1, 0x05C0, 0x041A,
++      0x0274, 0x013A, 0x8000, 0x8000},
++     0xADE0},
++    // 6 SPACE
++    {{0x033D, 0x0231, 0x7E00, 0x5000, 0xB400, 0xB000, 0x4C00, 0xB000, 0x6000, 0x5400, 0x1ED6, 0x1A31, 0x1D14, 0x183B,
++      0x1BC2, 0x16B2, 0x1A32, 0x15EF, 0x15EE, 0x1055, 0x1334, 0x0F2D, 0x11F6, 0x0C5D, 0x1056, 0x0AE1, 0x0AE0, 0x07A2,
++      0x0464, 0x0232, 0x8000, 0x8000},
++     0xF6C0},
++    // 7 ECHO
++    {{0x0001, 0x0001, 0x7FFF, 0x7FFF, 0x0000, 0x0000, 0x0000, 0x8100, 0x0000, 0x0000, 0x1FFF, 0x0FFF, 0x1005, 0x0005,
++      0x0000, 0x0000, 0x1005, 0x0005, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x1004, 0x1002,
++      0x0004, 0x0002, 0x8000, 0x8000},
++     0x18040},
++    // 8 DELAY
++    {{0x0001, 0x0001, 0x7FFF, 0x7FFF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x1FFF, 0x0FFF, 0x1005, 0x0005,
++      0x0000, 0x0000, 0x1005, 0x0005, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x1004, 0x1002,
++      0x0004, 0x0002, 0x8000, 0x8000},
++     0x18040},
++    // 9 PIPE
++    {{0x0017, 0x0013, 0x70F0, 0x4FA8, 0xBCE0, 0x4510, 0xBEF0, 0x8500, 0x5F80, 0x54C0, 0x0371, 0x02AF, 0x02E5, 0x01DF,
++      0x02B0, 0x01D7, 0x0358, 0x026A, 0x01D6, 0x011E, 0x012D, 0x00B1, 0x011F, 0x0059, 0x01A0, 0x00E3, 0x0058, 0x0040,
++      0x0028, 0x0014, 0x8000, 0x8000},
++     0x3C00},
++}};
++
++// The registers by name, as indices into a preset.
++enum ReverbReg : std::size_t {
++    dAPF1, dAPF2, vIIR, vCOMB1, vCOMB2, vCOMB3, vCOMB4, vWALL,
++    vAPF1, vAPF2, mLSAME, mRSAME, mLCOMB1, mRCOMB1, mLCOMB2, mRCOMB2,
++    dLSAME, dRSAME, mLDIFF, mRDIFF, mLCOMB3, mRCOMB3, mLCOMB4, mRCOMB4,
++    dLDIFF, dRDIFF, mLAPF1, mRAPF1, mLAPF2, mRAPF2, vLIN, vRIN,
++};
++
++// The 39-tap half-band filter the SPU resamples the reverb's input and output
++// with (psx-spx, "Reverb Buffer Resampling"). The odd taps are zero but the
++// centre one, so a 22050 Hz sample takes 20 taps and the centre.
++constexpr std::array<std::int32_t, 39> kReverbFir{
++    -0x0001, 0x0000, 0x0002, 0x0000, -0x000A, 0x0000, 0x0023, 0x0000, -0x0067, 0x0000, 0x010A, 0x0000, -0x0268,
++    0x0000, 0x0534, 0x0000, -0x0B90, 0x0000, 0x2806, 0x4000, 0x2806, 0x0000, -0x0B90, 0x0000, 0x0534, 0x0000,
++    -0x0268, 0x0000, 0x010A, 0x0000, -0x0067, 0x0000, 0x0023, 0x0000, -0x000A, 0x0000, 0x0002, 0x0000, -0x0001,
++};
++
++// A product of the reverb divided by 8000h, as the SPU does.
++[[nodiscard]] constexpr std::int32_t reverb_mul(std::int32_t sample, std::int32_t volume) noexcept {
++    return (sample * volume) >> 15;
++}
++
+ } // namespace
+ 
++void SasReverb::set_type(std::int32_t type) {
++    if (type < 0 || type >= kTypeCount) type = 0;
++    if (type == type_ && !ring_.empty()) return;
++    type_ = type;
++    ring_.assign(kReverbPresets[static_cast<std::size_t>(type)].bytes / 2u, 0);
++    position_ = 0u;
++    down_left_ = {};
++    down_right_ = {};
++    up_left_ = {};
++    up_right_ = {};
++    down_index_ = 0u;
++    up_index_ = 0u;
++    odd_frame_ = false;
++    configure();
++}
++
++void SasReverb::set_param(std::int32_t delay, std::int32_t feedback) {
++    delay_ = std::clamp(delay, 0, 127);
++    feedback_ = std::clamp(feedback, 0, 127);
++    configure();
++}
++
++// The preset of the type, with ECHO's and DELAY's echo shaped by RevParam. The
++// documentation gives those two tables only for one delay and one feedback,
++// so this follows what the tables themselves show: the echo is the distance
++// from the same-side write (mLSAME, mRSAME) down to the reads that feed it
++// back and out (dLSAME, mLCOMB1 and the right ones), FFAh units in both
++// tables, taken here as delay 127; the feedback is vWALL, -7F00h (8100h) in
++// ECHO and 0 in DELAY, so -(feedback << 8).
++void SasReverb::configure() {
++    regs_ = kReverbPresets[static_cast<std::size_t>(type_)].regs;
++    if (type_ != 7 && type_ != 8) return;
++    const auto distance = static_cast<std::uint16_t>(std::max(1, 0xFFA * delay_ / 127));
++    regs_[dLSAME] = regs_[mLCOMB1] = static_cast<std::uint16_t>(regs_[mLSAME] - distance);
++    regs_[dRSAME] = regs_[mRCOMB1] = static_cast<std::uint16_t>(regs_[mRSAME] - distance);
++    regs_[vWALL] = static_cast<std::uint16_t>(-(feedback_ << 8));
++}
++
++// One 22050 Hz step of the SPU formula (psx-spx, "SPU Reverb Formula"), in the
++// documented order of reads and writes. Offsets are 8-byte units, four 16-bit
++// samples each; "-2" bytes is the previous sample. Every intermediate value
++// saturates to 16 bits, as the documentation measured.
++void SasReverb::tick(std::int32_t in_left, std::int32_t in_right, std::int32_t &out_left, std::int32_t &out_right) {
++    const auto size = static_cast<std::int64_t>(ring_.size());
++    const auto at = [&](std::size_t reg, std::int32_t back = 0) -> std::int16_t & {
++        std::int64_t index = (static_cast<std::int64_t>(position_) + static_cast<std::int64_t>(regs_[reg]) * 4 - back) % size;
++        if (index < 0) index += size;
++        return ring_[static_cast<std::size_t>(index)];
++    };
++    const auto apf_at = [&](std::size_t reg, std::size_t disp) -> std::int16_t & {
++        std::int64_t index = (static_cast<std::int64_t>(position_) +
++                              (static_cast<std::int64_t>(regs_[reg]) - static_cast<std::int64_t>(regs_[disp])) * 4) % size;
++        if (index < 0) index += size;
++        return ring_[static_cast<std::size_t>(index)];
++    };
++    const auto vol = [&](std::size_t reg) { return static_cast<std::int32_t>(static_cast<std::int16_t>(regs_[reg])); };
++    const auto sat = [](std::int32_t value) { return clamp16(value); };
++
++    const std::int32_t lin = sat(reverb_mul(in_left, vol(vLIN)));
++    const std::int32_t rin = sat(reverb_mul(in_right, vol(vRIN)));
++    const std::int32_t iir = vol(vIIR);
++    const std::int32_t wall = vol(vWALL);
++
++    // Same side reflection, then the different side one.
++    const std::int32_t l_same_in = at(dLSAME);
++    const std::int32_t r_same_in = at(dRSAME);
++    const std::int32_t l_same_prev = at(mLSAME, 1);
++    const std::int32_t r_same_prev = at(mRSAME, 1);
++    const std::int32_t l_diff_in = at(dRDIFF);
++    const std::int32_t r_diff_in = at(dLDIFF);
++    const auto reflect = [&](std::int32_t input, std::int32_t wall_in, std::int32_t previous) {
++        const std::int32_t x = sat(sat(input + reverb_mul(wall_in, wall)) - previous);
++        return static_cast<std::int16_t>(sat(reverb_mul(x, iir) + previous));
++    };
++    at(mLSAME) = reflect(lin, l_same_in, l_same_prev);
++    at(mRSAME) = reflect(rin, r_same_in, r_same_prev);
++    const std::int32_t l_diff_prev = at(mLDIFF, 1);
++    const std::int32_t r_diff_prev = at(mRDIFF, 1);
++    const std::int32_t l_comb1 = at(mLCOMB1);
++    const std::int32_t r_comb1 = at(mRCOMB1);
++    at(mLDIFF) = reflect(lin, l_diff_in, l_diff_prev);
++    at(mRDIFF) = reflect(rin, r_diff_in, r_diff_prev);
++
++    // Early echo: the four combs.
++    std::int32_t lout = sat(reverb_mul(l_comb1, vol(vCOMB1)) + reverb_mul(at(mLCOMB2), vol(vCOMB2)) +
++                            reverb_mul(at(mLCOMB3), vol(vCOMB3)) + reverb_mul(at(mLCOMB4), vol(vCOMB4)));
++    std::int32_t rout = sat(reverb_mul(r_comb1, vol(vCOMB1)) + reverb_mul(at(mRCOMB2), vol(vCOMB2)) +
++                            reverb_mul(at(mRCOMB3), vol(vCOMB3)) + reverb_mul(at(mRCOMB4), vol(vCOMB4)));
++
++    // Late reverb: two all-pass filters.
++    const std::int32_t apf1 = vol(vAPF1);
++    const std::int32_t apf2 = vol(vAPF2);
++    const std::int32_t l_apf1 = apf_at(mLAPF1, dAPF1);
++    const std::int32_t r_apf1 = apf_at(mRAPF1, dAPF1);
++    const std::int32_t l_apf2 = apf_at(mLAPF2, dAPF2);
++    const std::int32_t r_apf2 = apf_at(mRAPF2, dAPF2);
++    lout = sat(lout - reverb_mul(apf1, l_apf1));
++    rout = sat(rout - reverb_mul(apf1, r_apf1));
++    at(mLAPF1) = static_cast<std::int16_t>(lout);
++    at(mRAPF1) = static_cast<std::int16_t>(rout);
++    lout = sat(reverb_mul(lout, apf1) + l_apf1);
++    rout = sat(reverb_mul(rout, apf1) + r_apf1);
++    lout = sat(lout - reverb_mul(apf2, l_apf2));
++    rout = sat(rout - reverb_mul(apf2, r_apf2));
++    at(mLAPF2) = static_cast<std::int16_t>(lout);
++    at(mRAPF2) = static_cast<std::int16_t>(rout);
++    lout = sat(reverb_mul(lout, apf2) + l_apf2);
++    rout = sat(reverb_mul(rout, apf2) + r_apf2);
++
++    out_left = lout;
++    out_right = rout;
++    position_ = position_ + 1u >= ring_.size() ? 0u : position_ + 1u;
++}
++
++void SasReverb::process(const std::int32_t *send, std::int32_t *wet, std::size_t frames) {
++    static const bool spu_rate = portablekit::env("SAS_REVERB_SPU_RATE") != nullptr;
++    if (!spu_rate) {
++        for (std::size_t frame = 0; frame < frames; ++frame) {
++            const std::size_t slot = frame * 2u;
++            tick(clamp16(send[slot]), clamp16(send[slot + 1u]), wet[slot], wet[slot + 1u]);
++        }
++        return;
++    }
++    // A 22050 Hz step on every other frame: the input filtered down from the
++    // newest 39 sends, the output filtered up from the newest 20 steps. On the
++    // frames between, the upsampler's centre tap lands on a step and passes it
++    // through; on the step's own frame its 20 side taps interpolate.
++    for (std::size_t frame = 0; frame < frames; ++frame) {
++        const std::size_t slot = frame * 2u;
++        down_index_ = (down_index_ + 1u) & 63u;
++        down_left_[down_index_] = down_left_[down_index_ + 64u] = static_cast<std::int16_t>(clamp16(send[slot]));
++        down_right_[down_index_] = down_right_[down_index_ + 64u] = static_cast<std::int16_t>(clamp16(send[slot + 1u]));
++        odd_frame_ = !odd_frame_;
++        if (odd_frame_) {
++            // The newest of the 39 is at down_index_ + 64, the oldest 38 before it.
++            const std::int16_t *left = &down_left_[down_index_ + 64u - 38u];
++            const std::int16_t *right = &down_right_[down_index_ + 64u - 38u];
++            std::int32_t sum_left = 0;
++            std::int32_t sum_right = 0;
++            for (std::size_t tap = 0; tap < kReverbFir.size(); tap += 2u) {
++                sum_left += left[tap] * kReverbFir[tap];
++                sum_right += right[tap] * kReverbFir[tap];
++            }
++            sum_left += left[19] * kReverbFir[19];
++            sum_right += right[19] * kReverbFir[19];
++            std::int32_t out_left = 0;
++            std::int32_t out_right = 0;
++            tick(clamp16(sum_left >> 15), clamp16(sum_right >> 15), out_left, out_right);
++            up_index_ = (up_index_ + 1u) & 63u;
++            up_left_[up_index_] = up_left_[up_index_ + 64u] = static_cast<std::int16_t>(out_left);
++            up_right_[up_index_] = up_right_[up_index_ + 64u] = static_cast<std::int16_t>(out_right);
++            // The zero-stuffed signal has a step here, so the even taps meet
++            // the newest 20 steps: the interpolated half-sample.
++            const std::int16_t *steps_left = &up_left_[up_index_ + 64u - 19u];
++            const std::int16_t *steps_right = &up_right_[up_index_ + 64u - 19u];
++            std::int32_t up_left = 0;
++            std::int32_t up_right = 0;
++            for (std::size_t step = 0; step < 20u; ++step) {
++                up_left += steps_left[step] * kReverbFir[2u * step];
++                up_right += steps_right[step] * kReverbFir[2u * step];
++            }
++            wet[slot] = clamp16(up_left >> 14);
++            wet[slot + 1u] = clamp16(up_right >> 14);
++        } else {
++            // The centre tap meets the step nine before the newest: itself.
++            wet[slot] = up_left_[(up_index_ + 64u - 9u) & 127u];
++            wet[slot + 1u] = up_right_[(up_index_ + 64u - 9u) & 127u];
++        }
++    }
++}
++
+ void SasCore::init(std::uint32_t grain, std::uint32_t max_voices, std::uint32_t output_mode) {
+     grain_ = grain != 0u && grain <= 2048u ? grain : 256u;
+     max_voices_ = std::clamp(max_voices, 1u, kSasMaxVoices);
+     output_mode_ = output_mode;
+     voices_ = {};
++    reverb_ = SasReverb{};
++    wet_left_ = 0;
++    wet_right_ = 0;
++    dry_on_ = true;
++    wet_on_ = false;
++}
++
++void SasCore::set_reverb_volume(std::int32_t left, std::int32_t right) {
++    wet_left_ = std::clamp(left, -kVolumeUnity, kVolumeUnity);
++    wet_right_ = std::clamp(right, -kVolumeUnity, kVolumeUnity);
++}
++
++void SasCore::set_reverb_switches(bool dry, bool wet) {
++    dry_on_ = dry;
++    wet_on_ = wet;
+ }
+ 
+ void SasCore::set_voice(std::uint32_t voice, std::uint32_t address, std::uint32_t size, bool looping) {
+@@ -162,10 +439,13 @@ void SasCore::set_pitch(std::uint32_t voice, std::uint32_t pitch) {
+     voices_[voice].pitch = std::min(pitch, kPitchMax);
+ }
+ 
+-void SasCore::set_volume(std::uint32_t voice, std::int32_t left, std::int32_t right) {
++void SasCore::set_volume(std::uint32_t voice, std::int32_t left, std::int32_t right, std::int32_t effect_left,
++                         std::int32_t effect_right) {
+     if (voice >= kSasMaxVoices) return;
+     voices_[voice].left = std::clamp(left, -kVolumeUnity, kVolumeUnity);
+     voices_[voice].right = std::clamp(right, -kVolumeUnity, kVolumeUnity);
++    voices_[voice].effect_left = std::clamp(effect_left, -kVolumeUnity, kVolumeUnity);
++    voices_[voice].effect_right = std::clamp(effect_right, -kVolumeUnity, kVolumeUnity);
+ }
+ 
+ void SasCore::set_simple_adsr(std::uint32_t voice, std::uint32_t adsr1, std::uint32_t adsr2) {
+@@ -538,6 +818,10 @@ void SasCore::render(const psprecomp::GuestMemory &memory, std::int16_t *output,
+     // <prefix>_SAS_CLAMP_EACH clamps after every voice, as before.
+     static const bool clamp_each = portablekit::env("SAS_CLAMP_EACH") != nullptr;
+     mix_.assign(frames * 2u, 0);
++    // The effect sends feed the reverb whenever it has a type, so its tail
++    // rings on after the voices stop; <prefix>_NO_REVERB leaves it out.
++    const bool reverb = reverb_.enabled() && !reverb_disabled();
++    if (reverb) send_.assign(frames * 2u, 0);
+     // Sampled before mixing: a short voice can finish inside this very block.
+     if (tracing())
+         trace().voices = std::max(trace().voices, static_cast<std::uint32_t>(std::popcount(
+@@ -567,6 +851,15 @@ void SasCore::render(const psprecomp::GuestMemory &memory, std::int16_t *output,
+             const std::size_t slot = frame * 2u;
+             mix_[slot] += (scaled * voice.left) >> 12;
+             mix_[slot + 1u] += (scaled * voice.right) >> 12;
++            if (reverb) {
++                // At half the send: PPSSPP's output of Wipeout Pure has the
++                // reverb at half the level unity sends and wet volumes give,
++                // at every 100 ms step of a pause's decay and in the race's
++                // level; the SAS documentation does not say where the half
++                // is taken, so it is taken once, here.
++                send_[slot] += (scaled * voice.effect_left) >> 13;
++                send_[slot + 1u] += (scaled * voice.effect_right) >> 13;
++            }
+             if (clamp_each) {
+                 mix_[slot] = clamp16(mix_[slot]);
+                 mix_[slot + 1u] = clamp16(mix_[slot + 1u]);
+@@ -588,6 +881,24 @@ void SasCore::render(const psprecomp::GuestMemory &memory, std::int16_t *output,
+             if (!voice.playing) break;
+         }
+     }
++    // The dry voices as the dry switch says, then the reverb's output at the
++    // wet volumes when the wet switch is on. With no type, or the wet switch
++    // off and the dry one on, the output is the dry mix alone, as before.
++    if (!dry_on_) std::fill(mix_.begin(), mix_.end(), 0);
++    if (reverb) {
++        const auto started = tracing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
++        wet_.resize(frames * 2u);
++        reverb_.process(send_.data(), wet_.data(), frames);
++        if (wet_on_) {
++            for (std::size_t frame = 0; frame < frames; ++frame) {
++                mix_[frame * 2u] += (wet_[frame * 2u] * wet_left_) >> 12;
++                mix_[frame * 2u + 1u] += (wet_[frame * 2u + 1u] * wet_right_) >> 12;
++            }
++        }
++        if (tracing())
++            trace().reverb_ns += static_cast<std::uint64_t>(
++                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count());
++    }
+     for (std::size_t sample = 0; sample < frames * 2u; ++sample) {
+         const std::int32_t value = mix_[sample];
+         if (tracing() && (value > 32767 || value < -32768)) ++trace().clipped;
+@@ -599,9 +910,10 @@ void SasCore::render(const psprecomp::GuestMemory &memory, std::int16_t *output,
+     for (std::size_t sample = 0; sample < frames * 2u; ++sample)
+         stats.peak = std::max(stats.peak, std::abs(static_cast<std::int32_t>(output[sample])));
+     if (stats.frames >= 44'100u) {
+-        std::printf("[sas] frames=%llu peak=%d voices=%u key_ons=%llu clipped=%llu\n",
++        std::printf("[sas] frames=%llu peak=%d voices=%u key_ons=%llu clipped=%llu reverb=%d reverb_us=%llu\n",
+                     static_cast<unsigned long long>(stats.frames), stats.peak, stats.voices,
+-                    static_cast<unsigned long long>(stats.key_ons), static_cast<unsigned long long>(stats.clipped));
++                    static_cast<unsigned long long>(stats.key_ons), static_cast<unsigned long long>(stats.clipped),
++                    reverb ? reverb_.type() : 0, static_cast<unsigned long long>(stats.reverb_ns / 1000u));
+         std::fflush(stdout);
+         stats = RenderTrace{};
+     }
+diff --git a/host/audio/sas_core.hpp b/host/audio/sas_core.hpp
+index 99acf07..f7f1b62 100644
+--- a/host/audio/sas_core.hpp
++++ b/host/audio/sas_core.hpp
+@@ -31,6 +31,10 @@ struct SasVoice {
+     std::uint32_t pitch{0x1000u};
+     std::int32_t left{0x1000};
+     std::int32_t right{0x1000};
++    // The effect sends of __sceSasSetVolume (its fifth and sixth arguments):
++    // how much of the voice goes into the reverb, 0x1000 being all of it.
++    std::int32_t effect_left{};
++    std::int32_t effect_right{};
+ 
+     bool playing{};
+     bool paused{};
+@@ -78,8 +82,57 @@ enum class SasCurve : std::uint8_t {
+ };
+ inline constexpr std::int64_t kEnvelopeHeightMax = 0x40000000;
+ 
+-// Software SAS: up to 32 VAG, PCM or noise voices mixed at 44100 Hz. Reverb
+-// is not modelled, so the effect sends are accepted and ignored.
++// The SAS reverb, the PlayStation SPU's reverberator the SAS inherits, as the
++// public SPU documentation (psx-spx, "SPU Reverb Formula", "SPU Reverb
++// Examples") describes it: the voices' effect sends run through the same-side
++// and different-side reflections, the four combs and the two all-pass filters
++// of the preset's register table in a ring of 16-bit samples. The SPU steps
++// that formula at 22050 Hz, between a 39-tap half-band filter down and the
++// same filter up ("Reverb Buffer Resampling"); the SAS steps it once a sample
++// at its own 44100 Hz, which is what PPSSPP's output of a game shows (its
++// decay is the formula's at 44100 Hz; at 22050 Hz every echo comes twice as
++// late and the tail lasts three times as long). <prefix>_SAS_REVERB_SPU_RATE
++// runs the SPU's way instead. __sceSasRevType picks the preset (0 OFF, 1 ROOM,
++// 2 STUDIO SMALL, 3 STUDIO MEDIUM, 4 STUDIO LARGE, 5 HALL, 6 SPACE, 7 ECHO,
++// 8 DELAY, 9 PIPE); __sceSasRevParam's delay and feedback (0..127) shape ECHO
++// and DELAY only.
++class SasReverb {
++public:
++    static constexpr std::int32_t kTypeCount = 10;
++    // Anything outside 0..9 is OFF. A new type starts from a silent work area.
++    void set_type(std::int32_t type);
++    void set_param(std::int32_t delay, std::int32_t feedback);
++    [[nodiscard]] std::int32_t type() const noexcept { return type_; }
++    [[nodiscard]] bool enabled() const noexcept { return type_ > 0; }
++    // Runs `frames` stereo frames of effect sends (44.1 kHz, interleaved) and
++    // writes the unit's output for each, before the wet volumes, to `wet`.
++    void process(const std::int32_t *send, std::int32_t *wet, std::size_t frames);
++
++private:
++    void configure();
++    void tick(std::int32_t in_left, std::int32_t in_right, std::int32_t &out_left, std::int32_t &out_right);
++
++    std::int32_t type_{};
++    std::int32_t delay_{};
++    std::int32_t feedback_{};
++    // The preset's 32 registers in the SPU's order (dAPF1 at 1F801DC0h to vRIN
++    // at 1F801DFEh), offsets in 8-byte units as the SPU takes them.
++    std::array<std::uint16_t, 32> regs_{};
++    std::vector<std::int16_t> ring_;
++    std::uint32_t position_{};
++    // The resamplers' histories, each sample stored twice (at i and i + 64) so
++    // the newest 39 are always one contiguous run.
++    std::array<std::int16_t, 128> down_left_{};
++    std::array<std::int16_t, 128> down_right_{};
++    std::array<std::int16_t, 128> up_left_{};
++    std::array<std::int16_t, 128> up_right_{};
++    std::uint32_t down_index_{};
++    std::uint32_t up_index_{};
++    bool odd_frame_{};
++};
++
++// Software SAS: up to 32 VAG, PCM or noise voices mixed at 44100 Hz, the dry
++// mix plus the reverb's wet one (SasReverb) at the wet volumes.
+ class SasCore {
+ public:
+     void init(std::uint32_t grain, std::uint32_t max_voices, std::uint32_t output_mode);
+@@ -90,7 +143,15 @@ public:
+     void set_voice_pcm(std::uint32_t voice, std::uint32_t address, std::uint32_t size, std::int32_t loop);
+     void set_noise(std::uint32_t voice, std::uint32_t clock);
+     void set_pitch(std::uint32_t voice, std::uint32_t pitch);
+-    void set_volume(std::uint32_t voice, std::int32_t left, std::int32_t right);
++    // The dry volumes and the effect sends (0x1000 is unity for both).
++    void set_volume(std::uint32_t voice, std::int32_t left, std::int32_t right, std::int32_t effect_left = 0,
++                    std::int32_t effect_right = 0);
++    // The reverb: __sceSasRevType, __sceSasRevParam, __sceSasRevEVOL (the wet
++    // volumes, 0x1000 unity) and __sceSasRevVON (the dry and wet switches).
++    void set_reverb_type(std::int32_t type) { reverb_.set_type(type); }
++    void set_reverb_param(std::int32_t delay, std::int32_t feedback) { reverb_.set_param(delay, feedback); }
++    void set_reverb_volume(std::int32_t left, std::int32_t right);
++    void set_reverb_switches(bool dry, bool wet);
+     void set_simple_adsr(std::uint32_t voice, std::uint32_t adsr1, std::uint32_t adsr2);
+     // The explicit envelope. `flag` bits 0-3 pick which of attack, decay,
+     // sustain and release change. Each returns 0 or the SAS error code.
+@@ -125,6 +186,13 @@ private:
+     std::uint32_t output_mode_{};
+     std::array<SasVoice, kSasMaxVoices> voices_{};
+     std::vector<std::int32_t> mix_;
++    std::vector<std::int32_t> send_;
++    std::vector<std::int32_t> wet_;
++    SasReverb reverb_;
++    std::int32_t wet_left_{};
++    std::int32_t wet_right_{};
++    bool dry_on_{true};
++    bool wet_on_{};
+ };
+ 
+ // One core per guest SAS handle. Games usually open one, but the handle is an
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 8efef9f..b648924 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -36,7 +36,9 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <iostream>
++#include <map>
+ #include <memory>
++#include <string>
+ #include <utility>
+ #include <vector>
+ 
+@@ -1029,9 +1031,20 @@ void register_audio(HleRegistrar &hle) {
+         audio::sas_core(arg(ctx, 0)).set_pitch(arg(ctx, 1), arg(ctx, 2));
+         kernel().finish(ctx, 0u);
+     });
++    // __sceSasSetVolume(core, voice, left, right, effect_left, effect_right):
++    // the dry volumes and the voice's sends into the reverb.
+     hle.add("sceSasCore", "__sceSasSetVolume", [](Runtime &, AllegrexContext &ctx) {
++        const auto effect_left = static_cast<std::int32_t>(arg(ctx, 4));
++        const auto effect_right = static_cast<std::int32_t>(arg(ctx, 5));
++        if (trace_sas() && arg(ctx, 1) < audio::kSasMaxVoices) {
++            static std::array<std::uint64_t, audio::kSasMaxVoices> sends{};
++            const std::uint64_t pair = (static_cast<std::uint64_t>(arg(ctx, 4)) << 32u) | arg(ctx, 5);
++            if (sends[arg(ctx, 1)] != pair)
++                std::cerr << "[sas] voice " << arg(ctx, 1) << " effect sends " << effect_left << " " << effect_right << "\n";
++            sends[arg(ctx, 1)] = pair;
++        }
+         audio::sas_core(arg(ctx, 0)).set_volume(arg(ctx, 1), static_cast<std::int32_t>(arg(ctx, 2)),
+-                                                static_cast<std::int32_t>(arg(ctx, 3)));
++                                                static_cast<std::int32_t>(arg(ctx, 3)), effect_left, effect_right);
+         kernel().finish(ctx, 0u);
+     });
+     hle.add("sceSasCore", "__sceSasSetSimpleADSR", [](Runtime &, AllegrexContext &ctx) {
+@@ -1104,9 +1117,41 @@ void register_audio(HleRegistrar &hle) {
+     hle.try_add("sceSasCore", "__sceSasGetPauseFlag", [](Runtime &, AllegrexContext &ctx) {
+         kernel().finish(ctx, audio::sas_core(arg(ctx, 0)).pause_flags());
+     });
+-    // Reverb is not modelled, so the sends are accepted and dropped.
+-    for (const char *name : {"__sceSasRevType", "__sceSasRevParam", "__sceSasRevEVOL", "__sceSasRevVON"})
+-        hle.add("sceSasCore", name, [](Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 0u); });
++    // The reverb (audio::SasReverb): __sceSasRevType(core, type),
++    // __sceSasRevParam(core, delay, feedback), __sceSasRevEVOL(core, left,
++    // right) the wet volumes, __sceSasRevVON(core, dry, wet) the switches.
++    // Each change is traced once under <prefix>_TRACE_SAS.
++    const auto trace_rev = [](const char *name, std::uint32_t a, std::uint32_t b) {
++        if (!trace_sas()) return;
++        static std::map<std::string, std::uint64_t> last;
++        const std::uint64_t pair = (static_cast<std::uint64_t>(a) << 32u) | b;
++        const auto it = last.find(name);
++        if (it == last.end() || it->second != pair)
++            std::cerr << "[sas] " << name << " " << static_cast<std::int32_t>(a) << " " << static_cast<std::int32_t>(b) << "\n";
++        last[name] = pair;
++    };
++    hle.add("sceSasCore", "__sceSasRevType", [trace_rev](Runtime &, AllegrexContext &ctx) {
++        trace_rev("RevType", arg(ctx, 1), 0u);
++        audio::sas_core(arg(ctx, 0)).set_reverb_type(static_cast<std::int32_t>(arg(ctx, 1)));
++        kernel().finish(ctx, 0u);
++    });
++    hle.add("sceSasCore", "__sceSasRevParam", [trace_rev](Runtime &, AllegrexContext &ctx) {
++        trace_rev("RevParam", arg(ctx, 1), arg(ctx, 2));
++        audio::sas_core(arg(ctx, 0)).set_reverb_param(static_cast<std::int32_t>(arg(ctx, 1)),
++                                                      static_cast<std::int32_t>(arg(ctx, 2)));
++        kernel().finish(ctx, 0u);
++    });
++    hle.add("sceSasCore", "__sceSasRevEVOL", [trace_rev](Runtime &, AllegrexContext &ctx) {
++        trace_rev("RevEVOL", arg(ctx, 1), arg(ctx, 2));
++        audio::sas_core(arg(ctx, 0)).set_reverb_volume(static_cast<std::int32_t>(arg(ctx, 1)),
++                                                       static_cast<std::int32_t>(arg(ctx, 2)));
++        kernel().finish(ctx, 0u);
++    });
++    hle.add("sceSasCore", "__sceSasRevVON", [trace_rev](Runtime &, AllegrexContext &ctx) {
++        trace_rev("RevVON", arg(ctx, 1), arg(ctx, 2));
++        audio::sas_core(arg(ctx, 0)).set_reverb_switches(arg(ctx, 1) != 0u, arg(ctx, 2) != 0u);
++        kernel().finish(ctx, 0u);
++    });
+     hle.add("sceSasCore", "__sceSasGetOutputmode", [](Runtime &, AllegrexContext &ctx) {
+         kernel().finish(ctx, audio::sas_core(arg(ctx, 0)).output_mode());
+     });

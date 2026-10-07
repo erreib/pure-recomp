@@ -649,7 +649,7 @@ Ordered by what a player would notice first. Each row is a candidate task; "size
 in one file; medium: a feature across the backend or the framework's state; large: a subsystem). Twelve
 differences: three in the race picture, two in the saves, one in loading, one in pacing, three in the audio and two
 small GE states. Task 041 checked 7, 8 and 9 against PPSSPP's audio dump and runs in a window: none of the three is
-the port's; it found 12 on the way.
+the port's; it found 12 on the way, which task 043 models (patch 0018).
 
 | # | What a player sees | Where | Evidence | Suspected cause | Size |
 |---|---|---|---|---|---|
@@ -664,7 +664,7 @@ the port's; it found 12 on the way.
 | 9 | The attract demo's sound clips | the main menu left for 30 s | 3474 clipped samples in the sceSas channel over two demos; the scripted races at most 0.014% | **checked (task 041): the game's own.** PPSSPP's attract demos clip too: 699 and 2236 clipped samples (0.0065% and 0.0209%) in its first two (Vineta K, Blue Ridge; the game picks the demo, differently in each run) against the port's 2611 and 836 (0.0246% and 0.0111%; Modesto Heights, Citta Nuova), full-scale peaks in all four, the loudest second's RMS 11817 and 13226 against 11863 and 10735. The levels agree where the content is the same: the main menu's music at RMS 1686 in both, and over 250 s of the Free Play idle the port's mix is 0.966 to 1.004 of PPSSPP's per second (mean 0.986). The SAS mix level is not the cause | none |
 | 10 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework (7.7 million writes a cell) | framework GE state: the colour test. **Fixed by task 040 (2026-10-07)**: patch 0017 carries COLORTESTENABLE, COLORTEST, COLORREF and COLORTESTMASK (0x27, 0xD8 to 0xDA), and the Metal backend discards by the GE's function on the 8-bit colour under the mask, after fog, as the alpha test (docs/metal-backend.md, "The colour test, 16-bit writes and the depth clamp"). The draws are light glows blended additively, so a black fragment adds no colour; what the test changes is the bloom mask's stencil 255 their black texels wrote. Headless Metal at tol 32: race_hud 0.014874 to 0.014828 with the dither below (the colour test alone changes 640 pixels, all in a lamp's glow, whose region (307,107) 26x34 goes from 0.0328 to 0.0260, 0.2285 to 0.1765 at tol 16); tt_hud and fp_hud have no colour-tested draw on screen. The Vulkan backend keeps every fragment | small |
 | 11 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws a frame), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state. **Fixed by task 040 (2026-10-07)**: patch 0017 carries DITHERENABLE, DITH0 to DITH3 (0x20, 0xE2 to 0xE5) and CLIPENABLE (0x1C). Dithering: the port's 16-bit targets had kept 8 bits a channel (they are RGBA8 textures, cut to the format only when stored in guest memory), so the Metal backend now writes a 5650, 5551 or 4444 target as the PSP does: the blend in the shader on the target's colour, the matrix's offset (row y & 3, column x & 3, as PPSSPP's software renderer shows on all 16384 pixels of Vineta K's fourth billboard round), one clamp, the format's top bits. Every dithered draw of the dumps is into the 565 billboard target; after the task its pixels are all 565 values ordered as the round's matrix, as PPSSPP's are (before: 0.0 to 99.6% 565 values, no dither). The billboard screens show other adverts than PPSSPP's frames, so their regions hardly move (race_hud (201,126) 16x8 0.8828 both; tt_hud (195,114) 29x29 0.4245 to 0.4221, fp_hud 0.4269 to 0.3912); the scenes: tt_hud 0.011221 to 0.011213, fp_hud 0.011566 to 0.011336. Depth clamp: the hardware notes put it with CLIPENABLE on (near-plane clipping only, each vertex's screen z clamped to 0..65535, MINZ/MAXZ per pixel), which every transformed draw of the game has; the backend draws that rule, and it changes no pixel of the 18 scenes, as the dumps predict (no vertex beyond the far plane, MINZ/MAXZ the viewport's own range). The Vulkan backend draws neither | small each |
-| 12 | The race's effects have no reverb: they stop dead where the PSP's ring on (at a pause the PSP's sound fades out over half a second, the port's stops) | every race, from the race load (traced in Free Play) | the game calls `__sceSasRevType` with type 5, `__sceSasRevVON` with the dry and the wet send on and `__sceSasRevEVOL` 0x666 (a ramp down from 0xFFF at the race load) through the race, and keeps the wet send off in the menus; the framework accepts all four and drops them (`hle_media.cpp`: "Reverb is not modelled"). PPSSPP applies them: its dump of the Free Play pause decays over 0.5 s (RMS 2148, 600, 198, 125, 64, 33 down to 1 in 100 ms steps) and stays at RMS 1, where the port's falls to exact zeros within 100 ms (task 041) | framework: the SAS reverb (the effect type, the wet send and its volume) is not modelled in `sas_core.cpp` | medium |
+| 12 | The race's effects have no reverb: they stop dead where the PSP's ring on (at a pause the PSP's sound fades out over half a second, the port's stops) | every race, from the race load (traced in Free Play) | the game calls `__sceSasRevType` with type 5, `__sceSasRevVON` with the dry and the wet send on and `__sceSasRevEVOL` 0x666 (a ramp down from 0xFFF at the race load) through the race, and keeps the wet send off in the menus; the framework accepts all four and drops them (`hle_media.cpp`: "Reverb is not modelled"). PPSSPP applies them: its dump of the Free Play pause decays over 0.5 s (RMS 2148, 600, 198, 125, 64, 33 down to 1 in 100 ms steps) and stays at RMS 1, where the port's falls to exact zeros within 100 ms (task 041) | framework: the SAS reverb (the effect type, the wet send and its volume) is not modelled in `sas_core.cpp`. **Fixed by task 043 (2026-10-07)**: patch 0018 runs the SPU reverb formula and HALL preset of the PlayStation's documentation on the voices' effect sends and adds it at the wet volumes, stepped once a sample at 44.1 kHz with the sends at half, the two things PPSSPP's output requires ("Difference 12: the SAS reverb" below). `tools/sas_reverb_check.sh`, the Free Play pause against PPSSPP's dump in 100 ms steps from where the held effects end: PPSSPP 383, 194, 116, 60, 31; the port before 254, then exact zeros (FAIL); after 487, 234, 131, 63, 35 (1.05 to 1.27 of PPSSPP's, PASS), and on through the first second at 1.1 to 1.3. The effects' level over 250 s of the Free Play idle is 1.008 of PPSSPP's (0.976 before) and over 40 s of a Vineta K race with the AI 1.000 (0.980). `PURE_NO_REVERB=1` restores the dry mix | medium |
 
 Not differences, though they looked like ones:
 
@@ -1006,3 +1006,107 @@ s) `__sceSasRevVON` with the wet send on and `__sceSasRevEVOL` stepping from 0xF
 half-second decay and residue at the pause and the 1.4% more level of its idle race mix. A player hears the race's
 effects dry. Implementing it (the effect types' parameters, the wet send and its volume, the feedback) is a
 framework task; a PPSSPP dump of a race and `audio_compare.py` are the check.
+(Task 043 implements it: "Difference 12: the SAS reverb", below. Task 041's decay figures were measured another way:
+task 043's two dumps of the same route have the same samples, and from where the held effects end, 480.609 s, their
+100 ms steps are 383, 194, 116, 60, 31.)
+
+## Difference 12: the SAS reverb (task 043, 2026-10-07)
+
+**Finding.** The race's effects now ring on after a pause as they do in PPSSPP. Patch 0018 gives the framework's
+software SAS a reverb unit: the PlayStation SPU's reverberator as its public documentation describes it (psx-spx, "SPU
+Reverb Formula" and the "Reverb Examples" register tables), fed by the voices' effect sends and added to the mix at the
+wet volumes. Built exactly as documented, it does not match PPSSPP. It matches after two changes, both measured against
+PPSSPP's output: the formula runs once per sample at 44.1 kHz, and the sends enter at half volume. With those changes
+`tools/sas_reverb_check.sh` passes.
+
+### What the game asks for
+
+From `PURE_TRACE_SAS` on the Free Play pause route:
+
+- At 4.07 s the game calls `__sceSasRevType` -1, then 5 (HALL), and calls `__sceSasRevParam` (0, 0) once.
+- In the menus, `__sceSasRevVON` is (1, 0) and `__sceSasRevEVOL` is (0, 0).
+- From the race load at 191.13 s, VON is (1, 1). EVOL steps from 0xFFF down to 0x666 over 0.28 s and then stays there,
+  re-sent 30 times a second. START does not change it.
+- The effect sends are `__sceSasSetVolume`'s fifth and sixth arguments, which the framework also dropped. The idling
+  engine (voice 1) sends the same amount it plays dry: 0x6E/0x6C dry, 110/108 of 0x1000 sent. The other effects
+  (voices 2 to 5) send about three quarters of their dry volume, for example 0x2AD/0x1D7 dry and 508/349 sent.
+- At START the game stops the music. The effects then hold one level for 150 ms (130 ms in PPSSPP) and are keyed off.
+  The game keeps calling `__sceSasCore` through the pause menu, so the reverb's tail rings out.
+
+### The model (patch 0018, `host/audio/sas_core.{hpp,cpp}`, `host/hle/hle_media.cpp`)
+
+| Part | What the patch does |
+|---|---|
+| Formula | psx-spx's formula: same-side and different-side reflections, four combs, two all-pass filters. They run in a ring of 16-bit samples the size of the preset's work area, with reads and writes in the documented order ("Reverb Computation Order"). Products are divided by 0x8000 and every intermediate value saturates to 16 bits. vLIN and vRIN (0x8000) multiply by -1.0, as psx-spx measured on hardware |
+| Presets | The nine tables by `__sceSasRevType`: 1 ROOM, 2 STUDIO SMALL, 3 STUDIO MEDIUM, 4 STUDIO LARGE, 5 HALL, 6 SPACE, 7 ECHO ("Chaos Echo"), 8 DELAY, 9 PIPE. PIPE is psx-spx's "Half Echo", the one table left over. Any other type is OFF, and a new type starts from a silent ring |
+| `__sceSasRevParam` | Delay and feedback (0..127) shape ECHO and DELAY only. psx-spx gives those two tables for one setting each, and they differ only in vWALL (8100h against 0). The patch therefore reads delay 127 as the tables' write-to-read distance (FFAh units) and scales it down linearly, and sets vWALL to -(feedback << 8) |
+| Mix | The dry voices as before, or none when VON's dry switch is 0. The unit's output is added at EVOL/0x1000 when VON's wet switch is on. With type 0 or the wet switch off, the output is exactly the old dry mix. `PURE_NO_REVERB=1` restores it |
+| Cost | 790 us of host time per second of race audio (`PURE_TRACE_AUDIO`'s `reverb_us`, averaged over 245 one-second lines of the race run below). That is about 4.6 us per 256-frame grain (5.8 ms of sound), or 0.08% of the grain's time. A standalone loop of the HALL unit: 4.2 us per 256 frames |
+
+### The two departures and their evidence
+
+The port runs deterministically, so the held effects end at the same virtual time (558.085 s) in every variant. The
+100 ms steps from there (RMS, port/PPSSPP in brackets):
+
+| | 0-100 ms | 100-200 | 200-300 | 300-400 | 400-500 | 500-1000 ms | steps outside 2x |
+|---|---|---|---|---|---|---|---|
+| PPSSPP's dump (from 480.609 s) | 383 | 194 | 116 | 60 | 31 | 16, 8, 4, 2, 1 | |
+| before: no reverb | 254 (0.66) | 0 | 0 | 0 | 0 | 0 | 4 (zero) |
+| as documented: 22050 Hz between the resampling filters, sends at unity | 1128 (2.95) | 833 (4.29) | 715 (6.17) | 535 (8.92) | 422 (13.61) | 316, 221, 161, 115, 84 | 5 |
+| the formula at 44100 Hz, sends at unity | 864 (2.26) | 468 (2.41) | 261 (2.25) | 126 (2.11) | 70 (2.25) | 36, 18, 9, 5, 2 | 5 |
+| patch 0018: 44100 Hz, sends at half | 487 (1.27) | 234 (1.21) | 131 (1.13) | 63 (1.05) | 35 (1.13) | 18, 9, 5, 2, 1 | 0 |
+
+- **The rate.** PPSSPP's tail falls by a factor of 1.7 to 2.0 every 100 ms. The documented formula at the SPU's
+  22050 Hz falls by 1.2 to 1.4, because every delay line is twice as long in time, so the loop gains apply half as
+  often. The same formula at 44100 Hz falls by 1.8 to 2.1. The slope alone decides this: no gain can make the 22050 Hz
+  tail fit, since its ratio to PPSSPP's grows from 3 to 14 over half a second. `PURE_SAS_REVERB_SPU_RATE=1` keeps the
+  SPU's rate and filters for comparison; with the half send it gives 607, 416, 358, 268, 211 (FAIL).
+- **The level.** At 44100 Hz with unity sends, the tail is 2.1 to 2.4 times PPSSPP's at every step of the first
+  second: one constant factor. The steady level shows the same factor independently. Over 250 s of the Free Play idle
+  (port 250 to 500 s), PPSSPP's effects have RMS 2819. Here PPSSPP's effects are its mix minus the port's music
+  channel, aligned to the sample: `audio_compare.py --locate` gives -74.78293 s at 300 s and at 480 s.
+
+  | Port variant | sceSas channel RMS | port/PPSSPP | per second |
+  |---|---|---|---|
+  | no reverb | 2752 | 0.976 | |
+  | unity sends | 3093 | 1.097 | 1.07 to 1.12 |
+  | half sends (patch 0018) | 2840 | 1.008 | 0.99 to 1.02 |
+
+  Halving the sends satisfies both the tail and the steady level. The SAS documentation available here does not say
+  where the SAS halves the signal: at the send, in the wet volume's unity, or at the unit's output. The patch halves
+  the send, so the unit's internal saturation works on the lower level.
+
+### In the race
+
+The comparison runs:
+
+- **PPSSPP:** a dump of the Vineta K Single Race (`frontend.txt` + `vineta_k_start.txt` + `vineta_k_hold_cross.txt`,
+  Cross held 50 s, to vblank 10300; `out/043/pp_race.wav`).
+- **Port:** `main_menu.txt` + `single_race.txt` to flip 9200, headless with `PURE_AUDIO_WAV`, with and without the
+  reverb.
+
+`--locate` puts the port's music at PPSSPP's time plus 77.83447 s, at 210 s (correlation 0.38) and at 240 s (0.68). The
+AI differs between the two races, so these figures are reported, not checked:
+
+| Measure (window) | PPSSPP | Port with reverb | Port without |
+|---|---|---|---|
+| Effects RMS, port 205 to 245 s (40 s with the AI's weapons and contacts); PPSSPP's mix minus the music | 2003 | 2003 (1.000; 0.86 to 1.16 per second) | 1964 (0.980) |
+| Mix RMS, 46 s from GO, port/PPSSPP | | 1.003 (0.87 to 1.07 per second) | 0.991 |
+
+- The waveform correlation of the mix (`--locate` at the countdown, the launch and in the race) is the same with and
+  without the reverb: 0.74 against 0.75 at the countdown, 0.25 to 0.68 later. A diffuse tail adds little to a
+  sample-level match, and PPSSPP's effects sit 28 ms later against the music than the port's do.
+- `wavstats.py` from GO (201.13 s): the mix and the sceSas channel are active 49 of 49 seconds with no clipping, with
+  and without the reverb. The mix peak is 21032 with the reverb, against PPSSPP's 21485 over the same window.
+
+### The reference
+
+Two PPSSPP runs of the route gave the same samples. The second file was 640 frames longer because the quit came
+later, so a file taken again can differ in length and hash but not in content. Its SHA-256 is in ref/README.md.
+
+### Not verified
+
+- **Unused paths.** The game uses HALL only, so the other eight presets, the ECHO and DELAY parameters and the PIPE
+  table were not checked against PPSSPP.
+- **The menus.** They keep the wet switch off. The unit runs there (it runs whenever a type is set) but adds nothing.
+- **Attract-demo clipping.** Difference 9's figures for the demos were not measured again with the reverb.
