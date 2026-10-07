@@ -53,3 +53,20 @@ the reported "double speed in 30 fps areas".
 For the runtime this means: GE callbacks must be delivered as guest interrupts that set an event flag (Yakumo does
 this), `sceGeListSync`/`sceGeDrawSync` must block until the list is done on the virtual clock, and
 `sceDisplaySetFrameBuf` with the "next vblank" mode must take effect at the next vblank, not immediately.
+
+## The game's clock in a race (task 046, 2026-10-07)
+- **The frame timer.** `FUN_08804390`, once a frame: `dt = (low word of sceKernelGetSystemTimeWide - the last one) *
+  scale`, clamped to 0..0.067 s (two flags at `DAT_08a8e964`/`DAT_08a8e965` force 1/30 or 1/60 instead; neither is
+  set in a race); `FUN_08893284` hands it to every object, which sums it into its own clock (the frontend root's
+  +0x44 is the one the race seed is taken from, docs/fidelity.md difference 13). The game's physics, camera and
+  timers integrate this dt.
+- **The port's frame times move in 1 ms steps.** The kernel's virtual clock advances by `kStarvationQuantumUs`
+  (1000 us) every 20000 dispatches of the outer loop, so a frame measures 15683, 16683 or 17683 us at 60 fps (32366
+  to 34366 us at 30 fps) where PPSSPP measures the vblank plus the frame's emulated CPU time (15957 to 17201 us in a
+  Vineta K race second). Averaged over a second both are the vblank rate; frame by frame the game integrates
+  different steps, which is all that parts the player's path from PPSSPP's on Karbonis (difference 14) and part of
+  why the AI ships differ (difference 13). `PURE_TEST_RACE_CLOCK` replays PPSSPP's frame times for the scorecard.
+- **The race load's length does not reach the race.** The race's two seeds are drawn at the TEAM SELECTION confirm,
+  before the load; the load draws the same 2566 random numbers on both sides whether it takes 5 flips (the port) or
+  34 (PPSSPP), the frame timer is not called while it runs, and the first frame after it is capped at 0.067 s on
+  both. With the race clock pinned the port's shorter load (D-011) leaves the random sequence PPSSPP's for 20 s.
