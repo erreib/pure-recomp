@@ -152,12 +152,12 @@ own.
 
 | Part | Fields |
 |---|---|
-| geometry | u8 primitive; u32 vertex count and each vertex (three f32 position, three f32 normal, two f32 texcoord, u32 colour); u32 index count and each u16 index; u8 through |
+| geometry | u8 primitive; u32 vertex count and each vertex (four f32 position, three f32 normal, two f32 texcoord, u32 colour); u32 index count and each u16 index; u8 through |
 | texture | `TextureState` without its mip levels: u8 enabled, u32 address, u32 buffer width, u16 width, u16 height, u8 format, u8 swizzled, u32 CLUT address, format, shift, mask, offset, format word, load bytes and max bytes, u32 function, u8 alpha from texture, u32 min filter, mag filter, wrap s, wrap t, f32 scale u, scale v, offset u, offset v |
 | target and state | `RenderTarget` (u32 colour address, stride, format, depth address, depth stride); `BlendState` (u8 enabled, u32 source and destination factors, equation, the two FIX colours); `DepthState` (u8 test, u8 write, u32 function, u16 range near and far, MINZ/MAXZ); `AlphaTestState` (u8 enabled, u32 function, reference, mask); `ViewportState` (six f32 scales and offsets, u32 scissor x1, y1, x2, y2, f32 offset x and y) |
 | draw flags | u8 culling, u8 cull clockwise, u8 clear mode, u32 clear flags; u32 vertex type, vertex address, index address, primitive count; u32 material colour, u8 lighting enabled, u8 has vertex colour |
-| lighting and fog | `LightingState` (u32 material update, emissive, diffuse, specular, f32 specular power, u32 ambient colour, ambient alpha, mode, u8 reverse normals, then four `LightState`: u8 enabled, u32 kind, type, three f32 position, direction and attenuation each, f32 spot exponent and cutoff, u32 ambient, diffuse, specular); `FogState` (u8 enabled, f32 end, f32 scale, u32 colour); u64 environment version, u64 material version |
-| matrices | the world, view, projection and texture matrices as f32 |
+| lighting and fog | `LightingState` (u32 material update, emissive, diffuse, specular, f32 specular power, u32 ambient colour, ambient alpha, mode, u8 reverse normals, then the four `LightState`s: u8 enabled, u32 kind, type, three f32 each of position, direction and attenuation, f32 spot exponent and cutoff, u32 ambient, diffuse, specular); `FogState` (u8 enabled, f32 end, f32 scale, u32 colour); u64 environment version, u64 material version |
+| matrices | the world, view, projection and texture matrices, 16 f32 each |
 | raw data | u32 raw count, raw stride and byte count, then the raw vertex bytes (none when the draw was decoded); u8 whether bone matrices follow, then 96 f32 |
 | stencil and masks | `StencilState` (u8 enabled, u32 function, reference, mask, fail, depth-fail and pass operations); u32 colour write mask, u32 alpha write mask |
 | texture map | u32 map mode, projection source, shade light u, shade light v |

@@ -90,8 +90,9 @@ One command that checks the port still renders the known screens like PPSSPP (ta
 task 035). By default (task 034) it runs headless on the Metal backend (`--shell headless --backend metal`): no
 window, unpaced, the scenes the backend's own 480x272 pictures, about 25 s in all. `--shell metal --backend metal`
 runs the same backend in the Metal shell's window (the macOS default for players since D-008) and `--shell vulkan
---backend vulkan` the Vulkan path; in a window each run is paced to real time, and the 18 scenes take about 20 minutes
-(the Vulkan path took 19m 47s in task 040). Which path to run for which change: "Which path for which change" below.
+--backend vulkan` the Vulkan path; in a window each run is paced to real time: the Vulkan path took 19m 47s for the
+18 scenes in task 040, and the Metal window's time for the 18 is unverified (it took 7 minutes for the first five,
+as the Vulkan path did). Which path to run for which change: "Which path for which change" below.
 The race HUD check ("The race HUD check" below) covers the race after the suite's last race scene. The suite boots
 the game once per route (seven routes), captures each scene of the route, and compares each capture with its
 reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL per scene and writes the same text
