@@ -1,0 +1,351 @@
+diff --git a/host/gpu/ge_state.cpp b/host/gpu/ge_state.cpp
+index 48af218..723c8c4 100644
+--- a/host/gpu/ge_state.cpp
++++ b/host/gpu/ge_state.cpp
+@@ -37,12 +37,18 @@ enum Command : std::uint32_t {
+     kOrigin = 0x14,
+     kLightingEnable = 0x17,
+     kLightEnable0 = 0x18,  // to 0x1B, one per light
++    // CLIPENABLE: on, a transformed primitive is clipped at the near plane
++    // and each vertex's screen z clamped to 0..65535 (DrawCall::clip_enabled).
++    kClipEnable = 0x1C,
+     kCullFaceEnable = 0x1D,
+     kTextureMapEnable = 0x1E,
+     kFogEnable = 0x1F,
++    kDitherEnable = 0x20,
+     kAlphaBlendEnable = 0x21,
+     kAlphaTestEnable = 0x22,
+     kDepthTestEnable = 0x23,
++    kStencilTestEnable = 0x24,
++    kColorTestEnable = 0x27,
+     kBoneMatrixNumber = 0x2A,
+     kBoneMatrixData = 0x2B,
+     kWorldMatrixNumber = 0x3A,
+@@ -100,35 +106,64 @@ enum Command : std::uint32_t {
+     kFrameBufferWidth = 0x9D,
+     kDepthBufferPointer = 0x9E,
+     kDepthBufferWidth = 0x9F,
++    // Texture levels 0 to 7: TEXADDRn, TEXBUFWIDTHn and TEXSIZEn at 0xA0 + n,
++    // 0xA8 + n and 0xB8 + n (the PSP SDK's sceGuTexImage(level, ...)).
+     kTextureAddress0 = 0xA0,
++    kTextureAddress7 = 0xA7,
+     kTextureBufferWidth0 = 0xA8,
++    kTextureBufferWidth7 = 0xAF,
+     kClutAddress = 0xB0,
+     kClutAddressUpper = 0xB1,
+     kTextureSize0 = 0xB8,
++    kTextureSize7 = 0xBF,
++    // Texture coordinate generation: 0xC0 holds the map mode in bits 0..1 and
++    // the texture matrix's source (TEXPROJMAP) in bits 8..9; 0xC1 the two
++    // lights an environment map takes s and t from, in bits 0..1 and 8..9.
++    kTextureMapMode = 0xC0,
++    kTextureShadeLights = 0xC1,
+     kTextureMode = 0xC2,
+     kTextureFormat = 0xC3,
+     kLoadClut = 0xC4,
+     kClutFormat = 0xC5,
+     kTextureFilter = 0xC6,
+     kTextureWrap = 0xC7,
++    // The level rule: TEXLEVEL holds the mode in bits 0..1 and a signed bias
++    // in 1/16 levels in bits 16..23 (sceGuTexLevelMode); TEXLODSLOPE a float
++    // (sceGuTexSlope).
++    kTextureLevel = 0xC8,
+     kTextureFunction = 0xC9,
+     kTextureFlush = 0xCB,
+     // Fog: 0xCD and 0xCE are floats (65000 and 1.0 in the menus), 0xCF a colour.
+     kFogEnd = 0xCD,
+     kFogScale = 0xCE,
+     kFogColor = 0xCF,
++    kTextureLodSlope = 0xD0,
+     kFrameBufferPixelFormat = 0xD2,
+     kClearMode = 0xD3,
+     kScissor1 = 0xD4,
+     kScissor2 = 0xD5,
+     kMinZ = 0xD6,
+     kMaxZ = 0xD7,
++    // The colour test: the function in bits 0..1 (0 NEVER, 1 ALWAYS, 2 EQUAL,
++    // 3 NOTEQUAL), then the reference and the mask, colours as 0x00BBGGRR
++    // (the PSP SDK's sceGuColorFunc).
++    kColorTest = 0xD8,
++    kColorReference = 0xD9,
++    kColorTestMask = 0xDA,
+     kAlphaTest = 0xDB,
++    kStencilTest = 0xDC,
++    kStencilOp = 0xDD,
+     kDepthTest = 0xDE,
+     kBlendMode = 0xDF,
+     kBlendFixedA = 0xE0,
+     kBlendFixedB = 0xE1,
++    // The dither matrix, one row of four signed 4-bit offsets each (the PSP
++    // SDK's sceGuSetDither): DITH0 is the row for y & 3 == 0.
++    kDither0 = 0xE2,
++    kDither3 = 0xE5,
+     kDepthWriteDisable = 0xE7,
++    kColorWriteMask = 0xE8,
++    kAlphaWriteMask = 0xE9,
+     // Block transfer registers, read off a trace of the quest reward screen,
+     // which copies the 16-bit framebuffer at 0x04000000 (512 pixels a row) to
+     // 0x093E7EF0 in main memory and then textures from there as 512x512 5650
+@@ -630,6 +665,13 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+     case kAlphaBlendEnable: blend_.enabled = (data & 1u) != 0u; break;
+     case kAlphaTestEnable: alpha_test_.enabled = (data & 1u) != 0u; break;
+     case kDepthTestEnable: depth_.test_enabled = (data & 1u) != 0u; break;
++    case kStencilTestEnable: stencil_.enabled = (data & 1u) != 0u; break;
++    case kClipEnable: clip_enabled_ = (data & 1u) != 0u; break;
++    case kDitherEnable: dither_.enabled = (data & 1u) != 0u; break;
++    case kColorTestEnable: color_test_.enabled = (data & 1u) != 0u; break;
++    case kColorTest: color_test_.function = data & 3u; break;
++    case kColorReference: color_test_.reference = data & 0x00FFFFFFu; break;
++    case kColorTestMask: color_test_.mask = data & 0x00FFFFFFu; break;
+     case kDepthWriteDisable: depth_.write_enabled = (data & 1u) == 0u; break;
+     case kDepthTest: depth_.function = data & 7u; break;
+     case kMinZ: depth_.range_near = static_cast<std::uint16_t>(data); break;
+@@ -640,6 +682,18 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+         alpha_test_.reference = (data >> 8u) & 0xFFu;
+         alpha_test_.mask = (data >> 16u) & 0xFFu;
+         break;
++    case kStencilTest:
++        stencil_.function = data & 7u;
++        stencil_.reference = (data >> 8u) & 0xFFu;
++        stencil_.mask = (data >> 16u) & 0xFFu;
++        break;
++    case kStencilOp:
++        stencil_.fail_op = data & 7u;
++        stencil_.depth_fail_op = (data >> 8u) & 7u;
++        stencil_.pass_op = (data >> 16u) & 7u;
++        break;
++    case kColorWriteMask: color_write_mask_ = data & 0x00FFFFFFu; break;
++    case kAlphaWriteMask: alpha_write_mask_ = data & 0xFFu; break;
+     case kBlendMode:
+         blend_.source_factor = data & 0xFu;
+         blend_.destination_factor = (data >> 4u) & 0xFu;
+@@ -676,7 +730,17 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+         texture_.height = static_cast<std::uint16_t>(1u << ((data >> 8u) & 0xFu));
+         break;
+     case kTextureFormat: texture_.format = static_cast<TextureFormat>(data & 0xFu); break;
+-    case kTextureMode: texture_.swizzled = (data & 1u) != 0u; break;
++    // TEXMODE: bit 0 swizzled, bits 16..18 the highest level the GE may sample
++    // (sceGuTexMode's maxmips).
++    case kTextureMode:
++        texture_.swizzled = (data & 1u) != 0u;
++        texture_.level_count = ((data >> 16u) & 7u) + 1u;
++        break;
++    case kTextureLevel:
++        texture_.level_mode = data & 3u;
++        texture_.level_bias = static_cast<std::int8_t>((data >> 16u) & 0xFFu);
++        break;
++    case kTextureLodSlope: texture_.lod_slope = decode_float24(data); break;
+     case kClutAddress: texture_.clut_address = resolve_ge_address((texture_.clut_address & 0xFF000000u) | data); break;
+     case kClutAddressUpper:
+         texture_.clut_address = resolve_ge_address((texture_.clut_address & 0x00FFFFFFu) | ((data << 8u) & 0xFF000000u));
+@@ -700,6 +764,14 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+         texture_.function = data & 7u;
+         texture_.alpha_from_texture = ((data >> 8u) & 1u) != 0u;
+         break;
++    case kTextureMapMode:
++        texture_map_.map_mode = data & 3u;
++        texture_map_.proj_source = (data >> 8u) & 3u;
++        break;
++    case kTextureShadeLights:
++        texture_map_.shade_light_u = data & 3u;
++        texture_map_.shade_light_v = (data >> 8u) & 3u;
++        break;
+     case kTexScaleU: texture_.scale_u = decode_float24(data); break;
+     case kTexScaleV: texture_.scale_v = decode_float24(data); break;
+     case kTexOffsetU: texture_.offset_u = decode_float24(data); break;
+@@ -866,6 +938,28 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+         break;
+ 
+     default:
++        if (command >= kDither0 && command <= kDither3) {
++            dither_.rows[command - kDither0] = data & 0xFFFFu;
++            break;
++        }
++        // Levels 1 to 7 of a mipmapped texture, read as level 0's registers.
++        if (command > kTextureAddress0 && command <= kTextureAddress7) {
++            TextureLevel &level = texture_.levels[command - kTextureAddress0 - 1u];
++            level.address = resolve_ge_address((level.address & 0xFF000000u) | data);
++            break;
++        }
++        if (command > kTextureBufferWidth0 && command <= kTextureBufferWidth7) {
++            TextureLevel &level = texture_.levels[command - kTextureBufferWidth0 - 1u];
++            level.buffer_width = data & 0xFFFFu;
++            level.address = resolve_ge_address((level.address & 0x00FFFFFFu) | ((data << 8u) & 0xFF000000u));
++            break;
++        }
++        if (command > kTextureSize0 && command <= kTextureSize7) {
++            TextureLevel &level = texture_.levels[command - kTextureSize0 - 1u];
++            level.width = static_cast<std::uint16_t>(1u << (data & 0xFu));
++            level.height = static_cast<std::uint16_t>(1u << ((data >> 8u) & 0xFu));
++            break;
++        }
+         // The per-light runs: three floats per light for positions, directions
+         // and attenuations, one float for the spot exponent and cutoff, and
+         // three colours per light.
+@@ -971,6 +1065,9 @@ void GeState::fill_draw_state(DrawCall &call) const {
+     call.blend = blend_;
+     call.depth = depth_;
+     call.alpha_test = alpha_test_;
++    call.stencil = stencil_;
++    call.color_write_mask = color_write_mask_;
++    call.alpha_write_mask = alpha_write_mask_;
+     call.viewport = viewport_;
+     call.culling_enabled = culling_enabled_;
+     call.cull_clockwise = cull_clockwise_;
+@@ -989,6 +1086,10 @@ void GeState::fill_draw_state(DrawCall &call) const {
+     call.view = view_;
+     call.projection = projection_;
+     call.texture_matrix = texture_matrix_;
++    call.texture_map = texture_map_;
++    call.color_test = color_test_;
++    call.dither = dither_;
++    call.clip_enabled = clip_enabled_;
+ }
+ 
+ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
+diff --git a/host/gpu/ge_state.hpp b/host/gpu/ge_state.hpp
+index a187ab4..fe4460e 100644
+--- a/host/gpu/ge_state.hpp
++++ b/host/gpu/ge_state.hpp
+@@ -45,6 +45,17 @@ struct Vertex {
+     std::uint32_t color{0xFFFFFFFFu};
+ };
+ 
++// A mip level after the first: where its texels are, its row length and its
++// size, from TEXADDRn (0xA0 + n), TEXBUFWIDTHn (0xA8 + n: the row length in
++// bits 0..15, the address's top byte in bits 16..23, as for level 0) and
++// TEXSIZEn (0xB8 + n: log2 of the width in bits 0..3, of the height in 8..11).
++struct TextureLevel {
++    std::uint32_t address{};
++    std::uint32_t buffer_width{};
++    std::uint16_t width{};
++    std::uint16_t height{};
++};
++
+ struct TextureState {
+     bool enabled{};
+     std::uint32_t address{};
+@@ -75,6 +86,21 @@ struct TextureState {
+     float scale_v{1.0f};
+     float offset_u{};
+     float offset_v{};
++    // Mip levels. level_count is TEXMODE (0xC2) bits 16..18 plus one: the
++    // levels the GE may sample, 1 for a texture without levels. Level 0 is
++    // address, buffer_width, width and height above; levels[n - 1] is level n
++    // (the registers as the game left them, whatever level_count says). The
++    // GE samples them when min_filter bit 2 is set (bit 1: linear between two
++    // levels), at the level TEXLEVEL (0xC8) chooses: bits 0..1 the mode (0
++    // auto, from the texture coordinates' change across the screen; 1
++    // constant, the bias alone; 2 slope, from TEXLODSLOPE and the depth),
++    // bits 16..23 the bias, signed, in 1/16 of a level. The Vulkan renderer
++    // samples level 0 whatever these say.
++    std::uint32_t level_count{1u};
++    std::array<TextureLevel, 7> levels{};
++    std::uint32_t level_mode{};
++    std::int32_t level_bias{};  // 1/16 levels, -128..127
++    float lod_slope{};          // TEXLODSLOPE (0xD0), a float
+ };
+ 
+ struct RenderTarget {
+@@ -109,6 +135,18 @@ struct AlphaTestState {
+     std::uint32_t mask{0xFFu};
+ };
+ 
++// The stencil test and its operations. The PSP has no stencil buffer of its
++// own: the stencil is the alpha channel of a 5551, 4444 or 8888 target.
++struct StencilState {
++    bool enabled{};                   // 0x24
++    std::uint32_t function{};         // 0xDC bits 0..2, the alpha test's functions
++    std::uint32_t reference{};        // 0xDC bits 8..15
++    std::uint32_t mask{0xFFu};        // 0xDC bits 16..23
++    std::uint32_t fail_op{};          // 0xDD bits 0..2: the stencil test failed
++    std::uint32_t depth_fail_op{};    // 0xDD bits 8..10: the depth test failed
++    std::uint32_t pass_op{};          // 0xDD bits 16..18: both passed
++};
++
+ struct ViewportState {
+     float x_scale{}, y_scale{}, z_scale{};
+     float x_offset{}, y_offset{}, z_offset{};
+@@ -155,6 +193,44 @@ struct FogState {
+     std::uint32_t color{};
+ };
+ 
++// Where a transformed draw's texture coordinates come from (TEXMAPMODE 0xC0,
++// TEXSHADELS 0xC1). Mode 0 takes the vertex's UVs through the texture scale
++// and offset; mode 1 multiplies the source TEXPROJMAP names by the texture
++// matrix (DrawCall::texture_matrix), giving s, t and q; mode 2 (environment
++// or shade mapping) takes s and t from the normal and the two shade lights.
++struct TextureMapState {
++    std::uint32_t map_mode{};       // 0xC0 bits 0..1: 0 UVs, 1 texture matrix, 2 environment map
++    std::uint32_t proj_source{};    // 0xC0 bits 8..9 (TEXPROJMAP): 0 position, 1 UV, 2 normalized normal, 3 normal
++    std::uint32_t shade_light_u{};  // 0xC1 bits 0..1: the light s comes from
++    std::uint32_t shade_light_v{};  // 0xC1 bits 8..9: the light t comes from
++};
++
++// The colour test: COLORTESTENABLE (0x27), COLORTEST (0xD8, the function in
++// bits 0..1: 0 NEVER, 1 ALWAYS, 2 EQUAL, 3 NOTEQUAL), COLORREF (0xD9) and
++// COLORTESTMASK (0xDA), both 0x00BBGGRR. A fragment whose 8-bit colour under
++// the mask compares false with the reference under the mask is dropped.
++struct ColorTestState {
++    bool enabled{};
++    std::uint32_t function{};
++    std::uint32_t reference{};
++    std::uint32_t mask{0x00FFFFFFu};
++};
++
++// Dithering: DITHERENABLE (0x20) and the 4x4 matrix DITH0 to DITH3 (0xE2 to
++// 0xE5). DITHn is the matrix's row for the pixels whose y & 3 is n: four
++// signed 4-bit offsets, the one for x & 3 in bits 4 x (x & 3) .. +3. The
++// offset is added to the colour's 8-bit channels before a 16-bit target keeps
++// their top bits.
++struct DitherState {
++    bool enabled{};
++    std::array<std::uint32_t, 4> rows{};  // DITH0..3 bits 0..15
++
++    [[nodiscard]] int offset(std::uint32_t x, std::uint32_t y) const noexcept {
++        const std::uint32_t nibble = (rows[y & 3u] >> (4u * (x & 3u))) & 0xFu;
++        return static_cast<int>(nibble ^ 8u) - 8;
++    }
++};
++
+ // A draw call: decoded vertices plus the state they are drawn with.
+ struct DrawCall {
+     PrimitiveType primitive{};
+@@ -201,6 +277,23 @@ struct DrawCall {
+     std::uint32_t raw_count{};
+     std::uint32_t raw_stride{};
+     const float *bone_matrices{};
++    StencilState stencil;
++    // The write masks: set bits are bits the draw leaves alone, 0x00BBGGRR for
++    // the colour (0xE8) and the alpha, i.e. the stencil, apart (0xE9).
++    std::uint32_t color_write_mask{};
++    std::uint32_t alpha_write_mask{};
++    // The texture mapping mode. The Vulkan renderer draws every draw with its
++    // UVs (mode 0) whatever this says.
++    TextureMapState texture_map;
++    // The colour test, dithering and CLIPENABLE (0x1C). With CLIPENABLE on the
++    // GE clips a transformed primitive at the near plane only and clamps each
++    // vertex's screen z to 0..65535; MINZ and MAXZ (depth.range_near and
++    // range_far) then reject pixels outside them. The Vulkan renderer draws
++    // none of the three: it keeps every fragment, writes 16-bit targets
++    // without dithering, and clips at the near and far planes.
++    ColorTestState color_test;
++    DitherState dither;
++    bool clip_enabled{};
+ };
+ 
+ // Where each field of a vertex of `vertex_type` lies in its bytes, as
+@@ -291,6 +384,13 @@ private:
+     BlendState blend_{};
+     DepthState depth_{};
+     AlphaTestState alpha_test_{};
++    StencilState stencil_{};
++    std::uint32_t color_write_mask_{};
++    std::uint32_t alpha_write_mask_{};
++    TextureMapState texture_map_{};
++    ColorTestState color_test_{};
++    DitherState dither_{};
++    bool clip_enabled_{};
+     ViewportState viewport_{};
+     bool culling_enabled_{};
+     bool cull_clockwise_{};
