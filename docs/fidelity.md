@@ -679,7 +679,7 @@ race's paths, 13 and 14, which task 046 traced to the clock the race reads and, 
 | 10 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework (7.7 million writes a cell) | framework GE state: the colour test. **Fixed by task 040 (2026-10-07)**: patch 0017 carries COLORTESTENABLE, COLORTEST, COLORREF and COLORTESTMASK (0x27, 0xD8 to 0xDA), and the Metal backend discards by the GE's function on the 8-bit colour under the mask, after fog, as the alpha test (docs/metal-backend.md, "The colour test, 16-bit writes and the depth clamp"). The draws are light glows blended additively, so a black fragment adds no colour; what the test changes is the bloom mask's stencil 255 their black texels wrote. Headless Metal at tol 32: race_hud 0.014874 to 0.014828 with the dither below (the colour test alone changes 640 pixels, all in a lamp's glow, whose region (307,107) 26x34 goes from 0.0328 to 0.0260, 0.2285 to 0.1765 at tol 16); tt_hud and fp_hud have no colour-tested draw on screen. The Vulkan backend keeps every fragment | small |
 | 11 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws a frame), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state. **Fixed by task 040 (2026-10-07)**: patch 0017 carries DITHERENABLE, DITH0 to DITH3 (0x20, 0xE2 to 0xE5) and CLIPENABLE (0x1C). Dithering: the port's 16-bit targets had kept 8 bits a channel (they are RGBA8 textures, cut to the format only when stored in guest memory), so the Metal backend now writes a 5650, 5551 or 4444 target as the PSP does: the blend in the shader on the target's colour, the matrix's offset (row y & 3, column x & 3, as PPSSPP's software renderer shows on all 16384 pixels of Vineta K's fourth billboard round), one clamp, the format's top bits. Every dithered draw of the dumps is into the 565 billboard target; after the task its pixels are all 565 values ordered as the round's matrix, as PPSSPP's are (before: 0.0 to 99.6% 565 values, no dither). The billboard screens show other adverts than PPSSPP's frames, so their regions hardly move (race_hud (201,126) 16x8 0.8828 both; tt_hud (195,114) 29x29 0.4245 to 0.4221, fp_hud 0.4269 to 0.3912); the scenes: tt_hud 0.011221 to 0.011213, fp_hud 0.011566 to 0.011336. Depth clamp: the hardware notes put it with CLIPENABLE on (near-plane clipping only, each vertex's screen z clamped to 0..65535, MINZ/MAXZ per pixel), which every transformed draw of the game has; the backend draws that rule, and it changes no pixel of the 18 scenes, as the dumps predict (no vertex beyond the far plane, MINZ/MAXZ the viewport's own range). The Vulkan backend draws neither | small each |
 | 12 | The race's effects have no reverb: they stop dead where the PSP's ring on (at a pause the PSP's sound fades out over half a second, the port's stops) | every race, from the race load (traced in Free Play) | the game calls `__sceSasRevType` with type 5, `__sceSasRevVON` with the dry and the wet send on and `__sceSasRevEVOL` 0x666 (a ramp down from 0xFFF at the race load) through the race, and keeps the wet send off in the menus; the framework accepts all four and drops them (`hle_media.cpp`: "Reverb is not modelled"). PPSSPP applies them: its dump of the Free Play pause decays over 0.5 s (RMS 2148, 600, 198, 125, 64, 33 down to 1 in 100 ms steps) and stays at RMS 1, where the port's falls to exact zeros within 100 ms (task 041) | framework: the SAS reverb (the effect type, the wet send and its volume) is not modelled in `sas_core.cpp`. **Fixed by task 043 (2026-10-07)**: patch 0018 runs the SPU reverb formula and HALL preset of the PlayStation's documentation on the voices' effect sends and adds it at the wet volumes, stepped once a sample at 44.1 kHz with the sends at half, the two things PPSSPP's output requires ("Difference 12: the SAS reverb" below). `tools/sas_reverb_check.sh`, the Free Play pause against PPSSPP's dump in 100 ms steps from where the held effects end: PPSSPP 383, 194, 116, 60, 31; the port before 254, then exact zeros (FAIL); after 487, 234, 131, 63, 35 (1.05 to 1.27 of PPSSPP's, PASS), and on through the first second at 1.1 to 1.3. The effects' level over 250 s of the Free Play idle is 1.008 of PPSSPP's (0.976 before) and over 40 s of a Vineta K race with the AI 1.000 (0.980). `PURE_NO_REVERB=1` restores the dry mix | medium |
-| 13 | The AI ships run another race than in PPSSPP: the scorecard's straight-on runs part from PPSSPP's 0.4 s after GO on every circuit (up to 500 m by 20 s), and three player rows move where an AI ship comes near (Sinucit, Mandrashee, Sol 2) | every Single Race; on a PSP every race is a different one too | the scorecard's Trajectories (task 044): each side repeats its own AI exactly from run to run | **found (task 046)**: the race's random numbers start from two clock readings at the TEAM SELECTION confirm, and the race runs on the frame times the game measures; neither is the same in two scripted runs on two machines. With PPSSPP's clock pinned (`PURE_TEST_RACE_CLOCK`, `tools/ai_seed_check.sh`) the random sequence is PPSSPP's to the end of the 20 s, all 12 player rows are faithful (0.00 to 0.41 m) and the AI ships part 3 to 16 s after GO instead of 0.4 s (Mandrashee's stay within 0.46 m for the 20 s). What remains is the VFPU's dot product: the port rounds `vdot` as an IEEE fused chain where the PSP truncates (1 ulp on 26% of one call site's results). "Difference 13: the AI's start" below | none for play (the seeds are meant to differ from race to race); the dot product is a framework task (`include/psprecomp/allegrex_context.hpp`, a full corpus rebuild) |
+| 13 | The AI ships run another race than in PPSSPP: the scorecard's straight-on runs part from PPSSPP's 0.4 s after GO on every circuit (up to 500 m by 20 s), and three player rows move where an AI ship comes near (Sinucit, Mandrashee, Sol 2) | every Single Race; on a PSP every race is a different one too | the scorecard's Trajectories (task 044): each side repeats its own AI exactly from run to run | **found (task 046)**: the race's random numbers start from two clock readings at the TEAM SELECTION confirm, and the race runs on the frame times the game measures; neither is the same in two scripted runs on two machines. With PPSSPP's clock pinned (`PURE_TEST_RACE_CLOCK`, `tools/ai_seed_check.sh`) the random sequence is PPSSPP's to the end of the 20 s, all 12 player rows are faithful (0.00 to 0.41 m) and the AI ships part 3 to 16 s after GO instead of 0.4 s (Mandrashee's stay within 0.46 m for the 20 s). What remains is the VFPU's dot product. **Measured (task 047)**: PPSSPP's JIT computes `vdot` and `vtfm` in IEEE single precision fused in lane order and `vmmul` unfused, on all of 1.17 million dot products from the race (its interpreter the same, but for vmmul's last element); the port's contraction rounds lane 1's product where PPSSPP rounds lane 0's (20% of `vdot.t` results differ, 71% of those by 1 ulp), its vtfm starts from +0 and its vmmul fuses. The PSP itself truncates (pspautotests), which PPSSPP does not reproduce. "Difference 13: the AI's start" and "The dot-product rule, measured" below | none for play (the seeds are meant to differ from race to race); the dot product is a framework task (`include/psprecomp/allegrex_context.hpp` and the codegen's vtfm and vmmul, a full corpus rebuild; the rule in C++ is in the section below) |
 | 14 | On Karbonis the player's ship scrapes a wall from 4.9 s and comes out 1 to 3 km/h faster than in PPSSPP, 34 m apart by 20 s | any long wall contact | the scorecard's Karbonis player row (task 044) | **found (task 046): the time step, not the contact response.** The first contact gives the same speed on both sides (218.2 against 218.3 km/h); the ship was already 0.4 m along its path from PPSSPP's (the frames' measured times differ), so the following contacts meet the wall at other points and the scrape's outcome drifts. With PPSSPP's frame times replayed the player's path on Karbonis stays within 0.01 m of PPSSPP's for the whole 20 s, scrape included. "Difference 14: the Karbonis contact" below | none (the port's frame times jitter by 1 ms, the kernel's time quantum; difference 13) |
 
 Not differences, though they looked like ones:
@@ -1221,6 +1221,107 @@ matrix forms. Making it the hardware's is a change to `include/psprecomp/allegre
 rebuild), outside task 046: the next task, which should also compare the transcendental instructions (`vsin`,
 `vcos`, `vrcp`, `vrsq`, `vexp2`, `vlog2`, `vasin`; PPSSPP takes them from tables of the hardware's results) the same
 way.
+
+### The dot-product rule, measured (task 047, 2026-10-07)
+Task 046's reading of PPSSPP's rule above (products aligned to the largest exponent, truncated) does not hold. The
+probe (`tools/vfpu_probe.py`) logged PPSSPP's operands and results at the game's own VFPU instructions over 12 s of
+the scorecard's Vineta K race, and `tools/vfpu_model.py` ran every candidate model over them (docs/verification.md,
+"The VFPU dot-product check"). Both of PPSSPP's CPU cores compute the dot product in plain IEEE single precision,
+fused in lane order; the port's only difference is which product its fused chain rounds first.
+
+**The samples.** Of the 711 dot-product and transcendental sites the corpus has code for, 205 ran between READY and
+3.2 s of race clock; the 195 with 50 or more hits were sampled with PPSSPP's JIT (CPU core 1, the core of every
+reference in ref/), 812229 rows, and 27 of them again with its interpreter (core 0, which must be stepped), 60086
+rows. Every row is one execution: the source lanes the encoding names and the destination lanes one instruction
+later. None of the sampled sites has a prefix. The port's results for the same operands come from the corpus's own
+code for each site, built with the corpus's flags (`vfpu_probe.py port`); the model of the port (b) reproduces all of
+them.
+
+| Instruction (lanes) | JIT: sites, dot products | JIT reproduced by | Interpreter: sites, dot products | Interpreter reproduced by | The port today against the JIT |
+|---|---|---|---|---|---|
+| `vdot.t` (3) | 109, 466447 | chain, 100% | 8, 25538 | chain, 100% | 79.873% |
+| `vdot.q` (4) | 2, 7506 | chain, 100% | 2, 2442 | chain, 100% | 100% |
+| `vtfm3.t` (3-lane rows) | 18, 255222 | chain, 100% | 4, 18804 | chain, 100% | 97.515% (signed zeros only) |
+| `vtfm4.q` (4-lane rows) | 6, 59064 | chain, 100% | 3, 29772 | chain, 100% | 100% |
+| `vmmul.q` (4-lane elements) | 5, 384704 | a0, 100% | 4, 98240 | a0, the last element chain, 100% | 97.975% |
+| `vhdp` | none: the game has no `vhdp` in its code (`scan`: the 371 words that decode as one are data) | | | | |
+
+The models (`vfpu_model.py`; s and t the n lanes the encoding names, after prefixes):
+- **chain**: `r = s0*t0` rounded, then `r = fma(s_i, t_i, r)` for i = 1 to n-1, each rounded once.
+- **a0**: `r = +0`, then `r = r + round(s_i*t_i)` for i = 0 to n-1, each product and each sum rounded.
+- **b, the port today**: clang contracts the framework's `s0*t0 + s1*t1 + s2*t2 + s3*t3` (the `_ct` vdot, over a
+  four-lane view) into `fma(s3,t3, fma(s2,t2, fma(s0,t0, round(s1*t1))))`: lane 1's product is the rounded one, where
+  PPSSPP rounds lane 0's. The vtfm and vmmul loops (`float sum = 0; sum += m*t`) become an fma chain from +0.
+
+The other candidates fall short (`--report`, the JIT set, `vdot.t`): unfused (a) 77.9%, the exact sum rounded once
+71.9%, products rounded and summed exactly 68.9%, products truncated 43.9%, a tree of roundings 77.9%; the
+aligned-truncation family's best member over the grid of extra bits (0 to 8), alignment (raw or normalised),
+truncation (magnitude or floor) and final rounding (nearest even, toward zero, nearest away) reaches 88% of the JIT's
+dot products and 91% of the interpreter's (`--search`, 3000 a group), closer to the exact sum as the extra bits
+grow.
+
+How far the port is from PPSSPP's JIT: of 466447 `vdot.t` results, 93881 differ: 66766 by 1 ulp, 12598 by 2 to 15,
+14117 by 16 or more (where large products cancel, the rounded product's error is large against the result). At task
+046's two sites: 0x089196B8, 1253 of 5824 (21.5%, all 1 ulp); 0x08926E08, 648 of 7248 (8.9%). Task 046's example,
+(0xBF5A4EEF, 0x3AFE5500, 0x3D0B28A3) squared: chain gives PPSSPP's 0x3F3A766B, the port 0x3F3A766C. Of 255222 `vtfm3.t`
+lanes, 6342 differ, each an exact zero that PPSSPP gives as -0 and the port as +0. Of 384704 `vmmul.q` elements, 7789
+differ (7026 by 1 ulp), all from the port's fusing.
+
+**The rule for the codegen (PPSSPP's JIT, so the port runs the scorecard's reference race).** With n the encoded
+length and s, t the lanes after the source prefixes (for a vtfm row, the matrix row and the vector, the last lane 1.0
+for vhtfm; for a vmmul element, the two rows the framework already pairs):
+
+```cpp
+// vdot, vhdp, each vtfm / vhtfm row: fused in lane order, lane 0's product rounded, one fma for each further lane.
+float r = s[0] * t[0];                         // its own statement: clang does not contract across statements
+for (std::uint32_t i = 1; i < n; ++i) r = std::fma(s[i], t[i], r);
+// vmmul, each element: nothing fused, from +0.
+float r = 0.0f;
+for (std::uint32_t i = 0; i < n; ++i) { const float p = s[i] * t[i]; r = r + p; }   // or #pragma clang fp contract(off)
+```
+
+Only the encoded n lanes take part: the `_ct` vdot's four-lane view adds `fma(0, 0, r)`, which turns a -0 into +0
+(the samples have no prefix that puts a constant in a lane past n, so that case is not measured). Subnormals: no
+sample has one, and the rule says nothing about them. `vhdp` is not measured and takes vdot's rule. The interpreter
+differs only in vmmul's last element, `d[side-1][side-1]`, which it fuses (23 of the 23 elements where the two
+differ; 0 of 69 with the JIT); the rule above is the JIT's.
+
+**Neither is the PSP's rule.** pspautotests' `vector.expected` holds a real PSP's 150 `vdot` and `vhdp` results over
+five test vectors, four of them integers and one (-0.1, 1000, inf, 0). On six results chain, a and the exact sum give
+the nearest float (-4999.600098, 999.900024, 1000.010010, ...) where the PSP gives the next one toward zero
+(-4999.599609, 999.899963, 1000.009949). Of the whole grid only c(N=2, raw, mag, rtz) gives all 150 (`--selftest`):
+each product exact (24 x 24 bits), aligned to the largest raw exponent sum `ea + eb - 127`, kept to 25 fraction bits
+there (2 extra), the bits below dropped from its magnitude before its sign is applied, the products summed exactly,
+and the sum cut to 24 significant bits toward zero. On PPSSPP's samples that model reproduces 40.5% of `vdot.t` (JIT). So the rule
+that puts the port on PPSSPP's reference race is chain/a0, and the PSP's own is another one, which no PPSSPP sample
+can confirm beyond those 150 results. Which the codegen takes is Fable's and Erik's call: the scorecard and
+`tools/ai_seed_check.sh` compare against PPSSPP's JIT.
+
+**The transcendentals.** The port's helpers (`1.0f / x`, `1.0f / std::sqrt(x)`, `std::fabs(std::sqrt(x))`) against
+PPSSPP, in ulps:
+
+| Instruction | JIT: sites, results, the port differs | Interpreter: sites, results, the port differs |
+|---|---|---|
+| `vrcp.s` | 4, 17627, 0 | 2, 3137, 1363 (max 5 ulp; 0x088437E8: 1363 of 1512, histogram 1: 298, 2: 405, 3: 395, 4: 264, 5: 1; 0x08824BB4's operand is always 1.0) |
+| `vrsq.s` | 22, 83901, 0 | 2, 4606, 0 |
+| `vsqrt.s` | 29, 112864, 0 | 2, 4512, 0 |
+| `vsin`, `vcos` | 2 sites each (FUN_088742b0, FUN_08889408), not run in the sampled race | |
+| `vexp2`, `vlog2`, `vasin` | not in the executable | |
+
+PPSSPP's JIT computes them in IEEE single precision, two roundings for `vrsq` (`1/sqrtf`: 27315 of 83901 results are
+1 ulp from the correctly rounded value), so no table is implied there and the port already matches it. The
+interpreter's `vrcp` is not `1/x` (no closed form tried reproduces it), up to 5 ulp from it: a table or the hardware's
+own algorithm, as the vfpu-docs' accuracy notes (the lowest 3.5 bits of `vrcp` inexact) describe the PSP. The
+interpreter's `vrsq` and `vsqrt` are the IEEE ones. That `vrcp` alone moves the interpreter's race off the reference's
+(its AI ships 1.3 to 62 m away at 12 s).
+
+**What the probe does to PPSSPP's race.** The player's ship ends within 1 mm of the reference at 12 s in every JIT
+run; the AI ships move by 0.55 m with four breakpoints in the two task 046 functions, as much with them beside the
+`vdot` sites as on them, and by 8 m with all 330; a breakpoint on code the race never runs and a second uninstrumented
+PPSSPP run both stay at the measure's floor (2 to 6 cm). That points at the breakpoints' effect on the JIT's blocks
+around them rather than at the dot product they log, but a breakpoint cannot show the uninstrumented JIT's arithmetic:
+the end-to-end test is the port with the rule against the reference race (`tools/ai_seed_check.sh --tracks` over the
+12 circuits, after the corpus rebuild).
 
 ## Difference 14: the Karbonis contact (task 046, 2026-10-07)
 
