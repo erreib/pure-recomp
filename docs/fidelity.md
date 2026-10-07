@@ -679,7 +679,7 @@ race's paths, 13 and 14, which task 046 traced to the clock the race reads and, 
 | 10 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework (7.7 million writes a cell) | framework GE state: the colour test. **Fixed by task 040 (2026-10-07)**: patch 0017 carries COLORTESTENABLE, COLORTEST, COLORREF and COLORTESTMASK (0x27, 0xD8 to 0xDA), and the Metal backend discards by the GE's function on the 8-bit colour under the mask, after fog, as the alpha test (docs/metal-backend.md, "The colour test, 16-bit writes and the depth clamp"). The draws are light glows blended additively, so a black fragment adds no colour; what the test changes is the bloom mask's stencil 255 their black texels wrote. Headless Metal at tol 32: race_hud 0.014874 to 0.014828 with the dither below (the colour test alone changes 640 pixels, all in a lamp's glow, whose region (307,107) 26x34 goes from 0.0328 to 0.0260, 0.2285 to 0.1765 at tol 16); tt_hud and fp_hud have no colour-tested draw on screen. The Vulkan backend keeps every fragment | small |
 | 11 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws a frame), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state. **Fixed by task 040 (2026-10-07)**: patch 0017 carries DITHERENABLE, DITH0 to DITH3 (0x20, 0xE2 to 0xE5) and CLIPENABLE (0x1C). Dithering: the port's 16-bit targets had kept 8 bits a channel (they are RGBA8 textures, cut to the format only when stored in guest memory), so the Metal backend now writes a 5650, 5551 or 4444 target as the PSP does: the blend in the shader on the target's colour, the matrix's offset (row y & 3, column x & 3, as PPSSPP's software renderer shows on all 16384 pixels of Vineta K's fourth billboard round), one clamp, the format's top bits. Every dithered draw of the dumps is into the 565 billboard target; after the task its pixels are all 565 values ordered as the round's matrix, as PPSSPP's are (before: 0.0 to 99.6% 565 values, no dither). The billboard screens show other adverts than PPSSPP's frames, so their regions hardly move (race_hud (201,126) 16x8 0.8828 both; tt_hud (195,114) 29x29 0.4245 to 0.4221, fp_hud 0.4269 to 0.3912); the scenes: tt_hud 0.011221 to 0.011213, fp_hud 0.011566 to 0.011336. Depth clamp: the hardware notes put it with CLIPENABLE on (near-plane clipping only, each vertex's screen z clamped to 0..65535, MINZ/MAXZ per pixel), which every transformed draw of the game has; the backend draws that rule, and it changes no pixel of the 18 scenes, as the dumps predict (no vertex beyond the far plane, MINZ/MAXZ the viewport's own range). The Vulkan backend draws neither | small each |
 | 12 | The race's effects have no reverb: they stop dead where the PSP's ring on (at a pause the PSP's sound fades out over half a second, the port's stops) | every race, from the race load (traced in Free Play) | the game calls `__sceSasRevType` with type 5, `__sceSasRevVON` with the dry and the wet send on and `__sceSasRevEVOL` 0x666 (a ramp down from 0xFFF at the race load) through the race, and keeps the wet send off in the menus; the framework accepts all four and drops them (`hle_media.cpp`: "Reverb is not modelled"). PPSSPP applies them: its dump of the Free Play pause decays over 0.5 s (RMS 2148, 600, 198, 125, 64, 33 down to 1 in 100 ms steps) and stays at RMS 1, where the port's falls to exact zeros within 100 ms (task 041) | framework: the SAS reverb (the effect type, the wet send and its volume) is not modelled in `sas_core.cpp`. **Fixed by task 043 (2026-10-07)**: patch 0018 runs the SPU reverb formula and HALL preset of the PlayStation's documentation on the voices' effect sends and adds it at the wet volumes, stepped once a sample at 44.1 kHz with the sends at half, the two things PPSSPP's output requires ("Difference 12: the SAS reverb" below). `tools/sas_reverb_check.sh`, the Free Play pause against PPSSPP's dump in 100 ms steps from where the held effects end: PPSSPP 383, 194, 116, 60, 31; the port before 254, then exact zeros (FAIL); after 487, 234, 131, 63, 35 (1.05 to 1.27 of PPSSPP's, PASS), and on through the first second at 1.1 to 1.3. The effects' level over 250 s of the Free Play idle is 1.008 of PPSSPP's (0.976 before) and over 40 s of a Vineta K race with the AI 1.000 (0.980). `PURE_NO_REVERB=1` restores the dry mix | medium |
-| 13 | The AI ships run another race than in PPSSPP: the scorecard's straight-on runs part from PPSSPP's 0.4 s after GO on every circuit (up to 500 m by 20 s), and three player rows move where an AI ship comes near (Sinucit, Mandrashee, Sol 2) | every Single Race; on a PSP every race is a different one too | the scorecard's Trajectories (task 044): each side repeats its own AI exactly from run to run | **found (task 046)**: the race's random numbers start from two clock readings at the TEAM SELECTION confirm, and the race runs on the frame times the game measures; neither is the same in two scripted runs on two machines. With PPSSPP's clock pinned (`PURE_TEST_RACE_CLOCK`, `tools/ai_seed_check.sh`) the random sequence is PPSSPP's to the end of the 20 s, all 12 player rows are faithful (0.00 to 0.41 m) and the AI ships part 3 to 16 s after GO instead of 0.4 s (Mandrashee's stay within 0.46 m for the 20 s). What remains is the VFPU's dot product. **Measured (task 047)**: PPSSPP's JIT computes `vdot` and `vtfm` in IEEE single precision fused in lane order and `vmmul` unfused, on all of 1.17 million dot products from the race (its interpreter the same, but for vmmul's last element); the port's contraction rounds lane 1's product where PPSSPP rounds lane 0's (20% of `vdot.t` results differ, 71% of those by 1 ulp), its vtfm starts from +0 and its vmmul fuses. The PSP itself truncates (pspautotests), which PPSSPP does not reproduce. "Difference 13: the AI's start" and "The dot-product rule, measured" below | none for play (the seeds are meant to differ from race to race); the dot product is a framework task (`include/psprecomp/allegrex_context.hpp` and the codegen's vtfm and vmmul, a full corpus rebuild; the rule in C++ is in the section below) |
+| 13 | The AI ships run another race than in PPSSPP: the scorecard's straight-on runs part from PPSSPP's 0.4 s after GO on every circuit (up to 500 m by 20 s), and three player rows move where an AI ship comes near (Sinucit, Mandrashee, Sol 2) | every Single Race; on a PSP every race is a different one too | the scorecard's Trajectories (task 044): each side repeats its own AI exactly from run to run | **found (task 046)**: the race's random numbers start from two clock readings at the TEAM SELECTION confirm, and the race runs on the frame times the game measures; neither is the same in two scripted runs on two machines. With PPSSPP's clock pinned (`PURE_TEST_RACE_CLOCK`, `tools/ai_seed_check.sh`) the random sequence is PPSSPP's to the end of the 20 s, all 12 player rows are faithful (0.00 to 0.41 m) and the AI ships part 3 to 16 s after GO instead of 0.4 s (Mandrashee's stay within 0.46 m for the 20 s). What remains is the VFPU's dot product. **Measured (task 047)**: PPSSPP's JIT computes `vdot` and `vtfm` in IEEE single precision fused in lane order and `vmmul` unfused, on all of 1.17 million dot products from the race (its interpreter the same, but for vmmul's last element); the port's contraction rounds lane 1's product where PPSSPP rounds lane 0's (20% of `vdot.t` results differ, 71% of those by 1 ulp), its vtfm starts from +0 and its vmmul fuses. The PSP itself truncates (pspautotests), which PPSSPP does not reproduce. **Measured (task 048)**: with patch 0020's test mode the dot products are PPSSPP's, but its JIT computes the cross product `vcrsp.t` unfused (both products rounded, then the difference) on all 1.59 million sampled lanes, where the port's test mode fuses one product (20 to 24% of the results differ); `vfad` and `vmscl` already match. Karbonis' player first parts at 6.974 s after frames in which only `vcrsp.t` results differ. "Difference 13: the AI's start", "The dot-product rule, measured" and "The cross, quaternion and horizontal products, measured" below | none for play (the seeds are meant to differ from race to race); the dot product is a framework task (`include/psprecomp/allegrex_context.hpp` and the codegen's vtfm and vmmul, a full corpus rebuild; the rule in C++ is in the section below) |
 | 14 | On Karbonis the player's ship scrapes a wall from 4.9 s and comes out 1 to 3 km/h faster than in PPSSPP, 34 m apart by 20 s | any long wall contact | the scorecard's Karbonis player row (task 044) | **found (task 046): the time step, not the contact response.** The first contact gives the same speed on both sides (218.2 against 218.3 km/h); the ship was already 0.4 m along its path from PPSSPP's (the frames' measured times differ), so the following contacts meet the wall at other points and the scrape's outcome drifts. With PPSSPP's frame times replayed the player's path on Karbonis stays within 0.01 m of PPSSPP's for the whole 20 s, scrape included. "Difference 14: the Karbonis contact" below | none (the port's frame times jitter by 1 ms, the kernel's time quantum; difference 13) |
 
 Not differences, though they looked like ones:
@@ -1358,6 +1358,84 @@ the chain from lane 0 where clang's contraction of the old expression rounded an
 (`execute_vfpu_horizontal`, 61 sites, now unfused), and anything else the corpus's contraction used to fuse. The next
 measurement (task 048) samples those kinds the same way and finds PPSSPP's rounding for them; the test mode's
 promise, equal rounding for the comparison, holds only once every kind the race runs is measured.
+
+### The cross, quaternion and horizontal products, measured (task 048, 2026-10-07)
+
+The kinds patch 0020 left unmeasured, sampled as task 047 sampled the dot products (docs/verification.md, "The other
+kinds"). What the game's code has (`vfpu_probe.py scan`, the instructions the corpus has labels for): 108 `vcrsp.t`, 61
+`vfad` (2 `.p`, 42 `.t`, 17 `.q`), 24 `vrot` (12 `.t`, 12 `.q`, all between 0x088F12A4 and 0x088F1ACC, outside the
+function map) and 4 `vmscl` (3 `.q`, 1 `.t`). `vcrs.t`, `vqmul.q` and `vavg` decode only in data, so the 108
+`execute_vfpu_cross_quat` call sites are all the cross product.
+
+**The samples.** PPSSPP's JIT on the scorecard's reference routes, every execution from READY to 13 s of race clock
+of every site with 50 or more hits (`--cap 0`); none has a prefix:
+
+| Circuit | Sites run (of 197) | Sampled | `vcrsp.t` | `vfad` | `vmscl.q` | The probe's PPSSPP race at 13 s |
+|---|---|---|---|---|---|---|
+| Vineta K | 101 | 65 | 27 sites, 255662 rows | 36 sites, 554934 rows | 2 sites, 95252 rows | player 0.001 m, ships 0.15 m or less from the reference |
+| Karbonis | 72 | 62 | 29 sites, 275182 rows | 31 sites, 557454 rows | 2 sites, 36780 rows | player 0.019 m, ships 0.026 m or less |
+
+No `vrot` ran on either circuit (the scorecard's straight-on race to 13 s). On Karbonis also every execution of every
+dot-product and transcendental site from 6.0 to 7.0 s of race clock (`--window`, 213 sites ran, 259370 rows; its 1422
+breakpoints move PPSSPP's AI by up to 31 m and its player by 4 cm, each row is still one execution).
+
+**The models** (`vfpu_model.py --report`; percentage of PPSSPP's result lanes each reproduces):
+
+| `vcrsp.t`, each lane `a*b - c*d` | Vineta K (766986) | Karbonis (825546) |
+|---|---|---|
+| **unfused: both products rounded, then their difference** | **100.000** | **100.000** |
+| the first product rounded, the second fused (`vfpu_dot`'s chain) | 75.893 | 79.985 |
+| the port's test mode since patch 0020 (that chain; Z over a four-lane view) | 75.893 | 79.759 |
+| the second product rounded, the first fused (clang's contraction of `a*b - c*d`) | 75.245 | 81.541 |
+| the port before patch 0020 (that contraction; Z through the `_ct` dot's) | 75.245 | 81.315 |
+| the exact difference rounded once | 68.757 | 73.473 |
+| the PSP's rule (`vfpu_dot_psp`, the port's default mode) | 47.596 | 50.917 |
+
+`vfad` is the lanes added in order (`((s0 + s1) + s2) + s3`, each sum rounded; starting from +0 gives the same on every
+sample) on all 554934 (Vineta K) and 557454 (Karbonis) results, which the port gives today in both modes (its loop
+`r += s*1.0` is the same sum); the exact sum reproduces 76.1 to 100% by group, the PSP's rule 49.2 to 86.5%. `vmscl`
+is one IEEE product on all 1524032 and 588480 elements, as the port. So of these kinds only `vcrsp.t` parts the port
+from PPSSPP under the test mode: on 24.1% of its results on Vineta K and 20.2% on Karbonis (Karbonis: 68.5% of those by
+1 ulp, 6.9% by 2, 14.3% by 3 to 15, 9.2% by 16 or more, 1.1% only in the sign of a zero). The large ones are where the
+two products cancel: the Y lane of (-48.2926, 1.2539, -103.9333) x (48.2926, -78.2539, 103.9333) is exactly 0 in
+PPSSPP, two equal rounded products, and 0.000148 in the port, the rounding error of the product its chain fuses.
+
+**The rule for the codegen, PPSSPP's JIT (the test mode):** `vcrsp.t` lane by lane, X = s.y*t.z - s.z*t.y,
+Y = s.z*t.x - s.x*t.z, Z = s.x*t.y - s.y*t.x, each product rounded and then the difference, nothing fused; for Z only
+those two products, not the four-lane view the header builds (whose `s.z * t.w` term turns an infinite s.z into NaN
+in both modes, where pspautotests' PSP gives the two-term result). `vfad` and `vmscl` unchanged. The C++ is in
+docs/tasks/048's Result. `vqmul.q`, `vcrs.t`, `vavg` and `vrot` are not measured (no code, or not run).
+
+**The PSP's rule (the default mode).** pspautotests' `vector.expected` (a real PSP): the hardware dot rule (`hw`)
+gives all 75 `vcrsp` lane results, all 100 `vqmul`, all 15 `vfad` (`vfad.p` of (-0.1, 1000) is 999.899963, not the
+nearest 999.900024) and all 15 `vavg` as `hw(sum) * (1/n)`; an IEEE product gives all 75 `vcrs`. So the default mode
+should take `vfpu_dot_psp` for `vfad` and `vavg` too, which today add in IEEE; `vcrsp` and `vqmul` already use it.
+`vrot.expected` gives the PSP's sine and cosine of 0.3 and -1.7 (times pi/2): 0x3EE8716C and 0x3F641900 for 0.3,
+where libm's `sinf`/`cosf` of the float product (the port) give 0x3EE87173 and 0x3F641901 and the double-precision
+values 0x3EE87172 and 0x3F641901: the PSP's low bits are inexact (vfpu-docs), and no closed form gives them.
+
+**Karbonis.** The port's race records under the race clock (`tools/ai_seed_check.sh --tracks karbonis`, after patch
+0020) against ref/scorecard/trajectories/karbonis.csv, at the clocks both sides have: the player's position and
+velocity agree to the printed 3 decimals until 6.924 s, except 11 single flips of the last digit from 0.117 s on (the
+first: vy -0.002 against -0.001), so its state differs in the low bits from the first frames; the first sample that
+parts is 6.974 s (8 mm, velocity 9 mm/s), in the scrape along the wall (difference 14), and it is 1 m apart at
+12.08 s. In the three frames before it (PPSSPP's usec 138276120 to 138326183): `vcrsp.t` results differ from the port's
+test mode at 22 of 26 sites (660 of 2895), the last of them the once-a-frame cross products of the ship update's path
+(FUN_0892a230 at 0x0892A6C0 and 0x0892A6C4, FUN_08945e54 at 0x08945E94, both under FUN_08926ae4) 1.1 ms before the
+sample, 1 or 2 ulp each; none of the 1962 `vfad` and 2032 `vmscl` results, none of the window run's 8767 `vdot`, 2094
+`vtfm3`, 3928 `vtfm4` and 5872 `vmmul` results and none of its `vrcp`, `vrsq` and `vsqrt` results differs. From READY
+to 13 s `vcrsp.t` differs on 167098 of 825546 lanes at all 29 of its sites, from the first frame; no other sampled kind
+differs. So the divergence is the cross product's, and the unfused rule fixes it: with the Result's header in a copy,
+`vfpu_probe.py port --tag candidate` under the test mode reproduces PPSSPP on every `vcrsp.t`, `vfad` and `vmscl`
+result of both circuits, and its default mode equals the PSP's rule on every one (`vfpu_model.py --check DIR --tag
+candidate`).
+
+The corpus before patch 0020 got `vcrsp.t` wrong as often (81.3% right on Karbonis; in those three frames 588 lanes
+wrong, 344 of them the same as the test mode's): its faithful Karbonis player was not a right cross product but a
+scrape that happened to resolve the same way with another set of low bits. That every ship's update runs `vcrsp.t`
+(FUN_0892cb58 8 times a frame, FUN_0892dea8 and FUN_089345e8 16 times, FUN_088274e0 about 50) makes
+it the likely start of the AI's partings on the other circuits too; the end-to-end test is `tools/ai_seed_check.sh --tracks` over the 12 circuits after the corpus
+rebuild with the rule, which this task cannot run.
 
 ## Difference 14: the Karbonis contact (task 046, 2026-10-07)
 
