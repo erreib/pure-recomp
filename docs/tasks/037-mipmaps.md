@@ -1,6 +1,6 @@
 # 037: Mipmaps (fidelity difference 2)
 
-Milestone: M8 | Branch: task/037-mipmaps | Status: OPEN (after task 036: both touch ge_state and the Metal texture path)
+Milestone: M8 | Branch: task/037-mipmaps | Status: MERGED 2026-10-07 (91a7980)
 
 ## Goal
 Distant textures shimmer: crowds, the track surface, windows. 70 to 87% of the race's textured draws name mip levels
@@ -219,4 +219,17 @@ Open questions:
    - `docs/ge-backend.md` section 6 (the Draw record) is outside May touch. The record format header is updated.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout on the merged build (fifteen patches, 0001 to 0015), 2026-10-07: the
+headless suite 18/18 with the race scenes at the re-baselined values exactly (race_hud 0.0149, tt_hud 0.0112, fp_hud
+0.0116, zone_hud 0.0121), `tools/hud_check.sh --shell headless` 61 of 61. The Blue Ridge reference the worker remade
+(byte-identical to ref/README.md's hashes) was copied into the main checkout's `ref/`.
+Spot-read: patch 0014 (`TextureLevel` x7 and the level rule in `TextureState`, the Draw record's 100 bytes appended;
+the Vulkan comment), the Metal upload of levels through per-level `TextureState` copies and the content hash over
+every level, the shader's float-bits log16 rule for auto and slope modes, `PURE_NO_MIPMAPS`.
+Merged: 91a7980 into batch/m2 (patches/README.md rows 0014 and 0015 ordered by hand); the suite's Metal column
+re-baselined (f3a5add); `tools/fidelity_audit.py`'s exit-line regex updated for the new counts (e5a184b).
+Notes: the record backend records only level 0's texels, so recordings made since patch 0014 replay mipmapped draws
+from zeroed memory: folded into task 040's patch 0017 (record every level). Blue Ridge still has no port route, so
+it is not a suite scene (follow-up: the scenes without routes). The rules the notes do not settle (auto mode's bias,
+a non-mip min filter on a texture with levels, q per 4-pixel span, a CLUT per level) are listed in
+docs/metal-backend.md; the game exercises only the second, on three draws a frame.

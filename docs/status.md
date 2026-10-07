@@ -116,7 +116,7 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   pause-menu redesign is dropped.** Merged: 035, the M8 fidelity audit (two workers; the matrix loop finished on its own; Verify rerun PASS,
   18/18 scenes). Merged: 036 (environment and projection mapping, patch 0013: the race scenes vs PPSSPP 0.012 to 0.035 now; the
   suite's Metal column re-baselined), 038 (the brightness is the weather mist's phase; not a difference). Merged: 039 (the save list, patch 0015; Verify rerun PASS), 037 (mipmaps, patch 0014: race scenes vs PPSSPP
-  0.011 to 0.015 now, Blue Ridge 0.025; Verify rerun pending). Running: 040 (colour test, dither, depth clamp; the
+  0.011 to 0.015 now, Blue Ridge 0.025; Verify rerun PASS). Running: 040 (colour test, dither, depth clamp; the
   record backend records mip levels). Then 041 (hitches and audio, alone on the machine). Then 037 (mipmaps, after 036), 040 (colour test, dither, clamp, after 037), 041 (hitches and audio,
   alone on the machine). Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
   trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
