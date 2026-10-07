@@ -63,10 +63,11 @@ history section has no natural task file or topic to go to (report; leave it in 
 
 ## Result
 Status: DONE. Every reference doc now describes the repository as it is, with each task's measurements moved word for
-word to `docs/history/` and linked from the doc it left; the patch numbers of the old series are gone from the docs,
-README.md, ref/README.md and the comments of tools/ and src/tools/; docs/status.md is trimmed; README.md's layout,
-tools and switches are checked against the tree and the code; and `tools/docs_check.py` (new, 227 lines) passes on
-all 31 docs. The Verify line passes.
+word to `docs/history/` and linked from the doc it left; the docs, README.md, ref/README.md and the comments of
+tools/ and src/tools/ name every patch in the new series with the task that made the change (an old number appears
+only marked "old": in the history files, docs/upstream.md and patches/README.md's mapping table); docs/status.md is
+trimmed; README.md's layout, tools and switches are checked against the tree and the code; and `tools/docs_check.py`
+(new, 227 lines) passes on all 31 docs. The Verify line passes.
 
 ### Changed
 Lines before (batch/m2 at 143f2f5) and after, and where each doc's history went:
