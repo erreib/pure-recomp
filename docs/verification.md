@@ -1,8 +1,32 @@
-# Frame verification tools (task 002, 2026-10-05)
+# Verification
 
-Every visual check compares a captured frame with a reference frame (a PPSSPP capture in `ref/` or an earlier run)
-with a tolerance. The tools are pure Python 3.13 with zlib only (no PIL, no numpy, no venv), so they run in every
-worktree and subagent as they are.
+The checks this repository runs, what each compares and how to read it. Every visual check compares a capture with a
+reference (a PPSSPP capture in `ref/`, or an earlier run) at a tolerance; the other checks compare audio, saves,
+trajectories and VFPU results with PPSSPP's, or the docs with the tree. What each check measured when it was made,
+the runs and before-and-after tables: [docs/history/verification.md](history/verification.md).
+
+| Check | Command | What it guards | Section |
+|---|---|---|---|
+| frame regression | `tools/frame_regress.sh` | 18 scenes against PPSSPP, headless on Metal in about 25 s; the merge gate for renderer changes | "Frame regression suite" |
+| race HUD | `tools/hud_check.sh` | the race's HUD in 61 shots of the Metal window | "The race HUD check" |
+| Metal against Vulkan | `tools/gerec/metal_check.sh` | the two backends on the TEAM screen and the race, through ge_replay | docs/metal-backend.md, "The 3D check" |
+| ge_replay | `tools/gerec/replay_check.sh` | the replay itself | docs/ge-backend.md, section 7 |
+| no change | `tools/refactor_check.sh` | a change that moves code changes no pixel and no count | docs/metal-backend.md, "Files" |
+| audio | `PURE_AUDIO_WAV`, `tools/wavstats.py`, `tools/audio_compare.py` | the game's sound, against PPSSPP's dump | "Audio" |
+| SAS reverb | `tools/sas_reverb_check.sh` | the reverb's tail at a pause against PPSSPP's | "The SAS reverb check" |
+| saves | `tools/save_roundtrip.sh`, `tools/save_interchange.sh` | the round trip of profiles; saves both ways with PPSSPP | docs/savedata.md; "The save interchange check" |
+| scorecard | `tools/scorecard.py` | how close the port is to the original, six categories | "The accuracy scorecard" |
+| trajectories, race clock pinned | `tools/ai_seed_check.sh` | the scorecard's trajectories on PPSSPP's race clock | docs/fidelity.md, difference 13 |
+| VFPU rounding | `tools/vfpu_probe.py`, `tools/vfpu_model.py` | the port's VFPU results against PPSSPP's and the PSP's rule | "The VFPU dot-product check" |
+| controls | `tools/controls_check.py` | docs/controls.md's tables against the framework's sources | docs/controls.md |
+| the app | `tools/bundle.sh --check DIR` | the app bundle: signature, libraries, no game data, setup and a run | docs/release.md |
+| the docs | `tools/docs_check.py` | every path, link, patch and task file the docs name exists | "The docs check" |
+| a task | `tools/verify_task.sh NNN` | the Verify line of `docs/tasks/NNN-*.md`, PASS or FAIL | CLAUDE.md |
+
+# Frame verification tools (task 002)
+
+The tools are pure Python 3.13 with zlib only (no PIL, no numpy, no venv), so they run in every worktree and subagent
+as they are.
 
 ## tools/png.py
 
@@ -50,55 +74,72 @@ tools/imgdiff.py out/shots/frame_600.bmp --region 140,100,200,40 --min-variance 
 frames give 0.0; the top-left quadrant shifted 7 px gives 0.25 +/- 0.01 (FAIL) and the diff image marks exactly the
 differing pixels red; a mask over that quadrant and a region on another quadrant give 0.0; a 960x544 BMP against the
 480x272 PNG of the same picture gives 0.0; BMP round trips (24-bit with padded rows, 32-bit top-down, 32-bit V5
-bitfields with alpha); PNG rows written with each of the filter types 0-4 at 1 to 4 channels; a 16-bit PNG is
-rejected with its IHDR fields; the variance check fails on a flat region and passes on a drawn one; the CLI's
-`--json` keys and exit code. It prints PASS and exits 0 in under 2 s (0.15 s on this Mac, about 0.7 s on a first run while Python compiles the modules).
+bitfields with alpha); PNG rows written with each of the filter types 0-4 at 1 to 4 channels; a 16-bit PNG is rejected
+with its IHDR fields; the variance check fails on a flat region and passes on a drawn one; the CLI's `--json` keys and
+exit code. It prints PASS and exits 0 in under 2 s (0.15 s on this Mac, about 0.7 s on a first run while Python compiles
+the modules).
 
-# Frame regression suite (task 020, 2026-10-06)
+# Frame regression suite
 
 ```
 tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]]
                        [--env KEY=VAL ...] [--allow-parallel]
 ```
 
-One command that checks the port still renders the known screens like PPSSPP. By default (task 034) it runs headless
-on the Metal backend (`--shell headless --backend metal`): no window, unpaced, the scenes the backend's own 480x272
-pictures, about 10 s in all. `--shell metal --backend metal` runs the same backend in the Metal shell's window (the
-macOS default for players since D-008, task 028) and `--shell vulkan --backend vulkan` the Vulkan path; in a window
-each run is paced to real time and the suite takes about 7 minutes, and `--only race_hud` about 3.5. Which path to
-run for which change: "Which path for which change" below. The race HUD check ("The race HUD check" below) covers
-the race after the suite's last scene. The suite boots the game three times, once per route, captures five scenes,
-and compares each capture with its reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL
-per scene and writes the same text to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one
-fails, and 2 on a usage error, a missing build, game or reference, or another PureNative running (below).
+One command that checks the port still renders the known screens like PPSSPP (task 020; thirteen scenes added by
+task 035). By default (task 034) it runs headless on the Metal backend (`--shell headless --backend metal`): no
+window, unpaced, the scenes the backend's own 480x272 pictures, about 25 s in all. `--shell metal --backend metal`
+runs the same backend in the Metal shell's window (the macOS default for players since D-008) and `--shell vulkan
+--backend vulkan` the Vulkan path; in a window each run is paced to real time, and the 18 scenes take about 20 minutes
+(the Vulkan path took 19m 47s in task 040). Which path to run for which change: "Which path for which change" below.
+The race HUD check ("The race HUD check" below) covers the race after the suite's last race scene. The suite boots
+the game once per route (seven routes), captures each scene of the route, and compares each capture with its
+reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL per scene and writes the same text
+to `<out>/summary.txt`. It exits 0 only when every scene passes, 1 when one fails, and 2 on a usage error, a missing
+build, game or reference, or another PureNative running (below).
 
-| Scene | Route (`config/pad_scripts/`) | Frame | Reference | Tol | Limit | Vulkan measured | Metal measured (window and headless) |
+| Scene | Route (`config/pad_scripts/`) | Frame | Reference (PPSSPP vblank) | Tol | Limit | Vulkan measured | Metal measured |
 |---|---|---|---|---|---|---|---|
-| `lang` | `frontend.txt` | 690 | `ref/frontend.png` | 24 | 0.07 | 0.054 (task 006; 0.0544) | 0.0002 (task 023) |
-| `title` | `frontend.txt` | 1750 | `ref/title.png` | 24 | 0.05 | 0.030 (tasks 006, 009-011; 0.0302) | 0.0002 (task 023) |
-| `profile` | `frontend.txt` | 2100 | `ref/profile.png` | 24 | 0.07 | 0.054 (task 006; 0.0543) | 0.0000 (task 023) |
-| `main_menu` | `main_menu.txt` | 4700 | `ref/main_menu.png` | 24 | 0.05 | 0.033 (task 006; 0.0331) | 0.0106 (task 023) |
-| `race_hud` | `main_menu.txt` + `single_race.txt` | 6016 | `ref/vineta_k_start.png` | 32 | 0.10 | 0.067 (task 011; 0.0672) | 0.0379 (task 025) |
+| `lang` | `frontend.txt` | 690 | `ref/frontend.png` | 24 | 0.07 | 0.054 | 0.0002 |
+| `title` | `frontend.txt` | 1750 | `ref/title.png` | 24 | 0.05 | 0.030 | 0.0002 |
+| `profile` | `frontend.txt` | 2100 | `ref/profile.png` | 24 | 0.07 | 0.054 | 0.0000 |
+| `main_menu` | `main_menu.txt` | 4700 | `ref/main_menu.png` | 24 | 0.05 | 0.033 | 0.0106 |
+| `race_hud` | `main_menu.txt` + `single_race.txt` | 6016 | `ref/vineta_k_start.png` (7155) | 32 | 0.10 | 0.067 | 0.0149 |
+| `single_player` | `main_menu.txt` + `single_race.txt` | 4765 | `ref/single_player.png` (5850) | 24 | 0.05 | 0.025 | 0.0000 |
+| `class_select` | the same | 4990 | `ref/class_select.png` (6050) | 24 | 0.07 | 0.045 | 0.0000 |
+| `league_select` | the same | 5185 | `ref/league_select.png` (6250) | 24 | 0.08 | 0.062 | 0.0000 |
+| `track_select` | the same | 5390 | `ref/track_select.png` (6450) | 24 | 0.06 | 0.041 | 0.0000 |
+| `team_select` | the same | 5600 | `ref/team_select.png` (6690) | 24 | 0.06 | 0.042 | 0.0000 |
+| `tt_track_select` | `main_menu.txt` + `time_trial.txt` | 5375 | `ref/tt_track_select.png` (6650) | 24 | 0.06 | 0.040 | 0.0000 |
+| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7340) | 32 | 0.12 | 0.096 | 0.0112 |
+| `fp_track_select` | `main_menu.txt` + `free_play.txt` | 5375 | `ref/fp_track_select.png` (6650) | 24 | 0.06 | 0.041 | 0.0000 |
+| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7340) | 32 | 0.11 | 0.095 | 0.0116 |
+| `tournament_select` | `main_menu.txt` + `tournament.txt` | 5185 | `ref/tournament_select.png` (6450) | 24 | 0.08 | 0.063 | 0.0000 |
+| `zone_track_select` | `main_menu.txt` + `zone.txt` | 4975 | `ref/zone_track_select.png` (6250) | 24 | 0.05 | 0.033 | 0.0000 |
+| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6694) | 32 | 0.09 | 0.065 | 0.0121 |
+| `zone_change` | the same | 5679 | `ref/zone_change.png` (7528) | 32 | 0.10 | 0.082 | 0.0353 |
 
 The table lives at the top of the script (`SCENES`), with a measured column per backend and the source of each value
-as a comment. A scene's fraction is the share of pixels that differ by more than Tol in any channel, with both frames
-at 480x272 (a window's 960x544 capture is reduced by nearest neighbour; a headless capture is 480x272 already). The
-scene passes at or below Limit, which is shared by both backends. The Metal column serves the Metal window and the
-headless shell alike (task 034): the headless captures of all five scenes equal the Metal window's reduced to
-480x272, pixel for pixel (tol 0), and three headless runs scored race_hud 0.0374, 0.0374 and 0.0371 and the other
-four scenes at the column exactly, all within 0.001 of it.
+as a comment; the one above is the script's as of 2026-10-07 (task 040's re-baseline of the Metal column). A scene's
+fraction is the share of pixels that differ by more than Tol in any channel, with both frames at 480x272 (a window's
+960x544 capture is reduced by nearest neighbour; a headless capture is 480x272 already). The scene passes at or below
+Limit, which is shared by both backends. The Metal column serves the Metal window and the headless shell alike: the
+headless captures equal the Metal window's reduced to 480x272, pixel for pixel (task 034).
 
-- On the Vulkan path lang and profile score 0.054 because of one-pixel edges of lines and glyphs, which the 2x-to-1x
-  reduction moves. The Metal backend draws at 480x272 and its shell scales by exactly 2x with nearest sampling, so no
-  edge moves: its few differing pixels are blinking cursors (docs/metal-backend.md, "Verify numbers").
-  The main menu capture catches the help text partway through typing.
-- `race_hud` is frame 6016 of the race route, with bloom and shadows on (the defaults). It is the first frame where
-  the HUD has fully faded in, and the same game moment as the PPSSPP frame 7155. The AI ships on the grid change from
-  run to run, so this scene varies. Runs of the same code have scored 0.063 to 0.086 on the Vulkan path, and 0.0344 to
-  0.0384 on the Metal path (task 025's 0.0379, four runs of task 028 and five of task 031, every capture with its
-  HUD), plus one of 0.0823 in task 028 whose capture most likely lacked the HUD, which adds about 0.04 to a frame:
-  until task 031 the Metal shell's window dropped the race HUD in most frames once the race ran ("The race HUD check"
-  below).
+- On the Vulkan path the 2D scenes score 0.025 to 0.063 because of one-pixel edges of lines and glyphs, which the
+  2x-to-1x reduction moves. The Metal backend draws at 480x272 and its shell scales by exactly 2x with nearest
+  sampling, so no edge moves: the menus match PPSSPP exactly (0 pixels over tol 24), and the few differing pixels of
+  `lang` and `title` are blinking cursors. The main menu capture catches the help text partway through typing. Each
+  menu frame sits inside a run of identical port frames, away from the blinking cursor's changes.
+- The race scenes are the first frame with the HUD fully faded in: `race_hud` (Vineta K, the same game moment as
+  PPSSPP's frame 7155, bloom and shadows on), CURRENT, BEST and the bronze time in Time Trial and Free Play, SCORE and
+  ZONE in Zone. `zone_change` is Zone 1's first zone change, the first frame with ZONE 2, where the score jumps from
+  299 to 800 (with Cross held the ship is at rest against the first barrier by then). The AI ships on `race_hud`'s
+  grid are the race's own (docs/fidelity.md, difference 13), so its fraction moves a little from build to build; the
+  player is alone in the other race scenes, which repeat to four places. `race_hud` comes before the race clock
+  starts; the race itself is the HUD check's.
+- Matching a race scene needs care on the PPSSPP side: a capture made during a load moves the race in emulated time
+  (`ref/README.md`), so these references come from runs with no capture before the race.
 
 How the runs are made:
 - Each route's input script is written to `<out>/<route>.route.txt`. The route files are joined in order with their
@@ -106,7 +147,8 @@ How the runs are made:
   same frame as a press captures before the press.
 - `race_hud` uses the same presses as `~/dev/pure-recomp/out/race/route.txt`, the route that measured it. Those are
   `main_menu.txt` followed by `single_race.txt`. Its Cross hold at 6100 comes after the run ends.
-- Each run goes to its last shot plus 30 flips (`--frames`), so 2130, 4730 and 6046.
+- Each run goes to its last shot plus 30 flips (`--frames`): 2130 (`frontend.txt`), 4730 (`main_menu.txt`), 6046
+  (Single Race), 5920 (Time Trial and Free Play), 5215 (Tournament) and 5709 (Zone).
 - Every run starts from an empty memory stick in `<out>/game`, where `EBOOT.ELF` and `disc.iso` are links to
   `game/`. `main_menu.txt` creates and saves a profile, and a profile left on the stick would change the next boot.
   The checkout's `game/ms0` is never touched.
@@ -122,8 +164,8 @@ How the runs are made:
   (settings.ini, the Vulkan pipeline caches), kept between runs, unless the environment sets `PURE_NO_AUDIO` or
   `PURE_DATA_DIR`; the player's `~/Library/Application Support/pure-recomp/PureNative/` is never read or written, so
   a setting changed while playing cannot move a scene. The summary names the data directory.
-- One game at a time: the suite refuses to start while another PureNative runs (`pgrep -f build/.*/bin/PureNative`,
-  kept when the process is PureNative itself), names it and exits 2, unless `--allow-parallel` is given.
+- One game at a time: the suite refuses to start while another PureNative runs (`tools/run_boot.py`'s
+  `other_games()`, from `tools/purelib`), names it and exits 2, unless `--allow-parallel` is given.
 - `--env KEY=VAL` passes extra environment to every run, through `tools/run_boot.py --env`. The summary records it.
 - The summary's first lines give the date, the commit (`+changes` when tracked files differ from it), the shell, the
   backend and so the measured column, the extra environment, and each run's exit code, whether it reached its last
@@ -131,52 +173,6 @@ How the runs are made:
 - Next to each fraction, the table prints `delta`, the difference from the running backend's measured value, to four
   decimals. If a scene moved by more than 0.03, a line names it. That means something changed, even if the scene still
   passes.
-
-The deliberate regression (2026-10-06, the Vulkan path): `tools/frame_regress.sh --shell vulkan --backend vulkan
---only race_hud --env PURE_NO_STENCIL_BUFFER=1 --out out/regress-nostencil` turns off the stencil attachment of patch
-0006 (a Vulkan backend switch; the Metal backend does not read it). That removes the ship shadows, and the 0004
-alpha path darkens the whole track. race_hud then scores 0.3053 (delta +0.238), so it fails with
-`out/regress-nostencil/race_hud.diff.png` written, and the suite exits 1.
-
-## The scenes task 035 added (2026-10-06)
-
-Thirteen more PPSSPP scenes (task 035, docs/fidelity.md "PPSSPP references beyond the five"; captures and commands
-in `ref/README.md`), each reachable by a route the suite already has, so they add three runs (the Time Trial, Free
-Play, Tournament and Zone routes; the Single Race menus share the race route's run). Headless the whole suite now
-takes about 23 s.
-
-| Scene | Route (`config/pad_scripts/`) | Frame | Reference (PPSSPP vblank) | Tol | Limit | Vulkan measured | Metal measured |
-|---|---|---|---|---|---|---|---|
-| `single_player` | `main_menu.txt` + `single_race.txt` | 4765 | `ref/single_player.png` (5850) | 24 | 0.05 | 0.025 | 0.0000 |
-| `class_select` | the same | 4990 | `ref/class_select.png` (6050) | 24 | 0.07 | 0.045 | 0.0000 |
-| `league_select` | the same | 5185 | `ref/league_select.png` (6250) | 24 | 0.08 | 0.062 | 0.0000 |
-| `track_select` | the same | 5390 | `ref/track_select.png` (6450) | 24 | 0.06 | 0.041 | 0.0000 |
-| `team_select` | the same | 5600 | `ref/team_select.png` (6690) | 24 | 0.06 | 0.042 | 0.0000 |
-| `tt_track_select` | `main_menu.txt` + `time_trial.txt` | 5375 | `ref/tt_track_select.png` (6650) | 24 | 0.06 | 0.040 | 0.0000 |
-| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7340) | 32 | 0.12 | 0.096 | 0.0617 |
-| `fp_track_select` | `main_menu.txt` + `free_play.txt` | 5375 | `ref/fp_track_select.png` (6650) | 24 | 0.06 | 0.041 | 0.0000 |
-| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7340) | 32 | 0.11 | 0.095 | 0.0620 |
-| `tournament_select` | `main_menu.txt` + `tournament.txt` | 5185 | `ref/tournament_select.png` (6450) | 24 | 0.08 | 0.063 | 0.0000 |
-| `zone_track_select` | `main_menu.txt` + `zone.txt` | 4975 | `ref/zone_track_select.png` (6250) | 24 | 0.05 | 0.033 | 0.0000 |
-| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6694) | 32 | 0.09 | 0.065 | 0.0348 |
-| `zone_change` | the same | 5679 | `ref/zone_change.png` (7528) | 32 | 0.10 | 0.082 | 0.0649 |
-
-- The menus match PPSSPP exactly on the Metal backend (0 pixels over tol 24): the frontend's 2D draws at 480x272.
-  On the Vulkan path (one windowed run, `--shell vulkan --backend vulkan`, 15.5 min for the five routes) they score
-  0.025 to 0.063, the one-pixel edges of glyphs and lines that its 2x-to-1x reduction moves, as `lang` and `profile`
-  do. The limits follow the re-baselining rule below: the larger backend's value plus about 0.015, rounded up to a
-  hundredth.
-  Each frame sits inside a run of identical port frames, away from the blinking cursor's changes.
-- The three race scenes are the first frame with the HUD fully faded in (as `race_hud` is): CURRENT, BEST and the
-  bronze time in Time Trial and Free Play, SCORE and ZONE in Zone. The player is alone in those modes, so the frames
-  do not vary from run to run: three headless runs gave the same fraction to four places in every new scene. What
-  differs from PPSSPP there is the 3D (docs/fidelity.md: the mip levels, the environment-mapped ship).
-- `zone_change` (added last, 2026-10-06) is Zone 1's first zone change: the first frame with ZONE 2, where the score
-  jumps from 299 to 800, port flip 5679 and PPSSPP vblank 7528 (both found from the HUD, `ref/README.md` run O). With
-  Cross held the ship is at rest against the first barrier by then. Metal scored 0.0649 in three headless runs, the
-  Vulkan path 0.0818 in one windowed run (`--only zone_change`, 3 min 10 s); limit 0.10 by the rule below.
-- Matching a race scene needs care on the PPSSPP side: a capture made during a load moves the race in emulated time
-  (`ref/README.md`), so these references come from runs with no capture before the race.
 
 ## Re-baselining the limits
 
@@ -226,17 +222,13 @@ check covers the race itself.
   uses the data directory `out/data/hud_check` (task 034). `--backend` names another backend. Outputs go to `--out`,
   by default `out/hud/<shell>` (the route, the run's log, the shots and the summary), removed first.
 
-| Path | Before task 031 | After |
-|---|---|---|
-| Metal shell and backend (the default) | 11 of 61 (task 028's probe: 12) | 61 of 61 |
-| Vulkan shell and backend | 61 of 61 (task 028's probe) | 61 of 61 |
-| headless, Metal backend | 61 of 61 (task 028's probe) | 61 of 61 |
+Until task 031 the Metal shell's window showed the race without its HUD in most shots (11 of 61) while the suite
+passed: [the race HUD check](history/verification.md#the-race-hud-check-task-031-2026-10-06).
 
-# Fast, silent test runs (task 034, 2026-10-06)
+# Fast, silent test runs
 
-Every scripted run used to be held to real time from its first frame, so the 4,450 flips of movies and menus before
-MAIN MENU cost about 150 s a run, and a windowed run touched the player's data directory and played its sound. Since
-task 034:
+Since task 034 no test run is paced to real time before its race, none plays sound, and none touches the player's
+data directory:
 
 | Tool | Shell by default | Pacing | Sound | Data directory |
 |---|---|---|---|---|
@@ -246,15 +238,15 @@ task 034:
 | `tools/save_roundtrip.sh` | the Metal window | paced | off | `out/data/save_roundtrip` |
 | `tools/run_boot.py` | headless unless `--window`, `--shell`, `--script` or `--shots` | the shell's | off; `--sound` | `out/data/run_boot` (`--data-dir`) |
 
-- `PURE_PACED_FROM=N` (`src/profile/pure_profile.cpp`): the kernel runs unpaced from start-up until flip N and is
-  held to real time from flip N on, in any shell (patch 0011's `Kernel::set_paced`, set every flip). Headless, the
-  menus take seconds and the race keeps real time. In a window the shell still presents at the display's rate (the
-  Metal shell waits for a drawable at vsync), so there the menus go at most at the display's rate instead of 30
-  flips a second. `0` paces from the start in any shell; unset leaves it to the shell.
+- `PURE_PACED_FROM=N` (`src/profile/pure_profile.cpp`): the kernel runs unpaced from start-up until flip N and is held
+  to real time from flip N on, in any shell (`Kernel::set_paced` of patch 0005-kernel-host-waits-and-pacing, set every
+  flip). Headless, the menus take seconds and the race keeps real time. In a window the shell still presents at the
+  display's rate (the Metal shell waits for a drawable at vsync), so there the menus go at most at the display's rate
+  instead of 30 flips a second. `0` paces from the start in any shell; unset leaves it to the shell.
 - Sound: `PURE_NO_AUDIO=1` unless `--sound`, or the environment sets `PURE_NO_AUDIO`, or sets `PURE_AUDIO_WAV` for
   a run with a window. It turns off the audio device only: the game's sceAudio calls still run on the virtual clock,
   so the `PURE_AUDIO_WAV` capture works without the device (checked: `main_menu.txt` headless with
-  `PURE_NO_AUDIO=1`, the music channel from t=145.48 s, as in check (a) above, `wavstats.py --from 146` active
+  `PURE_NO_AUDIO=1`, the music channel from t=145.48 s, as in task 013's check (a), `wavstats.py --from 146` active
   12/12, no clipping).
 - Data directory: `PURE_DATA_DIR=out/data/<tool>` unless the environment names one, made on first use with a
   settings.ini holding `ui.menu_hint_seen=1` (the menu hint would sit over a window's first 12 s) and kept between
@@ -265,24 +257,11 @@ task 034:
   `--allow-parallel` is given. No tool passes it on its own; the headless suite's own results do not depend on timing
   (unpaced, flip-indexed), so it is the run that can take `--allow-parallel` safely, while a sweep cell (its race
   paced and steered closed loop) and the window paths should not. `run_boot.py`, `hud_check.sh` and
-  `save_roundtrip.sh` do not check.
+  `save_roundtrip.sh` do not check; the scorecard waits for the other game instead ("The shared runner").
 
-Wall times on this Mac (Apple M4 Pro), before (the windowed Metal default, on b5cb152 and 8364dc0) and after:
-
-| Run | Before | After |
-|---|---|---|
-| `tools/frame_regress.sh` (default) | 7m 9s (Metal window: frontend 72 s, main_menu 159 s, race 197 s) | 9 to 10 s (three runs; headless: 2, 2 and 4 s a route) |
-| `tools/frame_regress.sh --shell metal --backend metal` | 7m 9s | 7m 9s (5/5; a window is paced) |
-| `tools/frame_regress.sh --shell vulkan --backend vulkan` | 7m 10s to 7m 16s (tasks 028, 031) | 7m 10s (5/5) |
-| `tools/campaign_sweep.py single_race vineta_k --no-damage` | 402 s (Metal window) | 197 s (headless, the race paced: 188.6 s of race clock) |
-| `tools/campaign_sweep.py time_trial vineta_k --no-damage` (30 flips a second) | 404 s (a windowed run of 2026-10-06 in the main checkout's summary) | 228 s, PASS, the `ref` shot's bar 100% |
-| `tools/campaign_sweep.py zone zone_1` | 247 s (likewise) | 75 s, PASS, SHIP DESTROYED read, TOTAL ZONES CLEAR 6 as before |
-| `tools/hud_check.sh` (Metal window) / `--shell headless` | about 4 min / about 15 s (task 031) | 229 s / 13 s, 61 of 61 each |
-| `main_menu.txt` from boot to MAIN MENU (flip 4380) | about 146 s (paced, 30 flips a second) | 1.8 to 2.05 s (three runs) headless unpaced |
-| the NEW-profile leg: the profile screen (flip 2100) to MAIN MENU | about 76 s | 0.65 s (three runs) |
-
-The NEW-profile leg (name, tag, save question) costs well under the brief's 5 s once the menus are unpaced, so the
-routes keep it: a cached profile and a LOAD route would save under a second a run.
+Since task 050 the Python tools share one runner, `tools/purelib` ("The shared runner"), and every headless run it
+starts sets `PURE_NO_BUSY_CLOCK=1`, so a run does not depend on the machine's load. The wall times before and after
+task 034: [Fast, silent test runs](history/verification.md#fast-silent-test-runs-task-034-2026-10-06).
 
 ## Which path for which change
 
@@ -294,7 +273,7 @@ routes keep it: a cached profile and a LOAD route would save under a second a ru
 | the Vulkan backend or shell (vendor renderer patches) | `--shell vulkan --backend vulkan` and `tools/hud_check.sh --shell vulkan` |
 | pacing, the kernel's clock, the input script, the follower | the headless suite, one window path (`--shell metal`), and a sweep cell (`campaign_sweep.py single_race vineta_k --no-damage`) |
 
-# Test hooks (task 051, 2026-10-07)
+# Test hooks
 
 The port's test instruments live in `src/profile/test_hooks.{hpp,cpp}`, apart from the game's profile
 (`src/profile/pure_profile.cpp`): `PURE_TEST_NO_DAMAGE`, `PURE_TEST_UNLOCK_ALL`, `PURE_TEST_RACE_CLOCK`,
@@ -319,38 +298,15 @@ audio capture, then `sceKernelGetGPI`. So `PURE_TRACE_CALLS` still wraps the fli
 in `test_hooks.cpp` with its switch read there (`pure_profile.cpp` reads no `TEST_`, `WATCH_` or `TRACE_` switch) and
 a test-only row in README.md.
 
-The proof of no change was a log diff of three headless runs of the Vineta K Single Race route
-(`main_menu.txt` + `single_race.txt` without their `shot` lines) to flip 6500, on the Metal backend, each on an empty
-memory stick (a `PURE_GAME_DIR` holding links to `game/EBOOT.ELF` and the disc image and an empty `ms0/PSP/SAVEDATA`,
-as `tools/frame_regress.sh` makes it), with `--max-lines 400000`:
-- the brief's run: `PURE_TEST_UNLOCK_ALL=1 PURE_TEST_NO_DAMAGE=1 PURE_WATCH_GRID=1 PURE_WATCH_SHIP=1
-  PURE_WATCH_RAND=1 PURE_TRACE_RAND=1` (8969 lines): identical;
-- the rest beside the run-control switches: `PURE_WATCH_MOVIE=1 PURE_WATCH_WORDS=08AB45BC,08B17C18
-  PURE_TRACE_CALLS=sceDisplay:0x289D82FE,UtilsForUser:0x37FB5C42 PURE_VFPU_DOT=ppsspp PURE_WATCH_RAND=2
-  PURE_TEST_NO_DAMAGE=1 PURE_FRAME_LOG=100 PURE_PACED_FROM=100000` (20398 lines): the same lines, 66 of them in
-  another place (below);
-- the race clock: `PURE_TEST_RACE_CLOCK=ref/race_clock/vineta_k.txt PURE_TEST_UNLOCK_ALL=1 PURE_WATCH_SHIP=1
-  PURE_WATCH_RAND=1 PURE_TRACE_CALLS=sceDisplay:0x289D82FE,ThreadManForUser:0x82BC5777` (14875 lines): identical.
+A headless run's log is deterministic, so a change to the hooks is proved by a log diff of the same route before and
+after (task 051 diffed three runs of the Vineta K route to flip 6500 with every switch on:
+[the proof](history/verification.md#test-hooks-task-051-2026-10-07)). The diff needs `PURE_NO_BUSY_CLOCK=1`: the
+framework's busy-time charge (`Kernel::charge_busy_time`) adds a thread's wall time to the virtual clock when it runs
+over 100 ms without a wait, which on a loaded machine moves every later `t=` and, without the race clock's replayed
+frame times, the race. Beyond that only the framework's wall-clock figures differ between runs (the `[metal]` lines'
+ms, fps and GPU wait counts, the `[run_boot] exit` time), which the diff masks.
 
-Two things to know when repeating it:
-- **The log diff needs `PURE_NO_BUSY_CLOCK=1`.** A headless run's log is deterministic except for the framework's
-  busy-time charge (`Kernel::charge_busy_time`): a thread that runs over 100 ms of wall time without a wait has that
-  time (up to 250 ms) added to the virtual clock. On a loaded machine a race frame sometimes crosses the line: two of
-  the twelve runs made with the charge on, with other workers' games beside them, took a 101 ms (flip 6072 to 6073)
-  and a 105 ms (flip 6428 to 6429) step, which changes every later `t=` and, without the race clock's replayed frame
-  times, the race. `PURE_NO_BUSY_CLOCK=1` turns the charge off; with it each run gave the same log twice on both builds.
-  Beyond that only the framework's wall-clock figures differ between runs (the `[metal]` lines' ms, fps and GPU wait
-  counts, the `[run_boot] exit` time), which the diff masks.
-- **Two orders moved, the lines did not.** With one install call the start-up lines come in one block after the
-  profile's own, so `[pure] PURE_PACED_FROM=N: ...` now comes before the `TEST SWITCH` lines instead of between the
-  race clock's and no damage's and the unlock lines, and the `PURE_AUDIO_WAV` capture's `audio capture: mix -> ...`
-  line after the unlock lines instead of before them. Within a flip the profile's own lines (`[pure] frame N`,
-  `[pure] paced from frame N`) now come before every test hook's line; `[pure] rand calls frame N` and `[pure] words
-  frame N` used to come before them (the probes' other lines came after them, as now). No tool reads these lines by
-  their order; every effect (each binding, each native function, the GPI answer, the rounding mode) happens at the
-  same moment as before.
-
-# Audio (task 013, 2026-10-05)
+# Audio
 
 ## PURE_AUDIO_WAV
 
@@ -395,22 +351,10 @@ music they are dropouts). With `--min-active-frac` and/or
 `--max-clip-frac` the last line is PASS (exit 0) or FAIL (exit 1); without either it is INFO. Pure Python
 (`array` and `math.sumprod`), about a second per minute of audio.
 
-## The M4 checks (2026-10-05)
+The checks of task 013 (the frontend music, its loop, a race's mix; 2026-10-05):
+[The M4 checks](history/verification.md#the-m4-checks-2026-10-05).
 
-| Check | Run | Result |
-|---|---|---|
-| (a) frontend music | `main_menu.txt`, `--frames 4700` | the game plays no music between the language confirm and the main menu, only movie audio and interface sounds (PPSSPP's `ref/boot-hle.log` creates its only sceAtrac context at about vblank 5400, also at the main menu). Music starts at t=145.5 s (flip ~4370); from 146 s to the end (157.5 s) active 11/11, no clipping. From 15 s: active 0.25, so the brief's `--from 15` check fails |
-| (b) loop boundary | `main_menu.txt` plus DOWN/UP on the main menu every 300 flips (left idle, the attract demo starts about 30 s after the music and releases it), `--frames 7700` | the frontend track is 1,764,236 samples (40.0 s) with a whole-track loop (`PURE_TRACE_ATRAC`: `at=1762188 count=2048 next=0` twice); the music repeats bit for bit at +1,764,236 frames, boundaries at 185.49 s and 225.49 s; 146-257.6 s active 111/111, no zero run of 50 ms, no clipping |
-| (c) race | `out/race/route.txt` + Cross held 1500 flips from 6100, `--frames 7700` | race 209-232 s: mix, effects (ch1) and music (ch2) each active 23/23, no clipping, 0 underruns on ch1 over the run, no zero run in ch1; effects RMS median 2185 vs music 1106, effects above the music in 22 of 23 s; mix peak 6.3 to 18.4 times the music RMS every second |
-
-Dropouts seen once each, not reproduced: in the first race run the frontend music held 7,547 zero frames (171 ms) at
-183.9 s, right after the TRACK SELECTION confirm (flip 5500), and the music then repeated at +1,771,742 frames instead
-of +1,764,236, so the zeros were inserted, not skipped; in the idle main-menu run, 8,902 zero frames (202 ms) at
-164.1 s. Both runs predate the underrun log. Each run of zeros starts inside a buffer the game submitted (1,792 and
-768 frames into a 2944-frame buffer), so at least its start is silence the game handed to sceAudio (its music feed
-starved), not a late output call; the reruns logged no underrun on the music channel.
-
-## tools/audio_compare.py: the port against PPSSPP (task 041, 2026-10-07)
+## tools/audio_compare.py: the port against PPSSPP
 
 ```
 tools/audio_compare.py A.wav B.wav [--from S] [--from-b S] [--seconds N] [--floor RMS] [--block-ms MS] [--top N]
@@ -434,14 +378,14 @@ correlation: the port's music channel (`<file>.ch2.wav`) found in PPSSPP's mix a
 times means the two played the same samples in between; a different offset after a track change is the difference
 in the switch, to the sample. A 2 s template takes about half a second per second searched.
 
-`--selftest` (task 041's Verify) writes WAVs with known gaps, clipping and a hidden stretch and checks the figures,
-PASS or FAIL. The comparisons of differences 7 to 9, and the routes on both sides, are in docs/fidelity.md
-("Differences 7 to 9"). Two things to know when repeating them: the game picks the attract demo's tracks itself,
-differently from run to run, so demos compare by their figures rather than sample for sample; and a dump of a race
-includes PPSSPP's SAS reverb, which the port models since task 043 (patch 0018; before it, PPSSPP's idle race mix had
-about 1.4% more level).
+`--selftest` (task 041's Verify) writes WAVs with known gaps, clipping and a hidden stretch and checks the figures, PASS
+or FAIL. The comparisons of differences 7 to 9, and the routes on both sides, are in docs/fidelity.md ("Differences 7 to
+9"). Two things to know when repeating them: the game picks the attract demo's tracks itself, differently from run to
+run, so demos compare by their figures rather than sample for sample; and a dump of a race includes PPSSPP's SAS reverb,
+which the port models since task 043 (patch 0008-sas-reverb; before it, PPSSPP's idle race mix had about 1.4% more
+level).
 
-## The SAS reverb check (task 043, 2026-10-07)
+## The SAS reverb check
 
 ```
 tools/sas_reverb_check.sh [--out DIR] [--env KEY=VAL ...] [--allow-parallel]
@@ -464,24 +408,11 @@ anyway). `<out>` (default `out/sas_reverb`) keeps the route, the log, the WAVs a
 A/B switches: `--env PURE_NO_REVERB=1` (the port before task 043) and `--env PURE_SAS_REVERB_SPU_RATE=1` (the SPU's own
 22050 Hz) both FAIL.
 
-| Port | 0-100 ms | 100-200 | 200-300 | 300-400 | 400-500 | 500-1000 ms | Result |
-|---|---|---|---|---|---|---|---|
-| PPSSPP's dump | 383 | 194 | 116 | 60 | 31 | 16, 8, 4, 2, 1 | |
-| patch 0018 (the default) | 487 (1.27) | 234 (1.20) | 131 (1.13) | 63 (1.05) | 35 (1.13) | 18, 9, 5, 2, 1 | PASS |
-| `PURE_NO_REVERB=1` | 254 (0.66) | 0 | 0 | 0 | 0 | 0 | FAIL |
-| `PURE_SAS_REVERB_SPU_RATE=1` | 607 (1.59) | 416 (2.14) | 358 (3.09) | 267 (4.42) | 211 (6.83) | 158 to 42 | FAIL |
+On 2026-10-07 the port's five steps were 1.05 to 1.27 of PPSSPP's (PASS); without the reverb the tail is exact zeros
+after the first step, and at the SPU's own rate 1.59 to 6.83 times PPSSPP's (both FAIL):
+[the table](history/verification.md#the-sas-reverb-check-task-043-2026-10-07).
 
-(port/PPSSPP in brackets; the port's held effects end at 558.085 s, 150 ms after START at 557.935 s, PPSSPP's at
-480.609 s, 130 ms after 480.479 s.) The first step of the port without the reverb is the last 10 ms of the held
-effects' fade; from there it is exact zeros.
-
-Re-baselined 2026-10-07 after task 036 (environment and projection mapping): the Metal column of race_hud (0.0262),
-tt_hud (0.0229), fp_hud (0.0232), zone_hud (0.0122) and zone_change (0.0353). The Vulkan column is unchanged (it keeps
-mode 0), and `tools/gerec/metal_check.sh` runs the race A/B with `PURE_NO_TEXMAP=1` so both backends draw mode 0.
-
-Re-baselined again 2026-10-07 after task 037 (mipmaps): race_hud 0.0149, tt_hud 0.0112, fp_hud 0.0116, zone_hud 0.0121.
-
-## The save interchange check (task 045, 2026-10-07)
+## The save interchange check
 
 ```
 tools/save_interchange.sh [--port-only]
@@ -490,15 +421,16 @@ tools/save_interchange.sh --make-ppsspp-save
 ```
 
 Checks that saves move both ways between the port and PPSSPP (a PSP's stand-in) now that the port writes them in the
-PSP's own format, the save-data utility's no-key mode (patch 0019, docs/savedata.md "The PSP's format"). The port runs
-are headless, unpaced and silent on memory sticks of their own under `out/045/<step>/game`; the PPSSPP run is the
-driver's, real time, on PPSSPP's own memory stick, which the script leaves as it found it. About 3 minutes when PPSSPP
-is free; it waits (at most 20 minutes) while another PPSSPP runs, and never touches another process.
+PSP's own format, the save-data utility's no-key mode (patch 0007-savedata-list-and-no-key-mode, task 045;
+docs/savedata.md "The PSP's format"). The port runs are headless, unpaced and silent on memory sticks of their own under
+`out/045/<step>/game`; the PPSSPP run is the driver's, real time, on PPSSPP's own memory stick, which the script leaves
+as it found it. About 3 minutes when PPSSPP is free; it waits (at most 20 minutes) while another PPSSPP runs, and never
+touches another process.
 
 | Step | What runs | Passes when |
 |---|---|---|
 | (a) PPSSPP to port | PPSSPP's NAME0000 (`ref/saves/ppsspp/UCUS98612P0000`, ref/README.md) alone on a fresh stick; `profile_load.txt` headless with `PURE_TRACE_SAVEDATA` to flip 3900 | LISTLOAD loads 41570 bytes and logs both hashes verified (mode 1); MAIN MENU within 0.05 of `ref/main_menu.png` at tol 24 (the suite's limit; 0.011); SET NAME's digits vary by 500 or more (1531: NAME0000); the game's PROFILE > SAVE writes P0000 back in mode 1, 41586 bytes, with "User name: NAME0000" in its PARAM.SFO (the game's own profile line), and that save verifies |
-| plain | the build before patch 0019's plain save (`ref/saves/port-plain/`), the same route | it loads as a plain save (flag 0) and shows as in (a); the game's save rewrites it in mode 1, and that verifies |
+| plain | the plain save of the build before task 045 (`ref/saves/port-plain/`), the same route | it loads as a plain save (flag 0) and shows as in (a); the game's save rewrites it in mode 1, and that verifies |
 | born | `main_menu.txt` headless on an empty stick, with SET NAME's shot at 2250 | NEW writes P0000 and the first-boot AUTOSAVE writes `PPCD00001DLS001` in mode 1; SET NAME on the empty stick is blank past NAME (variance 0, the control) |
 | (b) port to PPSSPP | (a)'s save (the round trip's) copied into PPSSPP's stick; `tools/ppsspp/routes/profile_load.txt` (LOAD, the load dialog, Enter, "Load completed.", Back, MAIN MENU, PROFILE > NEW > YES, SET NAME) | MAIN MENU at 3720 within 0.05 of `ref/main_menu.png`; SET NAME at 4560 varies by 500 or more, equals the port's SET NAME of (a) (tol 24, 0.02) and differs from the empty stick's; the stick holds what it held before |
 | (c) side by side | the port's NEW profile and the round trip's against PPSSPP's, the port's `PPCD00001DLS001` against PPSSPP's, each through the framework's `load_save` and hash checks (`out/045/savecheck`, built from `vendor/portablekit`'s save-data sources) | both sides verify (PARAM.SFO's hash, the data file's listed hash, decrypted); PARAM.SFO the same size, keys, formats, lengths and values apart from the bytes that cover the random header (the file's hash in `SAVEDATA_FILE_LIST`, the mode-1 hash at SAVEDATA_PARAMS 0x10); the flag byte equal; ICON0, ICON1, PIC1 and SND0 byte-equal. The decrypted contents are compared and every difference is listed (not a failure) |
@@ -518,7 +450,7 @@ to read a profile's contents: the plain bytes of a mode-1 save are not on the st
 remakes PPSSPP's reference save with `frontend.txt` + `save_yes.txt` + `save_dialog.txt` and moves it out of PPSSPP's
 stick into `ref/saves/ppsspp/`.
 
-## The accuracy scorecard (task 044, 2026-10-07)
+## The accuracy scorecard
 
 ```
 tools/scorecard.py [--quick | --full] [--only CATEGORY[,CATEGORY...]] [--out DIR] [--tracks TRACK[,...]]
@@ -581,19 +513,19 @@ How each category measures:
   median correlation graded; then the two mixes over 60 s from GO aligned by the best stretch's offset: the share of
   seconds where both or neither are active, and the clipped samples. The AI ships differ in the port, so the effects
   do too; the RMS ratio of the race mixes is reported, not graded.
-- **Saves.** `tools/save_roundtrip.sh`'s first run, `main_menu.txt` on an empty stick (NEW, NAME0000, AAA, SAVE
-  PROFILE YES), made headless in seconds (the script itself runs five windowed runs in 13 minutes and has no option for
-  one), against PPSSPP's save of the same profile (`ref/scorecard/saves/UCUS98612P0000`). Since task 045 (patch
-  0019) both write PROFILE.BIN enciphered in the save utility's mode 1, so it is compared by size and by its contents,
-  each side decrypted through the framework's own load path with both hashes checked (`tools/save_interchange.sh
-  --check`): close when the only differing words hold user-RAM addresses on both sides (the profile keeps heap
-  pointers verbatim, task 045's finding; the game sets them again on a load).
+- **Saves.** `tools/save_roundtrip.sh`'s first run, `main_menu.txt` on an empty stick (NEW, NAME0000, AAA, SAVE PROFILE
+  YES), made headless in seconds (the script itself runs five windowed runs in 13 minutes and has no option for one),
+  against PPSSPP's save of the same profile (`ref/scorecard/saves/UCUS98612P0000`). Since task 045 (patch
+  0007-savedata-list-and-no-key-mode) both write PROFILE.BIN enciphered in the save utility's mode 1, so it is compared
+  by size and by its contents, each side decrypted through the framework's own load path with both hashes checked
+  (`tools/save_interchange.sh --check`): close when the only differing words hold user-RAM addresses on both sides (the
+  profile keeps heap pointers verbatim, task 045's finding; the game sets them again on a load).
 - **Coverage.** The cell results of `tools/fidelity_audit.py` from `out/035-wip/fidelity` (this checkout's, else the
   main checkout's, else `out/fidelity`); without them the rows say which command makes them (about 4 hours; the
   scorecard never runs the matrix). The 278 imports by state from `config/imports.csv`, the start-up list of
-  unimplemented imports and the `[hle-stub]` and `UNVERIFIED` lines of the matrix's logs (the brief names
-  `config/hle_coverage.csv`, which does not exist). The GE commands still ignored from this run's exit list. Functions
-  entered: not measured (no cheap entry count exists).
+  unimplemented imports and the `[hle-stub]` and `UNVERIFIED` lines of the matrix's logs (the brief names an
+  `hle_coverage.csv` under `config/`, which does not exist). The GE commands still ignored from this run's exit list.
+  Functions entered: not measured (no cheap entry count exists).
 
 `--refresh-references [CATEGORY]` (trajectories, audio, saves or timing; all four without one) takes the PPSSPP side
 into `ref/scorecard/`, one PPSSPP at a time, waiting while PPSSPP runs for another task or while its memory stick
@@ -602,7 +534,7 @@ holds a profile save, and lists every file with its SHA-256 in `ref/scorecard/ma
 fail the run. `--selftest` checks every grader, the parsers and the report on synthetic inputs (PASS in about a
 second).
 
-## The VFPU dot-product check (task 047, 2026-10-07)
+## The VFPU dot-product check
 
 ```
 tools/vfpu_probe.py cover [--track T] [--seconds S]          # once: which sites a race runs (ref/vfpu/coverage.csv)
@@ -634,19 +566,10 @@ counts only when the two lines are consecutive in PPSSPP's log. Three things the
 - With the interpreter (`--cpu-core 0`) a log-only breakpoint stops the CPU like any other; the probe then reads the
   registers with `cpu.getAllRegs` at each stop and resumes (about 90 stops a second, so that run samples 27 sites).
 
-The breakpoints change PPSSPP's AI race a little (the player's ship ends within 1 mm of the reference at 12 s in
-every run): every ship's end position against the scorecard's reference race at the same clock, the largest of the
-seven AI ships:
-
-| Breakpoints (JIT) | Largest AI offset at 12.1 s |
-|---|---|
-| one, on code the race never runs (the measure's floor) | 0.055 m |
-| four, on integer instructions next to the two task 046 `vdot.t` sites | 0.550 m |
-| four, on those two `vdot.t` sites and the instructions after them | 0.560 m |
-| 330, on the 195 sampled sites and the instructions after them | 8.040 m |
-
-A breakpoint beside a `vdot` moves the race as much as one on it, so it is the breakpoints' place in the JIT's blocks,
-not a different `vdot`, that moves it; each logged row is still one execution's operands and result.
+The breakpoints change PPSSPP's AI race a little (the player's ship ends within 1 mm of the reference at 12 s in every
+run; the AI ships up to 8 m with 330 breakpoints), by their place in the JIT's blocks, not by the instruction they
+sit on; each logged row is still one execution's operands and result. The measurements:
+[the breakpoints](history/verification.md#the-vfpu-dot-product-check-task-047-2026-10-07).
 
 **The port side.** `port` builds, for every sampled site, the corpus's own block of that instruction
 (`generated/generated_unit_*.cpp`, between its label and its `goto`) into one program with the corpus's flags
@@ -660,7 +583,7 @@ all of them, else prints up to 20 failing rows a group (operands, PPSSPP's resul
 then reports the transcendental instructions. About 10 s. `--report` runs every candidate model over every set
 (about 70 s for the JIT set). The samples are git-ignored; ref/README.md has the commands and their hashes.
 
-### The two rounding modes of patch 0020 (D-013)
+### The two rounding modes (D-013)
 
 The port's generated code rounds dot products as a real PSP does by default and as PPSSPP's JIT does under the test
 mode (`PURE_VFPU_DOT=ppsspp`, or `PURE_TEST_RACE_CLOCK`, which implies it). Both are checked against the recorded
@@ -675,13 +598,12 @@ python3 tools/vfpu_model.py --report out/vfpu_ppsspp     # the "port" row must r
 ```
 
 and, for the default mode, the port's results against the hardware model (`vfpu_model.model_fn("c", vfpu_model.HW[1])`)
-over `vfpu_model.dot_rows(...)` of `out/vfpu_psp/jit`, which must agree on every row. On 2026-10-07 after the corpus
-rebuild: the test mode 100 percent at vdot.t (466447), vdot.q (7506), vtfm3.t (255222), vtfm4.q (59064) and vmmul.q
-(384704); the default mode equal to the hardware rule on every one of the same 1172943 dot products. The probe's
-harness compiles the header, so the check runs without a game; the vtfm and vmmul sites need the regenerated corpus
-(`tools/regen.sh`), since their code is emitted inline.
+over `vfpu_model.dot_rows(...)` of `out/vfpu_psp/jit`, which must agree on every row. The probe's harness compiles
+the header, so the check runs without a game; the vtfm and vmmul sites need the regenerated corpus (`tools/regen.sh`),
+since their code is emitted inline. The figures of the corpus rebuild of 2026-10-07:
+[the two rounding modes](history/verification.md#the-two-rounding-modes-task-047-2026-10-07).
 
-### The other kinds (task 048, 2026-10-07)
+### The other kinds
 
 ```sh
 P=/opt/homebrew/bin/python3
@@ -709,24 +631,22 @@ What is new in the tools:
   PPSSPP's emulated time by the player's samples of the scorecard's reference race (`--sites` may then name sites
   that never run; they give empty files). Karbonis' dot and transcendental window (`048_karbonis_dot`, 711 sites, 6.0 to
   7.0 s) was taken with `--sites` set to every dot and transcendental site of `scan`.
-- `port --modes ppsspp,psp` runs the harness under each rounding mode of patch 0020 and writes
+- `port --modes ppsspp,psp` runs the harness under each rounding mode of patch 0009-vfpu-rounding and writes
   `<ADDR>.port.<mode>.csv`; `--check` then prints, under every rule line, the test mode against PPSSPP and the default
   mode against the PSP's rule (`hw_of`: the hardware dot product, or `HW_048`'s model). The harness now compiles with
-  `-ffp-contract=off`, as the corpus does since patch 0020.
-- A header experiment never touches `vendor/`: copy `vendor/portablekit/include` to `out/048/candidate/include`, edit
-  it there, then `port DIR --modes ppsspp,psp --tag candidate --include out/048/candidate/include` and
-  `vfpu_model.py --check DIR --tag candidate`. The corpus before patch 0020 is the same with the header hunk of
-  `patches/0020-vfpu-dot-rounding.patch` reversed in the copy and `--fp-contract on --tag pre0020`.
+  `-ffp-contract=off`, as the corpus does since task 047.
+- A header experiment never touches `vendor/`: copy `vendor/portablekit/include` to `out/048/candidate/include`, edit it
+  there, then `port DIR --modes ppsspp,psp --tag candidate --include out/048/candidate/include` and `vfpu_model.py
+  --check DIR --tag candidate`. The corpus before task 047's rounding is the same with that rounding's header hunk (old
+  patch 0020, the first part of `patches/0009-vfpu-rounding.patch`) reversed in the copy and `--fp-contract on --tag
+  pre0020`.
 - `vfpu_model.py --diff DIR [--which ppsspp]` lists, per site and then in time order, every sampled result where the
   port differs from PPSSPP: the candidates a divergence can start from.
 
-On 2026-10-07 (PPSSPP 1.20.4, JIT): `vcrsp.t` is unfused (both products rounded, then their difference) on all
-1592532 result lanes of the two circuits, which the port's test mode gives on 75.9% (Vineta K) and 79.8% (Karbonis);
-`vfad` in lane order and `vmscl` one IEEE product on all, which the port gives on all. With the header copy of the
-Result of docs/tasks/048 the test mode reproduces every one and the default mode equals the PSP's rule on every one.
-The check runs in about 2.5 minutes over every set under `ref/vfpu`.
+What the samples of the other kinds showed (2026-10-07): [The other
+kinds](history/verification.md#the-other-kinds-task-048-2026-10-07).
 
-# The shared runner: tools/purelib (task 050, 2026-10-07)
+# The shared runner: tools/purelib
 
 The Python tools share one copy of the code that runs the game, waits its turn and reads the log: the package
 `tools/purelib/` (standard library only). A tool puts `tools/` on `sys.path`, as every tool does for `tools/png.py`,
@@ -759,8 +679,31 @@ The tools' own rules moved as they were; the module holds each of them, it did n
 - PPSSPP. The scorecard, `vfpu_probe.py` and `ai_seed_check.sh` wait through `wait_free`; `save_interchange.sh` keeps
   its bash wait (PPSSPP only, at most 30 minutes).
 
-Checked against the tools before the move (task 050's Result): every check of the brief gave the same result; the
-old `run_boot.py` and the sweep's old pty reader against `PtyRun` on a stand-in game, in six ways a run ends (frame
-exit, deadline, signal, an exit status, a slow writer, a 30,000-line flood), with and without the line cap, gave the
-same logs, lines, stdout and codes; `fidelity_audit.py --rescan` of the cached 46-cell matrix gave the same cells and
-tables; `pp_lines.py --port` on a grid log gave the same samples.
+How the move was shown to change nothing (task 050): [the shared
+runner](history/verification.md#the-shared-runner-task-050-2026-10-07).
+
+# The docs check
+
+```
+python3 tools/docs_check.py [--quiet] [FILE.md ...]
+```
+
+Task 053 (2026-10-07). Reads README.md, ref/README.md, patches/README.md and every doc under `docs/` except the task
+files (`docs/tasks/` is the record: each cites what existed when it was written, and is never rewritten), and checks
+that the docs name only what exists:
+
+- **Paths.** Every `tools/...`, `src/...`, `config/...`, `docs/...`, `packaging/...` and `third_party/...` path a doc
+  names exists: a file, a directory, a glob that matches, `a.{hpp,cpp}` braces with every member, or a stem
+  (`src/tools/ge_replay`); a placeholder in capitals (TRACK, MODE, NAME, FILE, DIR and the like) stands for any
+  name. Paths inside code blocks count too. The spike reports about other repositories (docs/vendor-map.md,
+  docs/codegen-baseline.md, docs/research.md) and the dated history files under `docs/history/` are not path-checked.
+- **Links.** Every relative Markdown link resolves, and a `#anchor` names a heading of its file (GitHub's rule).
+- **Patches.** Every `NNNN-slug` patch name is a file in `patches/`, and a patch cited by the word and a number alone is
+  reported: task 052 regrouped the series, so the numbers tasks 001 to 048 used name other patches now.
+  A doc cites a patch as `NNNN-slug` with the task that made the change ("patch 0002-ge-state-commands (task 037)"),
+  or an old number as "old NNNN" on purpose; a history file may cite an old patch by the name patches/README.md's
+  mapping table gives it.
+- **Tasks.** Every `docs/tasks/NNN` cited is a task file.
+
+It prints one line per finding (`FILE:LINE: what`) and a verdict, and exits 0 when there is none, 1 otherwise. Run it
+after editing a doc, and in a task that moves or renames a file, a tool or a patch.

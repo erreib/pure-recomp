@@ -166,7 +166,8 @@ def check_file(rel, patch_stems, task_files, findings):
         for m in PATCH_BARE_RE.finditer(joined):
             if m.start() >= len(line):
                 continue
-            before = line[:m.start()].rstrip().lower()
+            previous = lines[number - 2].split()[-1:] if number > 1 and lines[number - 2].strip() else []
+            before = " ".join(previous + [line[:m.start()]]).rstrip().lower()
             if not before.endswith("old"):
                 findings.append(f"{where}: '{m.group(0)}' names a patch by number alone (patches/README.md maps "
                                 "the old numbers; give NNNN-slug)")
