@@ -19,6 +19,10 @@ FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the fr
 # over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings.
 SCRATCH_SETTINGS = "ui.menu_hint_seen=1\n"
 CHECKOUT_VARS = ("PURE_ROOT", "PURE_MAIN_CHECKOUT")     # name checkouts, not switches: clean_env keeps them
+# The framework's busy-time charge (Kernel::charge_busy_time: a thread that runs over 100 ms of wall time without a
+# wait has up to 250 ms added to the virtual clock) makes a headless run's game state depend on the machine's load
+# (task 051 saw it twice in twelve runs); with this switch set, to any value, the charge is off and a run repeats.
+STEADY_CLOCK = "PURE_NO_BUSY_CLOCK"
 REFUSED = "another PureNative is running"               # the guard's words (refuse, wait_game)
 WAITED = 0.0                                            # seconds this process has spent in wait_until
 
@@ -70,6 +74,12 @@ def silence(env, sound=False, window=True):
     still captures them."""
     if not sound and "PURE_NO_AUDIO" not in env and not (window and "PURE_AUDIO_WAV" in env):
         env["PURE_NO_AUDIO"] = "1"
+
+
+def steady_clock(env):
+    """PURE_NO_BUSY_CLOCK=1 for a headless test run (the busy-time charge off, so the run does not depend on the
+    machine's load) unless env names it already; windowed and sound-on runs, a player's, are not given it."""
+    env.setdefault(STEADY_CLOCK, "1")
 
 
 def fresh_stick(game_dir):

@@ -22,6 +22,9 @@ The data directory (task 034): PURE_DATA_DIR (settings.ini, pipeline caches, log
 so a test run never reads or writes the player's ~/Library/Application Support/pure-recomp/PureNative/ and settings
 changed while playing never reach a test. A new one starts with a settings.ini holding ui.menu_hint_seen=1 (the
 menu hint would sit over a window's first 12 s). The game itself comes from PURE_GAME_DIR (default game/).
+The clock (task 050): a run without a window and without --sound gets PURE_NO_BUSY_CLOCK=1 (the framework's
+busy-time charge off, so the run does not depend on the machine's load), unless the environment (or --env) names
+it; a window or --sound keeps the framework's charge, as a player has it.
 --frames N sets PURE_EXIT_AT_FRAME=N (the profile stops the runtime at that flip), raises the deadline to
 max(seconds, N/15) and exits 0 when the run ended there (`[pure] exit at frame` in the output).
 --script FILE joins the file's non-empty lines that do not start with `#` with `;` into PURE_INPUT_SCRIPT and
@@ -183,9 +186,11 @@ def main(argv=None):
     if opts.stubs:
         env["PURE_LIST_STUBS"] = "1"
     extra = dict(kv.split("=", 1) for kv in opts.env)
-    asked = dict(env, **extra)          # --env counts as the environment for the two defaults below
+    asked = dict(env, **extra)          # --env counts as the environment for the defaults below
     silence(asked, opts.sound, window)
     scratch_data_dir(asked, opts.data_dir)
+    if not window and not opts.sound:
+        port.steady_clock(asked)
     env.update(asked)
     shots_before = bmp_state(shots) if shots is not None else {}
 
