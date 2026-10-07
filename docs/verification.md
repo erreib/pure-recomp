@@ -353,3 +353,7 @@ of +1,764,236, so the zeros were inserted, not skipped; in the idle main-menu ru
 164.1 s. Both runs predate the underrun log. Each run of zeros starts inside a buffer the game submitted (1,792 and
 768 frames into a 2944-frame buffer), so at least its start is silence the game handed to sceAudio (its music feed
 starved), not a late output call; the reruns logged no underrun on the music channel.
+
+Re-baselined 2026-10-07 after task 036 (environment and projection mapping): the Metal column of race_hud (0.0262),
+tt_hud (0.0229), fp_hud (0.0232), zone_hud (0.0122) and zone_change (0.0353). The Vulkan column is unchanged (it keeps
+mode 0), and `tools/gerec/metal_check.sh` runs the race A/B with `PURE_NO_TEXMAP=1` so both backends draw mode 0.
