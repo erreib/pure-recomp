@@ -3,20 +3,25 @@
 
   vfpu_probe.py scan [--kinds K,...]              the dot-product and transcendental sites of EBOOT.ELF
   vfpu_probe.py cover [--track T] [--seconds S]   which of them a race executes, and how often (PPSSPP)
-  vfpu_probe.py sample [--track T] [--seconds S] [--sites auto|ADDR,...] [--out DIR]
+  vfpu_probe.py sample [--track T] [--seconds S] [--sites all|auto|ADDR,...] [--cap N] [--cpu-core 0|1] [--out DIR]
                                                   operands and results at the sites, one CSV a site (PPSSPP)
   vfpu_probe.py port [DIR]                        the port's results for the same operands, from the corpus's own
                                                   code for each site, compiled with the corpus's flags
 
 How the PPSSPP side works. The route is the scorecard's reference route for the circuit (tools/scorecard.py
 pp_routes: the frontend, the circuit, Cross held from READY), so the race is the reference race the race clock of
-task 046 was taken from (PPSSPP repeats a route exactly). When the run reaches READY the probe pauses the CPU once and
-puts log-only breakpoints (they never stop the CPU) on every site and on the instruction after it; the first logs the
-source lanes the encoding names (`cpu.evaluate` and the breakpoint log both take PPSSPP's scalar names, S000 to
-S733), the second the destination lanes, which is the state one step later. A site in a branch delay slot gets its
-second breakpoint at the branch's target (and at the fall-through for a conditional branch); a site after `jr` or
-`jalr` is skipped. A result line counts only when the line just before it in PPSSPP's log is its own site's operand
-line, so a pair is always one execution. The run ends when the player's race clock reaches --seconds.
+task 046 was taken from (PPSSPP repeats a route exactly). At boot, before the JIT has compiled anything, the probe
+puts log-only breakpoints (they never stop the CPU) on every site and on the instruction after it, each with the
+condition `usec >= READY` (and an end for a hot site, which logs for a shorter span from GO); a breakpoint added later,
+while the CPU runs, never fires in a block PPSSPP's JIT has already compiled. The first logs the source lanes the
+encoding names (`cpu.evaluate` and the breakpoint log both take PPSSPP's scalar names, S000 to S733), the second the
+destination lanes, which is the state one step later. A site in a branch delay slot gets its second breakpoint at the
+branch's target (and at the fall-through for a conditional branch); a site after `jr` or `jalr` is skipped. A result
+line counts only when the line just before it in PPSSPP's log is its own site's operand line, so a pair is always
+one execution. The run ends when the player's race clock reaches --seconds; every ship's position is then compared
+with the scorecard's reference race. With PPSSPP's interpreter (`--cpu-core 0`) a log-only breakpoint stops the CPU,
+so the probe steps instead: it reads the registers at each stop (cpu.getAllRegs) and resumes, about 90 stops a second.
+The ini (and so the CPU core) is put back after every run; this machine's PPSSPP runs the JIT (CPUCore = 1).
 
 The prefix registers (VPFXS, VPFXT, VPFXD) are not registers PPSSPP's debugger exposes (cpu.getAllRegs offers GPR,
 FPU and the 128 VFPU scalars; checked 2026-10-07): they are set by the vpfx instructions just before an instruction,
@@ -27,7 +32,8 @@ Files (ref/vfpu/ by default; git-ignored, hashes in ref/README.md):
   sites.json        every sampled site: word, mnemonic, lanes (PPSSPP names), prefixes, function, rows
   <ADDR>.csv        `usec,s0..,t0..,d0..` in hex (s source lanes, t target lanes, d destination lanes after)
   <ADDR>.port.csv   (port) the port's destination lanes for the same rows
-  coverage.csv      (cover) hits per site over the covered race window
+  coverage.csv      (cover) hits per site over the covered race window; coverage.json, the run
+  A set a PPSSPP core: ref/vfpu/jit/ (core 1) and ref/vfpu/interp/ (core 0); coverage.* in ref/vfpu/ serves both.
 
 PPSSPP's memory stick: the routes answer NO to SAVE PROFILE; the probe compares PSP/SAVEDATA before and after and
 moves anything new out to out/vfpu_probe/savedata-moved/ (none so far). Python 3 standard library only.
