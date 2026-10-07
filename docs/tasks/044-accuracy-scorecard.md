@@ -176,7 +176,7 @@ The other rows:
   - both mixes active in 1.00 of the seconds;
   - clipped samples 0 against 6, 0 and 0.
 
-Changed (12 commits on the branch, plus the merges):
+Changed (on the branch, beside the merges of batch/m2):
 - `tools/scorecard.py` (new).
 - `tools/ppsspp/routes/main_menu_music.txt` (new): MAIN MENU with L every 20 s. This keeps the attract demo away, and L
   makes no sound there.
