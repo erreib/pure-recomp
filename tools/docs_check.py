@@ -139,7 +139,12 @@ def check_file(rel, patch_stems, task_files, findings):
             if stem not in patch_stems and not re.match(r"\d{4}-\d", stem):
                 findings.append(f"{where}: patch {stem} is not in patches/")
         # Patches named by a bare number.
-        for m in PATCH_BARE_RE.finditer(line):
+        # (A citation broken across two lines counts on the first: the next line's first word is read with it.)
+        following = lines[number].split()[:1] if number < len(lines) else []
+        joined = " ".join([line] + following)
+        for m in PATCH_BARE_RE.finditer(joined):
+            if m.start() >= len(line):
+                continue
             before = line[:m.start()].rstrip().lower()
             if not before.endswith("old"):
                 findings.append(f"{where}: '{m.group(0)}' names a patch by number alone (patches/README.md maps "
