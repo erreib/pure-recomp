@@ -1,6 +1,6 @@
 # 041: The hitches, the music gaps and the demo's clipping: checked against PPSSPP (fidelity differences 7, 8, 9)
 
-Milestone: M8 | Branch: task/041-hitches-and-audio-checks | Status: OPEN (run alone on the machine)
+Milestone: M8 | Branch: task/041-hitches-and-audio-checks | Status: MERGED (b9fd4ad, 2026-10-07)
 
 ## Goal
 Three findings of the audit are "to check": the game freezing 0.1 to 0.3 s now and then with a gap in the sound (12
@@ -221,4 +221,24 @@ Open questions:
 
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at b9fd4ad (2026-10-07): `tools/verify_task.sh 041` (audio_compare
+selftest PASS; race_hud 0.0148 against its measured 0.0149). No code of the port changed and no patch was added, so
+the full suite stands at task 040's rerun.
+
+Spot-read: tools/ppsspp/ppsspp_ctl.py (the dump settings go through the existing session context manager with the
+driver's and mute settings, so they are restored after the run; only the WAV new or grown during the run is moved
+out of the memstick, others are left in place; the RIFF repair rewrites only the data and RIFF sizes of a file
+PPSSPP did not close; `--dump-audio` refuses `--keep-running`), tools/audio_compare.py (the selftest covers each
+measure the comparisons use: activity, silences, clipping, peaks, the one-sided rows and `--locate` under noise),
+docs/fidelity.md rows 7, 8, 9 and the new 12. Files outside May touch: none.
+
+Merged: b9fd4ad into batch/m2 (`git merge --no-ff`).
+
+Notes: the brief's "through the sweep" could not drop the probe lines (the follower steers from them), so the two
+player-like runs launched the game directly with the sweep's steering replayed, which is the closer imitation of a
+player anyway. The machine was under heavy load during the runs (a browser renderer, a Steam helper, 44.5 GB of
+swap in use on 24 GB) and the display was asleep, so no window reached the screen; the frame times are host
+wall-clock and the windowed-against-headless contrast holds under that load, but a run with the display awake on
+an idle machine would be the final word on a player's experience. Open items go to docs/status.md: the SAS reverb
+(difference 12, a framework patch: the game sends type 5, both sends on, volume 0x666), the pre-warm list's nine
+missing pipelines (the one hitch a player could meet, on a cold shader cache), and the 38.5 ms later track switch.
