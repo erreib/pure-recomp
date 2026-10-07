@@ -11,7 +11,7 @@ add_subdirectory(vendor/portablekit portablekit)
 # portablekit_main, otherwise (task 022).
 # The Metal GE backend's files, by concern (docs/metal-backend.md, "Files"; task 049).
 set(metal_backend_sources src/gpu/metal_backend.mm src/gpu/metal_targets.mm src/gpu/metal_textures.mm
-    src/gpu/metal_pipelines.mm src/gpu/metal_trace.mm)
+    src/gpu/metal_pipelines.mm src/gpu/metal_effects.mm src/gpu/metal_trace.mm)
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main

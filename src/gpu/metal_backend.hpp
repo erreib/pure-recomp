@@ -28,9 +28,9 @@ namespace pure::gpu::metal_backend {
 std::array<float, 4> unpack_color(std::uint32_t color, float fourth = 1.0f);  // metal_backend.mm
 void not_emulated(const char *what, std::uint32_t value);                     // metal_backend.mm
 MTLCompareFunction to_compare(std::uint32_t function);                        // metal_pipelines.mm
-std::uint32_t stored_reference(const DrawCall &call);                         // metal_backend.mm
-int stencil_alpha(const DrawCall &call);                                      // metal_backend.mm
-bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail);        // metal_backend.mm
+std::uint32_t stored_reference(const DrawCall &call);                         // metal_effects.mm
+int stencil_alpha(const DrawCall &call);                                      // metal_effects.mm
+bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail);        // metal_effects.mm
 const char *format_name(TextureFormat format);                                // metal_textures.mm
 std::uint32_t texture_bits(TextureFormat format);                             // metal_textures.mm
 
@@ -107,7 +107,7 @@ private:
     void report_pipelines();
     void write_pipeline_list();
 
-    // Effects: the stencil kept as the alpha, and the blend of a 16-bit target in the shader (metal_backend.mm)
+    // Effects: the stencil kept as the alpha, and the blend of a 16-bit target in the shader (metal_effects.mm)
     void resolve_stencil_alpha(const char *reason);
     static bool blend_reads_source_alpha(const RenderKey &key, std::uint8_t write_mask);
     static bool blend_reads_destination_alpha(const RenderKey &key);
