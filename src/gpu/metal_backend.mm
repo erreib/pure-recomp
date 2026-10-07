@@ -117,8 +117,12 @@ struct VertexUniforms {
     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
     std::array<std::uint32_t, 4> mode{};
     std::array<float, 4> view_z{};
+    std::array<std::uint32_t, 4> texture_map{};  // mode, projection source, the two shade lights (task 036)
+    std::array<float, 16> texture_matrix{};
+    std::array<float, 4> viewer{};
+    std::array<float, 4> uv_remap{1.0f, 1.0f, 0.0f, 0.0f};
 };
-static_assert(sizeof(VertexUniforms) == 128u, "VertexUniforms must match metal_shaders.h");
+static_assert(sizeof(VertexUniforms) == 240u, "VertexUniforms must match metal_shaders.h");
 
 struct Light {
     std::array<float, 4> position{};
@@ -469,6 +473,7 @@ struct Stats {
     std::uint64_t passes{};
     std::uint64_t decoded{};
     std::uint64_t framebuffer_textures{};
+    std::uint64_t texture_mapped{};  // draws whose texture coordinates came from the texture matrix or the normals
     std::uint64_t copies{};
     std::uint64_t uploads{};
     std::uint64_t waits{};
@@ -641,6 +646,8 @@ public:
             no_lighting_ = portablekit::env("NO_LIGHTING") != nullptr;
             no_fog_ = no_lighting_ || portablekit::env("NO_FOG") != nullptr;
             no_cull_ = portablekit::env("NO_CULL") != nullptr;
+            // Ours (task 036): every draw takes its UVs (texture map mode 0), as before the mapping modes.
+            no_texture_map_ = portablekit::env("NO_TEXMAP") != nullptr;
             // The framework's traces, as the Vulkan backend reads them: a line per copy of the stencil into the
             // alpha, and per depth write-back.
             trace_stencil_copy_ = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
@@ -674,7 +681,8 @@ public:
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
             std::cout << "[metal] " << frames_ << " frames, " << stats_.draws << " draws, " << stats_.passes
                       << " passes, " << stats_.decoded << " textures decoded, " << stats_.framebuffer_textures
-                      << " framebuffer textures, " << stats_.copies << " target copies, " << stats_.uploads
+                      << " framebuffer textures, " << stats_.texture_mapped << " texture-mapped draws, "
+                      << stats_.copies << " target copies, " << stats_.uploads
                       << " uploads, " << targets_.size() << " targets, " << stats_.waits << " GPU waits ("
                       << stats_.wait_ms << " ms) in " << seconds << " s\n";
             report_guest_writes();
@@ -1992,12 +2000,13 @@ private:
     }
 
     // The lights, the material and the fog of a lit or fogged draw into lighting_ (ge.vert's Environment
-    // and Object blocks, filled as vulkan_renderer.cpp fills them).
-    void fill_lighting(const DrawCall &call, bool lit, bool fogged) {
+    // and Object blocks, filled as vulkan_renderer.cpp fills them). An environment-mapped draw (`shade_mapped`)
+    // reads the world matrix, the lights and the reversed normals whether it is lit or not.
+    void fill_lighting(const DrawCall &call, bool lit, bool fogged, bool shade_mapped) {
         LightingUniforms block{};
         const pk::LightingState &state = call.lighting;
         if (fogged) block.fog = {call.fog.end, call.fog.scale, 0.0f, 0.0f};
-        if (lit) {
+        if (lit || shade_mapped) {
             block.world = call.world;
             block.ambient = unpack_color(state.ambient_color, static_cast<float>(state.ambient_alpha & 0xFFu) / 255.0f);
             block.emissive = unpack_color(state.material_emissive, state.specular_power);
@@ -2131,6 +2140,45 @@ private:
         return [device_ newDepthStencilStateWithDescriptor:descriptor];
     }
 
+    // The texture mapping mode of a textured, transformed draw (task 036): the texture matrix (1) or the
+    // environment map (2) computed in ge_vertex, or the UVs (0) as before. `source` is the target sampled as the
+    // texture, if any: the mapped coordinates are placed in it as uv_transform places the UVs.
+    void set_texture_map(const DrawCall &call, const Target *source, std::uint32_t source_x, std::uint32_t source_y,
+                         VertexUniforms &vertex, FragmentUniforms &fragment) {
+        const pk::TextureMapState &map = call.texture_map;
+        if (call.through || no_texture_map_ || map.map_mode == 0u) return;
+        if (map.map_mode == 3u) {
+            not_emulated("texture map mode 3 (drawn with its UVs)", map.map_mode);
+            return;
+        }
+        if (sprite_corners_ != 0u) {
+            // The corners of a transformed sprite are made in clip space on the CPU; none of the game's is mapped.
+            not_emulated("texture map mode on a transformed sprite (drawn with its UVs)", map.map_mode);
+            return;
+        }
+        vertex.texture_map = {map.map_mode, map.proj_source, map.shade_light_u, map.shade_light_v};
+        if (map.map_mode == 1u) {
+            vertex.texture_matrix = call.texture_matrix;
+            fragment.texture[3] = 1u;  // s and t divided by q per pixel
+        } else {
+            // The viewer at infinity along view-space +z, in world space: the view matrix's third column (the
+            // GE's matrices are rows of a row-vector transform, stored here as columns).
+            std::array<float, 3> viewer{call.view[2], call.view[6], call.view[10]};
+            const float length = std::sqrt(viewer[0] * viewer[0] + viewer[1] * viewer[1] + viewer[2] * viewer[2]);
+            if (length > 0.0f)
+                for (float &value : viewer) value /= length;
+            vertex.viewer = {viewer[0], viewer[1], viewer[2], 0.0f};
+        }
+        if (source != nullptr) {
+            const float width = static_cast<float>(call.texture.width);
+            const float height = static_cast<float>(call.texture.height);
+            vertex.uv_remap = {width / static_cast<float>(kWidth), height / static_cast<float>(kHeight),
+                               static_cast<float>(source_x) / static_cast<float>(kWidth),
+                               static_cast<float>(source_y) / static_cast<float>(kHeight)};
+        }
+        ++stats_.texture_mapped;
+    }
+
     void draw(const DrawCall &call, const GuestMemory &memory) {
         // Transformed draws reach the backend decoded (gpu_decode() is false).
         if (call.vertices.empty()) return;
@@ -2187,6 +2235,7 @@ private:
             }
             fragment.texture = {state.function, state.alpha_from_texture ? 1u : 0u,
                                 source != nullptr && state.format == TextureFormat::Rgba5650 ? 1u : 0u, 0u};
+            set_texture_map(call, source, source_x, source_y, vertex, fragment);
         }
 
         // Pipeline state. The target's alpha is the PSP's stencil (patches 0004 and 0006): the stencil
@@ -2261,7 +2310,8 @@ private:
         // Lighting and fog, as ge.vert and ge.frag: transformed draws only, never a clear.
         const bool lit = call.lighting_enabled && !no_lighting_ && !call.through && !call.clear_mode;
         const bool fogged = call.fog.enabled && !no_fog_ && !call.through && !call.clear_mode;
-        if (lit || fogged) fill_lighting(call, lit, fogged);
+        const bool shade_mapped = vertex.texture_map[0] == 2u;
+        if (lit || fogged || shade_mapped) fill_lighting(call, lit, fogged, shade_mapped);
         if (fogged) {
             fragment.fog = unpack_color(call.fog.color, 1.0f);
             vertex.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
@@ -2358,9 +2408,9 @@ private:
             [encoder_ setVertexBufferOffset:offset atIndex:0];
         }
         [encoder_ setVertexBytes:&vertex length:sizeof(vertex) atIndex:1];
-        // The lighting block: a lit or fogged draw's whenever it changed, and something always, since the
-        // vertex function names it.
-        if (!lighting_bound_ || ((lit || fogged) && lighting_changed_)) {
+        // The lighting block: a lit, fogged or environment-mapped draw's whenever it changed, and something
+        // always, since the vertex function names it.
+        if (!lighting_bound_ || ((lit || fogged || shade_mapped) && lighting_changed_)) {
             [encoder_ setVertexBytes:&lighting_ length:sizeof(lighting_) atIndex:2];
             lighting_bound_ = true;
             lighting_changed_ = false;
@@ -2417,6 +2467,10 @@ private:
                 if (source != nullptr)
                     std::cout << " from target 0x" << std::hex << source->key.address << std::dec << " at " << x
                               << "," << y;
+                if (!call.through && call.texture_map.map_mode == 1u)
+                    std::cout << " texmatrix " << call.texture_map.proj_source;
+                else if (!call.through && call.texture_map.map_mode == 2u)
+                    std::cout << " envmap " << call.texture_map.shade_light_u << "," << call.texture_map.shade_light_v;
             }
             if (call.blend.enabled)
                 std::cout << " blend " << call.blend.source_factor << "/" << call.blend.destination_factor << " eq "
@@ -2563,6 +2617,7 @@ private:
     bool no_lighting_{};
     bool no_fog_{};
     bool no_cull_{};
+    bool no_texture_map_{};
     bool trace_stencil_copy_{};
     bool trace_depth_{};
     bool depth_announced_{};

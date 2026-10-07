@@ -105,6 +105,9 @@ def draw_call(c):
         c.floats(96)
     d["stencil"] = (c.flag(),) + c.take("<6I")
     d["color_write_mask"], d["alpha_write_mask"] = c.u32(), c.u32()
+    # The texture map state (patch 0013): map mode, projection source, the two shade lights. Recordings made before
+    # it end here, and their draws are map mode 0.
+    d["texture_map"] = c.take("<4I") if c.left() >= 16 else (0, 0, 0, 0)
     return d
 
 
@@ -126,6 +129,11 @@ def describe_draw(d):
             text += " swz"
         if t["format"] in (4, 5, 6, 7):
             text += f" clut 0x{t['clut_address']:08X}"
+        mode, source, light_u, light_v = d["texture_map"]
+        if not d["through"] and mode == 1:
+            text += f" texmatrix {source}"
+        elif not d["through"] and mode == 2:
+            text += f" envmap {light_u},{light_v}"
     flags = [name for name, on in (("through", d["through"]), ("clear", d["clear_mode"]), ("blend", d["blend"][0]),
                                    ("ztest", d["depth"][0]), ("stencil", d["stencil"][0]), ("lit", d["lighting"]),
                                    ("fog", d["fog"])) if on]

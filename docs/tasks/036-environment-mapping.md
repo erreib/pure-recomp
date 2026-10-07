@@ -74,7 +74,119 @@ gives against the reference; do not read PPSSPP's source into the repo), or the 
 without breaking `ge_replay` on existing recordings (report; re-recording is acceptable, say so).
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+What was done:
+- **Patch 0013** (`0013-texture-mapping-modes`): the GE state carries `DrawCall::texture_map` (`TextureMapState`:
+  `map_mode`, `proj_source`, `shade_light_u`, `shade_light_v`) from TEXMAPMODE 0xC0 (bits 0..1 and 8..9) and
+  TEXSHADELS 0xC1 (bits 0..1 and 8..9), so both left the ignored list (63 commands now, from 65). A Draw record ends
+  with the four as u32. A Draw that ends before them reads as map mode 0, and `kVersion` stays 1. The main checkout's
+  `race_1x.gerec` of 2026-10-06 still parses in `gerec_dump.py` and replays Vulkan against Metal as before (frame
+  6016, 2 pixels over tol 24). The Vulkan renderer is unchanged; comments in `vulkan_renderer.cpp` and
+  `ge_state.hpp` say it draws mode 0.
+- **Metal**: `map_texture` in `ge_vertex`.
+  - Mode 1: the texture matrix times (position, or (u, v, 0), or the normalized normal, or the normal; with w 1).
+    s and t are divided by q per pixel.
+  - Mode 2: s and t are (N.L' + 1) / 2 for the two TEXSHADELS lights, in world space. N is the world matrix times
+    the normal, with the dot product divided by |N|. L' is normalize(position) for a directional light and
+    normalize(position - world position) otherwise. For a diffuse-and-specular light it is normalize(L' + V), where
+    V is the view matrix's third column, normalized.
+  - The lighting block is now filled for environment-mapped draws, which are unlit in this game.
+  - `PURE_NO_TEXMAP=1` draws mode 0. With it, the 18 captures are pixel-identical to the build before the task.
+- **Sources for the rules**: PPSSPP's hardware notes (the ge-vertex-pipeline page and the lighting page's "Shade
+  mapping" section). No PPSSPP code was read. The register layout comes from the PSP SDK's
+  `sceGuTexMapMode`/`sceGuTexProjMapMode`. PPSSPP's dumps confirm it: on Vineta K, 96 draws have 0xC0 = 2 with
+  0xC1 = 0x100, and 40 have 0xC0 = 1 (position source).
+- **Where this differs from the brief**: modes 1 and 2 do **not** apply the texture scale and offset afterwards.
+  - The notes say shade mapping does not depend on them, and they name mode 0 as the scale-and-offset mode.
+  - The suite cannot tell the two rules apart. A throwaway build that applied them in mode 2 gave all 18 captures
+    pixel for pixel.
+  - In the port's race frame, 12 environment-mapped draws into the billboard target carry a v scale of -1, as do all
+    40 texture-matrix draws.
+- **Draw-level check**: I recorded race frame 6016 headless through Metal (the record backend, 1 frame, the suite's
+  route).
+  - Draws #357 to #359 are the ship's environment-mapped hull and canopy. #360 to #362 are the livery over them.
+    #359 alone is the canopy.
+  - `--cut 360`, with the modes against `PURE_NO_TEXMAP=1`: in the canopy region 1312 of 1680 pixels change, 1073 of
+    them by more than 32 (mean 51.7 levels). Without the modes the hull is near-black with streaks; with them it has
+    a grey reflection shading and a highlight on the canopy.
+  - The full replay is pixel-identical to the suite's `race_hud` shot.
+- `gerec_dump.py` reads the new fields and lists mapped draws as `envmap U,V` or `texmatrix SOURCE`.
+  `PURE_METAL_LOG` lines carry the same tags.
+
+The scenes, headless Metal at tol 32. "Before" is `PURE_NO_TEXMAP=1`, which is pixel-identical to the build before the task. The
+fractions were the same in three runs.
+
+| Scene | Before | After | Canopy region | Region before | Region after |
+|---|---|---|---|---|---|
+| race_hud (vs ref/vineta_k_start.png) | 0.0374 | 0.0262 | (225,177) 30x56, draw #359's footprint | 0.2690 (452 of 1680) | 0.0125 (21): 98.8% within tol 32 |
+| tt_hud | 0.0617 | 0.0229 | (225,177) 30x56 | 0.2988 (502) | 0.0333 (56): 96.7% |
+| fp_hud | 0.0620 | 0.0232 | (225,177) 30x56 | 0.2994 (503) | 0.0333 (56): 96.7% |
+| zone_hud | 0.0348 | 0.0122 | (212,183) 66x45, the Zone ship's dome | 0.3566 (1059 of 2970) | 0.0141 (42): 98.6% |
+| zone_change | 0.0649 | 0.0353 | | | |
+
+The 13 frontend scenes are unchanged pixel for pixel.
+
+Acceptance:
+- Suite 18/18. Against the measured column: race_hud -0.0117, tt_hud -0.0388, fp_hud -0.0388, zone_hud -0.0226, each
+  at least 0.005 lower. Each canopy region is at least 95% within tol 32.
+- No scene scores higher than its measured value; the largest delta is +0.0000.
+- `tools/frame_regress.sh --shell vulkan --backend vulkan`: 18/18, every scene within 0.0005 of its vulkan column
+  (19m 49s). `tools/patches.sh check`: 13 patches.
+- `tools/hud_check.sh` (Metal shell): 61 of 61.
+
+Changed: patches/0013-texture-mapping-modes.patch (vendor host/gpu/ge_state.hpp, ge_state.cpp, ge_record_format.hpp,
+and a comment in vulkan_renderer.cpp), patches/README.md, src/gpu/metal_backend.mm, src/gpu/metal_shaders.h,
+tools/gerec/gerec_dump.py, docs/metal-backend.md ("Texture mapping modes" with the draw-level check and the numbers,
+"Verify numbers / Task 036", the switch, the uniforms, the Vulkan differences), docs/fidelity.md (difference 1's row),
+README.md (`PURE_NO_TEXMAP`, the `PURE_METAL_LOG` tags).
+
+Verify output (last 20 lines; `tools/verify_task.sh 036` at 8b28258, 2026-10-07):
+```
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0262   0.10   32    0.0379 -0.0117  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0229   0.12   32    0.0617 -0.0388  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0232   0.11   32    0.0620 -0.0388  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0348 -0.0226  PASS
+zone_change   5679    0.0353   0.10   32    0.0649 -0.0296  PASS
+
+moved more than 0.03 from the metal measured value: tt_hud fp_hud (something changed; docs/verification.md)
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 24s)
+PASS fraction 0.026180 (3418/130560 pixels differ by more than 32, limit 0.032) at 480x272
+verify 036: PASS
+```
+
+Open questions:
+1. **Scale and offset in modes 1 and 2.** I followed the hardware notes, not the brief, and the suite cannot tell the
+   two apart. A capture where it would show: PPSSPP's Vineta K draws #123 to #125. That is an AI ship with v scale
+   -1 and clamp, from a team the port's grid did not have in that frame. With the scale applied it would sample only
+   the first row of its environment texture.
+2. **Mode 1 has no picture check.** Vineta K's 40 texture-matrix draws (four passes projecting onto a horizontal
+   plane) are clipped or culled in frame 6016, as they are in PPSSPP's dump. A frame where that plane is on screen
+   would check it.
+3. **Reversed normals (0x51).** They flip N in mode 2 as they do in lighting. The notes do not say whether they
+   should, and the game sets none.
+4. **The suite's metal column is stale.** It still holds the pre-task values; tt_hud and fp_hud print "moved more than
+   0.03". Re-baselining (docs/verification.md) needs `tools/frame_regress.sh`, which is outside May touch. The new
+   values are race_hud 0.0262, tt_hud 0.0229, fp_hud 0.0232, zone_hud 0.0122 and zone_change 0.0353.
+5. **The Metal-against-Vulkan race replay now differs.** On a recording made since patch 0013 the two backends differ
+   by the mapped draws: frame 6016 has 2387 pixels over tol 24 (0.0183), just under metal_check.sh's 0.02. With
+   `PURE_NO_TEXMAP=1` the difference is 0 pixels. `tools/gerec/metal_check.sh` should set it once it records again;
+   that file is outside May touch. Its existing recordings pass as before.
+6. **The lighting's specular uses a different viewer.** Its half vector takes the viewer along world +z (task 024's
+   port of ge.vert). The notes give V as the view matrix's third column, which mode 2 now uses. I did not change it
+   because lighting is outside this task, and the race uses no specular.
+7. **docs/ge-backend.md section 6** describes the Draw record and is outside May touch. The format's reference header
+   in `ge_record_format.hpp` is updated.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

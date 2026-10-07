@@ -12,7 +12,9 @@ and read-backs from targets into guest memory, the frame write-back and the dept
 at a GE SIGNAL. The race frame 6016 is now drawn as the Vulkan backend draws it, 2 pixels of 130560 over tol 24 at
 the same scale ("The race check" below), and the frame regression suite passes 5/5 with `--backend metal`, race_hud
 at 0.0379 against PPSSPP (Vulkan's 0.067). The Metal shell (task 027, "The Metal shell" below) shows its
-pictures in a window of its own, with no Vulkan involved.
+pictures in a window of its own, with no Vulkan involved. Task 036 added the GE's texture mapping modes, the
+texture matrix and the environment map (patch 0013 carries them in the draw state): the ships' hulls and canopies,
+glass and shiny roofs show their reflections ("Texture mapping modes" below), which the Vulkan backend does not draw.
 
 ## Quick start
 
@@ -42,6 +44,7 @@ tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile  
 | `PURE_METAL_PIPELINES=FILE` or `0` | (task 033) the pipeline list made at start instead of `config/metal_pipelines.txt`; `0` turns the pre-warm off ("Frame times", "The pre-warm list") |
 | `PURE_METAL_PIPELINES_OUT=FILE` | (task 033) at exit, every render pipeline and depth-stencil key the run's draws used, in the list's form |
 | `PURE_METAL_PACE=0` | (task 033) the Metal shell shows each picture as soon as it can, instead of at the real time of the PSP vblank after its frame began |
+| `PURE_NO_TEXMAP=1` | (task 036) every draw takes its UVs through the texture scale and offset (texture map mode 0), as before task 036: the texture matrix and environment map modes are not drawn ("Texture mapping modes") |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -54,7 +57,7 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | File | What |
 |---|---|
 | `src/gpu/metal_backend.mm` | `MetalGeBackend : portablekit::gpu::GeBackend` and its `BackendRegistration("metal", ...)`. Objective-C++ with ARC |
-| `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT) |
+| `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036) are ours, from PPSSPP's hardware notes |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
@@ -80,7 +83,7 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 | Transformed sprites | by the GE's rule, on the screen after projection: both vertices are projected, and the rectangle between them is axis-aligned in window coordinates, at the second vertex's depth, lit, coloured and fogged as the second vertex, texture coordinates interpolated without perspective. The corners go to the vertex function already in the PSP's clip space, all with the second vertex's w (`VertexUniforms::mode.y`), each naming the second vertex (appended to the buffer after the corners) as the one it is lit and fogged as. A sprite with a vertex behind the eye (w <= 0) is dropped. The Vulkan backend expands them in object space; the two agree whenever the transform keeps the rectangle axis-aligned on the screen, as it does for every transformed sprite in the recordings (26 in the TEAM frame, 28 in race frame 6016: 0.0000 px between the corners either way) |
 | Through mode | positions in screen pixels go straight to clip space for a 480x272 target; z is `z / 65535` |
 | Transformed | `projection x view x world`; the GE viewport (`screen = ndc x scale + offset - region offset`) folded into clip x and y, so the Metal viewport stays the whole target; clip z remapped from the PSP's [-w, w] to Metal's [0, w], and the GE's z scale and offset become the viewport's `znear` and `zfar` (reversed when the game reverses the range), as the Vulkan backend folds them into `minDepth`/`maxDepth` |
-| Texture coordinates | texels divided by the texture's size in through mode, the GE's scale and offset otherwise |
+| Texture coordinates | texels divided by the texture's size in through mode; transformed, by the GE's texture map mode (task 036): the UVs through the GE's scale and offset (mode 0), the texture matrix applied to the position, UV or normal with s and t divided by q per pixel (mode 1), or the environment map from the normal and two lights (mode 2), "Texture mapping modes" |
 | Texture function | modulate, decal, blend, replace and add, with TCC (alpha from the texture or not). The blend function's environment colour is not in the draw state; the texel stands in for it, as in `ge.frag` |
 | Filtering and wrap | the GE's own filter bits (nearest or linear for magnification and minification, the base level only) and wrap bits (clamp or repeat) choose one of 16 samplers; `sharp_textures` forces nearest |
 | Alpha test | in the fragment shader, by the GE's numbering (0 NEVER, 1 ALWAYS, then EQUAL ... GEQUAL: patch 0005), on the 8-bit alpha and reference under the test's mask, with `discard_fragment`. Draws without a test, or with ALWAYS, use a fragment function compiled without it |
@@ -105,12 +108,14 @@ The keys of `config/metal_pipelines.txt` are made at start, the render pipelines
 first use (task 033, "Frame times").
 
 Per draw, the vertex uniforms (matrix, folded viewport, uv transform, the row of view x world that gives view-space
-z, and the mode: through, sprite corners in clip space, fog, lighting), the fragment uniforms (FIX colour, texture
-function, TCC, opaque texel alpha, alpha test function, reference and mask, fog colour, the stencil value the
+z, the mode: through, sprite corners in clip space, fog, lighting, and since task 036 the texture map mode with
+the texture matrix, the viewer's direction and the texture's place in the image sampled; 240 bytes), the fragment
+uniforms (FIX colour, texture function, TCC, opaque texel alpha, whether the coordinates are divided by q, alpha
+test function, reference and mask, fog colour, the stencil value the
 alpha stores), the blend colour, the stencil reference, the viewport's depth range, the scissor and the cull mode
 are set on the encoder when they changed, and the lighting
 block (world matrix, global ambient, material colours, update mask and flags, the four lights, fog end and scale)
-when a lit or fogged draw changed it, or the pass is new. Lighting and fog are uniform branches in the one vertex
+when a lit, fogged or environment-mapped draw changed it, or the pass is new. Lighting and fog are uniform branches in the one vertex
 function, not pipeline variants.
 
 ## Targets
@@ -553,6 +558,128 @@ each frame over 20 ms, its guest, render and wait split and its stalls): 61 of t
 beside the frame's read-backs (1 to 37 ms through MoltenVK) or a submit that waited (3 to 13 ms). The game's stretches
 are the same on both paths; Metal's frames have no read-back of the picture to wait for.
 
+## Texture mapping modes (task 036, 2026-10-07)
+
+The GE takes a transformed draw's texture coordinates from one of three sources, chosen by TEXMAPMODE (0xC0). The
+framework's GE state ignored it and TEXSHADELS (0xC1) until patch 0013, which carries both in `DrawCall::texture_map`
+(`map_mode`, `proj_source`, `shade_light_u`, `shade_light_v`). `ge_vertex` computes the coordinates by the mode, so
+the reflections the game draws with them (the ships' hulls and canopies, glass buildings, shiny roofs: difference 1
+of docs/fidelity.md) are drawn. The Vulkan backend still draws every draw with its UVs.
+
+The registers: 0xC0 holds the mode in bits 0..1 and the texture matrix's source (TEXPROJMAP) in bits 8..9; 0xC1 the
+light s comes from in bits 0..1 and the light t comes from in bits 8..9, as the PSP SDK's `sceGuTexMapMode(mode, a1,
+a2)` and `sceGuTexProjMapMode(mode)` document them. The game's own values agree: in PPSSPP's dump of the Vineta K
+race frame (`ref/vineta_k_start.ppdmp`) 96 draws have 0xC0 = 2 with 0xC1 = 0x100 (lights 0 and 1) and 40 have
+0xC0 = 1 (the texture matrix, from the position); the Zone dump (`ref/zone_change.ppdmp`) has 6 with 0xC0 = 2 and
+0xC1 = 0x100.
+
+The rules are PPSSPP's hardware notes' (<https://www.ppsspp.org/docs/psp-hardware/gpu/ge-vertex-pipeline/>, the UV
+modes, and <https://www.ppsspp.org/docs/psp-hardware/gpu/lighting/>, "Shade mapping"), read as documentation; no
+PPSSPP code was read for them:
+
+| Mode | The GE | In `ge_vertex` (`map_texture` in `metal_shaders.h`) |
+|---|---|---|
+| 0, the UVs | u' = u x scale + offset (8- and 16-bit UVs divided by 128 and 32768 first) | as before: `uv_transform` |
+| 1, the texture matrix | (s, t, q) = the source times the 4x3 texture matrix (three rows and the translation row, each component a row sum); the source is the position, the UV, the normalized normal or the normal, as TEXPROJMAP says (0 to 3); per pixel s/q and t/q | `texture_matrix * float4(source, 1)`, the source the vertex's object-space position, (u, v, 0), the normal normalized (a zero normal stays zero) or the normal as decoded; s, t and q interpolated, and the fragment function divides s and t by q (`FragmentUniforms::texture.w`) |
+| 2, the environment (shade) map | s = (N.L' + 1) / 2 for the light in 0xC1 bits 0..1, t the same for the light in bits 8..9, in world space. N is the normal through the world matrix (not its inverse transpose), never normalized itself: the dot product is divided by its length. L' is the light's position for a directional light, else its position minus the vertex's world position, normalized (a zero vector stays zero); for a light of the diffuse-and-specular kind, normalize(L' + V), V the view matrix's third column normalized (the viewer at infinity along view-space +z, in world space). Lighting on or off, the light's enable, colours, attenuation, spot exponent and cone play no part | the same, from the light table of the lighting block (filled now for an environment-mapped draw, lit or not) and V in the vertex uniforms (`viewer`) |
+
+Neither mode 1 nor mode 2 takes the texture scale and offset: the notes say shade mapping does not depend on them, and
+name mode 0 as the scale-and-offset mode. (The task's brief expected them to apply after, as for mode 0. The game's
+draws do not tell the two apart: in the port's race frame the environment-mapped draws that reach the screen carry
+scale 1 and offset 0, while the 12 into the billboard target 0x04154000 and the 40 texture-matrix draws carry a v
+scale of -1, by all appearances left from earlier draws; a throwaway build that applied the scale and offset in mode
+2 drew the suite's 18 scenes pixel-identical to this one.) A target sampled as a texture keeps its place in the
+image applied (`uv_remap`, what `uv_transform` folds in for mode 0). Reversed normals (0x51) flip N as they do for
+lighting: the notes do not say, and no draw of the game's sets them. A transformed sprite keeps its UVs (its corners
+are made on the CPU in clip space; none of the game's is mapped), and mode 3 is drawn as mode 0, each logged once
+(`[metal] ... is not emulated`). Through-mode draws take no mapping.
+
+How the game uses them, in the port's race frame 6016 (the recording below): 100 environment-mapped and 40
+texture-matrix draws of 906. Every environment-mapped draw is unlit and blended add(FIX ffffff, FIX 000000), an
+opaque base layer that the next draws, the same meshes, add their livery or lighting to; its lights are 0 and 1,
+directional (in PPSSPP's Vineta K dump 24 of the 96 are of the diffuse-and-specular kind, which the viewer's
+direction enters). The texture-matrix draws, four passes of ten meshes, project 128x64 and 64x64 textures onto a
+horizontal plane (every vertex at one height) from the position, with an affine matrix (q is 1); in frame 6016
+every one of their triangles is clipped or culled (the picture replayed to just before them and to just after them
+is the same), as in PPSSPP's dump, so no capture of the suite checks mode 1.
+
+The player's ship in frame 6016 (gerec_dump numbering): #357 to #359 are its hull and canopy, environment-mapped
+(texture 0x04193300, CLUT8 64x64, the reflection); #360 to #362 the same three meshes again, lit, with the livery
+(CLUT4 128x128) blended over; then the side pods (#363 to #374, six environment-mapped, then six with the livery).
+#359 is the canopy: 178 pixels within PSP (225,177)-(254,232).
+
+### The draw-level check
+
+```sh
+# frame 6016 of the race route, recorded headless through Metal (about 10 s; GAME an empty memory stick with
+# EBOOT.ELF and disc.iso linked, ROUTE config/pad_scripts/main_menu.txt + single_race.txt without their shot steps)
+python3 tools/run_boot.py --script ROUTE --frames 6030 --shell headless --env PURE_GAME_DIR=GAME \
+  --env PURE_GE_BACKEND=record --env PURE_GE_RECORD_INNER=metal --env PURE_GE_RECORD=out/race6016.gerec \
+  --env PURE_GE_RECORD_AT=6016 --env PURE_GE_RECORD_FRAMES=1 out/record.log
+# the frame cut after the canopy's environment-mapped draw (#359, the 360th), with the modes and without
+build/arm64/bin/PureNative --replay out/race6016.gerec --backend metal --cut 360 --out out/cut_after
+PURE_NO_TEXMAP=1 build/arm64/bin/PureNative --replay out/race6016.gerec --backend metal --cut 360 --out out/cut_before
+```
+
+The recording is 8.8 MB, 1632 records; `gerec_dump.py` lists its 100 draws `envmap 0,1` and 40 `texmatrix 0`, and
+the table checks (906 draws, as the backend's counter says).
+
+The pictures cut after draw #359 (the 360th: the ship's three environment-mapped meshes drawn, the livery not yet)
+show the difference plainly (the commands above make them; pictures of the game are not committed). Without
+the modes the hull is the environment texture's darkest texels stretched by the meshes' UVs: nearly black, with
+bright streaks along the side pods. With them it is a smooth grey shading, light where the hull faces the shade
+lights and with a highlight on the canopy, the base the livery is then added to. In numbers, the two cut pictures:
+
+| Compared | Pixels over tol 0 | Over tol 32 | Mean difference |
+|---|---|---|---|
+| the canopy region (225,177) 30x56, without the modes against with them | 1312 of 1680 | 1073 | 51.7 levels |
+| the whole frame, the same (every mapped draw up to #359: the scenery's and the ship's) | 5644 (0.0432) | 2724 (0.0209) | |
+| what #357 to #359 change in the ship's area (180,172) 120x100, with the modes (cut 357 against cut 360) | 4643 over tol 8 | | 17.9 levels |
+
+The whole frame replayed from the recording is pixel-identical to the suite's `race_hud` capture (0 pixels over
+tol 0), and against PPSSPP's reference its canopy region differs on 452 of 1680 pixels over tol 32 without the modes
+and 21 with them, as the suite's captures below.
+
+### Against PPSSPP
+
+`tools/frame_regress.sh` (headless Metal, 2026-10-07, M4 Pro), each scene at tol 32 against its PPSSPP reference,
+before (the same build with `PURE_NO_TEXMAP=1`, whose 18 captures are pixel-identical to the build before the task)
+and after; the canopy region with `tools/imgdiff.py --region`:
+
+| Scene | Whole frame before | After | Canopy region | Region before | After |
+|---|---|---|---|---|---|
+| `race_hud` (ref/vineta_k_start.png) | 0.0374 | 0.0262 | (225,177) 30x56 | 0.2690 (452 of 1680) | 0.0125 (21): 98.8% within tol 32 |
+| `tt_hud` | 0.0617 | 0.0229 | (225,177) 30x56 | 0.2988 (502) | 0.0333 (56): 96.7% |
+| `fp_hud` | 0.0620 | 0.0232 | (225,177) 30x56 | 0.2994 (503) | 0.0333 (56): 96.7% |
+| `zone_hud` | 0.0348 | 0.0122 | (212,183) 66x45 | 0.3566 (1059 of 2970) | 0.0141 (42): 98.6% |
+| `zone_change` | 0.0649 | 0.0353 | | | |
+
+Each region is a rectangle around the ship's canopy: in race_hud, tt_hud and fp_hud (the same chase camera and ship,
+FEISAR) the footprint of draw #359 above, PSP (225,177) 30x56; in zone_hud the Zone ship's dome, (212,183) 66x45.
+The 13 frontend scenes have no mapped draws and are unchanged pixel for pixel. What stays over the tolerance in the
+race scenes: the AI ships (the grid differs from PPSSPP's), the crowds' alpha-tested texels and one-pixel edges; in
+the ship, a few edge pixels. In zone_hud the Zone ship's purple intake at the bottom of the screen differs as it did
+before the task (not a mapped draw).
+
+### Metal against Vulkan
+
+Recordings made before patch 0013 hold no texture map state: their draws read as mode 0, and `metal_check.sh`'s race
+comparison passes as before (the main checkout's `race_1x.gerec` of 2026-10-06, frame 6016, `--a vulkan --b metal`:
+2 pixels over tol 24, PASS). A recording made since carries the modes, which Metal draws and Vulkan does not:
+
+| `PureNative --replay out/race6016.gerec --a vulkan --b metal --frames 6016 --tol 24` | Pixels over tol 24 |
+|---|---|
+| as built | 2387 (0.0183): the mapped draws |
+| with `PURE_NO_TEXMAP=1` | 0 |
+
+(The recording above, made headless through Metal at 480x272, so both replay at 1x; one frame from a cold start, which
+two backends start equally.) 0.0183 is under the 0.02 that `metal_check.sh`'s step 3 allows, but by little, and
+what it measures there is now this task's difference, not a backend error.
+
+So on a recording made since patch 0013 the Metal-against-Vulkan comparison is like with like only with
+`PURE_NO_TEXMAP=1` (ge_replay hands the environment to both backends; the Vulkan backend has no such switch and draws
+mode 0 regardless).
+
 ## What is not done yet
 
 | Task | What |
@@ -566,8 +693,8 @@ are written to the rules above and the Vulkan backend's, and checked by no recor
 
 Not in the draw state (`DrawCall`), so neither backend draws them, and they wait for the framework's GE state to
 carry them: the colour test, logic ops, the texture environment colour (the blend texture function's), colour
-doubling, the texture map modes (environment and projection mapping: `texture_matrix` is carried, the map mode is
-not), and the depth range clamp (MINZ/MAXZ, which `docs/ge-backend.md` section 2 lets stay ignored).
+doubling, and the depth range clamp (MINZ/MAXZ, which `docs/ge-backend.md` section 2 lets stay ignored). The texture
+map modes are carried since patch 0013 and drawn by this backend since task 036.
 
 ## Where it differs from the Vulkan backend on purpose
 
@@ -580,6 +707,9 @@ not), and the depth range clamp (MINZ/MAXZ, which `docs/ge-backend.md` section 2
 - Points and lines are drawn (the Vulkan backend drops them).
 - Only a draw that reads the target it draws into goes through a copy.
 - An empty scissor draws nothing (the Vulkan backend draws one row or column).
+- The texture map modes are drawn (task 036): the texture matrix (mode 1) and the environment map (mode 2). The
+  Vulkan backend draws every draw with its UVs, so on a recording made since patch 0013 the race differs between the
+  two by every mapped draw ("Texture mapping modes", the A/B).
 - Transformed draws are clipped only at the target's edges and the scissor, as the GE clips them: the GE viewport is
   folded into clip space and the Metal viewport is the whole target. The Vulkan backend makes the GE viewport its
   `VkViewport`, which clips at the viewport's edges: the race's HUD is drawn with a viewport shifted one pixel right
@@ -793,3 +923,18 @@ checkout's run of 2026-10-06 07:54. The race route on Metal ran to frame 6046 wi
 validation on) without a validation error or a `[metal] ... not implemented` line ("Cost" above). Beyond the Verify
 line, `tools/frame_regress.sh --shell metal --backend metal` (no Vulkan at all, M6's exit check) passes 5/5 with the
 same five fractions (0.0002, 0.0002, 0.0000, 0.0106, 0.0379) in 7m 10s.
+
+### Task 036
+
+`tools/verify_task.sh 036` (`tools/patches.sh check && tools/build.sh profile && tools/frame_regress.sh && python3
+tools/imgdiff.py out/regress/shots/race_hud.png ref/vineta_k_start.png --max-frac 0.032 --tol 32`, 2026-10-07, M4
+Pro): 13 patches reproduce the vendor tree; the suite passes 18/18 headless in 24 s, the 13 frontend scenes at their
+fractions and the race scenes at race_hud 0.0262, tt_hud 0.0229, fp_hud 0.0232, zone_hud 0.0122 and zone_change
+0.0353 (the table's metal column, from before the task: 0.0379, 0.0617, 0.0620, 0.0348 and 0.0649; the suite flags
+tt_hud and fp_hud as moved by more than 0.03); race_hud 0.026180 at tol 32 against the Verify's 0.032: PASS. Beyond
+the Verify line: `tools/frame_regress.sh --shell vulkan --backend vulkan` 18/18, every scene within 0.0005 of its
+vulkan column (19m 49s); `tools/hud_check.sh` (the Metal shell) 61 of 61 shots with the HUD; `PURE_NO_TEXMAP=1`
+gives the 18 captures of the build before the task pixel for pixel; the framework's list of ignored GE commands is
+63 long in every run (0xC0 and 0xC1 left it); the main checkout's `race_1x.gerec` of 2026-10-06 replays Vulkan
+against Metal as before (frame 6016, 2 pixels over tol 24). "Texture mapping modes" has the draw-level check and the
+canopy regions.
