@@ -11,7 +11,7 @@ index b6b9ce3..0f0c0e7 100644
      host/ui/setup_screens.cpp
      host/ui/text_input.cpp
 diff --git a/host/hle/hle_savedata.cpp b/host/hle/hle_savedata.cpp
-index 348b854..bf32a3e 100644
+index 348b854..6cb0d2e 100644
 --- a/host/hle/hle_savedata.cpp
 +++ b/host/hle/hle_savedata.cpp
 @@ -4,17 +4,35 @@
@@ -100,7 +100,31 @@ index 348b854..bf32a3e 100644
  };
  
  SavedataState &state() {
-@@ -203,12 +233,16 @@ void log_request(const psprecomp::GuestMemory &memory, std::uint32_t params) {
+@@ -175,10 +205,12 @@ savedata::SaveFiles files_for(const psprecomp::GuestMemory &memory, std::uint32_
+     files.game_name = read_cstring(memory, params + param::kGameName, 13u);
+     files.save_name = save_name;
+     files.file_name = read_cstring(memory, params + param::kFileName, 13u);
++    bool has_key = false;
+     if (memory.load32(params + dialog_common::kSizeOffset) > param::kMinimumSizeWithKey) {
+         savedata::Block key{};
+         for (std::uint32_t i = 0; i < key.size(); ++i) key[i] = memory.load8(params + param::kKey + i);
+         if (!savedata::is_zero(key)) {
++            has_key = true;
+             // Without the console's keys the save is kept unencrypted; the
+             // game cannot tell, since it only ever sees the plain data. The
+             // key is still remembered, so the save can be encrypted for a PSP
+@@ -188,6 +220,10 @@ savedata::SaveFiles files_for(const psprecomp::GuestMemory &memory, std::uint32_
+             savedata::remember_game_key(files.game_name, key);
+         }
+     }
++    // No key (a block of the firmware 1.x layout, which has no key field, or
++    // a zero key): a PSP writes the save in its no-key mode, mode 1, with the
++    // console's keys alone; without them the save stays plain, as before.
++    if (!has_key) files.no_key_mode = savedata_keys_available();
+     return files;
+ }
+ 
+@@ -203,12 +239,16 @@ void log_request(const psprecomp::GuestMemory &memory, std::uint32_t params) {
                    << " buf=" << psprecomp::hex32(memory.load32(params + param::kDataBuf))
                    << " bufSize=" << psprecomp::hex32(memory.load32(params + param::kDataBufSize))
                    << " dataSize=" << psprecomp::hex32(memory.load32(params + param::kDataSize))
@@ -117,7 +141,34 @@ index 348b854..bf32a3e 100644
          if (size > param::kMinimumSizeWithKey) {
              savedata::Block key{};
              for (std::uint32_t i = 0; i < key.size(); ++i) key[i] = memory.load8(params + param::kKey + i);
-@@ -345,18 +379,6 @@ std::uint32_t do_sizes(psprecomp::GuestMemory &memory, std::uint32_t params) {
+@@ -251,6 +291,16 @@ std::uint32_t do_load(psprecomp::GuestMemory &memory, std::uint32_t params, cons
+     std::cerr << "[savedata] loaded " << count << " bytes from "
+               << savedata::save_folder(state().memory_stick, files).string()
+               << (files.key ? " (decrypted)" : "") << "\n";
++    // How the save was protected, on a line of its own (the line above keeps
++    // its form): a PSP's no-key save, and the saves the port wrote plain
++    // before it wrote them as a PSP does.
++    if (loaded.flags == savedata::flags_for_mode(savedata::CryptMode::Mode1))
++        std::cerr << "[savedata] " << files.file_name << ": mode 1 (no game key), PARAM.SFO's hash verified, "
++                  << (loaded.file_hash_checked ? "the file's hash in SAVEDATA_FILE_LIST verified"
++                                               : "no hash listed for the file")
++                  << ", decrypted\n";
++    else if (loaded.flags == 0u && trace_savedata())
++        std::cerr << "[savedata] " << files.file_name << ": plain (SAVEDATA_PARAMS flag 0)\n";
+     // An encrypted file is padded with zeros to a multiple of 16 bytes, so a
+     // buffer the size the game saved leaves up to 15 zero bytes behind. Only
+     // data that does not fit is worth saying.
+@@ -287,6 +337,9 @@ std::uint32_t do_save(psprecomp::GuestMemory &memory, std::uint32_t params, cons
+     }
+     std::cerr << "[savedata] saved " << size << " bytes to " << savedata::save_folder(state().memory_stick, files).string()
+               << (files.key ? " (encrypted)" : "") << "\n";
++    if (files.no_key_mode && !files.key)
++        std::cerr << "[savedata] " << files.file_name << ": mode 1 (no game key), " << size + savedata::kEncryptedHeaderSize
++                  << " bytes, its hash in SAVEDATA_FILE_LIST, PARAM.SFO signed\n";
+     return result::kOk;
+ }
+ 
+@@ -345,18 +398,6 @@ std::uint32_t do_sizes(psprecomp::GuestMemory &memory, std::uint32_t params) {
      return outcome;
  }
  
@@ -136,7 +187,7 @@ index 348b854..bf32a3e 100644
  // A save name pattern as LIST takes it: '?' stands for any one character.
  bool name_matches(std::string_view pattern, std::string_view name) {
      if (pattern.size() != name.size()) return false;
-@@ -428,6 +450,346 @@ std::uint32_t do_list(psprecomp::GuestMemory &memory, std::uint32_t params) {
+@@ -428,6 +469,346 @@ std::uint32_t do_list(psprecomp::GuestMemory &memory, std::uint32_t params) {
      return result::kOk;
  }
  
@@ -483,7 +534,7 @@ index 348b854..bf32a3e 100644
  std::uint32_t run_request(psprecomp::GuestMemory &memory, std::uint32_t params) {
      const std::uint32_t mode = memory.load32(params + param::kMode);
      const std::string save_name = save_name_at(memory, params + param::kSaveName);
-@@ -438,23 +800,8 @@ std::uint32_t run_request(psprecomp::GuestMemory &memory, std::uint32_t params)
+@@ -438,23 +819,8 @@ std::uint32_t run_request(psprecomp::GuestMemory &memory, std::uint32_t params)
      case kAutoSave:
      case kSave:
          return do_save(memory, params, save_name);
@@ -509,7 +560,7 @@ index 348b854..bf32a3e 100644
      case kDelete:
      case kAutoDelete:
      case kSingleDelete:
-@@ -503,25 +850,32 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
+@@ -503,25 +869,32 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
          auto &memory = rt.memory();
          const std::uint32_t params = arg(ctx, 0);
          // A new request while one is still active replaces it rather than
@@ -551,7 +602,7 @@ index 348b854..bf32a3e 100644
          if (trace_savedata()) std::cerr << "[savedata] status " << status << "\n";
          kernel().finish(ctx, status);
      });
-@@ -531,6 +885,7 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
+@@ -531,6 +904,7 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
              kernel().finish(ctx, kErrorUtilityInvalidStatus);
              return;
          }
@@ -559,6 +610,166 @@ index 348b854..bf32a3e 100644
          if (!state().dialog.shutdown())
              std::cerr << "[savedata] ShutdownStart before the dialog finished\n";
          kernel().finish(ctx, 0u);
+diff --git a/host/save_data/savedata_crypto.cpp b/host/save_data/savedata_crypto.cpp
+index f21670d..eecf824 100644
+--- a/host/save_data/savedata_crypto.cpp
++++ b/host/save_data/savedata_crypto.cpp
+@@ -146,7 +146,13 @@ Block cmac(const Aes128 &cipher, std::span<const std::uint8_t> data) {
+ }
+ 
+ Block data_file_hash(std::span<const std::uint8_t> encrypted_file, CryptMode mode, const Block *game_key) {
+-    return mode_hash(encrypted_file, mode, mode == CryptMode::Mode1 ? nullptr : game_key);
++    const Block *key = mode == CryptMode::Mode1 ? nullptr : game_key;
++    if (encrypted_file.size() % 16u == 0u) return mode_hash(encrypted_file, mode, key);
++    // A PSP stores the header and the data at the data's own length, and
++    // hashes the file in whole blocks, as if padded with zeros.
++    std::vector<std::uint8_t> padded(encrypted_file.begin(), encrypted_file.end());
++    padded.resize((padded.size() + 15u) & ~std::size_t{15u}, 0u);
++    return mode_hash(padded, mode, key);
+ }
+ 
+ std::vector<std::uint8_t> encrypt_data(std::span<const std::uint8_t> plain, CryptMode mode, const Block *game_key,
+diff --git a/host/save_data/savedata_crypto.hpp b/host/save_data/savedata_crypto.hpp
+index 691ba86..9bec0a9 100644
+--- a/host/save_data/savedata_crypto.hpp
++++ b/host/save_data/savedata_crypto.hpp
+@@ -16,7 +16,9 @@
+ //            with a second KIRK key in CBC mode; the result is XORed with the
+ //            data, so encryption and decryption are the same operation.
+ //
+-// Three modes exist; this game's saves use mode 5 (SAVEDATA_PARAMS flag 0x41).
++// Three modes exist: a request with a game key is written in mode 5
++// (SAVEDATA_PARAMS flag 0x41), one without in mode 1 (flag 0x01), whose hashes
++// and cipher use the console's keys alone.
+ #include "save_data/aes128.hpp"
+ 
+ #include <cstdint>
+@@ -52,7 +54,9 @@ inline constexpr std::size_t kParamsHashModeOffset = 0x70u;     // mode 3 or 5 h
+ // AES-CMAC (NIST SP 800-38B / RFC 4493).
+ [[nodiscard]] Block cmac(const Aes128 &cipher, std::span<const std::uint8_t> data);
+ 
+-// Hash of an encrypted data file as stored in SAVEDATA_FILE_LIST.
++// Hash of an encrypted data file as stored in SAVEDATA_FILE_LIST. A file
++// whose length is not a multiple of 16 bytes (a PSP does not pad the data it
++// stores) is hashed as if padded with zeros to one.
+ [[nodiscard]] Block data_file_hash(std::span<const std::uint8_t> encrypted_file, CryptMode mode,
+                                    const Block *game_key);
+ 
+diff --git a/host/save_data/savedata_store.cpp b/host/save_data/savedata_store.cpp
+index f09c4fa..3cafe15 100644
+--- a/host/save_data/savedata_store.cpp
++++ b/host/save_data/savedata_store.cpp
+@@ -100,6 +100,7 @@ LoadResult load_save(const std::filesystem::path &memory_stick, const SaveFiles
+ 
+     const auto *params = sfo->binary("SAVEDATA_PARAMS");
+     const std::uint8_t flags = params != nullptr && !params->empty() ? (*params)[kParamsFlagsOffset] : 0u;
++    result.flags = flags;
+     if (flags != 0u) {
+         const auto mode = mode_from_flags(flags);
+         if (!mode) {
+@@ -115,11 +116,21 @@ LoadResult load_save(const std::filesystem::path &memory_stick, const SaveFiles
+             result.reason = "the save is encrypted with a game key but the game passed none";
+             return result;
+         }
+-        if (const auto expected = listed_hash(*sfo, files.file_name);
+-            expected && *expected != data_file_hash(*file, *mode, key)) {
+-            result.reason = files.file_name + " does not match its hash in PARAM.SFO";
++        // PARAM.SFO's own hashes first, as a PSP checks them (and as the
++        // import check does), then the data file's.
++        const auto params_offset = sfo->data_offset("SAVEDATA_PARAMS");
++        if (!params_offset || !verify_param_sfo(*sfo_bytes, *params_offset)) {
++            result.reason = "PARAM.SFO does not match its hashes in SAVEDATA_PARAMS";
+             return result;
+         }
++        // A file the save lists no hash for has nothing to be checked against.
++        if (const auto expected = listed_hash(*sfo, files.file_name)) {
++            if (*expected != data_file_hash(*file, *mode, key)) {
++                result.reason = files.file_name + " does not match its hash in PARAM.SFO";
++                return result;
++            }
++            result.file_hash_checked = true;
++        }
+         auto plain = decrypt_data(*file, *mode, key);
+         if (!plain) {
+             result.reason = files.file_name + " is too short to be encrypted";
+@@ -137,6 +148,12 @@ LoadResult load_save(const std::filesystem::path &memory_stick, const SaveFiles
+     return result;
+ }
+ 
++std::uint8_t write_flags(const SaveFiles &files) {
++    if (files.key) return flags_for_mode(kSaveMode);
++    if (files.no_key_mode) return flags_for_mode(CryptMode::Mode1);
++    return 0u;
++}
++
+ bool write_save(const std::filesystem::path &memory_stick, const SaveFiles &files, const SaveContents &contents,
+                 std::string &error) {
+     const auto folder = save_folder(memory_stick, files);
+@@ -157,9 +174,16 @@ bool write_save(const std::filesystem::path &memory_stick, const SaveFiles &file
+     }
+ 
+     std::vector<std::uint8_t> stored;
+-    if (files.key) {
+-        stored = encrypt_data(contents.data, kSaveMode, &*files.key, random_block());
+-        const Block hash = data_file_hash(stored, kSaveMode, &*files.key);
++    const std::optional<CryptMode> mode = mode_from_flags(write_flags(files));
++    if (mode) {
++        const Block *key = files.key ? &*files.key : nullptr;
++        stored = encrypt_data(contents.data, *mode, key, random_block());
++        // A PSP stores the header and the data at the data's own length (a
++        // mode-1 save from PPSSPP is 16 bytes longer than its data), and
++        // data_file_hash pads it as the PSP's hash does. Mode 5 keeps the
++        // padded file this code has always written.
++        if (*mode == CryptMode::Mode1) stored.resize(kEncryptedHeaderSize + contents.data.size());
++        const Block hash = data_file_hash(stored, *mode, key);
+         // Replace this file's entry, or take the first free one.
+         std::size_t slot = file_list.size();
+         for (std::size_t offset = 0; offset < file_list.size(); offset += kFileListEntrySize) {
+@@ -193,7 +217,7 @@ bool write_save(const std::filesystem::path &memory_stick, const SaveFiles &file
+     sfo.set_string("SAVEDATA_TITLE", contents.savedata_title, 128u);
+     sfo.set_string("TITLE", contents.title, 128u);
+     std::vector<std::uint8_t> sfo_bytes = sfo.serialize();
+-    if (files.key) sign_param_sfo(sfo_bytes, *sfo.data_offset("SAVEDATA_PARAMS"), kSaveMode);
++    if (mode) sign_param_sfo(sfo_bytes, *sfo.data_offset("SAVEDATA_PARAMS"), *mode);
+ 
+     const std::pair<const char *, const std::vector<std::uint8_t> *> media[] = {
+         {"ICON0.PNG", &contents.icon0}, {"ICON1.PMF", &contents.icon1},
+diff --git a/host/save_data/savedata_store.hpp b/host/save_data/savedata_store.hpp
+index ff3e769..c8211d1 100644
+--- a/host/save_data/savedata_store.hpp
++++ b/host/save_data/savedata_store.hpp
+@@ -17,7 +17,11 @@ struct SaveFiles {
+     std::string game_name;   // the save folder, e.g. "ULJM05800"
+     std::string save_name;   // appended to the game name; may be empty
+     std::string file_name;   // the data file, e.g. "DATA.BIN"
+-    std::optional<Block> key;  // game key; saves are encrypted with it, and plain without one
++    std::optional<Block> key;  // game key; saves are encrypted with it (mode 5)
++    // The request carries no game key and the console's keys are here: a PSP
++    // then writes the save in its no-key mode (mode 1), enciphered and hashed
++    // with the console's keys alone. Without a key and without this, plain.
++    bool no_key_mode{};
+ };
+ 
+ struct SaveContents {
+@@ -38,6 +42,8 @@ struct LoadResult {
+     LoadStatus status{LoadStatus::NoData};
+     SaveContents contents;
+     std::string reason;  // why a save is broken, for the log
++    std::uint8_t flags{};       // SAVEDATA_PARAMS's flag byte: 0 for a plain save, else its mode's
++    bool file_hash_checked{};   // the data file matched the hash PARAM.SFO lists for it
+ };
+ 
+ // PSP/SAVEDATA under the memory stick root.
+@@ -46,6 +52,9 @@ struct LoadResult {
+ 
+ [[nodiscard]] bool save_exists(const std::filesystem::path &memory_stick, const SaveFiles &files);
+ [[nodiscard]] LoadResult load_save(const std::filesystem::path &memory_stick, const SaveFiles &files);
++// SAVEDATA_PARAMS's flag byte write_save gives `files`: 0x41 (mode 5) with a
++// game key, 0x01 (mode 1) for no_key_mode, 0 (plain) otherwise.
++[[nodiscard]] std::uint8_t write_flags(const SaveFiles &files);
+ // Writes the folder; returns false with `error` set on failure.
+ bool write_save(const std::filesystem::path &memory_stick, const SaveFiles &files, const SaveContents &contents,
+                 std::string &error);
 diff --git a/host/shell/headless_shell.cpp b/host/shell/headless_shell.cpp
 index 8869597..69b0f50 100644
 --- a/host/shell/headless_shell.cpp

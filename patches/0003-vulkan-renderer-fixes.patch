@@ -1,0 +1,1095 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index f180930..2de9e7a 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -6,12 +6,18 @@ layout(location = 2) in vec3 frag_specular;
+ layout(location = 3) in float frag_fog;
+ layout(location = 4) flat in vec4 frag_uv_rect;
+ layout(location = 0) out vec4 out_color;
++// The fragment's own alpha, for dual-source blending: when the target's alpha
++// receives the stencil value instead, a colour blend that reads the source
++// alpha reads it here (SRC1_ALPHA). Pipelines that do not blend with it use a
++// copy of this shader with the output moved to location 1, where no
++// attachment takes it (without_dual_source in vulkan_renderer.cpp).
++layout(location = 0, index = 1) out vec4 out_source_alpha;
+ 
+ layout(set = 0, binding = 0) uniform sampler2D guest_texture;
+ 
+-// False for pipelines of draws without an alpha test (texture_params.w 0):
+-// the discard below is then compiled out, so tiled GPUs keep their early
+-// depth test and hidden surface removal for them.
++// False for pipelines of draws without an alpha test, or with ALWAYS
++// (texture_params.w 1): the discard below is then compiled out, so tiled GPUs
++// keep their early depth test and hidden surface removal for them.
+ layout(constant_id = 0) const bool kAlphaTest = true;
+ 
+ layout(push_constant) uniform Push {
+@@ -29,6 +35,15 @@ layout(set = 1, binding = 0) uniform Environment {
+     vec4 fog_color;
+ } lighting;
+ 
++// What the target stores. Its alpha is the PSP's stencil: with viewport.w bit
++// 2 set, the draw's stencil value (bits 3..10) replaces the fragment's alpha,
++// which the alpha test has already used.
++vec4 stored(vec4 color) {
++    int enables = int(push.viewport.w + 0.5);
++    if ((enables & 4) != 0) color.a = float(enables >> 3) / 255.0;
++    return color;
++}
++
+ void main() {
+     vec4 color = frag_color;
+     if (push.texture_params.x > 0.5) {
+@@ -60,16 +75,21 @@ void main() {
+     color.rgb = min(color.rgb + frag_specular, vec3(1.0));
+     if ((int(push.viewport.w + 0.5) & 1) != 0) color.rgb = mix(lighting.fog_color.rgb, color.rgb, clamp(frag_fog, 0.0, 1.0));
+ 
+-    // PSP alpha test, evaluated per fragment.
++    // PSP alpha test, evaluated per fragment. The function is the GE's own
++    // number, as for the depth test: 0 NEVER, 1 ALWAYS, then EQUAL, NOTEQUAL,
++    // LESS, LEQUAL, GREATER, GEQUAL. Reading 1 as "never" discarded every
++    // draw that enables the test with ALWAYS, which a game can do for most of
++    // its world.
+     if (!kAlphaTest) {
+-        out_color = color;
++        out_source_alpha = vec4(color.a);
++        out_color = stored(color);
+         return;
+     }
+     int alpha_function = int(push.texture_params.w + 0.5);
+     float reference = push.texture_params.z / 255.0;
+     float alpha = color.a;
+     bool passed = true;
+-    if (alpha_function == 1) passed = false;                     // never
++    if (alpha_function == 0) passed = false;                     // never
+     else if (alpha_function == 2) passed = abs(alpha - reference) < 0.002;
+     else if (alpha_function == 3) passed = abs(alpha - reference) >= 0.002;
+     else if (alpha_function == 4) passed = alpha < reference;
+@@ -78,5 +98,6 @@ void main() {
+     else if (alpha_function == 7) passed = alpha >= reference;
+     if (!passed) discard;
+ 
+-    out_color = color;
++    out_source_alpha = vec4(color.a);
++    out_color = stored(color);
+ }
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 43aa31e..b8ac5f3 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -96,6 +96,12 @@ constexpr std::uint32_t kFrameRegions = 3u;
+ constexpr VkDeviceSize kPresentScratchBytes = 6u * 1024u * 1024u;
+ constexpr VkDeviceSize kVertexBufferTotal = kFrameRegions * kVertexBufferBytes + 2u * kPresentScratchBytes;
+ constexpr VkDeviceSize kIndexBufferTotal = kFrameRegions * kIndexBufferBytes;
++// The last bytes of each frame region hold the quad resolve_stencil_alpha()
++// draws, the same six vertices every time. It can then be written while a
++// draw's vertices sit in the buffer past vertex_offset (submit() moves
++// vertex_offset only once the draw is recorded), and no draw's vertices
++// reach it (vertex_limit stops short of it).
++constexpr VkDeviceSize kResolveQuadBytes = 256u;
+ 
+ // Says, once in a while, that a frame's geometry did not fit and some of its
+ // draws were left out, instead of dropping them silently.
+@@ -119,7 +125,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
+ 
+ struct PushConstants {
+     std::array<float, 16> transform{};
+-    std::array<float, 4> viewport{};        // x,y: target size; z: through flag; w: 1 fog + 2 lighting
++    std::array<float, 4> viewport{};        // x,y: target size; z: through flag; w: 1 fog + 2 lighting + 4 stencil
+     std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v, y: function, z: alpha ref, w: alpha func
+     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
+     std::array<float, 4> view_z{};          // row of view * world that gives view-space z, for fog
+@@ -129,6 +135,9 @@ struct PushConstants {
+ static_assert(sizeof(PushConstants) == 128u, "PushConstants must fit the guaranteed push constant size");
+ constexpr float kPushFog = 1.0f;
+ constexpr float kPushLighting = 2.0f;
++// The fragment shader stores the stencil value in bits 3..10 of viewport.w as
++// the target's alpha instead of the fragment's (stencil_alpha below).
++constexpr float kPushStencilAlpha = 4.0f;
+ 
+ struct GpuVertex {
+     float x{}, y{}, z{}, w{1.0f};
+@@ -275,10 +284,167 @@ struct PipelineKey {
+     // The raw vertex shader, which decodes the guest's vertex bytes, and its
+     // check build (<prefix>_CHECK_GPU_DECODE).
+     bool raw{};
++    // How a blended draw's alpha, the PSP's stencil, is stored (kAlpha*).
++    std::uint32_t alpha_blend{};
++    // The stencil attachment's test and operations: 0 for none; otherwise
++    // bit 0 set, the GE's test function in bits 1..3 and its sfail, zfail and
++    // zpass operations in bits 4..6, 7..9 and 10..12 (stencil_key). The
++    // reference, compare mask and write mask are bits 0..7, 8..15 and 16..23
++    // of stencil_values.
++    std::uint32_t stencil{};
++    std::uint32_t stencil_values{};
+ 
+     auto operator<=>(const PipelineKey &) const = default;
+ };
+ 
++// The alpha blend factors: the fragment's alpha (ONE, ZERO), zero (ZERO,
++// ZERO), or the blend constant's alpha where the fragment is opaque and the
++// destination's where it is transparent (CONSTANT_ALPHA, ONE_MINUS_SRC_ALPHA).
++// kAlphaDual stores the fragment's alpha (ONE, ZERO), which is the stencil
++// value, while the colour blend reads the fragment's own alpha from the
++// shader's second output (SRC1_ALPHA). kAlphaAdd adds (ONE, ONE): the copy
++// of the stencil into the alpha (resolve_stencil_alpha).
++constexpr std::uint32_t kAlphaFragment = 0u;
++constexpr std::uint32_t kAlphaZero = 1u;
++constexpr std::uint32_t kAlphaConstant = 2u;
++constexpr std::uint32_t kAlphaDual = 3u;
++constexpr std::uint32_t kAlphaAdd = 4u;
++
++// PipelineKey::stencil: the GE's stencil test function and its operations on
++// stencil fail, depth fail and pass, as the GE numbers them (0 KEEP, 1 ZERO,
++// 2 REPLACE, 3 INVERT, 4 INCR, 5 DECR).
++constexpr std::uint32_t stencil_key(std::uint32_t function, std::uint32_t fail, std::uint32_t depth_fail,
++                                    std::uint32_t pass) {
++    return 1u | (function & 7u) << 1u | (fail & 7u) << 4u | (depth_fail & 7u) << 7u | (pass & 7u) << 10u;
++}
++
++VkStencilOp to_stencil_op(std::uint32_t op) {
++    switch (op) {
++    case 1u: return VK_STENCIL_OP_ZERO;
++    case 2u: return VK_STENCIL_OP_REPLACE;
++    case 3u: return VK_STENCIL_OP_INVERT;
++    case 4u: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
++    case 5u: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
++    default: return VK_STENCIL_OP_KEEP;
++    }
++}
++
++// Says once per value which stencil or write-mask state is not emulated.
++void report_not_emulated(const char *what, std::uint32_t value) {
++    static std::set<std::pair<const char *, std::uint32_t>> seen;
++    if (!seen.emplace(what, value).second) return;
++    std::cout << "[render] " << what << " 0x" << std::hex << value << std::dec << " is not emulated\n" << std::flush;
++}
++
++// The stencil reference as the target's alpha holds it: the top bit of a 5551
++// target, the top nibble of a 4444 one, all of 8888.
++std::uint32_t stored_reference(const DrawCall &call) {
++    const std::uint32_t reference = call.stencil.reference & 0xFFu;
++    if (call.target.color_format == 1u) return (reference & 0x80u) != 0u ? 0xFFu : 0u;
++    if (call.target.color_format == 2u) return (reference >> 4u) * 17u;
++    return reference;
++}
++
++// The value a draw leaves in its target's alpha channel, which on the PSP is
++// the stencil: the GE never stores a fragment's own alpha there. -1 keeps the
++// destination's alpha: no stencil test (or a 5650 target, which has none),
++// stencil bits masked off, or a zpass KEEP. Only fragments that pass every
++// test write it. Without the stencil attachment (`buffer` false) the stencil
++// test is taken as ALWAYS, the only function whose writes do not depend on
++// the destination, and the other operations are logged once; with it, the
++// attachment does them and alpha_follows_stencil says when the alpha must be
++// copied from it.
++int stencil_alpha(const DrawCall &call, bool buffer) {
++    const StencilState &stencil = call.stencil;
++    if (!stencil.enabled || call.target.color_format == 0u || call.alpha_write_mask != 0u) return -1;
++    if (!buffer && stencil.function != 1u) report_not_emulated("stencil test function", stencil.function);
++    if (!buffer && stencil.depth_fail_op != 0u && call.depth.test_enabled && !call.through)
++        report_not_emulated("stencil depth fail op", stencil.depth_fail_op);
++    switch (stencil.pass_op) {
++    case 0u: return -1;  // keep
++    case 1u: return 0;   // zero
++    case 2u: return static_cast<int>(stored_reference(call));  // replace
++    default:             // invert, increment and decrement read the destination
++        if (!buffer) report_not_emulated("stencil pass op", stencil.pass_op);
++        return -1;
++    }
++}
++
++// With the stencil attachment: whether the draw leaves its target's alpha
++// equal to the stencil. The alpha is written only by fragments that pass
++// every test, with stencil_alpha()'s zpass value, so it cannot follow an
++// sfail op where the test can fail, a zfail op where the depth test can fail,
++// INVERT, INCR or DECR, or a write mask that keeps some bits.
++bool alpha_follows_stencil(const DrawCall &call, const PipelineKey &key) {
++    const StencilState &stencil = call.stencil;
++    if (!stencil.enabled || call.target.color_format == 0u || call.alpha_write_mask == 0xFFu) return true;
++    const auto writes = [](std::uint32_t op) { return op >= 1u && op <= 5u; };
++    const bool fail = stencil.function != 1u && writes(stencil.fail_op);
++    const bool depth_fail = key.depth_test && key.depth_function != 1u && writes(stencil.depth_fail_op);
++    const bool pass = stencil.pass_op >= 3u && stencil.pass_op <= 5u;
++    const bool partial = call.alpha_write_mask != 0u &&
++                         (writes(stencil.fail_op) || writes(stencil.depth_fail_op) || writes(stencil.pass_op));
++    return !fail && !depth_fail && !pass && !partial;
++}
++
++// Whether the colour blend reads the destination's alpha (DA, 1-DA and the
++// doubled forms), which is the stencil.
++bool blend_reads_destination_alpha(const PipelineKey &key) {
++    const auto reads = [](std::uint32_t factor) {
++        return factor == 4u || factor == 5u || factor == 8u || factor == 9u;
++    };
++    const bool colour = (key.color_mask & (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
++                                           VK_COLOR_COMPONENT_B_BIT)) != 0u;
++    return key.blend && colour && key.equation != 3u && key.equation != 4u &&
++           (reads(key.source_factor) || reads(key.destination_factor));
++}
++
++// The fragment shader as compiled writes the fragment's alpha to a second
++// output, location 0 index 1, for dual-source blending, which a pipeline may
++// only use with the dualSrcBlend feature. Every other pipeline uses this
++// copy, whose second output is moved to location 1 index 0: no attachment
++// takes it there, so its writes are dropped. Decorations are edited in place
++// (OpDecorate <id> Index 1 and <id> Location 0); nothing is added.
++std::vector<std::uint32_t> without_dual_source(const std::uint32_t *code, std::size_t bytes) {
++    std::vector<std::uint32_t> words(code, code + bytes / 4u);
++    constexpr std::uint32_t kOpDecorate = 71u;
++    constexpr std::uint32_t kLocation = 30u;
++    constexpr std::uint32_t kIndex = 32u;
++    const auto each_decoration = [&](const auto &visit) {
++        for (std::size_t i = 5u; i < words.size();) {
++            const std::uint32_t count = words[i] >> 16u;
++            if (count == 0u || i + count > words.size()) break;
++            if ((words[i] & 0xFFFFu) == kOpDecorate && count == 4u) visit(&words[i]);
++            i += count;
++        }
++    };
++    std::uint32_t output = 0u;
++    each_decoration([&](std::uint32_t *op) {
++        if (op[2] == kIndex && op[3] == 1u) {
++            output = op[1];
++            op[3] = 0u;
++        }
++    });
++    if (output != 0u)
++        each_decoration([&](std::uint32_t *op) {
++            if (op[1] == output && op[2] == kLocation) op[3] = 1u;
++        });
++    return words;
++}
++
++// Whether the colour blend reads the fragment's alpha (SA, 1-SA and the
++// doubled forms), so the fragment cannot hand over the stencil value as its
++// alpha instead.
++bool blend_reads_source_alpha(const PipelineKey &key) {
++    const auto reads = [](std::uint32_t factor) {
++        return factor == 2u || factor == 3u || factor == 6u || factor == 7u;
++    };
++    const bool colour = (key.color_mask & (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
++                                           VK_COLOR_COMPONENT_B_BIT)) != 0u;
++    return key.blend && colour && key.equation != 3u && key.equation != 4u &&
++           (reads(key.source_factor) || reads(key.destination_factor));
++}
++
+ // GU_FIX takes its factor from a colour register rather than from the source or
+ // destination pixel. Vulkan offers a single blend constant per attachment, so a
+ // fixed factor collapses to ONE or ZERO when the colour is white or black, and
+@@ -632,7 +798,36 @@ struct VulkanRenderer::Impl {
+                    ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                    : VK_IMAGE_ASPECT_DEPTH_BIT;
+     }
++    // The PSP's stencil is its target's alpha. A real stencil aspect in each
++    // target's depth image does the stencil test and operations, and the
++    // target's alpha, which textures and blends read, is kept equal to it
++    // (alpha_follows_stencil, resolve_stencil_alpha). Off without a
++    // depth+stencil format, with <prefix>_NO_STENCIL_BUFFER, and with
++    // <prefix>_NO_STENCIL_ALPHA.
++    bool stencil_buffer{};
++    // A draw in the current render pass left the target's alpha different
++    // from its stencil; resolve_stencil_alpha() copies the stencil over it
++    // before a draw reads the destination's alpha and before the pass ends.
++    bool alpha_stale{};
++    // `reason` is for <prefix>_TRACE_STENCIL_COPY, which logs every copy.
++    void resolve_stencil_alpha(const char *reason);
++    // Dual-source blending (the dualSrcBlend feature; <prefix>_NO_DUAL_SOURCE
++    // turns it off): the fragment shader as compiled, for kAlphaDual.
++    bool dual_source{};
++    VkShaderModule dual_fragment_shader{};
+     void choose_depth_format() {
++        if (portablekit::env("NO_STENCIL_BUFFER") == nullptr && portablekit::env("NO_STENCIL_ALPHA") == nullptr) {
++            for (const VkFormat format : {VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT}) {
++                VkFormatProperties properties{};
++                vkGetPhysicalDeviceFormatProperties(physical_device, format, &properties);
++                if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0u) {
++                    depth_format = format;
++                    stencil_buffer = true;
++                    return;
++                }
++            }
++            std::cout << "[render] no depth+stencil format; the stencil test is not emulated\n";
++        }
+         const VkFormat candidates[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT,
+                                        VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D16_UNORM,
+                                        VK_FORMAT_D32_SFLOAT_S8_UINT};
+@@ -1052,6 +1247,13 @@ struct VulkanRenderer::Impl {
+     WritebackFrame writeback_ready{};     // pixels waiting in writeback_pixels
+     bool writeback_has_pixels{};
+     std::vector<std::uint32_t> writeback_pixels;
++    // The depth write-back (write_back_depth): the depth aspect of a target,
++    // copied whole into a mapped buffer, then converted to the GE's 16 bits.
++    Staging depth_readback{};
++    VkDeviceSize depth_readback_size{};
++    bool depth_readback_coherent{true};
++    bool create_depth_readback(VkDeviceSize bytes, std::string &error);
++    void destroy_depth_readback();
+ 
+     // Frames in flight. With two (the default) the CPU records a frame while
+     // the GPU still draws the one before, so their times overlap instead of
+@@ -1242,7 +1444,7 @@ struct VulkanRenderer::Impl {
+     // turn with it (see kFrameRegions).
+     std::uint32_t frame_region{};
+     std::uint32_t next_region{};
+-    VkDeviceSize vertex_limit{kVertexBufferBytes};
++    VkDeviceSize vertex_limit{kVertexBufferBytes - kResolveQuadBytes};
+     VkDeviceSize index_limit{kIndexBufferBytes};
+     void enter_region(std::uint32_t index) {
+         // How much of its region the frame being left used, for the perf line.
+@@ -1250,7 +1452,7 @@ struct VulkanRenderer::Impl {
+                                index_offset - static_cast<VkDeviceSize>(frame_region) * kIndexBufferBytes);
+         frame_region = index;
+         vertex_offset = static_cast<VkDeviceSize>(index) * kVertexBufferBytes;
+-        vertex_limit = vertex_offset + kVertexBufferBytes;
++        vertex_limit = vertex_offset + kVertexBufferBytes - kResolveQuadBytes;
+         index_offset = static_cast<VkDeviceSize>(index) * kIndexBufferBytes;
+         index_limit = index_offset + kIndexBufferBytes;
+     }
+@@ -2193,6 +2395,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     // fault or hang. <prefix>_NO_ROBUST_BUFFERS leaves it off, as before.
+     if (supported_features.robustBufferAccess == VK_TRUE && portablekit::env("NO_ROBUST_BUFFERS") == nullptr)
+         enabled_features.robustBufferAccess = VK_TRUE;
++    // A stencil value written as the target's alpha under a colour blend that
++    // reads the fragment's alpha (kAlphaDual).
++    if (supported_features.dualSrcBlend == VK_TRUE && portablekit::env("NO_DUAL_SOURCE") == nullptr) {
++        enabled_features.dualSrcBlend = VK_TRUE;
++        impl.dual_source = true;
++    }
+     std::cout << "[render] robust buffer access " << (enabled_features.robustBufferAccess ? "on" : "off") << "\n";
+     VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+     device_info.pEnabledFeatures = &enabled_features;
+@@ -2271,6 +2479,10 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     attachments[1] = attachments[0];
+     impl.choose_depth_format();
+     attachments[1].format = impl.depth_format;
++    if (impl.stencil_buffer) {
++        attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
++        attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
++    }
+     attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+     attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+     VkAttachmentReference color_reference{0u, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+@@ -2291,7 +2503,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     if (portablekit::env("NO_CLEAR_LOAD") == nullptr) {
+         for (std::uint32_t variant = 1u; variant < 4u; ++variant) {
+             std::array<VkAttachmentDescription, 2> skipped = attachments;
+-            if ((variant & 1u) != 0u) skipped[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
++            // The stencil is the alpha: a clear of colour and alpha writes it.
++            if ((variant & 1u) != 0u) skipped[0].loadOp = skipped[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+             if ((variant & 2u) != 0u) skipped[1].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+             VkRenderPassCreateInfo variant_info = render_pass_info;
+             variant_info.pAttachments = skipped.data();
+@@ -2313,7 +2526,11 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     } else if (!create_shader(kGeRawVertexShader, sizeof(kGeRawVertexShader), impl.raw_vertex_shader)) {
+         return false;
+     }
+-    if (!create_shader(kGeFragmentShader, sizeof(kGeFragmentShader), impl.fragment_shader)) return false;
++    const std::vector<std::uint32_t> plain_fragment = without_dual_source(kGeFragmentShader, sizeof(kGeFragmentShader));
++    if (!create_shader(plain_fragment.data(), plain_fragment.size() * 4u, impl.fragment_shader)) return false;
++    if (impl.dual_source &&
++        !create_shader(kGeFragmentShader, sizeof(kGeFragmentShader), impl.dual_fragment_shader))
++        return false;
+ 
+     VkDescriptorSetLayoutBinding binding{};
+     binding.binding = 0u;
+@@ -2615,7 +2832,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+                   << (kVertexBufferTotal >> 20u) << " MiB in memory type " << vertex_type << " ("
+                   << ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0u ? "device local, " : "")
+                   << ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0u ? "cached" : "uncached")
+-                  << "); depth format " << static_cast<int>(impl.depth_format) << "\n";
++                  << "); depth format " << static_cast<int>(impl.depth_format) << ", stencil buffer "
++                  << (impl.stencil_buffer ? "on" : "off") << ", dual-source blending "
++                  << (impl.dual_source ? "on" : "off") << "\n";
+     }
+     std::cout << "Renderer: Vulkan on " << properties.deviceName << ", target " << impl.target_extent.width << "x"
+               << impl.target_extent.height << "\n";
+@@ -3394,9 +3613,10 @@ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
+                       target.color,
+                       target.color_memory, target.color_view, VK_IMAGE_ASPECT_COLOR_BIT, error))
+         return false;
++    // Copied from for write_back_depth().
+     if (!create_image(target_extent.width, target_extent.height, depth_format,
+-                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, target.depth, target.depth_memory,
+-                      target.depth_view, depth_aspect(), error))
++                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, target.depth,
++                      target.depth_memory, target.depth_view, depth_aspect(), error))
+         return false;
+     const std::array<VkImageView, 2> views{target.color_view, target.depth_view};
+     VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+@@ -3497,15 +3717,78 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
+     current_target = address;
+     last_drawn_target = address;
+     pass_active = true;
++    alpha_stale = false;
+ }
+ 
+ void VulkanRenderer::Impl::end_pass() {
+     flush_group();
+     if (!pass_active) return;
++    // Whatever reads the target next (a texture, the display, guest memory)
++    // reads its alpha.
++    if (alpha_stale) resolve_stencil_alpha("end of pass");
+     vkCmdEndRenderPass(command_buffer);
+     pass_active = false;
+ }
+ 
++// Copies the stencil into the target's alpha, which the draws since the last
++// copy left different from it, inside the pass and without reading the
++// stencil in a shader: a quad over the whole target writes alpha 0, then one
++// quad per stencil bit passes the stencil test (EQUAL under a compare mask of
++// that bit) where the bit is set and adds the bit's value to the alpha
++// (ONE + ONE, alpha written alone). Sums of multiples of 1/255 stay exact in
++// an 8-bit target.
++void VulkanRenderer::Impl::resolve_stencil_alpha(const char *reason) {
++    alpha_stale = false;
++    if (!pass_active) return;
++    static const bool trace = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
++    if (trace)
++        std::cout << "[render] stencil copied into the alpha of 0x" << std::hex << current_target << std::dec
++                  << " in frame " << frames << " (" << reason << ")\n";
++    flush_group();
++    const VkDeviceSize start = vertex_limit;  // the region's quad slot (kResolveQuadBytes)
++    std::array<GpuVertex, 6> quad{};
++    const float w = static_cast<float>(kPspWidth);
++    const float h = static_cast<float>(kPspHeight);
++    const std::array<std::array<float, 2>, 6> corners{{{0.0f, 0.0f}, {w, 0.0f}, {0.0f, h}, {0.0f, h}, {w, 0.0f}, {w, h}}};
++    for (std::size_t i = 0; i < quad.size(); ++i) {
++        quad[i].x = corners[i][0];
++        quad[i].y = corners[i][1];
++        quad[i].color = 0xFFFFFFFFu;
++    }
++    static_assert(sizeof(quad) <= kResolveQuadBytes, "the resolve quad must fit its slot");
++    std::memcpy(static_cast<std::uint8_t *>(vertex_mapped) + start, quad.data(), sizeof(quad));
++
++    DrawState state{};
++    state.texture = white_texture.descriptor;
++    state.lighting = state_known ? recorded.lighting
++                                 : std::array<std::uint32_t, 3>{environment_offset, object_offset, raw_offset};
++    state.viewport = {0.0f, 0.0f, static_cast<float>(target_extent.width), static_cast<float>(target_extent.height),
++                      0.0f, 1.0f};
++    state.scissor = {{0, 0}, target_extent};
++    state.push.viewport = {w, h, 1.0f, 0.0f};
++    state.push.texture_params = {0.0f, 0.0f, 0.0f, 1.0f};  // no texture, alpha test ALWAYS
++    PipelineKey key{};
++    key.alpha_test = false;
++    key.color_mask = VK_COLOR_COMPONENT_A_BIT;
++    for (std::uint32_t step = 0; step <= 8u; ++step) {
++        const std::uint32_t bit = step == 0u ? 0u : 1u << (step - 1u);
++        if (step != 0u) {
++            key.blend = true;
++            key.source_factor = kFactorOne;
++            key.destination_factor = kFactorOne;
++            key.alpha_blend = kAlphaAdd;
++            key.stencil = stencil_key(2u, 0u, 0u, 0u);  // EQUAL, keep
++            key.stencil_values = bit | bit << 8u;       // reference and compare mask; write mask 0
++        }
++        state.pipeline = pipeline_for(key);
++        if (state.pipeline == VK_NULL_HANDLE) return;
++        state.push.viewport[3] = kPushStencilAlpha + 8.0f * static_cast<float>(bit);
++        record_state(state);
++        vkCmdBindVertexBuffers(command_buffer, 0u, 1u, &vertex_buffer, &start);
++        vkCmdDraw(command_buffer, static_cast<std::uint32_t>(quad.size()), 1u, 0u, 0u);
++    }
++}
++
+ VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture(std::uint32_t width, std::uint32_t height,
+                                                                    const std::uint32_t *pixels) {
+     Texture texture = create_texture_image(width, height);
+@@ -3773,6 +4056,9 @@ std::uint16_t update_max_seen_v(std::uint16_t seen, std::uint16_t drawn, bool th
+ 
+ } // namespace
+ 
++// Level 0 only: the mip levels the GE names (TextureState::level_count and
++// levels) are neither decoded nor sampled by this renderer, which samples every
++// texture at its full size.
+ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemory &memory, const DrawCall &call) {
+     const TextureState &state = call.texture;
+     const TextureKeyInput input{state.address,
+@@ -4202,8 +4488,14 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+         texture.height == 0u)
+         return {};
+     const std::uint32_t texture_address = GuestMemory::canonical(texture.address);
++    // A target that starts exactly where the texture starts wins over one that
++    // merely contains the address: Wipeout Pure's bloom blurs 0x04132000, a
++    // 256-stride target of its own that also lies inside the 256-stride target
++    // at 0x04110000 (the depth buffer's bytes); the most recently drawn of the
++    // two is the wrong one, and its rows past the texture were never drawn.
+     Target *best = nullptr;
+     std::uint32_t best_base = 0u;
++    bool best_exact = false;
+     for (auto &[address, target] : targets) {
+         if (!target.initialized || target.guest_words.empty()) continue;
+         const std::uint32_t bytes_per_pixel = framebuffer_bytes_per_pixel(target.format);
+@@ -4212,9 +4504,12 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+         const std::uint32_t bytes = target.stride * kPspHeight * bytes_per_pixel;
+         if (texture_address < base || texture_address - base >= bytes) continue;
+         if (texture.buffer_width != target.stride || (texture_address - base) % bytes_per_pixel != 0u) continue;
+-        if (best == nullptr || target.draw_serial > best->draw_serial) {
++        const bool exact = texture_address == base;
++        if (best == nullptr || (exact && !best_exact) ||
++            (exact == best_exact && target.draw_serial > best->draw_serial)) {
+             best = &target;
+             best_base = base;
++            best_exact = exact;
+         }
+     }
+     if (best == nullptr) return {};
+@@ -4376,14 +4671,15 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+ namespace {
+ 
+ constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
+-constexpr std::uint32_t kPipelineKeysVersion = 1u;
+-constexpr std::uint32_t kPipelineKeyWords = 12u;
++constexpr std::uint32_t kPipelineKeysVersion = 3u;
++constexpr std::uint32_t kPipelineKeyWords = 15u;
+ constexpr std::uint32_t kMaxPipelineKeys = 4096u;
+ 
+ std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
+     return {key.blend ? 1u : 0u, key.source_factor,  key.destination_factor, key.equation,
+             key.depth_test ? 1u : 0u, key.depth_write ? 1u : 0u, key.depth_function, key.cull ? 1u : 0u,
+-            key.cull_clockwise ? 1u : 0u, key.color_mask, key.alpha_test ? 1u : 0u, key.raw ? 1u : 0u};
++            key.cull_clockwise ? 1u : 0u, key.color_mask, key.alpha_test ? 1u : 0u, key.raw ? 1u : 0u,
++            key.alpha_blend, key.stencil, key.stencil_values};
+ }
+ 
+ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
+@@ -4400,6 +4696,9 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+     key.color_mask = words[9] & 0xFu;
+     key.alpha_test = words[10] != 0u;
+     key.raw = words[11] != 0u;
++    key.alpha_blend = words[12] <= kAlphaAdd ? words[12] : kAlphaFragment;
++    key.stencil = words[13] & 0x1FFFu;
++    key.stencil_values = words[14] & 0xFFFFFFu;
+     return key;
+ }
+ 
+@@ -4445,7 +4744,9 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
+         if (!in) return;
+         in.seekg(0, std::ios::end);
+         const std::streamoff size = in.tellg();
+-        if (size < 16 || size % 4 != 0 || size > 16 + static_cast<std::streamoff>(kMaxPipelineKeys) * 48) return;
++        if (size < 16 || size % 4 != 0 ||
++            size > 16 + static_cast<std::streamoff>(kMaxPipelineKeys) * kPipelineKeyWords * 4)
++            return;
+         in.seekg(0);
+         data.resize(static_cast<std::size_t>(size / 4));
+         in.read(reinterpret_cast<char *>(data.data()), size);
+@@ -4554,7 +4855,10 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     stages[0].pName = "main";
+     stages[1] = stages[0];
+     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+-    stages[1].module = fragment_shader;
++    stages[1].module = key.alpha_blend == kAlphaDual ? dual_fragment_shader : fragment_shader;
++    // A key saved by a run with dual-source blending or the stencil
++    // attachment, prewarmed in a run without it (prewarm_pipelines).
++    if (stages[1].module == VK_NULL_HANDLE || (key.stencil != 0u && !stencil_buffer)) return VK_NULL_HANDLE;
+ 
+     VkVertexInputBindingDescription binding{0u, sizeof(GpuVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+     std::array<VkVertexInputAttributeDescription, 4> attributes{
+@@ -4598,14 +4902,41 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     depth.depthTestEnable = key.depth_test ? VK_TRUE : VK_FALSE;
+     depth.depthWriteEnable = key.depth_write ? VK_TRUE : VK_FALSE;
+     depth.depthCompareOp = to_compare_op(key.depth_function);
+-
++    // The GE compares the reference with the stencil as Vulkan does
++    // (reference OP stencil, both masked), with the same function numbers.
++    if ((key.stencil & 1u) != 0u) {
++        VkStencilOpState stencil{};
++        stencil.compareOp = to_compare_op((key.stencil >> 1u) & 7u);
++        stencil.failOp = to_stencil_op((key.stencil >> 4u) & 7u);
++        stencil.depthFailOp = to_stencil_op((key.stencil >> 7u) & 7u);
++        stencil.passOp = to_stencil_op((key.stencil >> 10u) & 7u);
++        stencil.reference = key.stencil_values & 0xFFu;
++        stencil.compareMask = (key.stencil_values >> 8u) & 0xFFu;
++        stencil.writeMask = (key.stencil_values >> 16u) & 0xFFu;
++        depth.stencilTestEnable = VK_TRUE;
++        depth.front = stencil;
++        depth.back = stencil;
++    }
++
++    // kAlphaDual: the colour blend's source alpha is the shader's second output.
++    const auto colour_factor = [&](std::uint32_t factor, bool source) {
++        const VkBlendFactor vk = to_blend_factor(factor, source);
++        if (key.alpha_blend != kAlphaDual) return vk;
++        if (vk == VK_BLEND_FACTOR_SRC_ALPHA) return VK_BLEND_FACTOR_SRC1_ALPHA;
++        if (vk == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA) return VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;
++        return vk;
++    };
+     VkPipelineColorBlendAttachmentState blend_attachment{};
+     blend_attachment.blendEnable = key.blend ? VK_TRUE : VK_FALSE;
+-    blend_attachment.srcColorBlendFactor = to_blend_factor(key.source_factor, true);
+-    blend_attachment.dstColorBlendFactor = to_blend_factor(key.destination_factor, false);
++    blend_attachment.srcColorBlendFactor = colour_factor(key.source_factor, true);
++    blend_attachment.dstColorBlendFactor = colour_factor(key.destination_factor, false);
+     blend_attachment.colorBlendOp = to_blend_op(key.equation);
+-    blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+-    blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
++    blend_attachment.srcAlphaBlendFactor = key.alpha_blend == kAlphaConstant ? VK_BLEND_FACTOR_CONSTANT_ALPHA
++                                           : key.alpha_blend == kAlphaZero   ? VK_BLEND_FACTOR_ZERO
++                                                                             : VK_BLEND_FACTOR_ONE;
++    blend_attachment.dstAlphaBlendFactor = key.alpha_blend == kAlphaConstant ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
++                                           : key.alpha_blend == kAlphaAdd    ? VK_BLEND_FACTOR_ONE
++                                                                             : VK_BLEND_FACTOR_ZERO;
+     blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+     blend_attachment.colorWriteMask = key.color_mask;
+     VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+@@ -6040,12 +6371,71 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         key.cull = call.culling_enabled && !call.through && call.primitive != PrimitiveType::Sprites;
+         key.cull_clockwise = call.cull_clockwise;
+     }
+-    // Matches texture_params.w below: without an alpha test the pipeline's
+-    // shader has no discard. <prefix>_NO_ALPHA_VARIANTS keeps the one shader
++    // The target's alpha is the PSP's stencil: only the stencil operations
++    // write it (stencil_alpha), and the write masks leave whole channels
++    // alone. A value the colour blend leaves the fragment's alpha free for is
++    // stored by the fragment shader. When the blend reads the source alpha,
++    // dual-source blending hands it the fragment's own alpha and the shader
++    // still stores the value (kAlphaDual); without it the alpha blend factors
++    // store it, exactly for zero and, for any other value, only where the
++    // fragment is opaque. <prefix>_NO_STENCIL_ALPHA stores the fragment's
++    // alpha and every channel, as before.
++    //
++    // With the stencil attachment the draw's stencil test, operations and
++    // masks go to it as they are (a clear of the alpha is a REPLACE of the
++    // clear colour's alpha), and `follows` says whether the alpha still
++    // equals the stencil afterwards (alpha_follows_stencil); when it does not,
++    // the alpha is copied from the stencil before it is read
++    // (resolve_stencil_alpha, below and in end_pass).
++    static const bool no_stencil_alpha = portablekit::env("NO_STENCIL_ALPHA") != nullptr;
++    int stored_alpha = -1;
++    float blend_alpha = 1.0f;
++    bool follows = true;
++    if (call.clear_mode) {
++        if (impl.stencil_buffer && (call.clear_flags & 2u) != 0u && call.target.color_format != 0u) {
++            if (!call.vertices.empty()) {
++                const std::uint32_t color = use_material_color ? call.material_color : call.vertices.back().color;
++                key.stencil = stencil_key(1u, 2u, 2u, 2u);  // ALWAYS, REPLACE
++                key.stencil_values = (color >> 24u) | 0xFFu << 8u | 0xFFu << 16u;
++            } else {
++                // A clear decoded on the GPU: its alpha is not known here, so
++                // the stencil keeps its old value while the alpha is cleared.
++                report_not_emulated("stencil clear of a raw draw, vertex type", call.vertex_type);
++            }
++        }
++    } else if (!no_stencil_alpha) {
++        std::uint32_t color_mask = 0u;
++        for (std::uint32_t channel = 0; channel < 3u; ++channel) {
++            const std::uint32_t bits = (call.color_write_mask >> (8u * channel)) & 0xFFu;
++            if (bits != 0xFFu) color_mask |= 1u << channel;  // VK_COLOR_COMPONENT_R/G/B_BIT
++            if (bits != 0u && bits != 0xFFu) report_not_emulated("partial colour write mask", call.color_write_mask);
++        }
++        const int stencil = stencil_alpha(call, impl.stencil_buffer);
++        key.color_mask = color_mask | (stencil >= 0 ? VK_COLOR_COMPONENT_A_BIT : 0u);
++        if (impl.stencil_buffer && call.stencil.enabled && call.target.color_format != 0u) {
++            key.stencil = stencil_key(call.stencil.function, call.stencil.fail_op, call.stencil.depth_fail_op,
++                                      call.stencil.pass_op);
++            key.stencil_values = stored_reference(call) | (call.stencil.mask & 0xFFu) << 8u |
++                                 (~call.alpha_write_mask & 0xFFu) << 16u;
++        }
++        if (stencil > 0 && impl.dual_source && blend_reads_source_alpha(key)) {
++            key.alpha_blend = kAlphaDual;
++            stored_alpha = stencil;
++        } else if (stencil >= 0 && blend_reads_source_alpha(key)) {
++            key.alpha_blend = stencil == 0 ? kAlphaZero : kAlphaConstant;
++            blend_alpha = static_cast<float>(stencil) / 255.0f;
++            if (stencil != 0) follows = false;  // the constant blend is exact only for opaque fragments
++        } else {
++            stored_alpha = stencil;
++        }
++        if (key.stencil != 0u && !alpha_follows_stencil(call, key)) follows = false;
++    }
++    // Matches texture_params.w below: without an alpha test, or with ALWAYS
++    // (GE function 1; 0 is NEVER), the pipeline's shader has no discard. <prefix>_NO_ALPHA_VARIANTS keeps the one shader
+     // that tests alpha for every draw, as before.
+     static const bool no_alpha_variants = portablekit::env("NO_ALPHA_VARIANTS") != nullptr;
+     key.alpha_test = no_alpha_variants || perf::alternate_off(perf::NewPath::Alpha) ||
+-                     (!call.clear_mode && call.alpha_test.enabled && call.alpha_test.function != 0u);
++                     (!call.clear_mode && call.alpha_test.enabled && call.alpha_test.function != 1u);
+     key.raw = raw;
+     // Escape hatch for bisecting "nothing is visible" reports.
+     static const bool no_cull = portablekit::env("NO_CULL") != nullptr;
+@@ -6059,6 +6449,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     push.transform = multiply(call.projection, view_world);
+     push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
+                      (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f)};
++    if (stored_alpha >= 0) push.viewport[3] += kPushStencilAlpha + 8.0f * static_cast<float>(stored_alpha);
+     push.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
+     // The GE's texture wrap register: clamp in u, in v, or repeat. The
+     // sampler repeats; the fragment shader clamps the axes flagged here
+@@ -6068,17 +6459,24 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     const float wrap_flags = no_texture_clamp ? 0.0f
+                                               : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
+                                                     (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
++    // The alpha test only: the colour test (DrawCall::color_test) is not
++    // drawn by this renderer, nor dithering (DrawCall::dither: 16-bit targets
++    // are drawn at 8 bits a channel), nor CLIPENABLE's depth clamp
++    // (DrawCall::clip_enabled: every draw is clipped at both depth planes).
+     push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
+-                           static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 0u)};
++                           static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
+     // Through-mode texture coordinates are in texels, transformed ones in [0,1].
++    // Every draw takes its vertex UVs here (texture map mode 0): the texture
++    // matrix and environment map modes (DrawCall::texture_map) are not drawn
++    // by this renderer.
+     push.uv_transform = call.through && call.texture.width != 0u
+                             ? std::array<float, 4>{1.0f / static_cast<float>(call.texture.width),
+                                                    1.0f / static_cast<float>(call.texture.height), 0.0f, 0.0f}
+                             : std::array<float, 4>{call.texture.scale_u, call.texture.scale_v, call.texture.offset_u,
+                                                    call.texture.offset_v};
+ 
+-    if (call.clear_mode) push.texture_params = {0.0f, 0.0f, 0.0f, 0.0f};
++    if (call.clear_mode) push.texture_params = {0.0f, 0.0f, 0.0f, 1.0f};  // no texture, alpha test ALWAYS
+ 
+     static const bool trace_fb = portablekit::env("TRACE_FB_TEXTURES") != nullptr;
+     if (trace_fb && call.texture.enabled && !call.clear_mode) impl.trace_framebuffer_texture(call);
+@@ -6134,6 +6532,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         impl.begin_pass(call.target.color_address, overwritten);
+         if (!impl.pass_active) return;
+     }
++    // A blend that reads the destination's alpha reads the PSP's stencil.
++    if (impl.alpha_stale && blend_reads_destination_alpha(key)) impl.resolve_stencil_alpha("destination alpha read");
++    if (impl.stencil_buffer && !follows) impl.alpha_stale = true;
+     {
+         Impl::Target &drawn = impl.targets.at(call.target.color_address);
+         const bool layout_changed =
+@@ -6183,7 +6584,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         key.source_factor == kFactorFixed ? call.blend.fixed_source : call.blend.fixed_destination;
+     const std::array<float, 4> blend_constants{static_cast<float>(constant_color & 0xFFu) / 255.0f,
+                                                static_cast<float>((constant_color >> 8u) & 0xFFu) / 255.0f,
+-                                               static_cast<float>((constant_color >> 16u) & 0xFFu) / 255.0f, 1.0f};
++                                               static_cast<float>((constant_color >> 16u) & 0xFFu) / 255.0f,
++                                               blend_alpha};
+ 
+     const auto clamp_axis = [](std::uint32_t value, std::uint32_t limit) { return std::min(value, limit); };
+     const std::uint32_t sx1 = clamp_axis(call.viewport.scissor_x1, kPspWidth - 1u);
+@@ -6406,6 +6808,215 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+                   << " back for a block transfer\n";
+ }
+ 
++bool VulkanRenderer::Impl::create_depth_readback(VkDeviceSize bytes, std::string &error) {
++    VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
++    buffer_info.size = bytes;
++    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++    if (!check(vkCreateBuffer(device, &buffer_info, nullptr, &depth_readback.buffer), "vkCreateBuffer", error))
++        return false;
++    VkMemoryRequirements requirements{};
++    vkGetBufferMemoryRequirements(device, depth_readback.buffer, &requirements);
++    // The CPU reads it, so cached memory first, as for the frame write-back.
++    VkPhysicalDeviceMemoryProperties memory_properties{};
++    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
++    constexpr VkMemoryPropertyFlags kVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
++    std::int32_t chosen = -1;
++    for (const VkMemoryPropertyFlags wanted :
++         {kVisible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
++          kVisible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, kVisible | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT}) {
++        for (std::uint32_t i = 0; i < memory_properties.memoryTypeCount && chosen < 0; ++i)
++            if ((requirements.memoryTypeBits & (1u << i)) != 0u &&
++                (memory_properties.memoryTypes[i].propertyFlags & wanted) == wanted)
++                chosen = static_cast<std::int32_t>(i);
++        if (chosen >= 0) break;
++    }
++    if (chosen < 0) {
++        error = "no host-visible memory type";
++        return false;
++    }
++    depth_readback_coherent =
++        (memory_properties.memoryTypes[chosen].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0u;
++    VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
++    allocate.allocationSize = requirements.size;
++    allocate.memoryTypeIndex = static_cast<std::uint32_t>(chosen);
++    if (!check(vkAllocateMemory(device, &allocate, nullptr, &depth_readback.memory), "vkAllocateMemory", error))
++        return false;
++    vkBindBufferMemory(device, depth_readback.buffer, depth_readback.memory, 0u);
++    if (!check(vkMapMemory(device, depth_readback.memory, 0u, bytes, 0u, &depth_readback.mapped), "vkMapMemory",
++               error))
++        return false;
++    depth_readback_size = bytes;
++    return true;
++}
++
++void VulkanRenderer::Impl::destroy_depth_readback() {
++    if (depth_readback.mapped != nullptr) vkUnmapMemory(device, depth_readback.memory);
++    vkDestroyBuffer(device, depth_readback.buffer, nullptr);
++    vkFreeMemory(device, depth_readback.memory, nullptr);
++    depth_readback = Staging{};
++    depth_readback_size = 0u;
++}
++
++bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t depth_address,
++                                      std::uint32_t depth_stride, GuestMemory &memory, const char *why) {
++    Impl &impl = *impl_;
++    if (!impl.ready) return false;
++    const auto found = impl.targets.find(color_address);
++    if (found == impl.targets.end() || !found->second.initialized) return false;
++    // The GE's depth buffer always lies in VRAM. Only screen-wide buffers are
++    // written, as for the frame write-back (record_writeback): a narrower one,
++    // a render-to-texture target's, has no height the GE states, and 272 rows
++    // of it could run over whatever the game keeps after it.
++    depth_address = 0x04000000u | (depth_address & 0x001FFFF0u);
++    if (depth_stride < kPspWidth) return false;
++    const std::size_t guest_bytes = static_cast<std::size_t>(depth_stride) * kPspHeight * 2u;
++    std::uint8_t *out = memory.raw_pointer(depth_address, guest_bytes);
++    if (out == nullptr) return false;
++    // Bytes per texel of the depth aspect copied into a buffer.
++    std::uint32_t texel_bytes = 4u;
++    switch (impl.depth_format) {
++    case VK_FORMAT_D32_SFLOAT:
++    case VK_FORMAT_D32_SFLOAT_S8_UINT:
++    case VK_FORMAT_D24_UNORM_S8_UINT:
++    case VK_FORMAT_X8_D24_UNORM_PACK32: break;
++    case VK_FORMAT_D16_UNORM: texel_bytes = 2u; break;
++    default: return false;
++    }
++    const perf::Clock::time_point start = perf::Clock::now();
++    if (!impl.recording) begin_frame();
++    impl.end_pass();
++    const VkExtent2D extent = impl.target_extent;
++    const VkDeviceSize bytes = static_cast<VkDeviceSize>(extent.width) * extent.height * texel_bytes;
++    if (impl.depth_readback_size < bytes) {
++        impl.destroy_depth_readback();
++        std::string error;
++        if (!impl.create_depth_readback(bytes, error)) {
++            static bool reported = false;
++            if (!std::exchange(reported, true))
++                std::cout << "[render] cannot write depth back to guest memory: " << error << "\n";
++            impl.destroy_depth_readback();
++            return false;
++        }
++    }
++    Impl::Target &target = found->second;
++    impl.transition(impl.command_buffer, target.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
++                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, impl.depth_aspect());
++    VkBufferImageCopy copy{};
++    copy.imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 0u, 1u};
++    copy.imageExtent = {extent.width, extent.height, 1u};
++    vkCmdCopyImageToBuffer(impl.command_buffer, target.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++                           impl.depth_readback.buffer, 1u, &copy);
++    VkBufferMemoryBarrier to_host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
++    to_host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++    to_host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
++    to_host.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    to_host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    to_host.buffer = impl.depth_readback.buffer;
++    to_host.offset = 0u;
++    to_host.size = VK_WHOLE_SIZE;
++    vkCmdPipelineBarrier(impl.command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0u, 0u,
++                         nullptr, 1u, &to_host, 0u, nullptr);
++    impl.transition(impl.command_buffer, target.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, impl.depth_aspect());
++    perf::count_target_copy();
++
++    // Run everything recorded so far and carry on recording afterwards, as
++    // read_back_framebuffer() does.
++    impl.end_gpu_segment(impl.command_buffer);
++    vkEndCommandBuffer(impl.command_buffer);
++    std::array<VkCommandBuffer, 2> batch{};
++    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
++    submit.commandBufferCount = impl.frame_batch(impl.command_buffer, batch);
++    submit.pCommandBuffers = batch.data();
++    const perf::Clock::time_point wait_start = perf::Clock::now();
++    vkQueueSubmit(impl.queue, 1u, &submit, impl.frame_fence);
++    impl.wait_fence(impl.frame_fence, "a depth write-back");
++    const perf::Clock::duration waited = perf::Clock::now() - wait_start;
++    perf::add_wait_time(waited, perf::Stall::Readback);
++    vkResetFences(impl.device, 1u, &impl.frame_fence);
++    // Uploads and evictions recorded so far have finished with the frame.
++    impl.release_frame_uploads(impl.slot);
++    vkResetCommandBuffer(impl.command_buffer, 0u);
++    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++    vkBeginCommandBuffer(impl.command_buffer, &begin);
++    impl.breadcrumb(impl.command_buffer, "frame goes on after a depth write-back");
++    impl.begin_gpu_segment(impl.command_buffer);
++    // A frame recorded for drawing again keeps what it wrote so far.
++    if (!impl.interpolating) impl.enter_region(impl.frame_region);
++    impl.environment_version = 0u;
++    impl.object_valid = false;
++    impl.raw_valid = false;
++    impl.forget_bindings();
++
++    // The GE's 16-bit z of each PSP pixel, from the texel at its centre. The
++    // GE's z reaches the depth image as z / 65535 (the vertex shader and the
++    // Vulkan viewport's depth range), so it is the texel times 65535.
++    if (!impl.depth_readback_coherent) {
++        VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
++        range.memory = impl.depth_readback.memory;
++        range.offset = 0u;
++        range.size = VK_WHOLE_SIZE;
++        vkInvalidateMappedMemoryRanges(impl.device, 1u, &range);
++    }
++    const auto *texels = static_cast<const std::uint8_t *>(impl.depth_readback.mapped);
++    const auto centre = [](std::uint32_t pixel, std::uint32_t pixels, std::uint32_t texels_across) {
++        const float at = (static_cast<float>(pixel) + 0.5f) * static_cast<float>(texels_across) /
++                         static_cast<float>(pixels);
++        return std::min(static_cast<std::uint32_t>(at), texels_across - 1u);
++    };
++    std::array<std::uint32_t, kPspWidth> columns{};
++    for (std::uint32_t x = 0; x < kPspWidth; ++x) columns[x] = centre(x, kPspWidth, extent.width);
++    const VkFormat format = impl.depth_format;
++    std::uint32_t lowest = 0xFFFFu;
++    std::uint32_t highest = 0u;
++    std::array<std::uint16_t, kPspWidth> row_values{};
++    for (std::uint32_t y = 0; y < kPspHeight; ++y) {
++        const std::uint8_t *row =
++            texels + static_cast<std::size_t>(centre(y, kPspHeight, extent.height)) * extent.width * texel_bytes;
++        for (std::uint32_t x = 0; x < kPspWidth; ++x) {
++            const std::uint8_t *texel = row + static_cast<std::size_t>(columns[x]) * texel_bytes;
++            std::uint32_t z = 0u;
++            if (format == VK_FORMAT_D16_UNORM) {
++                std::uint16_t value{};
++                std::memcpy(&value, texel, 2u);
++                z = value;
++            } else if (format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
++                float value{};
++                std::memcpy(&value, texel, 4u);
++                z = static_cast<std::uint32_t>(std::clamp(value, 0.0f, 1.0f) * 65535.0f + 0.5f);
++            } else {
++                std::uint32_t value{};
++                std::memcpy(&value, texel, 4u);
++                z = static_cast<std::uint32_t>(
++                    (static_cast<std::uint64_t>(value & 0x00FFFFFFu) * 65535u + 0x7FFFFFu) / 0xFFFFFFu);
++            }
++            lowest = std::min(lowest, z);
++            highest = std::max(highest, z);
++            row_values[x] = static_cast<std::uint16_t>(z);
++        }
++        // Guest memory is little-endian, as every host this runs on.
++        static_assert(std::endian::native == std::endian::little);
++        std::memcpy(out + static_cast<std::size_t>(y) * depth_stride * 2u, row_values.data(),
++                    static_cast<std::size_t>(kPspWidth) * 2u);
++    }
++    perf::note_stall(perf::Stall::Readback, perf::Clock::now() - start);
++    static bool announced = false;
++    if (!std::exchange(announced, true))
++        std::cout << "[render] depth written back to guest memory at 0x" << std::hex << depth_address << std::dec
++                  << " for " << why << " (" << portablekit::env_name("NO_DEPTH_READBACK") << " turns it off)\n";
++    static const bool trace = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
++    if (trace) {
++        const double total_ms = std::chrono::duration<double, std::milli>(perf::Clock::now() - start).count();
++        const double wait_ms = std::chrono::duration<double, std::milli>(waited).count();
++        std::cout << "[render] frame " << impl.frames << " " << why << ": depth of 0x" << std::hex << color_address
++                  << " written back to 0x" << depth_address << std::dec << " stride " << depth_stride << ", z "
++                  << lowest << "-" << highest << ", " << total_ms << " ms (GPU wait " << wait_ms << " ms)\n";
++    }
++    return true;
++}
++
+ namespace {
+ 
+ // 480x272 RGBA pixels (red in the low byte) into guest framebuffer rows of
+@@ -6876,7 +7487,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+     clears[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+     clears[0].colorAttachment = 0u;
+     clears[0].clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+-    clears[1].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
++    clears[1].aspectMask = depth_aspect();
+     clears[1].clearValue.depthStencil = {0.0f, 0u};
+     const VkClearRect whole{{{0, 0}, target_extent}, 0u, 1u};
+     vkCmdClearAttachments(commands, static_cast<std::uint32_t>(clears.size()), clears.data(), 1u, &whole);
+@@ -7646,6 +8257,7 @@ void VulkanRenderer::shutdown() {
+     vkFreeMemory(impl.device, impl.overlay_memory, nullptr);
+     impl.destroy_upload();
+     impl.destroy_writeback();
++    impl.destroy_depth_readback();
+     if (impl.breadcrumbs.mapped != nullptr) vkUnmapMemory(impl.device, impl.breadcrumbs.memory);
+     vkDestroyBuffer(impl.device, impl.breadcrumbs.buffer, nullptr);
+     vkFreeMemory(impl.device, impl.breadcrumbs.memory, nullptr);
+@@ -7672,6 +8284,15 @@ void VulkanRenderer::shutdown() {
+     vkDestroySampler(impl.device, impl.sharp_sampler, nullptr);
+     vkDestroySampler(impl.device, impl.clamp_sampler, nullptr);
+     vkDestroySampler(impl.device, impl.clamp_sharp_sampler, nullptr);
++    // The targets first: destroy_target frees each copy descriptor set back to
++    // descriptor_pool, and freeing into a destroyed pool writes the driver's
++    // freed memory (MoltenVK's pool and set objects are heap allocations).
++    for (auto &[address, target] : impl.targets) impl.destroy_target(target);
++    impl.targets.clear();
++    impl.destroy_target(impl.held);
++    impl.held = {};
++    impl.holding = false;
++    impl.destroy_interpolation_targets();
+     vkDestroyDescriptorPool(impl.device, impl.descriptor_pool, nullptr);
+     vkDestroyDescriptorSetLayout(impl.device, impl.descriptor_layout, nullptr);
+     vkDestroyDescriptorSetLayout(impl.device, impl.lighting_layout, nullptr);
+@@ -7682,12 +8303,8 @@ void VulkanRenderer::shutdown() {
+     vkDestroyBuffer(impl.device, impl.check_buffer, nullptr);
+     vkFreeMemory(impl.device, impl.check_memory, nullptr);
+     vkDestroyShaderModule(impl.device, impl.fragment_shader, nullptr);
+-    for (auto &[address, target] : impl.targets) impl.destroy_target(target);
+-    impl.targets.clear();
+-    impl.destroy_target(impl.held);
+-    impl.held = {};
+-    impl.holding = false;
+-    impl.destroy_interpolation_targets();
++    if (impl.dual_fragment_shader != VK_NULL_HANDLE)
++        vkDestroyShaderModule(impl.device, impl.dual_fragment_shader, nullptr);
+     for (VkFence fence : impl.present_fences) vkDestroyFence(impl.device, fence, nullptr);
+     if (impl.present_timer != VK_NULL_HANDLE) vkDestroyQueryPool(impl.device, impl.present_timer, nullptr);
+     vkDestroyRenderPass(impl.device, impl.render_pass, nullptr);
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index d9e1803..1df2eeb 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -139,6 +139,15 @@ public:
+     // writes that framebuffer back to guest memory, so the copy gets the
+     // picture. Waits for the GPU. <prefix>_NO_FB_TEXTURES turns it off.
+     void read_back_framebuffer(std::uint32_t source, GuestMemory &memory);
++    // Stores the depth of the target at `color_address` in guest VRAM, 16 bits
++    // a pixel as the GE keeps it (z 0-65535, the viewport's depth range) in
++    // rows of `depth_stride` pixels from `depth_address`, for game code that
++    // reads the depth buffer with the CPU: Wipeout Pure tests the sun for its
++    // lens flare in the handler of a GE SIGNAL. Finishes the work queued so far
++    // and waits for the GPU. Returns whether anything was written (false
++    // without such a target). `why` is for <prefix>_TRACE_DEPTH_READBACK.
++    bool write_back_depth(std::uint32_t color_address, std::uint32_t depth_address, std::uint32_t depth_stride,
++                          GuestMemory &memory, const char *why);
+     // Ends the frame and shows the target the guest just flipped to. Draws go to
+     // a separate offscreen target per guest framebuffer address, so only the
+     // displayed one reaches the window. `moment` is the real time the flip's
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 3b3727d..3d88aaf 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -165,6 +165,26 @@ void block_transfer(Runtime &rt, const gpu::BlockTransfer &transfer) {
+ #endif
+ }
+ 
++// Before a SIGNAL's handler runs: it may read the depth buffer with the CPU
++// (Wipeout Pure tests whether the sun is covered for its lens flare that
++// way), and the renderer keeps depth on the GPU, so the depth of the target
++// being drawn is written into guest VRAM where the GE would have left it.
++// <prefix>_NO_DEPTH_READBACK leaves guest memory alone.
++void write_back_depth_for_signal(Runtime &rt, std::uint32_t signal) {
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    static const bool disabled = portablekit::env("NO_DEPTH_READBACK") != nullptr;
++    if (disabled || !media().renderer || !media().renderer->available()) return;
++    const gpu::RenderTarget &target = media().ge.target();
++    char why[32];
++    std::snprintf(why, sizeof why, "signal 0x%X", signal);
++    media().renderer->write_back_depth(target.color_address, target.depth_address, target.depth_stride, rt.memory(),
++                                       why);
++#else
++    (void)rt;
++    (void)signal;
++#endif
++}
++
+ void run_ge_list(Runtime &rt, std::uint32_t id) {
+     auto found = media().ge_lists.find(id);
+     if (found == media().ge_lists.end()) return;
+@@ -174,11 +194,12 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
+     if (const auto cb = media().ge_callbacks.find(list.callback); cb != media().ge_callbacks.end())
+         callback = &cb->second;
+ 
+-    media().ge.set_signal_sink([callback](std::uint32_t signal, std::uint32_t pc) {
++    media().ge.set_signal_sink([callback, &rt](std::uint32_t signal, std::uint32_t pc) {
+         if (callback == nullptr) return;
+         const bool finish = (signal & 0x10000u) != 0u;
+         const std::uint32_t function = finish ? callback->finish_function : callback->signal_function;
+         if (function == 0u) return;
++        if (!finish) write_back_depth_for_signal(rt, signal & 0xFFFFu);
+         InterruptCall call{};
+         call.function = function;
+         call.arguments = {signal & 0xFFFFu, finish ? callback->finish_argument : callback->signal_argument, pc, 0u};
