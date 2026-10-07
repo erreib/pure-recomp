@@ -208,3 +208,12 @@ NAME shows NAME0000) and restart (`profile_list_load.txt`: the boot LOAD lists b
 it, SET NAME shows NAME1111), and check that P0000 was not written and that both folders hold their own pilots. The
 list's captures are `run4/list-save.png`, `run4/save-completed.png`, `run4/list-load.png`,
 `run4/list-load-p0000.png` and `run5/list-boot.png`.
+
+Since patch 0019 the round trip's `folder_check` fails its "PROFILE.BIN holds pilot" line (7 of its 73 checks, one per
+folder checked): it reads the pilot's name from `PROFILE.BIN` as plaintext, and the file is now enciphered as on a PSP.
+Every other check passes (2026-10-07). Task 045's Result proposes the change (the pilot read from
+`tools/save_interchange.sh --check`'s decryption); the script was outside that task.
+
+`tools/save_interchange.sh` (about 3 minutes; docs/verification.md, "The save interchange check") moves saves between
+the port and PPSSPP both ways on sticks of its own under `out/045/`, and leaves PPSSPP's stick as it found it.
+`tools/save_interchange.sh --check FOLDER PROFILE.BIN OUT` writes the decrypted profile of any save folder.
