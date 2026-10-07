@@ -1,6 +1,6 @@
 # 046: Why the AI runs a different race, and the Karbonis contact response (scorecard: Trajectories)
 
-Milestone: M8 | Branch: task/046-ai-seed-and-contact | Status: OPEN
+Milestone: M8 | Branch: task/046-ai-seed-and-contact | Status: MERGED (28fd1f2, 2026-10-07; PARTIAL: the VFPU dot product is task 047)
 
 ## Goal
 The scorecard's first run (docs/scorecard.md, task 044) grades Trajectories `differs`: with identical input the
@@ -232,4 +232,23 @@ Open questions:
    allowed in `scorecard.py` was the pass-through; docs/scorecard.md explains it.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: the Verify line fails by design at `tools/ai_seed_check.sh` (Vineta K's AI row is `close`, 4.05 m,
+which the escalation case explains: a 1-ulp VFPU dot product in the codegen, outside this task); from the main
+checkout after the merge: `tools/build.sh profile`, `tools/frame_regress.sh` 18/18 (race_hud 0.0148),
+`python3 tools/scorecard.py --selftest` PASS. The race-clock references copied from the worker's ref/race_clock (12
+files, git-ignored, their SHA-256 prefixes in the Result).
+
+Spot-read: src/profile/pure_profile.cpp (everything behind `PURE_TEST_RACE_CLOCK`, `PURE_WATCH_RAND`,
+`PURE_WATCH_WORDS`, `PURE_TRACE_RAND`; a player's game untouched), tools/ai_seed_check.sh (takes PPSSPP's clock through
+the driver, checks the player's end position first, then the scorecard's measure), tools/scorecard.py (the 5-line
+pass-through only). Files outside May touch: none.
+
+Merged: 28fd1f2 into batch/m2.
+
+Notes: the finding reverses my brief's framing: the AI's start is two `srand` seeds from the time since boot and the
+game's frame clock, the unlocked team set, and the port's 1 ms frame-time quanta; the load's length is not involved,
+so D-011 stands with no new finding. All 12 player rows are faithful under the pin, Karbonis included (the scrape was
+the time step, not the collision code). The remaining AI divergence is the codegen's vdot: clang contracts the C++
+expression into fused multiply-adds while the VFPU rounds each product (PPSSPP's model: 389 of 1488 results differ by
+1 ulp at 0x089196B8). That is task 047, in include/psprecomp (a corpus rebuild), Fable's own. Open for Erik: the 1 ms
+frame-time quanta (a finer virtual time answer would make the port's frame times follow its own work, as a PSP's do).
