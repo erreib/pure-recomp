@@ -1,6 +1,6 @@
 # 050: One shared runner for the tools (the organisation pass, 2 of 5)
 
-Milestone: M9 organisation | Branch: task/050-tools-shared-runner | Status: OPEN
+Milestone: M9 organisation | Branch: task/050-tools-shared-runner | Status: MERGED (7ed295e, 2026-10-07)
 
 ## Goal
 The Python tools each grew their own copy of "run the game headless with this route, wait for the one-game guard,
@@ -197,4 +197,18 @@ Open questions:
    that check of deliverable 3 overwrites its files too.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at 7ed295e (2026-10-07): scorecard selftest and `--quick` (pictures
+faithful, timing close, saves close, coverage close), HUD 61 of 61, `vfpu_model --check` PASS.
+
+Spot-read: tools/purelib (port, logs, ppsspp; one-line docstrings; both environment rules and both guard behaviours
+kept as functions rather than one picked), the tools' diffs (internals only; command lines and outputs unchanged),
+the steady clock set for headless runs and left off for windowed and `--sound` runs, the PtyRun equivalence test on
+a stand-in game in six ways a run ends. Files outside May touch: none.
+
+Merged: 7ed295e into batch/m2.
+
+Notes: the differing rules between tools (three environment rules, two guard behaviours, two exit-code forms) are
+recorded, not resolved; a new tool should take `clean_env()` and the scorecard's wait. The PPSSPP session block is
+still written four times (a follow-up with a PPSSPP run to compare). `vfpu_probe.py port ref/vfpu/jit` without
+`--modes` rewrites the set's port files under the default mode; the checks use `--modes`. README gains the
+`PURE_NO_BUSY_CLOCK` row here, after the merge.
