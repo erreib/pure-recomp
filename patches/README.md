@@ -8,8 +8,10 @@ go upstream, what a pull request would carry and what it needs first: `docs/upst
 
 ## Old numbers
 Task 052 (2026-10-07) regrouped the twenty patches of tasks 001 to 048 into the nine below, one per topic, without
-changing a byte of the vendor tree. Task files, docs, tool comments and three comments inside the vendor tree itself
-("patch 0014", "patch 0017", "patch 0021") cite the old numbers; this is where each went. A patch split by file
+changing a byte of the vendor tree. The task files (the record), a few strings the tools print, two config comments
+and three comments inside the vendor tree itself ("patch 0014", "patch 0017", "patch 0021") cite the old numbers;
+since task 053 the docs name the new patch with the task that made the change, and the history files under
+`docs/history/` mark an old number "old". This is where each went. A patch split by file
 went to more than one new patch. 0016 was never used.
 
 | Old patch | New patch |
