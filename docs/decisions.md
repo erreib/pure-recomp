@@ -13,6 +13,7 @@
 | D-009 | 2026-10-06 | Priority: as close to 1:1 with the original as possible before any enhancement; the host pause menu stays the framework's | accepted (Erik) |
 | D-010 | 2026-10-07 | The SAS reverb's two constants are fitted to PPSSPP's output (the formula at 44.1 kHz, the sends at half), not taken from the documentation | accepted |
 | D-011 | 2026-10-07 | Load times stay the port's own (no UMD read timing): fidelity difference 6 closed as accepted | accepted (Erik) |
+| D-012 | 2026-10-07 | The expanded version gets its own save format (the game's profile blob in our container, with an extensions area); the PSP format stays as the import/export bridge; designed when the DLC loader and the first sequel feature are concrete | accepted (Erik), scheduled |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -144,3 +145,25 @@ Consequences: nothing reads the disc with a delay; a later ad hoc multiplayer, i
 load timing between peers. If a game behaviour ever turns out to depend on the load's length (a timer that runs
 during it), that is a new finding, not this decision.
 Status: accepted.
+
+## D-012  2026-10-07  An own save format for the expanded version
+Context: Erik plans an expanded version after fidelity: the DLC packs, and possibly features from the sequel
+(Wipeout Pulse). He asked whether the save system could be rebuilt away from the PSP's proprietary format. The game
+itself never encrypts: it hands a plain profile structure (41 KB) to the save-data utility, and everything
+proprietary (the cipher, the hashes, PARAM.SFO, the folder layout) is the utility's work, which in the port is the
+framework's HLE layer, not recompiled code. On a PSP each DLC pack is a save-data folder holding a WAD the game
+decrypts itself; sequel features would be new native code needing state the original profile has no field for.
+Decision (Erik): the expanded version gets its own save format: the game's profile structure as the payload (the
+recompiled code reads that layout), inside our own versioned container with checksums and an extensions area for
+state our native code keeps beside the game's. DLC packs become entries the loader presents through the same
+save-data calls rather than memory-stick folders. The PSP format stays as the import and export bridge (task 045's
+writer and the framework's menu), so a PSP or PPSSPP profile can be brought in and a port profile taken out. The
+plain saves the port writes today migrate trivially, being the same blob.
+Timing: designed and built as the opening task of the expanded version, once the DLC loader and the first sequel
+feature are concrete, so the container holds what they need rather than guesses; not before the scorecard and not
+under D-009's fidelity rule.
+Consequences: task 045 proceeds as briefed (the bridge is wanted either way). The savedata HLE stays the one seam
+for saves; nothing else should learn the memory-stick layout. When the format is designed, docs/savedata.md gets the
+container's specification and a migration note, and the framework's import/export is kept working against it.
+Status: accepted, scheduled for the expanded version.
+
