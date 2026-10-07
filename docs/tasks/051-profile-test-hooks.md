@@ -1,6 +1,6 @@
 # 051: The test-only switches out of the profile (the organisation pass, 3 of 5)
 
-Milestone: M9 organisation | Branch: task/051-profile-test-hooks | Status: OPEN
+Milestone: M9 organisation | Branch: task/051-profile-test-hooks | Status: MERGED (f7dbc43, 2026-10-07)
 
 ## Goal
 src/profile/pure_profile.cpp (668 lines) mixes the game's real profile (the executable, memory, the HLE overrides,
@@ -202,4 +202,21 @@ On 28e5e34, before the change, the same `ai_seed_check` FAIL with the same two r
      rows under "Test switches" keep their heading's "never for play".
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout at f7dbc43 (2026-10-07): `tools/build.sh profile`, race_hud 0.0148, and
+`tools/ai_seed_check.sh` giving the same two Vineta K rows as before the change (player faithful 0.00 m; AI close at
+18.54 s, 2.85 m). The brief's Verify line fails as it did before the task, because `ai_seed_check.sh`'s own PASS rule
+(every row faithful) cannot hold on Vineta K's AI row; my brief should have said "the same rows", and the acceptance
+criteria, which say that, all hold.
+
+Spot-read: test_hooks.{hpp,cpp} (one `install`, one `flip`, each switch its own function with the README's text;
+the binding order kept so `PURE_TRACE_CALLS` still wraps the flip counter and the replayed timer), pure_profile.cpp
+(668 to 201 lines, only run-control reads left), the README's run-control/test-only words. Files outside May touch:
+none.
+
+Merged: f7dbc43 into batch/m2.
+
+Notes: the run-control three stay in the profile with the reasons given; agreed. The log order moved in two
+harmless places (the start-up block, the `words` lines after the frame line), which no tool reads by order; the one
+call stays. The finding that matters is the kernel's busy-time charge: headless runs depend on machine load unless
+`PURE_NO_BUSY_CLOCK=1`; the shared runner (task 050) now sets it for every headless run, and the stale comment in
+tools/ai_seed_check.sh goes with it.
