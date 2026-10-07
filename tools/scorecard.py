@@ -59,6 +59,8 @@ import audio_compare as ac       # noqa: E402  (Track, locate; used as it is)
 import pp_lines as pl            # noqa: E402  (the race-record layout and its parser; used as it is)
 import ppsspp_ctl as pc          # noqa: E402  (the PPSSPP driver; used as it is)
 import png                       # noqa: E402
+from purelib import logs, port   # noqa: E402  (tools/purelib: the port runs, the guard, the log readers)
+from purelib import ppsspp as shared_ppsspp  # noqa: E402  (one PPSSPP, its memory stick free of a profile)
 
 CATEGORIES = ["pictures", "trajectories", "timing", "audio", "saves", "coverage"]
 QUICK = ["pictures", "timing", "saves", "coverage"]
@@ -139,10 +141,9 @@ SFO_FIELDS = ["TITLE", "SAVEDATA_TITLE", "SAVEDATA_DETAIL", "CATEGORY", "PARENTA
 SAVE_FOLDER = "UCUS98612P0000"
 DATA_FILE = "PROFILE.BIN"
 
-SHIP_RE = fa.SHIP_T_RE
-PLAYER_RE = fa.PLAYER_RE
+SHIP_RE = logs.SHIP_T_RE              # frame, t, clock, kmh, dist, lap
+PLAYER_RE = logs.PLAYER_RE
 CALL_FLIP_RE = re.compile(r"^\[call\] sceDisplay:0x289D82FE .* t=(\d+)$")
-GE_COUNT_RE = re.compile(r"^GE commands ignored: (\d+) distinct")
 UNVERIFIED_RE = re.compile(r"^\[\w+\] (\w+) \(UNVERIFIED")
 
 
@@ -198,26 +199,6 @@ def rel(p):
         return "~" + s[len(home):] if s.startswith(home + "/") else s
 
 
-def clean_env(extra=None):
-    """The environment for a port run: no PURE_* or PSPRECOMP_* switch inherited from the shell."""
-    env = {k: v for k, v in os.environ.items()
-           if not (k.startswith("PURE_") or k.startswith("PSPRECOMP_")) or k in ("PURE_ROOT", "PURE_MAIN_CHECKOUT")}
-    env.update(extra or {})
-    return env
-
-
-def main_checkout():
-    if os.environ.get("PURE_MAIN_CHECKOUT"):
-        return Path(os.environ["PURE_MAIN_CHECKOUT"])
-    try:
-        out = subprocess.run(["git", "-C", str(ROOT), "worktree", "list", "--porcelain"], capture_output=True,
-                             text=True).stdout
-        first = next(ln[len("worktree "):] for ln in out.splitlines() if ln.startswith("worktree "))
-        return Path(first)
-    except (OSError, StopIteration):
-        return ROOT
-
-
 def commit_label():
     try:
         c = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"], capture_output=True,
@@ -236,53 +217,6 @@ def fmt(v, digits=4):
     return "-" if v is None else f"{v:.{digits}f}"
 
 
-def other_game():
-    sys.path.insert(0, str(ROOT / "tools"))
-    import run_boot
-    return run_boot.other_games()
-
-
-WAITED = 0.0                           # seconds spent waiting for someone else's game or PPSSPP
-
-
-def wait_until(busy, what, limit=3600.0):
-    """Waits while busy() names something (another game, another PPSSPP, a profile on PPSSPP's stick): one game at a
-    time, and a process this tool did not start is never touched. False after `limit` seconds."""
-    global WAITED
-    t0, said = time.time(), False
-    while True:
-        b = busy()
-        if not b:
-            if said:
-                say(f"{what}: free after {time.time() - t0:.0f} s")
-                WAITED += time.time() - t0
-            return True
-        if not said:
-            say(f"waiting: {what} ({b})")
-            said = True
-        if time.time() - t0 > limit:
-            say(f"gave up waiting after {limit:.0f} s: {what} ({b})")
-            return False
-        time.sleep(10)
-
-
-def wait_game():
-    return wait_until(other_game, "another PureNative is running")
-
-
-def ppsspp_profiles():
-    d = pc.MEMSTICK / "PSP" / "SAVEDATA"
-    return sorted(p.name for p in d.glob("UCUS98612P*")) if d.exists() else []
-
-
-def wait_ppsspp():
-    """PPSSPP is one instance (its debugger port, its ini, its memory stick): wait for it to be free and for its stick
-    to hold no profile (the routes make a new one)."""
-    return (wait_until(pc.ppsspp_pids, "PPSSPPSDL is running") and
-            wait_until(ppsspp_profiles, "PPSSPP's memory stick holds a profile save") and
-            wait_until(pc.ppsspp_pids, "PPSSPPSDL is running"))
-
-
 # ------------------------------------------------------------------------------------------------- port runs
 
 class Ctx:
@@ -294,18 +228,6 @@ class Ctx:
         self.logs = {}            # name -> log path of this invocation's runs
         self.race_runs = {}       # track -> (log, wav or None)
         self.stick = self.out / "game"
-
-    def make_stick(self):
-        g = self.stick
-        g.mkdir(parents=True, exist_ok=True)
-        for name, target in (("EBOOT.ELF", ROOT / "game" / "EBOOT.ELF"),
-                             ("disc.iso", Path(os.path.realpath(ROOT / "game" / "disc.iso")))):
-            link = g / name
-            if not link.is_symlink():
-                link.symlink_to(target)
-        shutil.rmtree(g / "ms0", ignore_errors=True)
-        (g / "ms0" / "PSP" / "SAVEDATA").mkdir(parents=True)
-        return g
 
 
 def write_route(path, steps):
@@ -321,23 +243,15 @@ def port_run(ctx, name, steps, frames, env=None, shots=False):
     route = runs / f"{name}.route.txt"
     write_route(route, steps)
     log = runs / f"{name}.log"
-    game = ctx.make_stick()
-    wait_game()
-    cmd = [sys.executable, str(ROOT / "tools" / "run_boot.py"), "--shell", "headless", "--backend", "metal",
-           "--script", str(route), "--frames", str(frames), "--seconds", str(max(120, frames // 20)),
-           "--max-lines", "600000", "--data-dir", DATA_DIR, "--env", f"PURE_GAME_DIR={game}"]
-    if shots:
-        cmd += ["--shots", str(runs / f"{name}.shots")]
-    for k, v in (env or {}).items():
-        cmd += ["--env", f"{k}={v}"]
-    cmd.append(str(log))
+    game = port.fresh_stick(ctx.stick)
+    port.wait_game(say)
     t0 = time.time()
-    with open(runs / f"{name}.stdout", "w") as f:
-        rc = subprocess.run(cmd, cwd=ROOT, env=clean_env(), stdout=f, stderr=subprocess.STDOUT).returncode
-    reached = log.exists() and f"[pure] exit at frame {frames}" in log.read_text(errors="replace")
-    say(f"run {name}: exit {rc}, frame {frames} {'reached' if reached else 'NOT reached'}, {time.time() - t0:.0f} s")
+    r = port.headless_run(log, route, frames, env=env, shots=runs / f"{name}.shots" if shots else None, game=game,
+                          data_dir=DATA_DIR, max_lines=600000, stdout=runs / f"{name}.stdout")
+    say(f"run {name}: exit {r.code}, frame {frames} {'reached' if r.reached else 'NOT reached'}, "
+        f"{time.time() - t0:.0f} s")
     ctx.logs[name] = log
-    return log, rc, reached
+    return log, r.code, r.reached
 
 
 def race_steps(track, hold_flips):
@@ -418,11 +332,10 @@ def imgdiff_fraction(cap, ref, tol):
 def cat_pictures(ctx):
     rows = []
     regress = ctx.out / "regress"
-    wait_game()
+    port.wait_game(say)
     t0 = time.time()
-    with open(ctx.out / "regress.stdout", "w") as f:
-        rc = subprocess.run([str(ROOT / "tools" / "frame_regress.sh"), "--out", str(regress)], cwd=ROOT,
-                            env=clean_env(), stdout=f, stderr=subprocess.STDOUT).returncode
+    rc = port.run_tool([str(ROOT / "tools" / "frame_regress.sh"), "--out", str(regress)], ctx.out / "regress.stdout",
+                       port.clean_env())
     say(f"frame_regress.sh: exit {rc}, {time.time() - t0:.0f} s")
     for name in ("main_menu+single_race", "main_menu+time_trial", "main_menu+zone"):
         if (regress / f"{name}.log").exists():
@@ -489,7 +402,7 @@ def read_pp_samples(path):
 
 
 def port_series(rows):
-    """pp_lines.port_samples rows (flip order) -> {ship: [(clock, x, y, z)]}, the first lap clock."""
+    """purelib.logs.grid_samples rows (flip order) -> {ship: [(clock, x, y, z)]}, the first lap clock."""
     ships = {}
     for r in rows:
         ships.setdefault(r[1], []).append((r[2], r[3], r[4], r[5]))
@@ -577,7 +490,7 @@ def cat_trajectories(ctx):
     for track in ctx.tracks:
         name = TRACK_NAMES[track]
         log, wav = port_race(ctx, track, track in AUDIO_TRACKS and "audio" in ctx.categories)
-        prow, player = pl.port_samples(log) if log.exists() else ([], PLAYER)
+        prow, player = logs.grid_samples(log) if log.exists() else ([], PLAYER)
         port = port_series(prow)
         ref = ref_dir / f"{track}.csv"
         if not ref.exists():
@@ -728,7 +641,7 @@ def pp_flip_times(log):
 
 def matrix_dir():
     """The matrix's cell results: out/035-wip/fidelity here or in the main checkout, else out/fidelity."""
-    for base in (ROOT, main_checkout()):
+    for base in (ROOT, port.main_checkout()):
         for sub in ("out/035-wip/fidelity", "out/fidelity"):
             d = base / sub
             if (d / "cells").is_dir() and any((d / "cells").glob("*.json")):
@@ -757,11 +670,10 @@ FRESH_CELLS = [("single_race", "vineta_k"), ("time_trial", "vineta_k"), ("free_p
 def sweep_cell(ctx, mode, track):
     out = ctx.out / "sweep"
     name = cs.cell_name(mode, track)
-    wait_game()
+    port.wait_game(say)
     t0 = time.time()
-    with open(ctx.out / f"sweep-{name}.stdout", "w") as f:
-        subprocess.run([sys.executable, str(ROOT / "tools" / "campaign_sweep.py"), mode, track, "--no-damage",
-                        "--out", str(out)], cwd=ROOT, env=clean_env(), stdout=f, stderr=subprocess.STDOUT)
+    port.run_tool([sys.executable, str(ROOT / "tools" / "campaign_sweep.py"), mode, track, "--no-damage",
+                   "--out", str(out)], ctx.out / f"sweep-{name}.stdout", port.clean_env())
     outcome = "?"
     for line in (ctx.out / f"sweep-{name}.stdout").read_text(errors="replace").splitlines():
         m = fa.SWEEP_LINE_RE.match(line.strip())
@@ -934,7 +846,8 @@ def cat_audio(ctx):
     wav = ctx.out / "runs" / "main_menu.wav"
     log, rc, reached = port_run(ctx, "main_menu", main_menu_steps(), 6900, {"PURE_AUDIO_WAV": str(wav)})
     ref = adir / "main_menu.wav"
-    ms = first_active(Path(f"{wav}.ch2.wav"), 100.0) if Path(f"{wav}.ch2.wav").exists() else None
+    music = Path(logs.wav_channel(wav, 2))
+    ms = first_active(music, 100.0) if music.exists() else None
     if not ref.exists():
         rows.append(row("main menu music, 60 s: correlation", "-", missing("audio"), "-", NO_REF, crule))
     elif ms is None:
@@ -981,7 +894,7 @@ def cat_audio(ctx):
             rows.append(row(f"{name} race: music correlation", "no race in the port's run", rel(ref), "-", DIFFERS,
                             crule))
             continue
-        music = Path(f"{pwav}.ch2.wav")
+        music = Path(logs.wav_channel(pwav, 2))
         guess = go_pp - go_port
         found = []
         for dt in (10.0, 20.0, 30.0, 40.0, 50.0):
@@ -1078,7 +991,7 @@ def decrypt(folder, out):
     if not tool.exists():
         return None, "tools/save_interchange.sh is missing (task 045)"
     r = subprocess.run([str(tool), "--check", str(folder), DATA_FILE, str(out)], cwd=ROOT, capture_output=True,
-                       text=True, env=clean_env())
+                       text=True, env=port.clean_env())
     lines = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.strip()]
     if r.returncode != 0 or not Path(out).exists():
         return None, "; ".join(lines[-3:])
@@ -1175,23 +1088,6 @@ def cat_saves(ctx):
 
 # ------------------------------------------------------------------------------------------------------ coverage
 
-def ge_ignored(log):
-    """The framework's exit list in a log: {opcode: count}, or None without one."""
-    out, inside = None, False
-    with open(log, errors="replace") as f:
-        for line in f:
-            if GE_COUNT_RE.match(line):
-                out, inside = {}, True
-                continue
-            if inside:
-                m = fa.IGNORED_RE.match(line.rstrip("\n"))
-                if m:
-                    out[int(m[1], 16)] = int(m[2])
-                    continue
-                inside = False
-    return out
-
-
 def import_states(imports_csv, unimplemented, stub_hits, unverified):
     """The 278 imports by state: implemented, stubbed with a documented value (the profile's constants), with no
     implementation (called or never called)."""
@@ -1245,11 +1141,10 @@ def cat_coverage(ctx):
         if c.get("unimplemented_list") and not unimpl:
             unimpl = c["unimplemented_list"]
         for k in c.get("features", {}):
-            m = re.search(r"\[hle-stub\] (\S+)", k)
+            m = logs.STUB_RE.search(k)
             if m:
                 stub_hits.add(m[1])
-    logs = [c["_log"] for c in cells if c["_log"].exists()]
-    for lg in logs:
+    for lg in [c["_log"] for c in cells if c["_log"].exists()]:
         with open(lg, errors="replace") as f:
             for line in f:
                 if "UNVERIFIED" in line:
@@ -1260,10 +1155,8 @@ def cat_coverage(ctx):
         # This invocation's logs carry the start-up list too.
         for lg in ctx.logs.values():
             if lg.exists():
-                txt = lg.read_text(errors="replace")
-                m = re.search(r"^Unimplemented imports: \d+ of \d+\n((?:  .*\n)+)", txt, re.M)
-                if m:
-                    unimpl = [ln.strip() for ln in m[1].splitlines() if ln.startswith("    ")]
+                unimpl = logs.unimplemented(lg.read_text(errors="replace"))
+                if unimpl:
                     break
     st = import_states(ROOT / "config" / "imports.csv", unimpl, stub_hits, unverified)
     src = "config/imports.csv; the start-up list and the `[hle-stub]` and `UNVERIFIED` lines of the matrix's logs"
@@ -1289,12 +1182,12 @@ def cat_coverage(ctx):
     cur = None
     for name in ("regress-main_menu+single_race", "race-vineta_k", "picture-blue_ridge_hud"):
         if name in ctx.logs and ctx.logs[name].exists():
-            cur = ge_ignored(ctx.logs[name]), name
+            cur = logs.ge_ignored(ctx.logs[name]), name
             if cur[0] is not None:
                 break
     if not cur or cur[0] is None:
         log, _, _ = port_run(ctx, "coverage-race", race_steps("vineta_k", 300), 6400)
-        cur = ge_ignored(log), "coverage-race"
+        cur = logs.ge_ignored(log), "coverage-race"
     ops, src_run = cur
     old = max((len(c.get("ignored", {})) for c in cells), default=None)
     if ops is None:
@@ -1388,7 +1281,7 @@ def run(opts):
         if t not in TRACKS:
             print(f"scorecard: unknown track {t}")
             return 2
-    if not (ROOT / "build" / "arm64" / "bin" / "PureNative").exists():
+    if not port.EXE.exists():
         print("scorecard: build/arm64/bin/PureNative missing: tools/build.sh profile")
         return 1
     out = Path(opts.out)
@@ -1407,7 +1300,7 @@ def run(opts):
              "saves": cat_saves, "coverage": cat_coverage}
     order = [c for c in ("trajectories", "audio", "pictures", "timing", "saves", "coverage") if c in cats]
     for name in order:
-        c0, w0 = time.time(), WAITED
+        c0, w0 = time.time(), port.waited()
         say(f"{name} ...")
         try:
             rows = funcs[name](ctx)
@@ -1417,13 +1310,14 @@ def run(opts):
             rows = [row(f"{name}", "-", "-", "-", NOT_MEASURED, "", f"the scorecard failed here: {type(e).__name__}: {e}")]
         grade = worst([r["grade"] for r in rows])
         result["categories"][name] = {"grade": grade, "rows": rows, "wall_s": round(time.time() - c0, 1),
-                                      "waited_s": round(WAITED - w0, 1)}
+                                      "waited_s": round(port.waited() - w0, 1)}
         say(f"{name}: {grade} ({len(rows)} rows, {time.time() - c0:.0f} s)")
     wall = time.time() - t0
     result["wall_s"] = round(wall, 1)
-    result["waited_s"] = round(WAITED, 1)
+    waited = port.waited()
+    result["waited_s"] = round(waited, 1)
     result["wall"] = f"{int(wall // 60)}m {int(wall % 60)}s" + (
-        f", of it {int(WAITED // 60)}m {int(WAITED % 60)}s waiting for another task's game" if WAITED >= 1 else "")
+        f", of it {int(waited // 60)}m {int(waited % 60)}s waiting for another task's game" if waited >= 1 else "")
     result["categories"] = {k: result["categories"][k] for k in CATEGORIES if k in result["categories"]}
     (out / "scorecard.json").write_text(json.dumps(result, indent=1, default=str) + "\n")
     md = render_md(result)
@@ -1479,7 +1373,7 @@ def pp_race(track, csv_path, race_seconds, wav=None, wall_limit=900.0):
     tmp = csv_path.with_suffix(".csv.tmp")
     report = {}
     rows = torn = 0
-    if not wait_ppsspp():
+    if not shared_ppsspp.wait_free(say):
         return {"error": "PPSSPP did not become free"}
     t0 = time.time()
     before = pc.audio_dumps()
@@ -1557,10 +1451,6 @@ def pp_race(track, csv_path, race_seconds, wav=None, wall_limit=900.0):
     return report
 
 
-def ppsspp_saves():
-    return pc.MEMSTICK / "PSP" / "SAVEDATA"
-
-
 def refresh(opts):
     cats = [opts.refresh_references] if opts.refresh_references not in (None, "all") else \
         ["trajectories", "audio", "saves", "timing"]
@@ -1609,8 +1499,8 @@ def refresh(opts):
                "--pad-file", str(PP_ROUTES / "frontend.txt"), "--pad-file", str(PP_ROUTES / "main_menu_music.txt"),
                "--until", "9900", "--renderer", "hardware", "--dump-audio", str(wav)]
         say("PPSSPP main menu music ...")
-        wait_ppsspp()
-        if subprocess.run(cmd, cwd=ROOT).returncode == 0 and wav.exists():
+        shared_ppsspp.wait_free(say)
+        if port.run_tool(cmd) == 0 and wav.exists():
             note(wav, "PPSSPP frontend.txt + main_menu_music.txt to vblank 9900; its audio dump")
     if "saves" in cats:
         sdir = REF / "saves"
@@ -1618,9 +1508,9 @@ def refresh(opts):
                "--pad-file", str(PP_ROUTES / "frontend.txt"), "--pad-file", str(PP_ROUTES / "save_yes.txt"),
                "--until", "6200", "--renderer", "hardware"]
         say("PPSSPP save of NAME0000 ...")
-        wait_ppsspp()
-        subprocess.run(cmd, cwd=ROOT)
-        src = ppsspp_saves() / SAVE_FOLDER
+        shared_ppsspp.wait_free(say)
+        port.run_tool(cmd)
+        src = shared_ppsspp.savedata() / SAVE_FOLDER
         if src.is_dir():
             shutil.rmtree(sdir / SAVE_FOLDER, ignore_errors=True)
             sdir.mkdir(parents=True, exist_ok=True)
@@ -1628,14 +1518,14 @@ def refresh(opts):
             for p in sorted((sdir / SAVE_FOLDER).iterdir()):
                 note(p, "PPSSPP frontend.txt + save_yes.txt to vblank 6200 (YES on SAVE PROFILE, the first slot)")
         else:
-            say(f"no {SAVE_FOLDER} appeared in {ppsspp_saves()}")
+            say(f"no {SAVE_FOLDER} appeared in {shared_ppsspp.savedata()}")
     if "timing" in cats:
         out = "ref/scorecard/timing"
         shutil.rmtree(ROOT / out / "ppsspp" / "vineta_k", ignore_errors=True)
         say("PPSSPP follower race on Vineta K (fidelity_audit.py --ppsspp-race) ...")
-        wait_ppsspp()
-        subprocess.run([sys.executable, str(ROOT / "tools" / "fidelity_audit.py"), "--ppsspp-race", "vineta_k",
-                        "--out", out], cwd=ROOT)
+        shared_ppsspp.wait_free(say)
+        port.run_tool([sys.executable, str(ROOT / "tools" / "fidelity_audit.py"), "--ppsspp-race", "vineta_k",
+                       "--out", out])
         d = ROOT / out / "ppsspp" / "vineta_k"
         for extra in ("shots", "race.csv"):
             p = d / extra
@@ -1838,7 +1728,7 @@ def selftest():
         glog = tmp / "ge.log"
         glog.write_text("x\nGE commands ignored: 3 distinct\n  0x15 x10 first=0x0\n  0xca x2 first=0x0\n"
                         "  0xc8 x5 first=0x0\n[metal] 1 frames\n")
-        ops = ge_ignored(glog)
+        ops = logs.ge_ignored(glog)
         check(ops == {0x15: 10, 0xCA: 2, 0xC8: 5} and sorted(op for op in ops if op not in GE_UNUSED) == [0xC8],
               "coverage: the GE exit list, and which are not in the unused set")
         imp = tmp / "imports.csv"
