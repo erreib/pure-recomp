@@ -235,7 +235,11 @@ void watch_rand(Runtime &rt, std::uint64_t frame) {
 //                0x08804428), in order: the first is the last one before the race seed, the rest follow it. From
 //                the race seed on, the port's frame timer is answered with the same differences, so each frame's
 //                measured time (dt, capped at 0.067 s) is PPSSPP's; when the list runs out it continues with the
-//                port's own differences. Every other caller of the clock gets the port's own time.
+//                port's own differences. Every other caller of the clock gets the port's own time;
+//   unlocked 0|1 whether the reference's route had everything unlocked (the Beta and Classic routes run the game's
+//                own unlock code, the Alpha routes unlock nothing): the AI team pick draws only from unlocked teams
+//                (FUN_088b43d4), and PURE_TEST_UNLOCK_ALL adds ZONE and MEDIEVIL to a new profile's eight, so the
+//                file's value decides what sceKernelGetGPI answers (1 or 0), whatever PURE_TEST_UNLOCK_ALL says.
 // The seeds are clock readings at the moment the player confirms: on a PSP they differ from play to play, and between
 // the port's and PPSSPP's scripted routes. The frame times are where the port's clock differs in kind: it advances in
 // 1 ms quanta (the kernel's starvation tick), so its frame times jitter by +-1 ms where PPSSPP's follow each frame's
@@ -252,6 +256,7 @@ struct RaceClock {
     std::string path;
     std::optional<std::uint32_t> team, race;
     std::vector<std::uint64_t> frames;
+    std::optional<bool> unlocked;
 };
 
 const RaceClock &race_clock() {
@@ -274,6 +279,7 @@ const RaceClock &race_clock() {
             if (key == "team") c.team = static_cast<std::uint32_t>(x);
             else if (key == "race") c.race = static_cast<std::uint32_t>(x);
             else if (key == "frame") c.frames.push_back(x);
+            else if (key == "unlocked") c.unlocked = x != 0u;
         }
         c.on = c.team.has_value() || c.race.has_value() || c.frames.size() > 1u;
         if (!c.on) std::cout << "[pure] PURE_TEST_RACE_CLOCK=" << c.path << " holds no seed and no frame times; ignored\n";
@@ -554,10 +560,15 @@ void register_pure_hle(HleRegistrar &hle) {
     // FUN_0894d4c8 sets, "Everything"), so every class, league and track is open on any profile. Bits 0x20/0x40/0x80,
     // the frame limiter's and the display mode's (FUN_0886511c), stay 0; the game copies GPI to GPO each frame
     // (FUN_08804390), which the framework ignores.
-    if (env_on("TEST_UNLOCK_ALL"))
+    // PURE_TEST_RACE_CLOCK's `unlocked` (above) takes precedence: the race as PPSSPP's reference route ran it.
+    const bool unlock_all = race_clock().unlocked ? *race_clock().unlocked : env_on("TEST_UNLOCK_ALL");
+    if (race_clock().unlocked && *race_clock().unlocked != env_on("TEST_UNLOCK_ALL"))
+        std::cout << "[pure] PURE_TEST_RACE_CLOCK: unlocked " << (unlock_all ? 1 : 0)
+                  << " (the reference's route), so sceKernelGetGPI returns " << (unlock_all ? 1 : 0) << "\n";
+    if (unlock_all)
         std::cout << "[pure] TEST SWITCH: unlock all (PURE_TEST_UNLOCK_ALL=1: sceKernelGetGPI returns 1, which the "
                      "frontend's lock checks read as everything unlocked; a sweep instrument, never for play)\n";
-    hle.add("UtilsForUser", "sceKernelGetGPI", env_on("TEST_UNLOCK_ALL") ? return_one : return_zero);
+    hle.add("UtilsForUser", "sceKernelGetGPI", unlock_all ? return_one : return_zero);
 
     // sceKernelUSec2SysClock(usec, SceKernelSysClock *clock): the 64-bit clock is just the microsecond count.
     hle.add("ThreadManForUser", "sceKernelUSec2SysClock", [](Runtime &rt, AllegrexContext &ctx) {

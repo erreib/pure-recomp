@@ -361,6 +361,11 @@ def port_race(ctx, track, audio):
            "PURE_TRACE_CALLS": "sceDisplay:0x289D82FE"}
     if wav:
         env["PURE_AUDIO_WAV"] = str(wav)
+    # SCORECARD_RACE_CLOCK=DIR (task 046), a pass-through: a track with DIR/<track>.txt (PPSSPP's race clock for it,
+    # taken by tools/ai_seed_check.sh) runs with PURE_TEST_RACE_CLOCK, so its AI ships can be compared ship for ship.
+    clock = Path(os.environ.get("SCORECARD_RACE_CLOCK", "")) / f"{track}.txt"
+    if os.environ.get("SCORECARD_RACE_CLOCK") and clock.exists():
+        env["PURE_TEST_RACE_CLOCK"] = str(clock.resolve())
     log, rc, reached = port_run(ctx, f"race-{track}", race_steps(track, frames - PORT_THROTTLE + 100), frames, env)
     ctx.race_runs[track] = (log, wav if reached or (wav and wav.exists()) else None)
     return ctx.race_runs[track]
