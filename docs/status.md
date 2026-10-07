@@ -114,7 +114,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   shell change (docs/verification.md, "Which path for which change"); `python3 tools/docs_check.py` after a change
   that moves or renames a file, a tool or a patch. Merge: rerun the Verify, spot-read, `git merge --no-ff` into
   `batch/m2`, remove the worktree.
-- **Running.** Nothing. M9 closed with task 053 (merged 7de2978). Next: the simplification task from task
+- **Running.** Nothing. M9 closed with task 053 (merged 7de2978). Erik (2026-10-07 night): Windows compatibility is
+  the next target, worked on his Windows machine when his credits reload; the plan is docs/windows.md (four steps;
+  the Vulkan renderer's fidelity parity is the real work). Before that or beside it: the simplification task from task
   049's list (the follow-up above), measured by `tools/refactor_check.sh`; then the enhancements (D-009).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
