@@ -1,6 +1,6 @@
 # 048: PPSSPP's rounding for the cross, quaternion and horizontal products (the test mode's missing kinds)
 
-Milestone: M8 | Branch: task/048-vfpu-cross-horizontal-rule | Status: OPEN (the samples and the rule; the codegen change is Fable's)
+Milestone: M8 | Branch: task/048-vfpu-cross-horizontal-rule | Status: MERGED (3c6891a, 2026-10-07); the header change is patch 0021
 
 ## Goal
 Patch 0020 (D-013) made the port's dot products round as PPSSPP's JIT does under the test mode, and the samples
@@ -365,4 +365,21 @@ Open questions:
      This is task 047's caveat, unchanged.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at 3c6891a (2026-10-07): selftest PASS (pspautotests' vcrs, vcrsp, vqmul,
+vfad and vavg cases included), `--check ref/vfpu` PASS over every set, race_hud 0.0144. The three new sample sets
+copied from the worker's ref/vfpu (now 496 MB, hashes in ref/README.md).
+
+Spot-read: the probe's new kinds and `--window`, the harness's `--modes`/`--tag`/`--include` (experiments on header
+copies under out/, never on vendor/), the model's `kind_models`, `RULES_048` and `HW_048`, the Karbonis attribution
+(the last differing results before the first parting sample are the once-a-frame cross products in the ship
+update's path, 1.1 ms before it; nothing else differs). Files outside May touch: none; nothing under vendor/
+committed.
+
+Merged: 3c6891a into batch/m2.
+
+Notes: the worker's C++ applied verbatim as patch 0021 (`vfpu_cross_dot`, the vcrsp lanes with Z over the two
+forced lanes, the horizontal sums by mode); through the harness it reproduces PPSSPP under the test mode and the
+PSP's rule by default on every one of the 18 sample sets. The default mode's `vfad` is a change to a player's game
+in D-013's direction (the PSP's truncating sum, pspautotests' 15 of 15); taken. Unmeasured and recorded: vrot (24
+sites the race never runs; the PSP's sin and cos are 1 to 7 ulp from libm and no closed form gives them), vqmul,
+vcrs, vavg (not in the game's code), prefix constants past n.

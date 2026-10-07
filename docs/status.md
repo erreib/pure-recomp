@@ -150,8 +150,10 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   Patch 0020 landed 2026-10-07 (Fable): `vfpu_dot` rounds as the PSP (default) or as PPSSPP's JIT (test
   mode), the Vtfm/Vmmul emitters use it, the corpus is compiled with `-ffp-contract=off`; 19 patches; both modes 100
   percent on the 1.17 million samples; suite 18/18. The AI rows still part on ten circuits and Karbonis' player
-  parts at 12 s under the test mode: the cross/quaternion products and vfad/vavg were never sampled. Running: 048
-  (sample those kinds, find PPSSPP's rounding for them). Then the organisation pass.
+  parts at 12 s under the test mode: the cross/quaternion products and vfad/vavg were never sampled. Merged 2026-10-07: 048 (vcrsp.t is
+  unfused in PPSSPP's JIT on 1.59 million lanes, vfad a sequential sum; Karbonis' player parts after cross products
+  alone). Patch 0021 (Fable) applies the rule; the corpus rebuild, the suite and `tools/ai_seed_check.sh --tracks`
+  follow. Then the organisation pass.
   Open for Erik: a finer virtual-time answer than the kernel's 1 ms starvation tick. Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
   trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
   coverage, a VFPU differential test) before any enhancement. The game's own unlock code on MAIN MENU: LEFT, RIGHT,
