@@ -1,6 +1,6 @@
 # 052: The patch series by topic, and the upstream list (the organisation pass, 4 of 5)
 
-Milestone: M9 organisation | Branch: task/052-patch-series-by-topic | Status: OPEN
+Milestone: M9 organisation | Branch: task/052-patch-series-by-topic | Status: MERGED (b280e27, 2026-10-07)
 
 ## Goal
 The vendor patch series grew one task at a time: 20 patches, with host/gpu/vulkan_renderer.cpp touched by 11 of
@@ -226,4 +226,19 @@ Open questions:
    since the tree under it is byte-identical; it would be renumbered 0010 and its README row rewritten at merge.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at b280e27 (2026-10-07): `tools/vendor_setup.sh` from the nine patches,
+`tools/patches.sh check` ("9 patch(es) reproduce vendor/portablekit at 8b0c3fe"), `tools/build.sh profile`, the
+suite 18/18 at the same values (after guard retries while the wave-1 workers ran).
+
+Spot-read: the proposal's three departures from the brief's shape are each argued from the diffs (the stencil
+state must precede the seams, the CMake lines belong to their topics, the MPEG ring and the kernel clock share
+nothing) and I accept them; patches/README.md's mapping table and docs/upstream.md's dependency list; no hunk
+edited (the split patches' sections add up to their bytes). Files outside May touch: none; vendor/ untouched.
+
+Merged: b280e27 into batch/m2.
+
+Notes: `tools/patches.sh export` still appends a new number above the last, so the next vendor change becomes 0010
+whatever its topic; keeping one patch per topic needs an export mode that regenerates a named patch (a small
+follow-up for tools/patches.sh, recorded). Old patch numbers remain in the docs and comments; the docs pass (053)
+switches the docs by the mapping table, and the three comments inside the vendor tree stay until a deliberate
+vendor change touches those lines.
