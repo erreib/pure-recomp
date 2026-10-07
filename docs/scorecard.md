@@ -3,7 +3,7 @@
 `tools/scorecard.py` (task 044) answers "how close is the port to the original" in numbers that can be re-run after
 every change: six categories, each measured on the port headless and compared with PPSSPP (the oracle, its side taken
 once and kept under `ref/scorecard/`, hashes in `ref/README.md`) or with the game's own facts. Every row has a grade:
-`faithful`, `close` or `differs`, by the threshold in its last column; a category's grade is its worst graded row.
+`faithful`, `close` or `differs`, by the threshold in its Threshold column; a category's grade is its worst graded row.
 Three marks stand in for a grade where none can be given and do not count towards the category's: `no reference`
 (the PPSSPP side is missing: refresh it), `not measured` (no instrument exists) and `accepted (D-011)` (difference 6,
 the faster race loads, which Erik decided to keep). The two differences the audit left open for a decision:
