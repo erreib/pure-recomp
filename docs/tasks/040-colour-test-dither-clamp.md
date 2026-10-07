@@ -35,7 +35,11 @@ state (a vendor patch) and applies them in the Metal backend.
    content) against PPSSPP before and after, a 16-bit target's dither pattern (the 565 offscreen target at 0x04154000
    from docs/ge-effects.md, captured through a recording and `ge_replay --cut`, against the PPSSPP dump's pixels of
    it), and the suite.
-4. docs/metal-backend.md, docs/fidelity.md (differences 10 and 11's rows), patches/README.md.
+4. Also in patch 0017: `RecordBackend::submit` records the texels of every mip level a draw names (task 037's
+   levels; today only level 0's bytes are recorded, so a recording made since patch 0014 replays mipmapped draws
+   from zeroed memory, 0.09 off its own picture). Check: a Blue Ridge or race frame recorded through Metal replays
+   exactly into Metal without `PURE_NO_MIPMAPS`.
+5. docs/metal-backend.md, docs/fidelity.md (differences 10 and 11's rows), patches/README.md.
 
 ## Acceptance criteria
 - [ ] `tools/frame_regress.sh` passes with no scene more than 0.003 above its measured value; the race scenes at or
@@ -47,7 +51,7 @@ state (a vendor patch) and applies them in the Metal backend.
 `tools/patches.sh check && tools/build.sh profile && tools/frame_regress.sh`
 
 ## May touch
-- vendor/portablekit/host/gpu/ge_state.hpp, ge_state.cpp, ge_record_format.hpp, vulkan_renderer.cpp (comment), via
+- vendor/portablekit/host/gpu/ge_state.hpp, ge_state.cpp, ge_record_format.hpp, record_backend.cpp, vulkan_renderer.cpp (comment), via
   `tools/patches.sh export 0017-colour-test-dither-clip`; patches/; src/gpu/; tools/gerec/gerec_dump.py;
   docs/metal-backend.md, docs/fidelity.md (differences 10, 11), README.md
 
