@@ -1,0 +1,1293 @@
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index b6b9ce3..0f0c0e7 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -110,6 +110,7 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/ui/input_script.cpp
+     host/ui/layer.cpp
+     host/ui/menu.cpp
++    host/ui/save_list.cpp
+     host/ui/save_screen.cpp
+     host/ui/setup_screens.cpp
+     host/ui/text_input.cpp
+diff --git a/host/hle/hle_savedata.cpp b/host/hle/hle_savedata.cpp
+index 348b854..bf32a3e 100644
+--- a/host/hle/hle_savedata.cpp
++++ b/host/hle/hle_savedata.cpp
+@@ -4,17 +4,35 @@
+ // Load, save, delete, sizes and the list modes are answered from those
+ // folders; each game uses its own few. <prefix>_TRACE_SAVEDATA prints every
+ // request, which is how to find out which a game asks for.
+-// No save-data UI is drawn: modes that would show a list act as if the player
+-// confirmed the first entry. Every mode, the failures included, reports QUIT
+-// after a few polls; see utility_dialog.hpp.
++//
++// The modes in which a PSP shows its save list and the player picks an entry
++// (LISTLOAD, LISTSAVE, LISTDELETE, and the delete mode without a save name,
++// which lists every save of the game) are answered in this order:
++//   1. the input script's `save` answer, when one is queued (shell/script_steps.hpp);
++//   2. the list screen (ui/save_list.hpp), drawn over the running game, when
++//      there is a choice to make (LISTLOAD: two saves or more; LISTSAVE and the
++//      deletes: any save in the list) and an interface to draw it in: the
++//      request stays VISIBLE while the player chooses, and the game polls;
++//   3. otherwise the entry a player would want without looking: LISTLOAD the
++//      newest save, LISTSAVE the first free slot (never a save that exists),
++//      LISTDELETE the save the game names; when there is none, the request
++//      is cancelled rather than overwrite or delete anything.
++// Every other mode, the failures included, reports QUIT after a few polls;
++// see utility_dialog.hpp.
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
+ #include "utility_dialog.hpp"
+ 
+ #include "crypto_keys.hpp"
++#include "save_data/param_sfo.hpp"
+ #include "save_data/savedata_crypto.hpp"
+ #include "save_data/savedata_store.hpp"
+ #include "save_data/save_transfer.hpp"
++#include "shell/script_steps.hpp"
++
++#if defined(PORTABLEKIT_HAS_RENDERER)
++#include "ui/save_list.hpp"
++#endif
+ 
+ #include "psprecomp/common.hpp"
+ 
+@@ -22,6 +40,7 @@
+ #include <chrono>
+ #include <ctime>
+ #include <filesystem>
++#include <fstream>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <iostream>
+@@ -35,6 +54,8 @@ namespace {
+ 
+ // SceUtilitySavedataParam, after the common dialog header.
+ namespace param {
++// In the common dialog header: 1 when the PSP's X is Enter (a Western PSP).
++constexpr std::uint32_t kButtonSwap = 0x08u;
+ constexpr std::uint32_t kMode = 0x30u;
+ constexpr std::uint32_t kOverwrite = 0x38u;
+ constexpr std::uint32_t kGameName = 0x3Cu;      // char[13]
+@@ -52,6 +73,7 @@ constexpr std::uint32_t kIcon0 = 0x584u;  // {buf, bufSize, size, unknown}
+ constexpr std::uint32_t kIcon1 = 0x594u;
+ constexpr std::uint32_t kPic1 = 0x5A4u;
+ constexpr std::uint32_t kSnd0 = 0x5B4u;
++constexpr std::uint32_t kNewData = 0x5C4u;  // pointer to {buf, bufSize, size, unknown}: a free slot's icon
+ constexpr std::uint32_t kFocus = 0x5C8u;
+ constexpr std::uint32_t kMsFree = 0x5D0u;
+ constexpr std::uint32_t kMsData = 0x5D4u;
+@@ -102,6 +124,8 @@ const char *mode_name(std::uint32_t mode) {
+ // Result codes written to the parameter block's result field.
+ namespace result {
+ constexpr std::uint32_t kOk = 0u;
++// The common header's result when the player backs out of a dialog.
++constexpr std::uint32_t kCancelled = 1u;
+ constexpr std::uint32_t kLoadDataBroken = 0x80110306u;
+ constexpr std::uint32_t kLoadNoData = 0x80110307u;
+ constexpr std::uint32_t kLoadParam = 0x80110308u;
+@@ -117,6 +141,12 @@ constexpr std::uint32_t kFreeClusters = 0x8000u;  // 1 GiB
+ struct SavedataState {
+     std::filesystem::path memory_stick;
+     DialogLifecycle dialog;
++    // A list screen is open for the request at `params`: it stays VISIBLE
++    // until the screen closes and leaves the result in `answer`.
++    bool waiting{};
++    std::uint32_t params{};
++    std::uint32_t acted{};  // the result of the load, save or delete the screen ran
++    std::optional<std::uint32_t> answer;
+ };
+ 
+ SavedataState &state() {
+@@ -203,12 +233,16 @@ void log_request(const psprecomp::GuestMemory &memory, std::uint32_t params) {
+                   << " buf=" << psprecomp::hex32(memory.load32(params + param::kDataBuf))
+                   << " bufSize=" << psprecomp::hex32(memory.load32(params + param::kDataBufSize))
+                   << " dataSize=" << psprecomp::hex32(memory.load32(params + param::kDataSize))
++                  << " buttonSwap=" << memory.load32(params + param::kButtonSwap)
+                   << " overwrite=" << memory.load32(params + param::kOverwrite)
+                   << " focus=" << memory.load32(params + param::kFocus)
+                   << " icon0=" << memory.load32(params + param::kIcon0 + 8u)
+                   << " icon1=" << memory.load32(params + param::kIcon1 + 8u)
+                   << " pic1=" << memory.load32(params + param::kPic1 + 8u)
+                   << " snd0=" << memory.load32(params + param::kSnd0 + 8u);
++        if (const std::uint32_t new_data = memory.load32(params + param::kNewData);
++            new_data != 0u && memory.contains(new_data, 16u))
++            std::cerr << " newData=" << memory.load32(new_data + 8u);
+         if (size > param::kMinimumSizeWithKey) {
+             savedata::Block key{};
+             for (std::uint32_t i = 0; i < key.size(); ++i) key[i] = memory.load8(params + param::kKey + i);
+@@ -345,18 +379,6 @@ std::uint32_t do_sizes(psprecomp::GuestMemory &memory, std::uint32_t params) {
+     return outcome;
+ }
+ 
+-// Picks the save a list dialog would land on when the player just confirms:
+-// for loading and deleting the first listed save that exists, for saving the
+-// first listed name.
+-std::optional<std::string> pick_from_list(psprecomp::GuestMemory &memory, std::uint32_t params, bool must_exist) {
+-    const auto names = save_name_list(memory, memory.load32(params + param::kSaveNameList));
+-    for (const auto &name : names) {
+-        if (!must_exist || savedata::save_exists(state().memory_stick, files_for(memory, params, name))) return name;
+-    }
+-    if (!must_exist) return save_name_at(memory, params + param::kSaveName);
+-    return std::nullopt;
+-}
+-
+ // A save name pattern as LIST takes it: '?' stands for any one character.
+ bool name_matches(std::string_view pattern, std::string_view name) {
+     if (pattern.size() != name.size()) return false;
+@@ -428,6 +450,346 @@ std::uint32_t do_list(psprecomp::GuestMemory &memory, std::uint32_t params) {
+     return result::kOk;
+ }
+ 
++// The save lists. A PSP shows its list for LISTLOAD, LISTSAVE, LISTDELETE and
++// the delete mode without a save name (PPSSPP's LISTALLDELETE: every save of
++// the game, to free space with), and the player picks an entry: one per name
++// of the game's list (LISTSAVE: free slots too, as NEW DATA), or one per save
++// folder of the game.
++enum class ListKind { Load, Save, Delete };
++
++struct ListEntry {
++    std::string name;  // the save name, appended to the game name
++    bool exists{};
++    // PARAM.SFO's, the file a save writes last: when the save was made.
++    std::filesystem::file_time_type modified{};
++};
++
++std::optional<ListKind> list_kind(const psprecomp::GuestMemory &memory, std::uint32_t params) {
++    switch (memory.load32(params + param::kMode)) {
++    case kListLoad: return ListKind::Load;
++    case kListSave: return ListKind::Save;
++    case kListDelete: return ListKind::Delete;
++    case kDelete:
++        // Wipeout Pure's PROFILE > DELETE asks this with no save name.
++        if (save_name_at(memory, params + param::kSaveName).empty()) return ListKind::Delete;
++        return std::nullopt;
++    default: return std::nullopt;
++    }
++}
++
++savedata::SaveFiles folder_of(const psprecomp::GuestMemory &memory, std::uint32_t params, const std::string &name) {
++    savedata::SaveFiles files;
++    files.game_name = read_cstring(memory, params + param::kGameName, 13u);
++    files.save_name = name;
++    return files;
++}
++
++// Every entry of the request's list, in the game's order, saves and free
++// slots alike.
++std::vector<ListEntry> list_entries(const psprecomp::GuestMemory &memory, std::uint32_t params) {
++    std::vector<std::string> names;
++    if (const std::uint32_t list = memory.load32(params + param::kSaveNameList); list != 0u) {
++        names = save_name_list(memory, list);
++    } else if (memory.load32(params + param::kMode) == kDelete) {
++        const std::string game_name = read_cstring(memory, params + param::kGameName, 13u);
++        std::error_code error;
++        for (const auto &entry :
++             std::filesystem::directory_iterator(savedata::savedata_root(state().memory_stick), error)) {
++            const std::string folder = entry.path().filename().string();
++            if (entry.is_directory(error) && folder.size() > game_name.size() && folder.starts_with(game_name))
++                names.push_back(folder.substr(game_name.size()));
++        }
++        std::sort(names.begin(), names.end());
++    } else {
++        names.push_back(save_name_at(memory, params + param::kSaveName));
++    }
++    std::vector<ListEntry> entries;
++    for (const auto &name : names) {
++        ListEntry entry;
++        entry.name = name;
++        const auto files = folder_of(memory, params, name);
++        entry.exists = savedata::save_exists(state().memory_stick, files);
++        std::error_code error;
++        if (entry.exists)
++            entry.modified = std::filesystem::last_write_time(
++                savedata::save_folder(state().memory_stick, files) / "PARAM.SFO", error);
++        entries.push_back(std::move(entry));
++    }
++    return entries;
++}
++
++std::optional<std::size_t> newest_save(const std::vector<ListEntry> &entries) {
++    std::optional<std::size_t> newest;
++    for (std::size_t i = 0; i < entries.size(); ++i)
++        if (entries[i].exists && (!newest || entries[i].modified > entries[*newest].modified)) newest = i;
++    return newest;
++}
++
++std::optional<std::size_t> first_free(const std::vector<ListEntry> &entries) {
++    for (std::size_t i = 0; i < entries.size(); ++i)
++        if (!entries[i].exists) return i;
++    return std::nullopt;
++}
++
++// The entry a player would want without looking: the newest save to load,
++// the first free slot to save to, and only the save the game names to delete.
++std::optional<std::size_t> default_entry(const psprecomp::GuestMemory &memory, std::uint32_t params, ListKind kind,
++                                         const std::vector<ListEntry> &entries) {
++    switch (kind) {
++    case ListKind::Load: return newest_save(entries);
++    case ListKind::Save: return first_free(entries);
++    case ListKind::Delete: {
++        const std::string named = save_name_at(memory, params + param::kSaveName);
++        for (std::size_t i = 0; i < entries.size(); ++i)
++            if (entries[i].exists && !named.empty() && entries[i].name == named) return i;
++        return std::nullopt;
++    }
++    }
++    return std::nullopt;
++}
++
++const char *default_reason(ListKind kind) {
++    switch (kind) {
++    case ListKind::Load: return "the newest save";
++    case ListKind::Save: return "the first free slot";
++    case ListKind::Delete: return "the save the game names";
++    }
++    return "";
++}
++
++// The input script's `save` answer as an entry: `cancel` is nullopt; an answer
++// that names no usable entry (a free slot to load from, say) does not fit.
++struct ScriptAnswer {
++    bool fits{};
++    std::optional<std::size_t> entry;
++};
++
++ScriptAnswer resolve_answer(const std::string &answer, ListKind kind, const std::vector<ListEntry> &entries) {
++    if (answer == "cancel") return {true, std::nullopt};
++    std::optional<std::size_t> entry;
++    if (answer == "newest") {
++        entry = newest_save(entries);
++    } else if (answer == "free") {
++        if (kind == ListKind::Save) entry = first_free(entries);
++    } else {
++        for (std::size_t i = 0; i < entries.size() && !entry; ++i)
++            if (entries[i].name == answer) entry = i;
++        if (!entry && !answer.empty() && answer.find_first_not_of("0123456789") == std::string::npos) {
++            const unsigned long position = std::strtoul(answer.c_str(), nullptr, 10);
++            if (position < entries.size()) entry = position;
++        }
++    }
++    if (!entry || (kind != ListKind::Save && !entries[*entry].exists)) return {};
++    return {true, entry};
++}
++
++// Loads, saves or deletes the chosen entry, whose name the game reads back
++// from the block afterwards (its autosaves go to the profile's slot).
++std::uint32_t act_on(psprecomp::GuestMemory &memory, std::uint32_t params, ListKind kind, const std::string &name) {
++    write_cstring(memory, params + param::kSaveName, name, 20u);
++    switch (kind) {
++    case ListKind::Load: return do_load(memory, params, name);
++    case ListKind::Save: return do_save(memory, params, name);
++    case ListKind::Delete: return do_delete(memory, params, name);
++    }
++    return result::kLoadParam;
++}
++
++#if defined(PORTABLEKIT_HAS_RENDERER)
++std::vector<std::uint8_t> read_whole_file(const std::filesystem::path &path) {
++    std::ifstream in(path, std::ios::binary);
++    if (!in) return {};
++    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
++}
++
++// "2026/10/07   14:03": a save's date and time as the PSP's list gives them.
++std::string save_date(std::filesystem::file_time_type written) {
++    // file_time_type's clock is not the system clock everywhere; offset by now.
++    const auto system_time = std::chrono::system_clock::now() +
++                             std::chrono::duration_cast<std::chrono::system_clock::duration>(
++                                 written - std::filesystem::file_time_type::clock::now());
++    const std::time_t time = std::chrono::system_clock::to_time_t(system_time);
++    std::tm tm{};
++#if defined(_WIN32)
++    localtime_s(&tm, &time);
++#else
++    localtime_r(&time, &tm);
++#endif
++    char text[32];
++    std::snprintf(text, sizeof text, "%04d/%02d/%02d   %02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
++                  tm.tm_hour, tm.tm_min);
++    return text;
++}
++
++std::string outcome_message(ListKind kind, std::uint32_t outcome) {
++    if (outcome == result::kOk) {
++        switch (kind) {
++        case ListKind::Load: return "Load completed.";
++        case ListKind::Save: return "Save completed.";
++        case ListKind::Delete: return "Delete completed.";
++        }
++    }
++    switch (outcome) {
++    case result::kLoadNoData:
++    case result::kDeleteNoData: return "There is no save data.";
++    case result::kLoadDataBroken: return "The save data is corrupted.";
++    case result::kSaveAccessError:
++    case result::kSaveParam: return "The save data could not be written.";
++    default: return "The save data could not be loaded.";
++    }
++}
++
++// What the list shows of a save: PARAM.SFO's titles and detail, when it was
++// made, its size and ICON0.PNG.
++ui::SaveListEntry shown_save(const psprecomp::GuestMemory &memory, std::uint32_t params, const std::string &name) {
++    ui::SaveListEntry shown;
++    shown.name = name;
++    shown.exists = true;
++    const auto files = folder_of(memory, params, name);
++    const auto folder = savedata::save_folder(state().memory_stick, files);
++    if (const auto sfo = savedata::ParamSfo::parse(read_whole_file(folder / "PARAM.SFO"))) {
++        shown.title = sfo->string("TITLE").value_or("");
++        shown.savedata_title = sfo->string("SAVEDATA_TITLE").value_or("");
++        shown.detail = sfo->string("SAVEDATA_DETAIL").value_or("");
++    }
++    std::error_code error;
++    shown.date = save_date(std::filesystem::last_write_time(folder / "PARAM.SFO", error));
++    shown.size_kb = savedata::save_size(state().memory_stick, files) / 1024u;
++    shown.icon = read_whole_file(folder / "ICON0.PNG");
++    return shown;
++}
++
++// Opens the list screen for the request, on the entry the default would take
++// (so a straight confirm never writes over a save). False when there is no
++// interface to draw it in.
++bool open_list_screen(psprecomp::GuestMemory &memory, std::uint32_t params, ListKind kind,
++                      const std::vector<ListEntry> &entries) {
++    ui::SaveListRequest request;
++    request.kind = kind == ListKind::Load   ? ui::SaveListKind::Load
++                   : kind == ListKind::Save ? ui::SaveListKind::Save
++                                            : ui::SaveListKind::Delete;
++    request.enter_cross = memory.load32(params + param::kButtonSwap) == 1u;
++    // The game's own icon for a free slot, if it passes one.
++    std::vector<std::uint8_t> new_icon;
++    if (const std::uint32_t new_data = memory.load32(params + param::kNewData);
++        new_data != 0u && memory.contains(new_data, 16u))
++        new_icon = read_file_data(memory, new_data);
++    const std::optional<std::size_t> preferred = default_entry(memory, params, kind, entries);
++    std::vector<std::string> names;
++    for (std::size_t i = 0; i < entries.size(); ++i) {
++        const ListEntry &entry = entries[i];
++        // Only LISTSAVE lists free slots.
++        if (kind != ListKind::Save && !entry.exists) continue;
++        if (preferred && *preferred == i) request.focus = names.size();
++        ui::SaveListEntry shown;
++        if (entry.exists) {
++            shown = shown_save(memory, params, entry.name);
++        } else {
++            shown.name = entry.name;
++            shown.icon = new_icon;
++        }
++        names.push_back(entry.name);
++        request.entries.push_back(std::move(shown));
++    }
++    if (request.entries.empty()) return false;
++    request.act = [&memory, params, kind, names](std::size_t index) {
++        const std::uint32_t outcome = act_on(memory, params, kind, names.at(index));
++        state().acted = outcome;
++        ui::SaveListOutcome told{outcome == result::kOk, outcome_message(kind, outcome), std::nullopt};
++        // The save just written, as the dialog shows it beside "Save completed.".
++        if (kind == ListKind::Save && outcome == result::kOk) told.saved = shown_save(memory, params, names.at(index));
++        return told;
++    };
++    const bool opened = ui::open_game_save_list(std::move(request), [](std::optional<std::size_t> chosen) {
++        SavedataState &s = state();
++        if (!s.waiting) return;  // closed by a request that replaced it
++        s.answer = chosen ? s.acted : result::kCancelled;
++    });
++    if (!opened) return false;
++    SavedataState &s = state();
++    s.waiting = true;
++    s.params = params;
++    s.acted = result::kCancelled;
++    s.answer.reset();
++    std::cerr << "[savedata] " << mode_name(memory.load32(params + param::kMode)) << ": the save list is open ("
++              << names.size() << " entries)\n";
++    return true;
++}
++#endif
++
++// A list mode: the result, answered at once, or nullopt while the list screen
++// is open for the player to choose.
++std::optional<std::uint32_t> answer_list(psprecomp::GuestMemory &memory, std::uint32_t params, ListKind kind) {
++    const std::vector<ListEntry> entries = list_entries(memory, params);
++    const auto existing = static_cast<std::size_t>(
++        std::count_if(entries.begin(), entries.end(), [](const ListEntry &e) { return e.exists; }));
++    const char *mode = mode_name(memory.load32(params + param::kMode));
++    if (trace_savedata()) {
++        std::cerr << "[savedata] " << mode << " list:";
++        for (const auto &entry : entries) std::cerr << " " << entry.name << (entry.exists ? " (save)" : " (free)");
++        std::cerr << "\n";
++    }
++
++    if (const auto answer = host::script::take_save_answer()) {
++        const ScriptAnswer chosen = resolve_answer(*answer, kind, entries);
++        if (chosen.fits) {
++            std::cerr << "[savedata] " << mode << ": the script's answer \"" << *answer << "\": "
++                      << (chosen.entry ? entries[*chosen.entry].name : std::string("cancel")) << "\n";
++            if (!chosen.entry) return result::kCancelled;
++            return act_on(memory, params, kind, entries[*chosen.entry].name);
++        }
++        std::cerr << "[savedata] " << mode << ": the script's answer \"" << *answer
++                  << "\" names no entry this list can take; answering as without one\n";
++    }
++
++    // A choice to make: two saves to load from, or saves beside the slot to
++    // save to, or saves to delete.
++    const bool choice = kind == ListKind::Load ? existing >= 2u : existing >= 1u;
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    if (choice && open_list_screen(memory, params, kind, entries)) return std::nullopt;
++#endif
++    if (existing == 0u && kind == ListKind::Load) return result::kLoadNoData;
++    if (existing == 0u && kind == ListKind::Delete) return result::kDeleteNoData;
++    const std::optional<std::size_t> chosen = default_entry(memory, params, kind, entries);
++    if (!chosen) {
++        std::cerr << "[savedata] " << mode << ": "
++                  << (kind == ListKind::Save ? "no free slot in the list; cancelled, nothing overwritten"
++                                             : "no save named; cancelled, nothing deleted")
++                  << "\n";
++        return result::kCancelled;
++    }
++    if (choice || trace_savedata())
++        std::cerr << "[savedata] " << mode << ": " << entries[*chosen].name << ", " << default_reason(kind) << "\n";
++    return act_on(memory, params, kind, entries[*chosen].name);
++}
++
++// A list screen left open by a request that is being replaced or shut down.
++void close_list_screen() {
++    SavedataState &s = state();
++    if (!s.waiting) return;
++    s.waiting = false;
++    s.answer.reset();
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    ui::cancel_save_list();
++#endif
++    std::cerr << "[savedata] the save list was still open; closed as cancelled\n";
++}
++
++// One poll (GetStatus or Update): the status to report. While the list screen
++// is open the request stays VISIBLE; once it has closed, its result goes into
++// the parameter block and the request moves on to QUIT.
++std::uint32_t poll_dialog(psprecomp::GuestMemory &memory) {
++    SavedataState &s = state();
++    if (s.waiting && s.dialog.status() == dialog_status::kVisible) {
++        if (!s.answer) return dialog_status::kVisible;
++        memory.store32(s.params + dialog_common::kResultOffset, *s.answer);
++        std::cerr << "[savedata] the save list closed: result " << psprecomp::hex32(*s.answer) << "\n";
++        s.waiting = false;
++        s.answer.reset();
++    }
++    return s.dialog.poll();
++}
++
+ std::uint32_t run_request(psprecomp::GuestMemory &memory, std::uint32_t params) {
+     const std::uint32_t mode = memory.load32(params + param::kMode);
+     const std::string save_name = save_name_at(memory, params + param::kSaveName);
+@@ -438,23 +800,8 @@ std::uint32_t run_request(psprecomp::GuestMemory &memory, std::uint32_t params)
+     case kAutoSave:
+     case kSave:
+         return do_save(memory, params, save_name);
+-    case kListLoad: {
+-        const auto chosen = pick_from_list(memory, params, true);
+-        if (!chosen) return result::kLoadNoData;
+-        write_cstring(memory, params + param::kSaveName, *chosen, 20u);
+-        return do_load(memory, params, *chosen);
+-    }
+-    case kListSave: {
+-        const auto chosen = pick_from_list(memory, params, false);
+-        write_cstring(memory, params + param::kSaveName, *chosen, 20u);
+-        return do_save(memory, params, *chosen);
+-    }
+-    case kListDelete: {
+-        const auto chosen = pick_from_list(memory, params, true);
+-        if (!chosen) return result::kDeleteNoData;
+-        write_cstring(memory, params + param::kSaveName, *chosen, 20u);
+-        return do_delete(memory, params, *chosen);
+-    }
++    // LISTLOAD, LISTSAVE, LISTDELETE and a delete without a save name are
++    // the list modes (answer_list).
+     case kDelete:
+     case kAutoDelete:
+     case kSingleDelete:
+@@ -503,25 +850,32 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
+         auto &memory = rt.memory();
+         const std::uint32_t params = arg(ctx, 0);
+         // A new request while one is still active replaces it rather than
+-        // failing: the earlier request's work is already done.
++        // failing: the earlier request's work is already done (or, with its
++        // list still open, cancelled).
+         if (state().dialog.active())
+             std::cerr << "[savedata] InitStart while a dialog is active (status " << state().dialog.status() << ")\n";
++        close_list_screen();
+         log_request(memory, params);
+-        const std::uint32_t outcome = run_request(memory, params);
+-        memory.store32(params + dialog_common::kResultOffset, outcome);
+-        if (outcome != result::kOk || trace_savedata())
+-            std::cerr << "[savedata] result " << psprecomp::hex32(outcome) << "\n";
++        const auto kind = list_kind(memory, params);
++        const std::optional<std::uint32_t> outcome =
++            kind ? answer_list(memory, params, *kind) : std::optional<std::uint32_t>(run_request(memory, params));
++        // With the list screen open the result is written when it closes.
++        if (outcome) {
++            memory.store32(params + dialog_common::kResultOffset, *outcome);
++            if (*outcome != result::kOk || trace_savedata())
++                std::cerr << "[savedata] result " << psprecomp::hex32(*outcome) << "\n";
++        }
+         state().dialog.start();
+         kernel().finish(ctx, 0u);
+     });
+ 
+-    hle.add("sceUtility", "sceUtilitySavedataUpdate", [](Runtime &, AllegrexContext &ctx) {
+-        (void)state().dialog.poll();
++    hle.add("sceUtility", "sceUtilitySavedataUpdate", [](Runtime &rt, AllegrexContext &ctx) {
++        (void)poll_dialog(rt.memory());
+         kernel().finish(ctx, 0u);
+     });
+ 
+-    hle.add("sceUtility", "sceUtilitySavedataGetStatus", [](Runtime &, AllegrexContext &ctx) {
+-        const std::uint32_t status = state().dialog.poll();
++    hle.add("sceUtility", "sceUtilitySavedataGetStatus", [](Runtime &rt, AllegrexContext &ctx) {
++        const std::uint32_t status = poll_dialog(rt.memory());
+         if (trace_savedata()) std::cerr << "[savedata] status " << status << "\n";
+         kernel().finish(ctx, status);
+     });
+@@ -531,6 +885,7 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
+             kernel().finish(ctx, kErrorUtilityInvalidStatus);
+             return;
+         }
++        close_list_screen();
+         if (!state().dialog.shutdown())
+             std::cerr << "[savedata] ShutdownStart before the dialog finished\n";
+         kernel().finish(ctx, 0u);
+diff --git a/host/shell/headless_shell.cpp b/host/shell/headless_shell.cpp
+index 8869597..69b0f50 100644
+--- a/host/shell/headless_shell.cpp
++++ b/host/shell/headless_shell.cpp
+@@ -9,6 +9,7 @@
+ //   pad NAME[+NAME...] [N]  hold gamepad buttons (SDL's names) for N frames, 4 by default
+ //   axis NAME VALUE         hold an axis at VALUE, -1 to 1, as the virtual gamepad does
+ //   shot NAME               the GE backend's picture (capture_frame) as <prefix>_SCREENSHOT_DIR/NAME.bmp
++//   save ANSWER             the answer to the game's next save-list request (script_steps.hpp)
+ //   quit                    pump_events() returns false: the run ends
+ // key, mouse, click, text and drop need a window; each is reported once and
+ // ignored.
+@@ -186,6 +187,10 @@ private:
+             quit_ = true;
+             return false;
+         }
++        if (step.action == "save") {
++            script::push_save_answer(step.argument);
++            return false;
++        }
+         if (step.action == "key" || step.action == "mouse" || step.action == "click" || step.action == "text" ||
+             step.action == "drop") {
+             if (ignored_.insert(step.action).second)
+diff --git a/host/shell/script_steps.cpp b/host/shell/script_steps.cpp
+index d9057de..d623fe0 100644
+--- a/host/shell/script_steps.cpp
++++ b/host/shell/script_steps.cpp
+@@ -7,6 +7,7 @@
+ #include <fstream>
+ #include <iostream>
+ #include <sstream>
++#include <utility>
+ 
+ namespace portablekit::host::script {
+ 
+@@ -92,4 +93,21 @@ void load(Steps &s, bool &uses_pad, bool &uses_mouse) {
+     }
+ }
+ 
++namespace {
++std::deque<std::string> &save_answers() {
++    static std::deque<std::string> answers;
++    return answers;
++}
++} // namespace
++
++void push_save_answer(std::string answer) { save_answers().push_back(std::move(answer)); }
++
++std::optional<std::string> take_save_answer() {
++    auto &answers = save_answers();
++    if (answers.empty()) return std::nullopt;
++    std::string answer = std::move(answers.front());
++    answers.pop_front();
++    return answer;
++}
++
+ } // namespace portablekit::host::script
+diff --git a/host/shell/script_steps.hpp b/host/shell/script_steps.hpp
+index 6e72dc0..6615b34 100644
+--- a/host/shell/script_steps.hpp
++++ b/host/shell/script_steps.hpp
+@@ -8,6 +8,7 @@
+ #include <cstdint>
+ #include <deque>
+ #include <ios>
++#include <optional>
+ #include <string>
+ #include <utility>
+ 
+@@ -47,4 +48,15 @@ void read_live(Steps &s, std::uint64_t frame);
+ // presses the gamepad or moves the mouse; the live file counts as both.
+ void load(Steps &s, bool &uses_pad, bool &uses_mouse);
+ 
++// `save ANSWER`: the answer to the game's next save-list request (the
++// savedata modes that show the PSP's list: LISTLOAD, LISTSAVE, LISTDELETE and
++// the list delete), queued by whichever shell runs the step and taken by
++// hle_savedata.cpp, which then answers that request with it instead of the
++// list screen or the default. ANSWER is a save name of the game's list
++// ("P0001"), a 0-based position in it ("1"), "newest", "free" (the first
++// free slot) or "cancel". Answers are taken in the order they were queued,
++// one per request.
++void push_save_answer(std::string answer);
++[[nodiscard]] std::optional<std::string> take_save_answer();
++
+ } // namespace portablekit::host::script
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index 5c51c53..64c01ef 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -157,6 +157,8 @@ void run(const Step &step) {
+         const std::string name = step.argument.empty() ? "frame_" + std::to_string(s.frame) : step.argument;
+         Layer::get().shell().capture_window((dir != nullptr ? std::string(dir) : std::string(".")) + "/" + name +
+                                             ".bmp");
++    } else if (step.action == "save") {
++        host::script::push_save_answer(step.argument);
+     } else if (step.action == "quit") {
+         SDL_Event event{};
+         event.type = SDL_EVENT_QUIT;
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index 7107eaf..200cbe8 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -21,6 +21,10 @@
+ //   text STRING       type text
+ //   drop PATH         drop a file onto the window
+ //   shot NAME         write the window image to <prefix>_SCREENSHOT_DIR/NAME.bmp
++//   save ANSWER       answer the game's next save-list request (LISTLOAD,
++//                     LISTSAVE, LISTDELETE, the list delete) without the list
++//                     screen: a save name of the game's list (P0001), a 0-based
++//                     position in it, newest, free or cancel (save_list.hpp)
+ //   quit              close the window
+ //
+ // For example: <prefix>_INPUT_SCRIPT="300:key Escape;330:shot menu;360:pad leftstick+rightstick"
+@@ -38,8 +42,8 @@
+ // This file drives a shell with a window. The headless shell
+ // (<prefix>_SHELL=headless or <prefix>_NO_RENDER; shell/headless_shell.cpp)
+ // reads the same script and live file at pad level, one frame per flip:
+-// pad, axis, shot (the GE backend's picture) and quit; key, mouse, click,
+-// text and drop are reported and ignored. The grammar both read is in
++// pad, axis, shot (the GE backend's picture), save and quit; key, mouse,
++// click, text and drop are reported and ignored. The grammar both read is in
+ // shell/script_steps.hpp.
+ namespace portablekit {
+ 
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 1d1a682..517ffd7 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -8,6 +8,7 @@
+ #include "ui/font_menu.hpp"
+ #include "ui/input_script.hpp"
+ #include "ui/layer.hpp"
++#include "ui/save_list.hpp"
+ #include "ui/save_screen.hpp"
+ #include "ui/texture_pack_screen.hpp"
+ #include "ui/text_input.hpp"
+@@ -1428,6 +1429,13 @@ void draw_over_game() {
+         layer.end_frame();
+         return;
+     }
++    // The game's save list (LISTLOAD, LISTSAVE, ...): the same, until closed.
++    if (save_list_open() && !menu) {
++        layer.begin_frame();
++        save_list_frame();
++        layer.end_frame();
++        return;
++    }
+     const double hint_left = menu || settings::current().menu_hint_seen ? -1.0 : hint_seconds_left();
+     const bool overlay = network_overlay();
+     const bool touch = !menu && layer.shell().touch_controls_visible();
+@@ -1470,7 +1478,7 @@ bool take_quit_request() { return std::exchange(quit_requested(), false); }
+ 
+ bool menu_requested() {
+     Layer &layer = Layer::get();
+-    if (!layer.attached() || text_input_open()) return false;
++    if (!layer.attached() || text_input_open() || save_list_open()) return false;
+     // The on-screen menu button, then Esc or L3+R3.
+     const bool touched = layer.shell().take_touch_menu();
+     return layer.take_menu_toggle() || touched;
+diff --git a/host/ui/save_list.cpp b/host/ui/save_list.cpp
+new file mode 100644
+index 0000000..ff70885
+--- /dev/null
++++ b/host/ui/save_list.cpp
+@@ -0,0 +1,480 @@
++#include "ui/save_list.hpp"
++
++#include "ui/layer.hpp"
++#include "ui/widgets.hpp"
++
++#include "shell/shell.hpp"
++
++#include "imgui.h"
++#include "imgui_internal.h"
++
++#define STB_IMAGE_STATIC
++#define STB_IMAGE_IMPLEMENTATION
++#define STBI_ONLY_PNG
++#include "stb_image.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstring>
++#include <iostream>
++#include <map>
++#include <string_view>
++#include <utility>
++
++namespace portablekit::ui {
++namespace {
++
++// The list's layout in the PSP's own 480x272 pixels, after the PSP's system
++// dialog: the chosen icon 144x80 at (27, 97), the others 81x45 above and
++// below it, the save's details from x 180, the buttons along the bottom.
++constexpr float kPspWidth = 480.0f;
++constexpr float kPspHeight = 272.0f;
++
++enum class Stage { List, Confirm, Done };
++
++struct Screen {
++    bool open{};
++    SaveListRequest request;
++    SaveListDone on_done;
++    Stage stage{Stage::List};
++    std::size_t selected{};
++    bool yes{};  // the confirmation's answer: No until changed, as on a PSP
++    SaveListOutcome outcome;
++    std::optional<std::size_t> acted;
++};
++
++Screen &screen() {
++    static Screen value;
++    return value;
++}
++
++// The game's picture in the window (letterboxed to the PSP's shape) and the
++// size of one PSP pixel in it.
++struct Psp {
++    ImVec2 origin;
++    float scale{1.0f};
++    [[nodiscard]] ImVec2 at(float x, float y) const { return {origin.x + x * scale, origin.y + y * scale}; }
++    [[nodiscard]] float px(float value) const { return value * scale; }
++};
++
++Psp psp_area() {
++    const ImGuiIO &io = ImGui::GetIO();
++    const float aspect = kPspWidth / kPspHeight;
++    float width = io.DisplaySize.x;
++    float height = io.DisplaySize.y;
++    if (width / height > aspect) width = height * aspect;
++    else height = width / aspect;
++    return {{std::round((io.DisplaySize.x - width) * 0.5f), std::round((io.DisplaySize.y - height) * 0.5f)},
++            height / kPspHeight};
++}
++
++// Decoded save icons, kept for the run: a profile's ICON0.PNG is the same
++// picture save after save, so a handful covers a game.
++struct Icon {
++    ImTextureData *texture{};
++    int width{};
++    int height{};
++};
++
++const Icon *icon_for(const std::vector<std::uint8_t> &png) {
++    static std::map<std::size_t, Icon> cache;
++    if (png.empty()) return nullptr;
++    const std::size_t key =
++        std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(png.data()), png.size()));
++    auto found = cache.find(key);
++    if (found == cache.end()) {
++        if (cache.size() >= 32u) return nullptr;
++        Icon icon;
++        int width = 0;
++        int height = 0;
++        int channels = 0;
++        stbi_uc *pixels =
++            stbi_load_from_memory(png.data(), static_cast<int>(png.size()), &width, &height, &channels, 4);
++        if (pixels != nullptr && width > 0 && height > 0) {
++            auto *texture = IM_NEW(ImTextureData)();
++            texture->Create(ImTextureFormat_RGBA32, width, height);
++            std::memcpy(texture->GetPixels(), pixels, static_cast<std::size_t>(width) * height * 4u);
++            texture->UseColors = true;
++            ImGui::RegisterUserTexture(texture);
++            icon = {texture, width, height};
++        }
++        if (pixels != nullptr) stbi_image_free(pixels);
++        found = cache.emplace(key, icon).first;
++    }
++    return found->second.texture != nullptr ? &found->second : nullptr;
++}
++
++// Text as the PSP's dialogs draw it: white with a soft shadow, `size` PSP
++// pixels high.
++void text(ImDrawList *draw, const Psp &psp, float size, ImVec2 at, ImU32 color, const std::string &value,
++          float wrap = 0.0f) {
++    ImFont *font = ImGui::GetFont();
++    const float pixels = psp.px(size);
++    const float shadow = std::max(1.0f, psp.px(0.6f));
++    draw->AddText(font, pixels, {at.x + shadow, at.y + shadow}, IM_COL32(0, 0, 0, 150), value.c_str(), nullptr,
++                  wrap);
++    draw->AddText(font, pixels, at, color, value.c_str(), nullptr, wrap);
++}
++
++ImVec2 text_size(const Psp &psp, float size, const std::string &value, float wrap = 0.0f) {
++    return ImGui::GetFont()->CalcTextSizeA(psp.px(size), FLT_MAX, wrap, value.c_str());
++}
++
++constexpr ImU32 kWhite = IM_COL32(255, 255, 255, 255);
++constexpr ImU32 kGrey = IM_COL32(192, 192, 192, 255);
++
++const char *banner_title(SaveListKind kind) {
++    switch (kind) {
++    case SaveListKind::Load: return "Load";
++    case SaveListKind::Save: return "Save";
++    case SaveListKind::Delete: return "Delete";
++    }
++    return "";
++}
++
++void draw_banner(ImDrawList *draw, const Psp &psp) {
++    draw->AddRectFilled(psp.at(0, 0), psp.at(kPspWidth, 23), IM_COL32(88, 99, 99, 101));
++    draw->AddNgonFilled(psp.at(16, 12), psp.px(6.0f), IM_COL32(255, 255, 255, 220), 6);
++    const std::string title = banner_title(screen().request.kind);
++    const float size = 13.0f;
++    text(draw, psp, size, psp.at(30, 12 - size * 0.5f), kWhite, title);
++}
++
++// One entry's icon box: the save's ICON0.PNG fitted to the box's height, a
++// grey box when there is none.
++void draw_icon(ImDrawList *draw, const Psp &psp, const SaveListEntry &entry, float x, float y, float w, float h,
++               bool selected) {
++    const Icon *icon = icon_for(entry.icon);
++    float pad = 0.0f;
++    if (icon != nullptr) {
++        const float scaled = std::floor(static_cast<float>(icon->width) * h / static_cast<float>(icon->height));
++        pad = std::floor((w - scaled) * 0.5f);
++        w = scaled;
++        // A free slot's icon (the game's "empty" picture) is drawn dimmed.
++        const ImU32 tint = entry.exists ? IM_COL32(255, 255, 255, 255) : IM_COL32(119, 119, 119, 255);
++        draw->AddImage(icon->texture->GetTexRef(), psp.at(x + pad, y), psp.at(x + pad + w, y + h), {0, 0}, {1, 1},
++                       tint);
++    } else {
++        draw->AddRectFilled(psp.at(x, y), psp.at(x + w, y + h), IM_COL32(102, 102, 102, 136));
++        const std::string label = entry.exists ? entry.name : "NEW DATA";
++        const float size = selected ? 12.0f : 9.0f;
++        const ImVec2 measured = text_size(psp, size, label);
++        text(draw, psp, size,
++             {psp.at(x, y).x + (psp.px(w) - measured.x) * 0.5f, psp.at(x, y).y + (psp.px(h) - measured.y) * 0.5f},
++             entry.exists ? kWhite : kGrey, label);
++    }
++    if (selected) {
++        const float b = std::max(1.0f, psp.px(1.2f));
++        const ImVec2 min = psp.at(x + pad, y);
++        const ImVec2 max = psp.at(x + pad + w, y + h);
++        draw->AddRect({min.x - b * 0.5f, min.y - b * 0.5f}, {max.x + b * 0.5f, max.y + b * 0.5f},
++                      IM_COL32(255, 255, 255, 208), 0.0f, 0, b);
++    }
++}
++
++// Where entry `index` sits in the column while `selected` is chosen.
++struct Slot {
++    float x, y, w, h;
++};
++
++Slot slot_of(std::size_t index, std::size_t selected) {
++    if (index == selected) return {27.0f, 97.0f, 144.0f, 80.0f};
++    const float distance = static_cast<float>(index < selected ? selected - index : index - selected);
++    const float y = index < selected ? 97.0f - 13.0f - 45.0f * distance : 97.0f + 48.0f + 45.0f * distance;
++    return {58.5f, y, 81.0f, 45.0f};
++}
++
++// The column of icons; a click chooses an entry, a click on the chosen one
++// picks it. Returns true when an entry was picked.
++bool draw_column(ImDrawList *draw, const Psp &psp) {
++    Screen &s = screen();
++    bool picked = false;
++    const auto &entries = s.request.entries;
++    for (std::size_t i = 0; i < entries.size(); ++i) {
++        const Slot slot = slot_of(i, s.selected);
++        if (slot.y > kPspHeight || slot.y + slot.h < 0.0f) continue;
++        draw_icon(draw, psp, entries[i], slot.x, slot.y, slot.w, slot.h, i == s.selected);
++        ImGui::SetCursorScreenPos(psp.at(slot.x, slot.y));
++        ImGui::PushID(static_cast<int>(i));
++        if (ImGui::InvisibleButton("##entry", {std::max(1.0f, psp.px(slot.w)), std::max(1.0f, psp.px(slot.h))})) {
++            if (i == s.selected) picked = true;
++            else s.selected = i;
++        }
++        ImGui::PopID();
++    }
++    return picked;
++}
++
++// Beside the column: the chosen save's title, date, time and size, its
++// savedata title and detail; NEW DATA for a free slot.
++void draw_details(ImDrawList *draw, const Psp &psp) {
++    const Screen &s = screen();
++    const SaveListEntry &entry = s.request.entries[s.selected];
++    if (!entry.exists) {
++        const float size = 14.0f;
++        text(draw, psp, size, psp.at(180, 136 - size * 0.5f), kWhite, "NEW DATA");
++        return;
++    }
++    draw->AddRectFilled(psp.at(180, 136), psp.at(kPspWidth, 137), kWhite);
++    const float title_size = 13.0f;
++    const ImVec2 title = text_size(psp, title_size, entry.title);
++    text(draw, psp, title_size, {psp.at(180, 0).x, psp.at(0, 135).y - title.y}, kGrey, entry.title);
++    text(draw, psp, 11.5f, psp.at(180, 139), kWhite,
++         entry.date + "  " + std::to_string(entry.size_kb) + " KB");
++    text(draw, psp, 12.5f, psp.at(175, 159), kWhite, entry.savedata_title);
++    draw->PushClipRect(psp.at(175, 181), psp.at(kPspWidth, 250), true);
++    text(draw, psp, 11.5f, psp.at(175, 181), kWhite, entry.detail, psp.px(kPspWidth - 175 - 6));
++    draw->PopClipRect();
++}
++
++// The confirmation and the outcome: the chosen save's icon large on the left,
++// its savedata title, date and size under it, and the message, framed by two
++// lines, in the middle of the right half.
++void draw_message(ImDrawList *draw, const Psp &psp, const std::string &message, bool yes_no) {
++    const Screen &s = screen();
++    const SaveListEntry &entry = s.request.entries[s.selected];
++    draw_icon(draw, psp, entry, 27, 97, 144, 80, false);
++    if (entry.exists)
++        text(draw, psp, 11.0f, psp.at(8, 200), kWhite,
++             entry.savedata_title + "\n" + entry.date + "\n" + std::to_string(entry.size_kb) + " KB");
++    const float size = 13.0f;
++    const float wrap = psp.px(254.0f);
++    const ImVec2 measured = text_size(psp, size, message, wrap);
++    const float half = measured.y / psp.scale * 0.5f;
++    float top = 136.0f - half;
++    float bottom = 136.0f + half;
++    if (yes_no) {
++        top -= 10.0f;
++        bottom += 10.0f;
++    }
++    text(draw, psp, size, {psp.at(334, 0).x - measured.x * 0.5f, psp.at(0, top).y}, kWhite, message, wrap);
++    if (yes_no) {
++        const float y = bottom - 9.0f;
++        const float choice_x = s.yes ? 302.0f : 366.0f;
++        draw->AddRectFilled(psp.at(choice_x - 18, y - 2), psp.at(choice_x + 18, y + 14), IM_COL32(192, 192, 192, 64));
++        for (const auto &[label, x] : {std::pair<const char *, float>{"Yes", 302.0f}, {"No", 366.0f}}) {
++            const ImVec2 label_size = text_size(psp, size, label);
++            text(draw, psp, size, {psp.at(x, 0).x - label_size.x * 0.5f, psp.at(0, y).y}, kWhite, label);
++            ImGui::SetCursorScreenPos(psp.at(x - 18, y - 2));
++            ImGui::PushID(label);
++            if (ImGui::InvisibleButton("##answer", {psp.px(36), psp.px(16)})) screen().yes = x < 330.0f;
++            ImGui::PopID();
++        }
++    }
++    draw->AddRectFilled(psp.at(202, top - 14), psp.at(466, top - 13), kWhite);
++    draw->AddRectFilled(psp.at(202, bottom + 14), psp.at(466, bottom + 15), kWhite);
++}
++
++// A PSP button's symbol, `size` PSP pixels across: X or O.
++void draw_symbol(ImDrawList *draw, const Psp &psp, ImVec2 at, float size, bool cross) {
++    const float r = psp.px(size * 0.5f);
++    const ImVec2 c{at.x + r, at.y + r};
++    const float thickness = std::max(1.0f, psp.px(1.4f));
++    for (const auto &[offset, color] :
++         {std::pair<float, ImU32>{std::max(1.0f, psp.px(0.6f)), IM_COL32(0, 0, 0, 150)}, {0.0f, kWhite}}) {
++        if (cross) {
++            const float s = r * 0.75f;
++            draw->AddLine({c.x - s + offset, c.y - s + offset}, {c.x + s + offset, c.y + s + offset}, color, thickness);
++            draw->AddLine({c.x - s + offset, c.y + s + offset}, {c.x + s + offset, c.y - s + offset}, color, thickness);
++        } else {
++            draw->AddCircle({c.x + offset, c.y + offset}, r * 0.8f, color, 0, thickness);
++        }
++    }
++}
++
++// The buttons along the bottom, where the PSP puts them: Enter, then Back
++// (Back alone once the work is done). With the keyboard, its keys instead.
++void draw_buttons(ImDrawList *draw, const Psp &psp, bool with_enter) {
++    const bool cross_enter = screen().request.enter_cross;
++    const bool keyboard = Layer::get().input_device() == InputDevice::Keyboard;
++    const float size = 11.5f;
++    const auto button = [&](float x, bool enter) {
++        const ImVec2 at = psp.at(x, 250);
++        float label_x = x + 14.5f;
++        if (keyboard) {
++            const std::string key = enter ? "Enter" : "Esc";
++            const ImVec2 measured = text_size(psp, 10.0f, key);
++            const float pad = psp.px(2.5f);
++            draw->AddRect({at.x, at.y}, {at.x + measured.x + pad * 2.0f, at.y + psp.px(size)}, kGrey, psp.px(2.0f));
++            text(draw, psp, 10.0f, {at.x + pad, at.y + (psp.px(size) - measured.y) * 0.5f}, kWhite, key);
++            label_x = x + (measured.x + pad * 2.0f) / psp.scale + 4.0f;
++        } else {
++            draw_symbol(draw, psp, at, size, enter == cross_enter);
++        }
++        text(draw, psp, 12.0f, psp.at(label_x, 249.5f), kWhite, enter ? "Enter" : "Back");
++    };
++    // Enter first, Back after it, at the PSP's two places.
++    if (with_enter) button(183.5f, true);
++    button(with_enter ? 261.5f : 183.5f, false);
++}
++
++void finish(std::optional<std::size_t> acted) {
++    Screen &s = screen();
++    if (!s.open) return;
++    s.open = false;
++    Layer &layer = Layer::get();
++    layer.set_interactive(false);
++    layer.shell().set_game_input(true);
++    SaveListDone done = std::move(s.on_done);
++    s.on_done = nullptr;
++    s.request = SaveListRequest{};
++    if (done) done(acted);
++}
++
++void act() {
++    Screen &s = screen();
++    s.outcome = s.request.act ? s.request.act(s.selected) : SaveListOutcome{};
++    if (s.outcome.saved) s.request.entries[s.selected] = std::move(*s.outcome.saved);
++    s.acted = s.selected;
++    s.stage = Stage::Done;
++}
++
++// Picking the chosen entry: a save that exists to save over or to delete is
++// asked about first.
++void pick() {
++    Screen &s = screen();
++    const bool exists = s.request.entries[s.selected].exists;
++    if (s.request.kind == SaveListKind::Delete || (s.request.kind == SaveListKind::Save && exists)) {
++        s.yes = false;
++        s.stage = Stage::Confirm;
++        return;
++    }
++    act();
++}
++
++struct Presses {
++    bool up{}, down{}, left{}, right{}, confirm{}, back{};
++};
++
++Presses read_presses() {
++    Layer &layer = Layer::get();
++    Presses p;
++    const auto pressed = [](std::initializer_list<ImGuiKey> keys) {
++        for (const ImGuiKey key : keys)
++            if (ImGui::IsKeyPressed(key, true)) return true;
++        return false;
++    };
++    p.up = pressed({ImGuiKey_UpArrow});
++    p.down = pressed({ImGuiKey_DownArrow});
++    p.left = pressed({ImGuiKey_LeftArrow});
++    p.right = pressed({ImGuiKey_RightArrow});
++    p.confirm = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
++    p.back = layer.take_back();
++    // A button held when the list opened, such as the one that asked for it,
++    // does nothing until it is released.
++    if (!layer.gamepad_armed()) return p;
++    // The PSP's Enter and Back are its X and O, which the game reads from
++    // the buttons the pad mapping gives them (shell/gamepad.cpp): X is the
++    // south face button unless the "Confirm button" setting moves it east.
++    const bool south = layer.confirm_south();
++    const ImGuiKey cross = south ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
++    const ImGuiKey circle = south ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight;
++    const bool enter_cross = screen().request.enter_cross;
++    const ImGuiKey confirm = enter_cross ? cross : circle;
++    const ImGuiKey back = enter_cross ? circle : cross;
++    p.up = p.up || pressed({ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp});
++    p.down = p.down || pressed({ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown});
++    p.left = p.left || pressed({ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft});
++    p.right = p.right || pressed({ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight});
++    p.confirm = p.confirm || ImGui::IsKeyPressed(confirm, false);
++    p.back = p.back || ImGui::IsKeyPressed(back, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false);
++    return p;
++}
++
++} // namespace
++
++bool open_game_save_list(SaveListRequest request, SaveListDone on_done) {
++    Layer &layer = Layer::get();
++    if (!layer.attached() || request.entries.empty()) return false;
++    if (screen().open) cancel_save_list();
++    Screen &s = screen();
++    s = Screen{};
++    s.open = true;
++    s.selected = std::min(request.focus, request.entries.size() - 1u);
++    s.request = std::move(request);
++    s.on_done = std::move(on_done);
++    // The game reads a neutral pad until it closes.
++    layer.shell().set_game_input(false);
++    layer.set_interactive(true);
++    std::cout << "[ui] save list open: " << banner_title(s.request.kind) << ", " << s.request.entries.size()
++              << " entries, on " << s.request.entries[s.selected].name << std::endl;
++    return true;
++}
++
++bool save_list_open() { return screen().open; }
++
++void cancel_save_list() { finish(std::nullopt); }
++
++void save_list_frame() {
++    Screen &s = screen();
++    if (!s.open) return;
++    Layer &layer = Layer::get();
++    // The menu does not open over the list.
++    (void)layer.take_menu_toggle();
++
++    const Presses presses = read_presses();
++    switch (s.stage) {
++    case Stage::List:
++        if (presses.back) {
++            std::cout << "[ui] save list: backed out" << std::endl;
++            finish(std::nullopt);
++            return;
++        }
++        if (presses.up && s.selected > 0u) --s.selected;
++        if (presses.down && s.selected + 1u < s.request.entries.size()) ++s.selected;
++        if (presses.confirm) pick();
++        break;
++    case Stage::Confirm:
++        if (presses.left) s.yes = true;
++        if (presses.right) s.yes = false;
++        if (presses.back || (presses.confirm && !s.yes)) s.stage = Stage::List;
++        else if (presses.confirm) act();
++        break;
++    case Stage::Done:
++        if (presses.back || presses.confirm) {
++            std::cout << "[ui] save list: " << s.outcome.message << std::endl;
++            finish(s.acted);
++            return;
++        }
++        break;
++    }
++
++    const ImGuiIO &io = ImGui::GetIO();
++    const Psp psp = psp_area();
++    ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
++    ImGui::Begin("##savelist", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    // Over the game's own picture, as on a PSP (Wipeout Pure draws a plain
++    // grey screen with a blinking memory stick while the dialog is up). The
++    // banner goes on last, over the icons that scroll under it.
++    bool picked = false;
++    switch (s.stage) {
++    case Stage::List:
++        picked = draw_column(draw, psp);
++        draw_details(draw, psp);
++        break;
++    case Stage::Confirm:
++        draw_message(draw, psp,
++                     s.request.kind == SaveListKind::Delete
++                         ? "This save data will be deleted.\nAre you sure you want to continue?"
++                         : "Do you want to overwrite the data?",
++                     true);
++        break;
++    case Stage::Done:
++        draw_message(draw, psp, s.outcome.message, false);
++        break;
++    }
++    draw_banner(draw, psp);
++    draw_buttons(draw, psp, s.stage != Stage::Done);
++    ImGui::End();
++    ImGui::PopStyleVar(2);
++    if (picked && s.stage == Stage::List) pick();
++    else if (s.stage == Stage::Done && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) finish(s.acted);
++}
++
++} // namespace portablekit::ui
+diff --git a/host/ui/save_list.hpp b/host/ui/save_list.hpp
+new file mode 100644
+index 0000000..0f7e061
+--- /dev/null
++++ b/host/ui/save_list.hpp
+@@ -0,0 +1,81 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <functional>
++#include <optional>
++#include <string>
++#include <vector>
++
++// The save list: the PSP's own save-data dialog for the requests in which the
++// player picks a save (LISTLOAD, LISTSAVE, LISTDELETE and the list delete; see
++// hle/hle_savedata.cpp), drawn over the running game as the PSP draws it: the
++// banner (Save, Load or Delete), a column of the saves' icons with the chosen
++// one large, and beside it the save's title, date, time and size, its savedata
++// title and its detail, or NEW DATA for a free slot. Choosing a save that
++// exists to save over or to delete asks first, with No chosen, as on a PSP;
++// then the dialog says what happened ("Save completed.") until a button closes
++// it.
++//
++// Gamepad: up and down choose, the PSP's Enter button picks (X, as the game
++// asks; the pad gives X where the game reads it, south unless the "Confirm
++// button" setting says otherwise), its Back button (O) or Triangle backs out.
++// Keyboard: the arrow keys, Enter and Esc. Mouse: click an entry to choose it,
++// click it again to pick it.
++//
++// The game keeps running behind it, as behind the PSP's dialog (it polls the
++// request's status every frame), but reads a neutral pad, and the window shows
++// whatever the game draws behind it (Wipeout Pure: a grey screen). Without an
++// interface (the headless shell) nothing opens and the request is answered at
++// once.
++namespace portablekit::ui {
++
++enum class SaveListKind { Load, Save, Delete };
++
++struct SaveListEntry {
++    std::string name;            // the save name, e.g. "P0001"
++    bool exists{};               // false: a free slot (LISTSAVE only)
++    std::string title;           // PARAM.SFO's TITLE
++    std::string savedata_title;  // SAVEDATA_TITLE
++    std::string detail;          // SAVEDATA_DETAIL, lines separated by '\n'
++    std::string date;            // "2026/10/07   14:03"
++    std::uint64_t size_kb{};
++    // ICON0.PNG, or the game's own icon for a free slot; may be empty.
++    std::vector<std::uint8_t> icon;
++};
++
++// What the dialog says once the load, save or delete has run.
++struct SaveListOutcome {
++    bool ok{};
++    std::string message;  // "Save completed.", or what went wrong
++    std::optional<SaveListEntry> saved;  // a save just written, shown in place of its entry
++};
++
++struct SaveListRequest {
++    SaveListKind kind{SaveListKind::Load};
++    std::vector<SaveListEntry> entries;
++    std::size_t focus{};  // the entry chosen when the list opens
++    // Enter is the PSP's X and Back its O (the game's dialog parameters say
++    // so with buttonSwap 1, as a Western PSP does); false: the other way.
++    bool enter_cross{true};
++    // Loads, saves or deletes entries[i] once the player has picked it (and
++    // confirmed writing over it or deleting it). Runs inside the game frame
++    // the choice is made in.
++    std::function<SaveListOutcome(std::size_t)> act;
++};
++
++// Called once when the list closes: the entry `act` ran on, or nullopt when
++// the player backed out (or the list was cancelled).
++using SaveListDone = std::function<void(std::optional<std::size_t>)>;
++
++// Opens the list over the running game; draw_over_game() draws it with every
++// game frame until it closes. False when there is no interface to draw it in.
++bool open_game_save_list(SaveListRequest request, SaveListDone on_done);
++[[nodiscard]] bool save_list_open();
++// Closes an open list as if the player had backed out.
++void cancel_save_list();
++// Builds this frame of the list and handles its input, inside an interface
++// frame.
++void save_list_frame();
++
++} // namespace portablekit::ui
