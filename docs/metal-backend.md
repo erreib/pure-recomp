@@ -16,7 +16,9 @@ pictures in a window of its own, with no Vulkan involved. Task 036 added the GE'
 texture matrix and the environment map (patch 0013 carries them in the draw state): the ships' hulls and canopies,
 glass and shiny roofs show their reflections ("Texture mapping modes" below), which the Vulkan backend does not draw.
 Task 037 added the mip levels (patch 0014 carries them): a texture the GE names levels for is a mipmapped texture,
-sampled at the level the GE's rule picks, so distant textures no longer shimmer ("Mipmaps" below).
+sampled at the level the GE's rule picks, so distant textures no longer shimmer ("Mipmaps" below). Task 040 added
+the colour test, the writes into 16-bit targets (the format's bits kept, dithered as the GE says) and CLIPENABLE's
+depth clamp (patch 0017 carries the three; "The colour test, 16-bit writes and the depth clamp" below).
 
 ## Quick start
 
@@ -48,6 +50,8 @@ tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile  
 | `PURE_METAL_PACE=0` | (task 033) the Metal shell shows each picture as soon as it can, instead of at the real time of the PSP vblank after its frame began |
 | `PURE_NO_TEXMAP=1` | (task 036) every draw takes its UVs through the texture scale and offset (texture map mode 0), as before task 036: the texture matrix and environment map modes are not drawn ("Texture mapping modes") |
 | `PURE_NO_MIPMAPS=1` | (task 037) every texture is uploaded and sampled at level 0 alone, as before task 037, whatever levels the GE names ("Mipmaps"); its pictures are those of the build before the task |
+| `PURE_NO_COLOR_TEST=1`, `PURE_NO_DITHER=1`, `PURE_NO_DEPTH_CLAMP=1` | (task 040) each restores what the backend drew before task 040: every fragment kept; 5650, 5551 and 4444 targets blended by the pipeline at 8 bits a channel, never dithered; every transformed draw clipped at both ends of the depth range, MINZ/MAXZ unread. With all three the pictures are those of the build before the task ("The colour test, 16-bit writes and the depth clamp") |
+| `PURE_METAL_SHOW_TARGET=ADDR` | (task 040) each flip presents the target drawn last at ADDR instead of the display: a target the game never shows, such as the race's 565 billboard target (`0x04154000`), in a capture or a `ge_replay --cut ... --out` picture |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -60,7 +64,7 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | File | What |
 |---|---|
 | `src/gpu/metal_backend.mm` | `MetalGeBackend : portablekit::gpu::GeBackend` and its `BackendRegistration("metal", ...)`. Objective-C++ with ARC |
-| `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036) are ours, from PPSSPP's hardware notes |
+| `src/gpu/metal_shaders.h` | the shaders as one MSL string (`pure::metal::kShaderSource`), ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036), the mip level (task 037), and the colour test, the 16-bit writes (`ge_fragment_16`) and the depth clamp (task 040) are ours, from PPSSPP's hardware notes |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
@@ -90,10 +94,12 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 | Texture function | modulate, decal, blend, replace and add, with TCC (alpha from the texture or not). The blend function's environment colour is not in the draw state; the texel stands in for it, as in `ge.frag` |
 | Filtering and wrap | the GE's own filter bits (nearest or linear for magnification and minification; with mip levels, nearest or linear between them: task 037, "Mipmaps") and wrap bits (clamp or repeat) choose one of 48 samplers; `sharp_textures` forces nearest within a level |
 | Alpha test | in the fragment shader, by the GE's numbering (0 NEVER, 1 ALWAYS, then EQUAL ... GEQUAL: patch 0005), on the 8-bit alpha and reference under the test's mask, with `discard_fragment`. Draws without a test, or with ALWAYS, use a fragment function compiled without it |
+| Colour test | (task 040) in the fragment shader after fog, as the alpha test: the 8-bit colour under COLORTESTMASK against COLORREF under it, NEVER, ALWAYS, EQUAL or NOTEQUAL, with `discard_fragment` (no colour, depth or stencil written); compiled out without a test or with ALWAYS |
+| 16-bit targets | (task 040) a draw into a 5650, 5551 or 4444 target blends in the shader on the target's colour (`ge_fragment_16`), adds the dither matrix's offset when DITHERENABLE is on, and keeps the format's bits, as the PSP writes such a target; the target texture stays RGBA8 and holds what those bits expand to |
 | Blend | Metal's blend units for the GE factors and the equations ADD, SUBTRACT, REVERSE SUBTRACT, MIN and MAX (MIN and MAX take no factors). A FIX source factor is applied in the shader (the colour arrives multiplied, the blend takes it ONE), so any pair of FIX colours is exact, unless the destination factor reads the source colour, when it is the blend colour; a FIX destination is ONE, ZERO or the blend colour. The doubled factors (2xSA and so on) are drawn single and ABSDIFF as ADD, each logged once (`[metal] ... is not emulated`). A draw that stores a stencil value under a blend that reads the source alpha blends with the fragment's own alpha from a second output (dual-source blending, below). The alpha channel's own blend stores the fragment's alpha (ONE, ZERO): the stencil value or a clear's alpha |
 | Write masks | whole colour channels the mask (0xE8) keeps are not written; a partial channel mask is written whole and logged once. The alpha, the PSP's stencil, is written only as "The stencil and the alpha" says; the alpha mask (0xE9) is the stencil attachment's write mask (~0xE9) |
 | Stencil | the GE's test (0x24, 0xDC: function, reference, compare mask) and operations (0xDD: sfail, zfail, zpass as KEEP, ZERO, REPLACE, INVERT, INCR and DECR, both clamping) on the target's `Depth32Float_Stencil8` attachment, for draws into 5551, 4444 and 8888 targets; the GE compares reference OP stencil under the mask, as Metal does, with the alpha test's function numbers. The reference is the one the target's alpha holds (the top bit of a 5551 target, the top nibble of a 4444 one), set on the encoder (`setStencilReferenceValue`) |
-| Depth | the GE function as the depth compare; written only where the GE tests it (`test_enabled && write_enabled`), through mode included |
+| Depth | the GE function as the depth compare; written only where the GE tests it (`test_enabled && write_enabled`), through mode included. With CLIPENABLE on (every transformed draw of the game), as the GE: clipped at the near plane only, each vertex's screen z clamped to 0..65535, and MINZ/MAXZ tested per pixel (task 040) |
 | Clears | CLEARMODE draws have no blend, texture or tests; bits 8..10 choose the colour, the alpha and the depth, and the depth compare is ALWAYS. A clear of the alpha on a 5551, 4444 or 8888 target writes the stencil with it: ALWAYS, REPLACE with the clear colour's alpha (patch 0006) |
 | Culling | transformed triangles with culling on, back faces culled, the GE's clockwise front as Metal's `MTLWindingClockwise`: Metal counts the winding in window coordinates (y down), as the GE and Vulkan's flipping viewport do. Confirmed on the race (task 024): race frame 6016 culls 593 of its 906 draws, 353 of them among the first 393 (344 with the counter-clockwise front, 266 of those into the display target; 9 with the clockwise one, the shadow volumes, which write only the stencil), and it matches Vulkan's up to its draw 394, while a build with the winding reversed differs from draw 41 on, 49% of the picture by draw 393 ("The 3D check"). The clockwise case, the shadow volumes, reaches the picture through the stencil since task 025 |
 | Scissor | the GE scissor, both ends included, clamped to 480x272; an empty one draws nothing |
@@ -104,7 +110,7 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 
 | Part | Fields | Makes |
 |---|---|---|
-| `RenderKey` | blend on/off, Metal source and destination factors, blend operation, colour write mask (alpha included when the draw stores a stencil value), the alpha's destination factor (ZERO, or ONE for the copy of the stencil into the alpha), dual source, textured, alpha test | `MTLRenderPipelineState` (vertex function `ge_vertex`, fragment function `ge_fragment`, or `ge_fragment_dual` with dual source, specialised by the function constants `kTextured` and `kAlphaTest`; the eight specialisations are made at start). With dual source the colour factors SA and 1-SA become `Source1Alpha` and `OneMinusSource1Alpha` |
+| `RenderKey` | blend on/off, Metal source and destination factors, blend operation, colour write mask (alpha included when the draw stores a stencil value), the alpha's destination factor (ZERO, or ONE for the copy of the stencil into the alpha), dual source, textured, alpha test, and since task 040 colour test and `sixteen` (a 5650, 5551 or 4444 target) | `MTLRenderPipelineState` (vertex function `ge_vertex`, fragment function `ge_fragment`, `ge_fragment_dual` with dual source, or `ge_fragment_16` for a 16-bit target, whose pipeline does not blend; specialised by the function constants `kTextured`, `kAlphaTest` and `kColorTest`: the eight specialisations without the colour test and the 16-bit function are made at start, the others on first use). With dual source the colour factors SA and 1-SA become `Source1Alpha` and `OneMinusSource1Alpha`. A line of the pre-warm list without the two later fields reads them as 0 |
 | `DepthStencilKey` | depth compare, depth write; the stencil test as the GE gives it: enabled (on a 5551, 4444 or 8888 target), function, fail, depth-fail and pass operations, compare mask, write mask (~0xE9) | `MTLDepthStencilState`, with the same `MTLStencilDescriptor` for both faces. The reference is the encoder's, not the state's |
 
 The keys of `config/metal_pipelines.txt` are made at start, the render pipelines asynchronously, and any other key on
@@ -112,10 +118,13 @@ first use (task 033, "Frame times").
 
 Per draw, the vertex uniforms (matrix, folded viewport, uv transform, the row of view x world that gives view-space
 z, the mode: through, sprite corners in clip space, fog, lighting, and since task 036 the texture map mode with
-the texture matrix, the viewer's direction and the texture's place in the image sampled; 240 bytes), the fragment
+the texture matrix, the viewer's direction and the texture's place in the image sampled, and since task 040 the GE's
+z scale and offset and MINZ/MAXZ for the depth clamp; 256 bytes), the fragment
 uniforms (FIX colour, texture function, TCC, opaque texel alpha, whether the coordinates are divided by q, alpha
 test function, reference and mask, fog colour, the stencil value the
-alpha stores, and since task 037 the mip level rule: 112 bytes), the blend colour, the stencil reference, the viewport's depth range, the scissor and the cull mode
+alpha stores, since task 037 the mip level rule, and since task 040 the colour test and, for a 16-bit target, the
+GE's blend factors, equation and FIX colours, the dither matrix and the target's format: 208 bytes), the blend
+colour, the stencil reference, the viewport's depth range, the depth clip mode, the scissor and the cull mode
 are set on the encoder when they changed, and the lighting
 block (world matrix, global ambient, material colours, update mask and flags, the four lights, fog end and scale)
 when a lit, fogged or environment-mapped draw changed it, or the pass is new. Lighting and fog are uniform branches in the one vertex
@@ -124,8 +133,9 @@ function, not pipeline variants.
 ## Targets
 
 As section 2 of `docs/ge-backend.md`: a target is keyed by (colour address, stride, format), the address taken
-modulo the cached/uncached mirrors. Each is a 480x272 `RGBA8Unorm` colour texture (5650, 5551 and 4444 targets too,
-for now) and a `Depth32Float_Stencil8` texture, both private to the GPU: internal scale 1, as D-002 asks first.
+modulo the cached/uncached mirrors. Each is a 480x272 `RGBA8Unorm` colour texture (5650, 5551 and 4444 targets too:
+since task 040 their draws write only the values the format's bits expand to) and a `Depth32Float_Stencil8` texture,
+both private to the GPU: internal scale 1, as D-002 asks first.
 
 - A pass draws into one target. A draw into another target ends the pass; the next one loads the target, or clears
   it to zero the first time.
@@ -820,15 +830,175 @@ levels. The Time Trial route: 566 textures both, plus 361 levels; Zone: 433 both
 
 ### Recordings
 
-`record_backend.cpp` (outside this task) records the bytes level 0's texels lie in, not the other levels'. A
-recording made since patch 0014 replays with the levels after the first decoded from whatever ge_replay's guest
-memory holds there (zero unless an earlier record wrote it), so a replay of a mipmapped draw is not the game's
-picture; replay such recordings with `PURE_NO_MIPMAPS=1` until the record backend writes every level. Blue Ridge's
+Until patch 0017, `record_backend.cpp` recorded the bytes level 0's texels lie in, not the other levels'. A
+recording made with patches 0014 to 0016 replays with the levels after the first decoded from whatever ge_replay's
+guest memory holds there (zero unless an earlier record wrote it), so a replay of a mipmapped draw is not the game's
+picture; replay such recordings with `PURE_NO_MIPMAPS=1`. Since patch 0017 the record backend writes every level a
+draw samples, and a recording replays exactly ("The colour test, 16-bit writes and the depth clamp", "Recordings"). Blue Ridge's
 frame 6016 recorded through Metal replays 0.0913 off its recorded picture at tol 32 (336 of the frame's mipmapped
 draws in PPSSPP's dump have their texture in main memory); recorded and replayed with `PURE_NO_MIPMAPS=1` it is
 exact, and `gerec_dump.py --draws` parses the recording (831 draws with levels, listed `levels N auto|slope bias B
 slope S`). Older recordings read as one level and replay as before (the main checkout's `race_1x.gerec` parses as
 it did).
+
+## The colour test, 16-bit writes and the depth clamp (task 040, 2026-10-07)
+
+Three GE states the framework's GE state ignored until patch 0017, which carries them in `DrawCall::color_test`
+(`ColorTestState`), `DrawCall::dither` (`DitherState`) and `DrawCall::clip_enabled`: differences 10 and 11 of
+docs/fidelity.md. The Vulkan backend draws none of them.
+
+### The registers and how the game uses them
+
+| Register | What | In the draw state |
+|---|---|---|
+| COLORTESTENABLE (0x27), COLORTEST (0xD8), COLORREF (0xD9), COLORTESTMASK (0xDA) | the switch; the function in bits 0..1 (0 NEVER, 1 ALWAYS, 2 EQUAL, 3 NOTEQUAL); the reference and the mask, colours as 0x00BBGGRR | `ColorTestState`: `enabled`, `function`, `reference`, `mask` |
+| DITHERENABLE (0x20), DITH0 to DITH3 (0xE2 to 0xE5) | the switch; the 4x4 matrix, DITHn the row for the pixels whose y & 3 is n, four signed 4-bit offsets, the one for x & 3 in bits 4 (x & 3) to 4 (x & 3) + 3 | `DitherState`: `enabled`, `rows`, `offset(x, y)` |
+| CLIPENABLE (0x1C) | on: transformed primitives clipped at the near plane, each vertex's screen z clamped to 0..65535 | `clip_enabled` |
+
+The command numbers are those of the framework's list of ignored commands (docs/fidelity.md, the feature table) and
+the PSP SDK's `sceGuColorFunc` and `sceGuSetDither`; the numbers in the task's brief (0xE1, 0x23, 0xE2 for the colour
+test, 0x25 and 0xD0 to 0xD3 for dithering, 0x1D for CLIPENABLE) are other registers (FIXB, the depth test switch,
+anti-aliasing, TEXLODSLOPE, culling). The ten commands left the list: 30 distinct remain, from 40.
+
+The matrix's orientation and the dither rule are the ones PPSSPP's software renderer (documented as exact for
+dithering and 16-bit conversion, "Per-pixel operations" of the raster pipeline notes) shows. PPSSPP's dump of the
+Vineta K frame (`ref/vineta_k_start.ppdmp`) holds the 565 billboard target as its fourth round left it (the
+FRAMEBUF record at draw 82): one flat colour, the round's first draw (vertex colour 0xE5E5E5 over the whole target)
+dithered by the matrix D71B 5F93 D71B 5F93. Taking the 8-bit value 229 plus the offset at (x & 3, y & 3) with DITHn
+as row y & 3, clamped to 0..255 and cut to its top 5, 6 and 5 bits, gives PPSSPP's pixel at all 16384 pixels (its five
+colours); with the matrix read the other way round (DITHn as column x & 3), 6144 at best.
+
+In PPSSPP's dumps of the race frames:
+
+- **The colour test**: 3 to 14 draws a frame, always NOTEQUAL to black under the full mask, all textured, blended
+  add(SA, FIXB FFFFFF) with the depth write off and the alpha test GREATER 0: light glows. Some write the stencil
+  255 that is the bloom's mask (STENCILTEST ALWAYS, zpass REPLACE), and one or two draw into the billboard target.
+  Under an additive blend a black fragment adds nothing to the colour, so what the test changes is the stencil (the
+  bloom mask) where a glow's texels are black.
+- **Dithering**: on every draw into the 565 billboard target (8 to 60 a frame), never on a draw into an 8888 target.
+  The game changes the matrix: Blue Ridge's frame has one (CE02 468A), Vineta K's a different one for each of its four
+  rounds (the rows' nibbles rotated), the menus and Zone set one but never enable dithering. Of
+  Vineta K's 60 draws into the 565 target 17 are opaque, 9 add(FIXA FFFFFF, FIXB 000000), 23 add(SA, 1-SA), 9
+  add(FIXA FFFFFF, FIXB FFFFFF) and 2 add(SA, FIXB FFFFFF): 43 blend with what is there.
+- **CLIPENABLE**: on for every transformed draw of all 18 dumps. MINZ and MAXZ are the viewport's own z range, one
+  step inside it at the far end (1001 and 64946 for z scale -31973 and offset 32973, which map z/w = 1 and -1 to 1000
+  and 64946; 0 and 946 for the sky's draws; 65001 and 65481 for a few draws given a thin slice at the front of the
+  depth range).
+
+### The colour test
+
+`shade()` in `metal_shaders.h` tests after fog, where the alpha test is done: the fragment's colour in 8-bit steps
+under the mask, against the reference under the mask, and `discard_fragment` when the function says so, which writes
+no colour, depth or stencil. The function constant `kColorTest` (a field of `RenderKey`) compiles it into the draws
+that have it; ALWAYS is compiled out, as for the alpha test. The documentation does not give the order of fog and the
+colour test (it matters for fogged draws: fog moves a black fragment off black); the test follows the alpha test's
+place, after fog.
+
+### 16-bit targets: where the bits are kept, and the dither
+
+**Where the 16-bit quantisation happened before this task: nowhere a picture reads.** Every target is an RGBA8
+texture, 5650, 5551 and 4444 ones too, and the backend cut a 16-bit target's colour to its format only when it stored
+the target in guest memory (`store_pixels`: block transfers, read-backs and the frame write-back, 5650 as r >> 3,
+g >> 2, b >> 3). The race's 565 billboard target is drawn by four rounds a frame and sampled on the GPU straight from
+its RGBA8 texture by the billboard draws, so it kept 8 bits a channel, and a dither offset applied at the store would
+change nothing on the screen. Applying the offset to the fragment's colour before Metal's blend would not be the GE's
+rule either: the PSP blends, then adds the offset, then keeps the format's bits, and 43 of the 60 draws into the
+target blend.
+
+So a draw into a 5650, 5551 or 4444 target now writes what the PSP writes. It goes through `ge_fragment_16`
+(`RenderKey::sixteen`), which reads the target's colour (`[[color(0)]]`, the programmable blending of Apple GPUs; the
+pipeline does not blend), blends with the GE's own factors and equation (the FIX colours exact, the doubled factors
+and ABSDIFF too, which the pipeline's blend draws approximately: `ge_factor`, `ge_blend`), adds the dither matrix's
+offset for the pixel when DITHERENABLE is on, clamps once to 0..255, keeps the format's top bits (5, 6 and 5; 5, 5
+and 5; 4, 4 and 4) and writes the 8-bit value they expand to by repeating their bits, which `store_pixels` packs back
+to the same bits. The alpha, the PSP's stencil, is written as before. A clear into a 16-bit target keeps the bits but
+is not dithered: the documentation does not say whether the GE dithers a clear, and the game's clears of the billboard
+target are black and covered by every round. The order of the offset and the clamp (one clamp after the offset) is
+not stated by the documentation either; it shows only for blends that overflow. 8888 targets are drawn as before.
+
+**The check.** Race frame 6016 recorded through Metal (the command in "Texture mapping modes", with the build of this
+task) and replayed with `--cut` at the end of each billboard round, the target shown with
+`PURE_METAL_SHOW_TARGET=0x04154000`, before (`PURE_NO_COLOR_TEST=1 PURE_NO_DITHER=1 PURE_NO_DEPTH_CLAMP=1`) and after,
+against the target as PPSSPP's dump holds it after each of its rounds (draws 26, 45, 69 and 82, `ppdmp.py tex`):
+
+| Picture | Pixels that are 565 values | Flat 4x4 blocks ordered as the round's matrix | The rule applied to the before picture |
+|---|---|---|---|
+| PPSSPP, rounds 1 to 4 | 1.0000 in each | 0.9943 (874 blocks), 1.0 (921), 0.1171 (222: a vertical gradient), 1.0 (1024) | |
+| port before, rounds 1 to 4 (cut 42, 72, 84, 98) | 0.5560, 0.0721, 0.0000, 0.9963 | no block with any dither | |
+| port after, rounds 1 to 4 | 1.0000 in each | 1.0 (710 blocks), 1.0 (831), 1.0 (936), 1.0 (1009) | 1.0000, 1.0000, 1.0000, 0.9998 of the pixels |
+
+"Flat 4x4 blocks" are the matrix-aligned blocks whose 5-, 6- and 5-bit values span at most two steps (four in green)
+and are not all equal, where a flat colour shows its dither; "ordered as the matrix" means that in every channel no
+pixel with a larger offset has a smaller value, which an ordered dither by that matrix always gives (PPSSPP's third
+round is a gradient across the blocks, which the measure does not allow for). The last column applies the PSP's rule
+(the offset, the clamp, the top bits) to the before picture's 8-bit pixels and compares with the after picture: exact
+wherever the last write to a pixel did not blend with an earlier one. The two runs show different adverts at that
+moment (the billboards cycle through them: PPSSPP's first round is the red PIRANHA advert, the port's an orange one),
+so their pixels are not compared one to one.
+
+### The depth clamp
+
+The hardware notes (<https://www.ppsspp.org/docs/psp-hardware/gpu/ge-vertex-pipeline/>, "Z Clipper", "Clipping
+enabled", "MinZ and MaxZ", "Z Clamp") give the rule with CLIPENABLE **on**: transformed triangles and lines are
+clipped at the near plane (z = -w) and nowhere else; each vertex's screen z is clamped to 0..65535 before it is
+interpolated; the part of a primitive beyond the far plane is drawn at its interpolated depth, and only the per-pixel
+MINZ/MAXZ test removes it. With CLIPENABLE off the GE does not clip at the near plane at all and drops a primitive with
+a vertex outside 0..65535 in screen z or behind the eye. (The task's brief expected the clamp with CLIPENABLE off; the
+notes put it with the switch on, which is how the game draws every transformed draw.) The MINZ/MAXZ test is not done in
+through mode: the bloom's through-mode sprites lie at z 0 under MINZ 1001 and are drawn on the PSP.
+
+With CLIPENABLE on the backend now draws a transformed draw that way. `ge_vertex` computes the GE's screen z times w
+(z times the z scale plus w times the z offset), clamps it to 0..65535 w for a vertex in front of the near plane, and
+hands z / 65535 to a viewport of 0..1; the near plane and MINZ and MAXZ are three clip distances on that z (which,
+like the depth, is linear across the screen, so cutting at MINZ is the per-pixel test); the encoder's depth clip mode
+is `MTLDepthClipModeClamp`, so Metal no longer clips at the far plane. A vertex behind the near plane keeps its z
+unclamped, so the clipper's new vertex on the near plane gets the z the GE gives it. CLIPENABLE off is drawn as before
+(clipped at both planes) and named once (`[metal] CLIPENABLE off on a transformed draw ... is not emulated`); no draw
+of the game's has it off, and a recording made before patch 0017 reads as off, so it replays as it did.
+
+For this game the clamp changes nothing on the screen, which is what the documentation predicts for its draws: in
+PPSSPP's 18 dumps no vertex in front of the near plane lies beyond the far plane (z/w at most 0.9999, on Blue Ridge),
+every such vertex's screen z lies within MINZ..MAXZ, and MINZ/MAXZ are the viewport's own range, so the near plane,
+the far plane and the test cut where Metal's clipping cut. The suite's 18 captures with the clamp alone
+(`PURE_NO_COLOR_TEST=1 PURE_NO_DITHER=1`) are pixel-identical to the build before the task, and the race recording
+replays to the same picture with and without it. The reference cannot show the rule either way, so the brief's
+escalation (the rule against the reference) did not arise.
+
+### What changed on the screen
+
+Headless Metal, 2026-10-07, M4 Pro, against PPSSPP at tol 32 (`tools/frame_regress.sh`, "before" the same build with
+the three switches, whose 18 captures are pixel-identical to the build before the task):
+
+| Scene | Before | After | Pixels changed (tol 0) | By |
+|---|---|---|---|---|
+| race_hud | 0.014874 (1942) | 0.014828 (1936) | 723 | the colour test 640 (a lamp's glow, (307,107) 26x34), the billboard 83 |
+| tt_hud | 0.011221 (1465) | 0.011213 (1464) | 377 | the billboards |
+| fp_hud | 0.011566 (1510) | 0.011336 (1480) | 413 | the billboards |
+| the other 15 scenes | | unchanged | 0 | |
+
+| Region against PPSSPP | tol 32 before | after | tol 16 before | after |
+|---|---|---|---|---|
+| race_hud, the lamp's glow (307,107) 26x34 | 0.0328 (29 of 884) | 0.0260 (23) | 0.2285 (202) | 0.1765 (156) |
+| race_hud, the billboard screen (201,126) 16x8 (draw #42's footprint, 127 pixels) | 0.8828 (113 of 128) | 0.8828 (113) | 0.9063 | 0.9063 |
+| tt_hud, the billboard screen (195,114) 29x29 | 0.4245 (357 of 841) | 0.4221 (355) | 0.4828 | 0.4828 |
+| fp_hud, the billboard screen (195,114) 29x29 | 0.4269 (359 of 841) | 0.3912 (329) | 0.4816 | 0.4828 |
+
+The billboard screens show other adverts than PPSSPP's frames do (a different moment of the adverts' cycle), which is
+nearly all of their difference; what the task changes there is the dither and the 16-bit steps of the content. The
+colour test's effect is the bloom: the glows' black texels no longer write the bloom mask's stencil 255, so the bloom
+no longer spreads the scene under them.
+
+### Recordings
+
+Patch 0017 also makes `RecordBackend::submit` record the texels of every mip level a draw samples (levels 1 to
+`level_count` - 1 when the minification filter's bit 2 is on), each from its own address at its own size. Race frame
+6016 recorded through Metal now replays into Metal exactly without `PURE_NO_MIPMAPS` (0 pixels over tol 0; the
+recording is 8.9 MB, 611 Memory records against 283), where a recording of the same frame made with patch 0014's
+record backend replays 0.0119 off at tol 0. BLUE_RIDGE_LINE
+
+A Draw record ends with the colour test, dithering and CLIPENABLE (`kPixelBytes`, 31 bytes); a Draw that ends before
+them reads as no colour test, no dithering and CLIPENABLE off, so the older recordings replay as before. `gerec_dump.py`
+lists `ctest FUNCTION REFERENCE/MASK`, `dither ROWS` and `noclip`.
 
 ## What is not done yet
 
@@ -842,10 +1012,12 @@ main memory), and the frontend calls only `write_back_frame`: the 16-bit store f
 are written to the rules above and the Vulkan backend's, and checked by no recording yet.
 
 Not in the draw state (`DrawCall`), so neither backend draws them, and they wait for the framework's GE state to
-carry them: the colour test, logic ops, the texture environment colour (the blend texture function's), colour
-doubling, and the depth range clamp (MINZ/MAXZ, which `docs/ge-backend.md` section 2 lets stay ignored). The texture
+carry them: logic ops, the texture environment colour (the blend texture function's) and colour doubling. The texture
 map modes are carried since patch 0013 and drawn by this backend since task 036, the mip levels since patch 0014 and
-task 037.
+task 037, the colour test, dithering and CLIPENABLE since patch 0017 and task 040 (which also reads MINZ/MAXZ, carried
+in `DepthState` all along). CLIPENABLE off on a transformed draw (no near-plane clipping; a primitive with a vertex
+outside 0..65535 or behind the eye dropped) is not emulated: such a draw is clipped at both depth planes as before
+and named once; the game never draws one.
 
 ## Where it differs from the Vulkan backend on purpose
 
@@ -863,6 +1035,11 @@ task 037.
   two by every mapped draw ("Texture mapping modes", the A/B).
 - Mip levels are uploaded and sampled at the level the GE's rule picks (task 037, "Mipmaps"); the Vulkan backend
   samples every texture at level 0.
+- The colour test drops fragments, 16-bit targets keep the format's bits with the GE's dithering, and CLIPENABLE's
+  depth clamp and MINZ/MAXZ are applied (task 040); the Vulkan backend keeps every fragment, draws 16-bit targets at
+  8 bits a channel and clips at both depth planes. On a recording made since patch 0017 the race differs between the
+  two by the colour test and the billboard target's bits (`PURE_NO_COLOR_TEST=1 PURE_NO_DITHER=1` makes the Metal
+  side draw as before).
 - Transformed draws are clipped only at the target's edges and the scissor, as the GE clips them: the GE viewport is
   folded into clip space and the Metal viewport is the whole target. The Vulkan backend makes the GE viewport its
   `VkViewport`, which clips at the viewport's edges: the race's HUD is drawn with a viewport shifted one pixel right
