@@ -27,7 +27,7 @@ namespace pure::gpu::metal_backend {
 // Helpers more than one of the files uses, each defined in the file named beside it.
 std::array<float, 4> unpack_color(std::uint32_t color, float fourth = 1.0f);  // metal_backend.mm
 void not_emulated(const char *what, std::uint32_t value);                     // metal_backend.mm
-MTLCompareFunction to_compare(std::uint32_t function);                        // metal_backend.mm
+MTLCompareFunction to_compare(std::uint32_t function);                        // metal_pipelines.mm
 std::uint32_t stored_reference(const DrawCall &call);                         // metal_backend.mm
 int stencil_alpha(const DrawCall &call);                                      // metal_backend.mm
 bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail);        // metal_backend.mm
@@ -95,7 +95,7 @@ private:
     id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state, std::uint32_t levels);
     static void set_level_rule(const TextureState &state, std::uint32_t levels, FragmentUniforms &fragment);
 
-    // Pipelines: fragment-function variants, render and depth-stencil states, the pre-warm list (metal_backend.mm)
+    // Pipelines: fragment-function variants, render and depth-stencil states, the pre-warm list (metal_pipelines.mm)
     id<MTLFunction> fragment_function(std::uint32_t variant, NSError **failure = nullptr);
     MTLRenderPipelineDescriptor *pipeline_descriptor(const RenderKey &key);
     id<MTLRenderPipelineState> render_pipeline(const RenderKey &key);
