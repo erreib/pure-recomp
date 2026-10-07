@@ -59,6 +59,9 @@ import argparse, json, math, os, re, struct, subprocess, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import campaign_sweep as cs  # noqa: E402  (tools/campaign_sweep.py, imported for its names; never modified)
+from purelib import logs, port  # noqa: E402  (tools/purelib: the environment, the log readers)
+from purelib.logs import (GE_IGNORED_RE as IGNORED_RE, METAL_FPS_RE, PLAYER_RE, SHIP_T_RE,  # noqa: E402,F401
+                          UNDERRUN_RE, UNIMPL_RE)
 
 OUT = "out/fidelity"
 QUICK = [("single_race", "vineta_k", "vector"), ("zone", "zone_1", "vector"), ("time_trial", "vineta_k", "vector")]
@@ -73,6 +76,9 @@ TWO_VBLANK_US = 25000           # a race flip whose virtual time step exceeds th
 HITCH_US = 45000                # one that exceeds this waited three or more: a hitch
 LEAGUE_AT = 5180                # Single Race's league pick; Time Trial and Free Play show LEAGUE SELECTION then too
 EXTENDED_MPS = 30.0             # budget speed for the extended 30-flip cells (the follower is slower there)
+# What a cell does not inherit from the shell (purelib.port.clean_env's drop): traces, and the switches the sweep or
+# this tool sets per cell. The rest (PURE_SHELL, PURE_GE_BACKEND, PURE_PACED_FROM, ...) goes through to the sweep.
+CELL_DROP = ("PURE_TRACE_*", "PURE_AUDIO_WAV", "PURE_TEST_NO_DAMAGE", "PURE_TEST_UNLOCK_ALL", "PURE_METAL_TRACE")
 
 
 def extend_modes():
@@ -159,26 +165,11 @@ WARN_RE = re.compile(r"cannot|can't|not (emulated|implemented|supported)|unsuppo
                      r"ran out|missing|dropped|too (many|large|big)|overflow|invalid|stall|timeout|lost", re.I)
 TAG_RE = re.compile(r"^\[(render|mpeg|atrac|sas|psmfplayer|savedata|audio|metal|io)\]")
 GUEST_BAD_RE = re.compile(r"error|fail|assert|warn", re.I)
-SHIP_T_RE = re.compile(r"^\[pure\] ship frame (\d+) t=(\d+) clock=(\S+) pos=\S+ vel=\S+ kmh=(\S+) dist=(\S+) "
-                       r"lap=(\d+)")
-PLAYER_RE = re.compile(r"^\[pure\] ship frame (\d+) player object")
 TRACK_RE = re.compile(r"\[io\] open disc0:/PSP_GAME/USRDIR/Data/(Environments|ClassicsNS|Zone)/([^/]+)/TrackStartup")
-IGNORED_RE = re.compile(r"^  0x([0-9a-f]+) x(\d+) first=0x([0-9a-f]+)$")
-# The backend's exit line. Tasks 036 and 037 inserted "texture-mapped draws" and "mipmapped draws (... mip levels
-# decoded after the first)" after the framebuffer textures; both are optional here so older logs still parse.
-METAL_EXIT_RE = re.compile(r"^\[metal\] (\d+) frames, (\d+) draws, (\d+) passes, (\d+) textures decoded, (\d+) "
-                           r"framebuffer textures, (?:\d+ texture-mapped draws, )?(?:\d+ mipmapped draws \([^)]*\), )?"
-                           r"(\d+) target copies, (\d+) uploads, (\d+) targets, (\d+) GPU waits "
-                           r"\(([\d.]+) ms\) in ([\d.]+) s")
-METAL_PIPE_RE = re.compile(r"^\[metal\] pipelines: (\d+) render pipelines used, (\d+) made by a draw \((\d+) of them "
-                           r"waited for the pre-warm, (\d+) not in the list\).*?; (\d+) depth-stencil states, (\d+) made")
-METAL_FPS_RE = re.compile(r"^\[metal\] frame (\d+), \d+ draws \(\d+ in the last \d+ frames, ([\d.]+) fps\)")
 THREADS_RE = re.compile(r"^threads \(virtual time (\d+) ms, vblanks (\d+)\)")
-UNIMPL_RE = re.compile(r"^Unimplemented imports: (\d+) of (\d+)")
 STOPPED_RE = re.compile(r"Runtime stopped: (.*)")
 SWEEP_LINE_RE = re.compile(r"^\[sweep\] (\S+): (PASS|STALL|HALT|NO RACE|TIMEOUT|STUCK)((?: \([^)]*\))?) at flip (\d+), "
                            r"(\d+) laps, race time ([\d.]+) s, (\d+) s: (.*)$")
-UNDERRUN_RE = re.compile(r"\[pure\] audio capture: channel (\d+) underrun")
 SAVEDATA_RE = re.compile(r"^\[savedata\] (\w+) \((\d+)\) game=\"(\w*)\" save=\"(\w*)\" file=\"([\w.]*)\"")
 
 
@@ -305,15 +296,9 @@ def scan_log(path, fps=60):
                 if found["race_start_s"] is not None and (found["min_fps"] is None or rate < found["min_fps"][1]):
                     found["min_fps"] = (fr, rate)
                 continue
-            m = METAL_EXIT_RE.match(line)
-            if m:
-                found["exit"].update(frames=int(m[1]), draws=int(m[2]), textures=int(m[4]), waits=int(m[9]),
-                                     wait_ms=float(m[10]), seconds=float(m[11]))
-                continue
-            m = METAL_PIPE_RE.match(line)
-            if m:
-                found["exit"].update(pipelines=int(m[1]), pipelines_made=int(m[2]), pipelines_unlisted=int(m[4]),
-                                     depth_states=int(m[5]), depth_made=int(m[6]))
+            e = logs.metal_exit(line) or logs.metal_pipelines(line)
+            if e:
+                found["exit"].update(e)
                 continue
             m = THREADS_RE.match(line)
             if m:
@@ -387,12 +372,10 @@ def run_cell(mode, track, cls, opts):
     sweep_out = os.path.join(opts.out, "sweep")
     os.makedirs(os.path.join(out, "cells"), exist_ok=True)
     os.makedirs(os.path.join(out, "audio"), exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("PURE_TRACE_")}
-    for k in ("PURE_AUDIO_WAV", "PURE_TEST_NO_DAMAGE", "PURE_TEST_UNLOCK_ALL", "PURE_METAL_TRACE"):
-        env.pop(k, None)
+    env = port.clean_env(drop=CELL_DROP)
     wav = os.path.join(out, "audio", f"{name}.wav")
     if opts.audio:
-        for p in [wav] + [f"{wav}.ch{n}.wav" for n in range(1, 5)]:
+        for p in logs.wav_files(wav):
             if os.path.exists(p):
                 os.remove(p)
         env["PURE_AUDIO_WAV"] = wav
@@ -406,8 +389,7 @@ def run_cell(mode, track, cls, opts):
     print(f"[audit] {name}: {' '.join(cmd[1:] if not extended else ['fidelity_audit.py --sweep-cell'] + args)}",
           flush=True)
     t0 = time.time()
-    with open(stdout, "w") as f:
-        code = subprocess.run(cmd, cwd=ROOT, env=env, stdout=f, stderr=subprocess.STDOUT).returncode
+    code = port.run_tool(cmd, stdout, env)
     elapsed = time.time() - t0
     rec = {"cell": name, "mode": mode, "track": track, "class": cls, "extended": extended, "exit": code,
            "wall_s": round(elapsed), "date": time.strftime("%Y-%m-%d %H:%M"), "audio": opts.audio}
@@ -417,7 +399,7 @@ def run_cell(mode, track, cls, opts):
             m = SWEEP_LINE_RE.match(line.strip())
             if m and m[1] == name:
                 outcome = m
-            if line.startswith("campaign_sweep: another PureNative"):
+            if line.startswith(f"campaign_sweep: {port.REFUSED}"):
                 rec["refused"] = True
     if outcome:
         rec.update(outcome=outcome[2], switches=outcome[3].strip(" ()"), flip=int(outcome[4]),
@@ -432,12 +414,12 @@ def run_cell(mode, track, cls, opts):
     if opts.audio:
         start, end = rec.get("race_start_s"), rec.get("end_s")
         rec["wav"] = {}
-        for label, p in (("mix", wav), ("sas", f"{wav}.ch1.wav"), ("music", f"{wav}.ch2.wav")):
+        for label, p in (("mix", wav), ("sas", logs.wav_channel(wav, 1)), ("music", logs.wav_channel(wav, 2))):
             st = wav_stats(p, start, end)
             if st:
                 rec["wav"][label] = st
         if not opts.keep_wav:
-            for p in [wav] + [f"{wav}.ch{n}.wav" for n in range(1, 5)]:
+            for p in logs.wav_files(wav):
                 if os.path.exists(p):
                     os.remove(p)
     with open(os.path.join(out, "cells", f"{name}.json"), "w") as f:
