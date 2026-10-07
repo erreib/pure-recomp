@@ -209,6 +209,8 @@ route_check() {   # route_check DIR DATA SCRIPT
 # finder: the same through LaunchServices, as a double click in Finder starts it.
 finder_check() {   # finder_check DIR DATA SCRIPT
   local dir=$1 data=$2 script=$3 line shell_line finder_pid ticks=0
+  # open appends to --stdout and --stderr: without this a check run into the same DIR would read an earlier run's log.
+  rm -f "$dir/finder.log" "$dir/finder.stderr.log"
   open -n -W --env PURE_DATA_DIR="$data" --env "PURE_INPUT_SCRIPT=$script" \
     --env PURE_SCREENSHOT_DIR="$dir/finder_shots" --env PURE_SCREENSHOT_EVERY=0 --env PURE_EXIT_AT_FRAME=$ROUTE_FRAMES \
     --stdout "$dir/finder.log" --stderr "$dir/finder.stderr.log" "$APP" &
