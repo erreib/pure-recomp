@@ -110,8 +110,9 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   unlock-all switch, racing lines from the port's own AI, every track in the sweep). Merged: 034 (faster tests: the suite headless on Metal in 10 s, a sweep cell in 199 s with only the race paced,
   tools on scratch data directories, silent runs; Verify rerun PASS). Merged: 033 (frame-time trace, pipeline pre-warming, vblank-timed presents; the remaining dips are the
   game's own two-vblank stretches, routed to 035 item 6; Verify rerun PASS). **D-009 (Erik, 2026-10-06): fidelity before enhancements; the
-  pause-menu redesign is dropped.** Running: 035, the M8 fidelity audit; its worker was cut by the usage limit with the matrix loop still
-  running on its own (continuation after the loop ends). Erik, 2026-10-06: finish this round first; then consider an
+  pause-menu redesign is dropped.** Running: 035, the M8 fidelity audit; its first worker was cut by the usage limit, the matrix loop finished on
+  its own (46 cells: 36 pass, 10 driver stalls; results kept in out/035-wip/), and a continuation worker is
+  finishing the write-up and the Verify. Erik, 2026-10-06: finish this round first; then consider an
   accuracy scorecard (pictures, trajectory divergence per track with the AI seed pinned, timing, audio correlation,
   save files byte for byte, coverage, a VFPU differential test) before any enhancement. The audit's scope: every halt and unimplemented GE
   feature over the whole sweep, PPSSPP comparisons beyond the five scenes, the 30-fps modes and higher classes on
