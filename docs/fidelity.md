@@ -652,7 +652,7 @@ three still to confirm), two small GE states.
 |---|---|---|---|---|---|
 | 1 | Reflective surfaces look wrong: the ship's hull and canopy (always on screen), glass buildings, shiny roofs show the reflection texture stretched over the model instead of a reflection | every race and Zone, all the time; Sol 2's glass buildings and Sinucit's overhang most (0.12 of those frames) | the ship in the port's shots against PPSSPP's (Modesto Heights, Zone 1); 46 to 125 draws a race frame with TEXMAPMODE 2 in PPSSPP's dumps; TEXMAPMODE and TEXSHADELS in the framework's ignored list in every cell, 0.55 million writes a cell | backend feature: environment mapping (texture coordinates from the normals and the TEXSHADELS lights) and projection mapping (TEXMAPMODE 1, 40 draws on Vineta K) not carried by the framework's GE state (`ge_state.cpp`), not drawn by the Metal backend | medium |
 | 2 | Distant textures are sharp and shimmer while moving (crowds, track surface, windows), where the PSP's are smooth | every race, worst on wide open tracks (Blue Ridge's grandstands) | Blue Ridge's first race frame against PPSSPP's (0.053 at tol 32 with the HUD equal); 70 to 87% of textured race draws carry mip levels in PPSSPP's dumps; TEXADDR1 to 7, TEXSIZE1 to 7, TEXLEVEL, TEXLODSLOPE ignored in every cell, 22.7 million writes a cell | backend feature: mipmaps (upload the levels the GE names, pick the level by the GE's LOD rule: TEXLEVEL mode 2 with the per-draw slope) | medium |
-| 3 | Some surfaces are about 1.5 times brighter than on the PSP: Sebenco Climb's long concrete wall, Sinucit's overhang | Sebenco Climb (0.32 of the first race frame differs), Sinucit (0.12) | wall pixels (113, 125, 126) in the port against (70, 81, 83) in PPSSPP; the draws are unlit, fogged, vertex-coloured CLUT4 textures; the Vulkan backend draws the same pixels as the Metal one (a windowed run of the same frame), turning the port's fog or lighting off does not change them, and the mip levels have the same mean colour | unknown, upstream of both backends: the framework's GE state or vertex decode, or a GE rule neither backend applies; bisect from a PPSSPP GE dump of the frame (burst K's command of `ref/README.md` with `--gedump` at the Sebenco Climb frame; in this task's dump the wall was draws 197, 198 and 201) | small to medium (finding it) |
+| 3 | Some surfaces are about 1.5 times brighter than on the PSP: Sebenco Climb's long concrete wall, Sinucit's overhang | Sebenco Climb (0.32 of the first race frame differs), Sinucit (0.12) | wall pixels (113, 125, 126) in the port against (70, 81, 83) in PPSSPP; the draws are unlit, fogged, vertex-coloured CLUT4 textures; the Vulkan backend draws the same pixels as the Metal one (a windowed run of the same frame), turning the port's fog or lighting off does not change them, and the mip levels have the same mean colour | **found (task 038): not a port difference.** The wall's draws are the same field for field and vertex for vertex; the brightness is added later in the frame by the game's weather mist (FxScreenMist: two full-screen additive layers), whose layer alphas and texture offsets the game computes from its own state (the mist layers' phase, advanced by the camera's motion, and its random generator). The two runs reached the frame with different states (Sebenco Climb: alphas 0x49 and 0x02 in the port, 0x1C and 0x30 in PPSSPP, the same sum); with PPSSPP's values put into the port's recording the wall is within 5 levels and the frame's fraction 0.061 (Sinucit 0.045), and the port's own frame moves from 0.33 to 0.07 when its route idles 60 flips longer on MAIN MENU. "Difference 3: the weather mist" below | none in the port; the suite's weather frames need matching mist states to compare |
 | 4 | Creating a second profile silently overwrites the first; LOAD offers no choice; no save dialog ever appears | the PROFILE menu, any player with more than one profile | `PURE_TRACE_SAVEDATA`: the second LISTSAVE (`overwrite=0`) writes P0000 again; PPSSPP shows the system save list (`ref/save_dialog.png`) and "Save completed." (`ref/save_completed.png`) | framework: `hle_savedata.cpp` answers LISTSAVE with the first listed name and LISTLOAD with the first save, with no dialog | medium (a list dialog in the framework's UI), small for the data loss alone (LISTSAVE with `overwrite=0` to the first free name) |
 | 5 | A save from a PSP (or PPSSPP) does not load, and a port save would not load on a PSP | the memory stick | PPSSPP's `PROFILE.BIN` is 41586 bytes of ciphertext with the file in `SAVEDATA_FILE_LIST`; the port's 41570 bytes plain | framework: the PSP's savedata encryption (no-key mode) is not done | medium |
 | 6 | Loading screens before a race are shorter than on the PSP (about 0.3 s of game time against 1.5 s in PPSSPP) | every race load | `PURE_TRACE_CALLS` on `sceDisplaySetFrameBuf` against PPSSPP's flip log | framework: file reads complete at once in emulated time, where PPSSPP (like the UMD) takes time over them; arguably welcome, but not 1:1 | small |
@@ -665,6 +665,8 @@ three still to confirm), two small GE states.
 Not differences, though they looked like ones:
 
 - The two-vblank stretches (task 033): the game's own, and PPSSPP's (above).
+- Difference 3, the bright wall on Sebenco Climb and Sinucit (task 038): the game's weather mist in another phase,
+  not a GE or backend rule ("Difference 3: the weather mist", below).
 - Zone's pace: a PPSSPP run with a capture every vblank seemed to count zones three times as fast, but a run with no
   capture during the race ends exactly as the port does (TOTAL ZONES CLEAR 6, SCORE 4292 against 4291): PPSSPP's
   captures moved its timing, not the port's.
@@ -688,3 +690,154 @@ Follow-ups that are not differences:
   bronze times).
 - The 38-to-39-flip and the 31-flip (put-back) flashes were measured in the port only; PPSSPP's race had three
   flashes of 22 to 25 flips.
+
+## Difference 3: the weather mist (task 038, 2026-10-07)
+
+**Finding: the wall is drawn exactly as on the PSP; the game's weather mist over it was in another state.** Sebenco
+Climb's wall and the track beside it get the same GE state, the same vertices and the same texels in the port as in
+PPSSPP, and the port's wall draw gives the pixel PPSSPP's frame implies. The brightness comes 580 draws later, from
+the weather's full-screen mist (FxScreenMist.cpp: two additive layers of a soft CLUT8 texture), whose layer alphas
+and texture coordinates are values the game computes on the CPU from its own state. The two runs reached the first
+race frame with the mist in different phases. Nothing in the GE state, the vertex decode or either backend is wrong,
+so there is no patch and no backend change.
+
+### The frames
+
+PPSSPP: burst K's command with a GE dump at the reference's frame, so the dump and the PNG are the same frame. Its
+`f07670.png` is byte-identical to the audit's `sebenco_climb_hud.png` (SHA-256 2dedf676..., flipped at vblank
+7671.4), and the Sinucit run's `f07662.png` to `sinucit_hud.png` (305a41aa..., vblank 7663.3). Both pairs were copied
+to `ref/` as `sebenco_climb_hud.{png,ppdmp}` and `sinucit_hud.{png,ppdmp}` (git-ignored, like every capture).
+
+```
+P=/opt/homebrew/bin/python3; R=tools/ppsspp/routes; C=tools/ppsspp/ppsspp_ctl.py
+$P $C run --pad-file $R/frontend.txt --pad-file $R/unlock_all.txt --pad-file $R/unlock_race_beta.txt \
+  --pad-file $R/unlock_track_down2.txt --until 7690 --shots-every 2 --shots-from 7580 \
+  --shots-dir out/ppsspp/hud_beta_2 --gedump 7670:out/ppsspp/hud_beta_2/f07670.ppdmp
+# Sinucit: without unlock_track_down2.txt, --until 7680, --gedump 7662:out/ppsspp/hud_beta_0/f07662.ppdmp
+```
+
+Port: `config/pad_scripts/beta_sebenco_climb.txt` and `beta_sinucit.txt` hold the sweep's picks for the two tracks
+and their shot flips (6018, 6016), after `main_menu.txt` and `single_race.txt` with `PURE_TEST_UNLOCK_ALL=1`. Run
+headless on the Metal backend on an empty stick of its own (`$G` below: `ms0/PSP/SAVEDATA`, EBOOT.ELF and disc.iso
+linked, as `tools/frame_regress.sh` makes one), with the record backend around Metal:
+
+```
+(echo 6018:shot sebenco_climb_hud; cat config/pad_scripts/{main_menu,single_race,beta_sebenco_climb}.txt | grep -v ':shot') > out/038/route.txt
+python3 tools/run_boot.py --script out/038/route.txt --shots out/038/shots --frames 6025 --env PURE_GAME_DIR=$G \
+  --env PURE_SHELL=headless --env PURE_TEST_UNLOCK_ALL=1 --env PURE_GE_BACKEND=record \
+  --env PURE_GE_RECORD=$PWD/out/038/f6018.gerec --env PURE_GE_RECORD_AT=6018 --env PURE_GE_RECORD_FRAMES=1 \
+  --env PURE_GE_RECORD_INNER=metal out/038/run.log
+```
+
+The shot is the recording's frame 6018 (0 pixels differ) and scores what the audit measured: 0.3207 at tol 32 against
+`sebenco_climb_hud.png`, and Sinucit's 0.1163. The same run without the recorder, and one paced to real time from flip
+5600 (`PURE_PACED_FROM=5600`), give the same picture to the pixel.
+
+### The bisection
+
+1. **Which draws the wall is.** `tools/ppsspp/ppdmp.py cover` on PPSSPP's dump: the last opaque writer of the wall at
+   (400,130), (420,150), (350,140) and (450,110) is draw 381 or 384 (CLUT4 64x64, vertex type 0x13F), and of the
+   bright track beside it at (350,200), (420,220) and (300,230) draws 465 and 392. The port's recording has the same
+   draws under the same numbers (the same primitive, vertex count and texture size; the audit's 197, 198 and 201
+   were numbers in its own dump). No opaque draw is the last writer of those pixels: something blended comes after.
+2. **The wall's draws, field by field and vertex by vertex** (the port's `DrawCall` from the recording against the
+   registers PPSSPP's dump holds at the draw; the readers were scratch scripts on `tools/gerec/gerec_dump.py`'s and
+   `tools/ppsspp/ppdmp.py`'s parsers): no field differs (the table below). Every vertex of draws 380, 381, 384, 392
+   and 465 (989 in all) has the same texture coordinates and the same colour, the CLUTs hold the same entries, and
+   the level-0 texels are the same 2048 bytes in each. Only the addresses differ: the game put these textures
+   elsewhere in VRAM (0x041E81C0 in the port, 0x041EF7C0 in PPSSPP) and the mist's CLUT and texture 0x200 bytes
+   further on in RAM, its own allocation; the bytes there are the same.
+3. **Where the port's pixel changes.** `PureNative --replay out/038/f6018.gerec --backend metal --frames 6018 --cut N
+   --out DIR` for N from 382 to 963: (420,150) is (65,75,75) once the wall is drawn (N = 382) and stays so through
+   draw 960; draw #961 makes it (121,131,131), #962 (122,132,132), and the bloom composite brings it to (127,137,137),
+   the port's final pixel, where PPSSPP's is (77,88,87). So the wall draw gives 65 to 75, and the port adds 56
+   levels after it where PPSSPP adds about 12.
+4. **Draws #961 and #962** (PPSSPP's #964 and #965) are the mist: two full-screen strips (identity matrices, x and y
+   -1 to 1) of a CLUT8 128x64 texture of white with alpha 0x00 to 0x40, added as src x SA + dst. Their first
+   differing field is the material alpha (GE 0x58, which the game writes with 0x55, 0x56 and 0x57 as one colour
+   before each layer): 0x49 and 0x02 in the port, 0x1C and 0x30 in PPSSPP. Their texture coordinates differ too (the
+   table). Everything else is the same.
+
+| Field | Wall #381, port | Wall #381, PPSSPP | Mist #961 / #962, port | Mist #964 / #965, PPSSPP |
+|---|---|---|---|---|
+| Vertex type | 0x00013F: uv f32, colour 8888, normal s8, position s16 | 0x00013F | 0x000183: uv f32, position f32, no colour | 0x000183 |
+| Primitive, vertices | strip, 327 | strip, 327 | strip, 4 / 4 | strip, 4 / 4 |
+| Vertex colours | 137 distinct, each vertex equal to PPSSPP's | the same | none: the material colour | none |
+| Texture coordinates | each vertex equal to PPSSPP's | the same | u 2.754-3.447, v 1.469-1.858 / u 2.032-3.440, v 1.724-2.516 | u 1.830-2.998, v 1.719-2.376 / u 3.207-3.658, v 1.512-1.766 |
+| Texture | CLUT4 64x64, swizzled | CLUT4 64x64, swizzled, TEXMODE 0x030001 | CLUT8 128x64, swizzled | the same, TEXMODE 0x000001 |
+| Texels, CLUT | the same bytes; CLUT format 0x00FF03 (8888, shift 0, mask 0xFF, start 0), the same entries | the same | CLUT 0x00FF03, the same entries | the same |
+| TEXFUNC (0xC9) | modulate, alpha from the texture, no doubling | 0x000100: modulate, TCC, colour doubling 0 | the same | 0x000100 |
+| Filter, wrap | min 7, mag 1; repeat | 0x000107, 0x000000 | the same | the same |
+| Lighting (0x17), light enables | off; lights 0 and 1 on | off; 1100 | off | off |
+| Material: update, emissive, diffuse | 7, 0, 0xFFFFFF | the same | the same | the same |
+| Material ambient (0x55) and alpha (0x58) | 0xFFFFFF, 0xFF | 0xFFFFFF, 0xFF | 0xFFFFFF, **0x49 / 0x02** | 0xFFFFFF, **0x1C / 0x30** |
+| Ambient light (0x5C, 0x5D) | 0x4A361F, 0xFF | the same | 0, 0 | 0, 0 |
+| Fog (0x1F; end, scale, colour) | on; 715.094, 0.00182098, 0xEDD8D1 | the same | on, the same (at z = 0 the factor is 1.30, clamped to 1: no fog) | the same |
+| Blend | off | off | add(SA, FIXB 0xFFFFFF) | 0x0000A2: the same |
+| Alpha test; stencil | ALWAYS; ALWAYS ref 4 mask 0xFF, zpass REPLACE | 0xFF0001; 0xFF0401, 0x020000 | off; off | the same |
+
+The brief's three candidate rules are all ruled out by the dump: the texture function's colour doubling (bit 16 of
+TEXFUNC is 0 on these draws), the vertex colour's decoding (8888 colours equal vertex by vertex), and the material and
+ambient colours of an unlit draw (equal; the draws are unlit and coloured by their vertices). Fog and the CLUT are
+equal too.
+
+### The mist, from the game's code
+
+Read in Ghidra (decompiles of a read-only copy of the main checkout's project): FxWeather's constructor
+(FUN_08937cb8, FxWeather.cpp) makes an FxScreenMist (constructor FUN_08941ab8, FxScreenMist.cpp). Each frame
+FUN_089414bc takes the camera's displacement since the last frame in camera space, less a drift term
+(FUN_08a3fdc4), and FUN_08941d98 advances each layer's phase by its forward component times 0.02, wraps it into 0 to
+1, and sets the layer's alpha to the weather's intensity times a triangle of the phase (rising over half the cycle,
+falling over the other half). The layers start half a cycle apart, so their alphas always add up to the intensity.
+When a layer's phase wraps, its texture offset is drawn again from the game's random generator (FUN_0882f70c, a
+float from FUN_0882f4d0), and its texture coordinates zoom with the phase. FUN_08941574 draws the two layers with the
+colours and strips the update left. So the mist at a given frame depends on how the camera has moved since the race
+loaded and on the random draws, and on nothing in the GE.
+
+The intensity is the same in both runs and only the phase differs: the alphas add up to 76 on Sebenco Climb (0x49 +
+0x02 = 75 in the port, 0x1C + 0x30 = 76 in PPSSPP, truncated) and to 50 on Sinucit (0x30 + 0x02, 0x12 + 0x20). At
+the race start the camera stands still, so the phase the fly-by left stays for the whole countdown: the wall's mean red
+(400-439 x 120-159) is 126 to 137 in the port from flip 5976 to 6100 and 86 to 108 in PPSSPP from vblank 7612 to 7690.
+
+### Evidence that the mist explains the whole difference
+
+**PPSSPP's mist values in the port's recording.** A copy of the port's recording in which draws #961 and #962 take
+PPSSPP's material alpha (0x1C, 0x30) and texture coordinates, replayed into the Metal backend (Sinucit: #570 and #571
+take #571's and #572's):
+
+| Frame | Port as recorded | With PPSSPP's mist values | Target of the brief |
+|---|---|---|---|
+| Sebenco Climb, fraction at tol 32 against `sebenco_climb_hud.png` | 0.3207 | 0.0613 | under 0.10 |
+| Sebenco Climb, at tol 16 | 0.5436 | 0.1152 | |
+| wall (420,150) / (400,130), PPSSPP (77,88,87) / (90,99,98) | (127,137,137) / (135,145,143) | (79,89,89) / (91,104,102) | within 16 |
+| track (350,200), PPSSPP (123,136,145) | (177,190,201) | (126,139,150) | |
+| Sinucit, fraction at tol 32 against `sinucit_hud.png` | 0.1163 | 0.0445 | under 0.06 |
+
+What still differs in the substituted frames is differences 1 and 2 (the ship's hull, the buildings' windows) and the
+AI ships; the wall and the track are within 5 levels.
+
+**The port's own mist moves with the history.** The same route with every press of `single_race.txt` and the picks
+shifted by S flips (the game idles S flips longer on MAIN MENU), the race frame at 6018 + S, headless Metal:
+
+| Shift S | Mist alphas | Wall mean (400-439 x 120-159) | Fraction against `sebenco_climb_hud.png` (tol 32) |
+|---|---|---|---|
+| 0 (the route) | 0x49, 0x02 | (134.9, 145.6, 146.7) | 0.3207 |
+| 2 | 0x4C, 0x00 | (134.9, 145.8, 146.9) | 0.3289 |
+| 30 | 0x46, 0x06 | (127.8, 138.8, 140.0) | 0.1671 |
+| 60 | 0x2C, 0x20 | (96.9, 109.0, 110.1) | 0.0688 |
+| 90 | 0x3B, 0x10 | (91.1, 102.8, 103.8) | 0.0689 |
+| 120 | 0x46, 0x05 | (95.1, 106.1, 107.3) | 0.1165 |
+| PPSSPP | 0x1C, 0x30 | (85.9, 96.4, 97.4) | |
+
+The sum stays 75 or 76 in every run; the phase and the texture offsets (S = 30 and 120 have nearly the same alphas
+and different walls) follow from what ran before the race. Which input carries the menus' length into the mist (the
+random generator's state, which FxWeather's constructor also draws two oscillator phases from, or the drift) was not
+isolated; pacing to real time does not move it, so it is counted in frames.
+
+### What it means
+
+The first race frame of a weather track compares two mist states, not two renderers: a player's mist depends on how
+long they spent in the menus, on a PSP as in the port. The PPSSPP references of Sebenco Climb and Sinucit stay right
+as references of those runs; a suite row for them would need the port to reach the same mist state (or to compare
+with the mist values substituted, as above). Nothing was changed in the framework or the backends, so the suite's
+fractions are unchanged (task 038's Result has both runs).

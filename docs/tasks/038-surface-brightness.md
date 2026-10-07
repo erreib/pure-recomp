@@ -67,7 +67,103 @@ the three candidate rules you considered), or the fix would change the vertex de
 scope and the suite's deltas with the change applied in a throwaway build).
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: PARTIAL. The cause is found, and it is not in the port: there is nothing to fix in the GE state, the
+vertex decode or a backend. So acceptance criterion 1 is met. Criteria 2 and 3 cannot be met by a code change. The
+substituted replay below shows what criterion 2 asks for, and no code changed, so nothing could move the Vulkan path.
+
+**The cause.** The wall is drawn exactly as on the PSP. The brightness comes 580 draws later, from the game's weather
+mist (FxScreenMist.cpp). The mist is two full-screen additive layers of a soft CLUT8 texture. The game computes their
+alphas and texture coordinates on the CPU from its own state: each layer's phase moves with the camera's motion, and
+the layer's texture offset is drawn again from the game's random generator each time the phase wraps. The port and
+PPSSPP reached the first race frame with the mist in different phases. On Sebenco Climb the layer alphas (GE 0x58)
+are 0x49 and 0x02 in the port against 0x1C and 0x30 in PPSSPP, and their texture coordinates differ too. The sum is
+the same, 75 against 76: the weather's intensity matches and only the phase differs. Sinucit has the same mist, with
+0x30 and 0x02 against 0x12 and 0x20 (sum 50 in both).
+
+**The bisection.**
+- PPSSPP's GE dump of the reference frame: burst K's command plus `--gedump 7670`. Its PNG is byte-identical to the
+  audit's `sebenco_climb_hud.png`, and Sinucit's run (`--gedump 7662`) to `sinucit_hud.png`. Both pairs are in `ref/`.
+- The port's recording: new routes `config/pad_scripts/beta_sebenco_climb.txt` and `beta_sinucit.txt`, then
+  `PURE_GE_RECORD` at flip 6018 (6016). The capture scores 0.3207 at tol 32, as the audit measured.
+- `ppdmp.py cover` names the wall's draws (381 and 384) and the track's beside it (392 and 465). The port numbers
+  them the same.
+- Field by field, every vertex and every texel of those draws is the same in both (the table is in
+  docs/fidelity.md, "Difference 3: the weather mist").
+- `--replay --cut N` puts the port's wall pixel at (65,75,75) from draw 382 through draw 960. Draw #961, the first
+  mist layer, raises it by 56 levels. In PPSSPP the mist adds about 12.
+- The first field that differs is the mist's material alpha.
+
+| Check (Sebenco Climb unless named, fraction at tol 32) | Before | After (no code change) | Port recording with PPSSPP's mist alphas and texture coordinates put in, replayed into Metal |
+|---|---|---|---|
+| Sebenco Climb frame against `ref/sebenco_climb_hud.png` | 0.3207 | 0.3207 | 0.0613 (target under 0.10) |
+| wall pixel (420,150), PPSSPP (77,88,87) | (127,137,137) | the same | (79,89,89), within tol 16 |
+| Sinucit frame against `ref/sinucit_hud.png` | 0.1163 | 0.1163 | 0.0445 (target under 0.06) |
+
+In the port's own runs, delaying the route on MAIN MENU changes the mist by itself. Delays of 0, 2, 30, 60, 90 and
+120 flips give alphas 0x49/0x02, 0x4C/0x00, 0x46/0x06, 0x2C/0x20, 0x3B/0x10 and 0x46/0x05. The fractions are 0.321,
+0.329, 0.167, 0.069, 0.069 and 0.117. A run held to real time (`PURE_PACED_FROM=5600`) is identical to the unpaced
+one.
+
+**The suite, before and after** (headless Metal; before = batch/m2 at 8d3bc3e, after = the Verify run at 10225f2).
+All 18 scenes are the same to four places, and none rises:
+
+| Scene | lang | title | profile | main_menu | race_hud | single_player .. team_select (5) | tt_track_select | tt_hud | fp_track_select | fp_hud | tournament_select | zone_track_select | zone_hud | zone_change |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Before | 0.0002 | 0.0002 | 0.0000 | 0.0106 | 0.0374 | 0.0000 each | 0.0000 | 0.0617 | 0.0000 | 0.0620 | 0.0000 | 0.0000 | 0.0348 | 0.0649 |
+| After | 0.0002 | 0.0002 | 0.0000 | 0.0106 | 0.0374 | 0.0000 each | 0.0000 | 0.0617 | 0.0000 | 0.0620 | 0.0000 | 0.0000 | 0.0348 | 0.0649 |
+
+The Vulkan suite (`--shell vulkan --backend vulkan`) was not run. No source, vendor or patch file changed, so its
+pictures cannot have moved, and its windowed runs would have held the machine for seven minutes while tasks 036 and
+039 ran their own games.
+
+Changed:
+- config/pad_scripts/beta_sebenco_climb.txt, beta_sinucit.txt (new): the capture routes.
+- docs/fidelity.md: difference 3's row, a line under "Not differences", and the section "Difference 3: the weather
+  mist" (the frames and commands, the field-by-field table, the code reading, the substitution and delay tables).
+- This file.
+- No vendor patch. Nothing in `ge_state.cpp` or `src/gpu/`. docs/metal-backend.md and patches/README.md unchanged.
+- Not committed (git-ignored): `ref/sebenco_climb_hud.{png,ppdmp}` and `ref/sinucit_hud.{png,ppdmp}` in this
+  worktree. The main checkout's `ref/` lacks them; copy them there or make them with the commands in docs/fidelity.md.
+
+Verify output (last 20 lines; `tools/verify_task.sh 038` at 10225f2, 2026-10-07 01:06, after ten refusals while other
+workers' games ran; the commit after it adds this Result only):
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0374   0.10   32    0.0379 -0.0005  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0617   0.12   32    0.0617 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0620   0.11   32    0.0620 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0348   0.09   32    0.0348 +0.0000  PASS
+zone_change   5679    0.0649   0.10   32    0.0649 +0.0000  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 25s)
+verify 038: PASS
+```
+
+Open questions:
+- How should the suite compare weather tracks (Sebenco Climb, Sinucit, and any other track with FxWeather)? A
+  first-race-frame row compares two mist states as well as two renderers. One option is a port route that reaches
+  PPSSPP's mist state, but that tunes the route to a random state. Another is a mist-substituted replay as above.
+  A third is to compare the frame with the two mist draws left out on both sides.
+- What carries the menus' length into the mist was not isolated: the random generator's state, which FxWeather's
+  constructor also draws two oscillator phases from, or the drift term in the camera-motion helper. Pacing to real
+  time does not move it, so it is counted in frames.
+- The game placed the track textures elsewhere in VRAM (0x041E81C0 against 0x041EF7C0) and the mist's CLUT 0x200
+  bytes further on in RAM than in PPSSPP. The bytes are the same. This is probably the asset load order (difference
+  6's load timing) and was not followed up.
+- The comparison readers were scratch scripts: a full `DrawCall` parser on gerec_dump.py, a register reader on
+  ppdmp.py, and a .gerec patcher that substitutes one draw's material colour and texture coordinates. A tool for
+  these would make the next bisection quicker, but `tools/` was outside this task's May touch.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
