@@ -11,6 +11,7 @@
 | D-007 | 2026-10-06 | Shell seam: `host::Shell` behind the HLE; Vulkan shell adapted, headless shell added, Metal shell implemented against it | accepted |
 | D-008 | 2026-10-06 | Metal shell and Metal backend are the default on macOS; Vulkan stays the portable path, selectable | accepted |
 | D-009 | 2026-10-06 | Priority: as close to 1:1 with the original as possible before any enhancement; the host pause menu stays the framework's | accepted (Erik) |
+| D-010 | 2026-10-07 | The SAS reverb's two constants are fitted to PPSSPP's output (the formula at 44.1 kHz, the sends at half), not taken from the documentation | accepted |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -111,3 +112,23 @@ fidelity work is a milestone of its own (M8 in docs/status.md): the breadth swee
 features, PPSSPP comparisons beyond the five scenes, the 30-fps modes and higher classes on every track, audio and
 save behaviour, the PSP system dialogs the framework replaces (the save list), and whatever the playtests find.
 Status: accepted.
+
+## D-010  2026-10-07  The SAS reverb's constants come from PPSSPP's output
+Context: task 043 modelled the SAS reverb from the PlayStation SPU documentation (psx-spx's formula and preset
+tables), which is the only published description of the unit the PSP's SAS inherits. Run as documented (the SPU's
+22050 Hz between its resampling filters, the sends at unity) the pause tail is 3 to 14 times PPSSPP's and falls too
+slowly; no gain fixes the slope. Two changes bring every 100 ms step of the first second within 1.05 to 1.27 of
+PPSSPP's and the steady effects level of a race and of the Free Play idle within 1 percent: the formula ticks once per
+sample at 44.1 kHz (the presets' delays are then half as long in time, which is the slope PPSSPP shows), and the
+sends enter at half level (one constant, fitted independently by the tail and by the steady level). Neither comes
+from documentation the worker could read, and the PSP SDK's sceSasCore reference, which might say where the half
+belongs, is not at hand.
+Decision: keep both. PPSSPP is this project's oracle with tolerance (the plan's fidelity rule), its SAS output is the
+only reference we have for the reverb, and the fitted model matches it on every measure taken while the documented
+one matches none. The documented path stays behind `PURE_SAS_REVERB_SPU_RATE=1` so the choice can be revisited, and
+`PURE_NO_REVERB=1` turns the unit off.
+Consequences: the reverb is faithful to PPSSPP, not proven faithful to a PSP; a capture from real hardware would settle
+the two constants and is the one check that does not route through the emulator. The inferred parts no game here
+exercises (RevParam's mapping for ECHO and DELAY, PIPE as "Half Echo", type -1 as OFF) are named in the patch's row.
+Status: accepted.
+
