@@ -164,8 +164,11 @@ SHIP_T_RE = re.compile(r"^\[pure\] ship frame (\d+) t=(\d+) clock=(\S+) pos=\S+ 
 PLAYER_RE = re.compile(r"^\[pure\] ship frame (\d+) player object")
 TRACK_RE = re.compile(r"\[io\] open disc0:/PSP_GAME/USRDIR/Data/(Environments|ClassicsNS|Zone)/([^/]+)/TrackStartup")
 IGNORED_RE = re.compile(r"^  0x([0-9a-f]+) x(\d+) first=0x([0-9a-f]+)$")
+# The backend's exit line. Tasks 036 and 037 inserted "texture-mapped draws" and "mipmapped draws (... mip levels
+# decoded after the first)" after the framebuffer textures; both are optional here so older logs still parse.
 METAL_EXIT_RE = re.compile(r"^\[metal\] (\d+) frames, (\d+) draws, (\d+) passes, (\d+) textures decoded, (\d+) "
-                           r"framebuffer textures, (\d+) target copies, (\d+) uploads, (\d+) targets, (\d+) GPU waits "
+                           r"framebuffer textures, (?:\d+ texture-mapped draws, )?(?:\d+ mipmapped draws \([^)]*\), )?"
+                           r"(\d+) target copies, (\d+) uploads, (\d+) targets, (\d+) GPU waits "
                            r"\(([\d.]+) ms\) in ([\d.]+) s")
 METAL_PIPE_RE = re.compile(r"^\[metal\] pipelines: (\d+) render pipelines used, (\d+) made by a draw \((\d+) of them "
                            r"waited for the pre-warm, (\d+) not in the list\).*?; (\d+) depth-stencil states, (\d+) made")
