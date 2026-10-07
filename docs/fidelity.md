@@ -962,13 +962,15 @@ below one 30-fps frame (not chased further). The matrix's later change at 755 s 
 the tournaments' changes come with their loads.
 
 **Difference 8, Free Play's finish.** The sweep pauses after the third lap and picks END SESSION (START, DOWN, DOWN,
-Cross, 40 flips apart); the routes above do the same with the ship on the grid.
+Cross, 40 flips apart); the routes above do the same with the ship on the grid. From the race music's start to past
+the end screen (368 s, the windows aligned by the music) both mixes are active in 367 seconds, the same 367, with no
+clipping (peaks 21403 in the port, 24186 in PPSSPP); the music channel alone is active in 347 of 354.
 
 | | Port | PPSSPP |
 |---|---|---|
 | START | flip 16700, the sound drops at 558.05 s | vblank 28800 (480.48 s), drops at 480.55 s |
 | the drop (RMS in 100 ms steps) | 3836, 1628, then exact zeros | 2148, 600, 198, 125, 64, 33, 17, 9, 4, 2, then 1 |
-| silences between the menu's sounds (10 ms blocks at RMS 100 or less) | 1220 ms all zero, 1250 ms, 1210 ms all zero | 950 ms, 1250 ms, 1240 ms (at RMS 1, not zero) |
+| silences between the menu's sounds (10 ms blocks at RMS 100 or less; the windows aligned by the music) | 1220, 1240 and 1210 ms, all zero | 970, 1250 and 1250 ms, at RMS 1, not zero |
 | sound back (the session's end screen) | 3.9 s after the drop | 4.0 s after the drop |
 
 The pause silences the music and the effects on a PSP too, for as long. What differs is the drop: PPSSPP's sound dies
@@ -986,6 +988,8 @@ answering NO Sol 2. So the demos compare as demos, not sample for sample:
 | demo 2 | Citta Nuova, 295.69 to 381.0 s (the run's end): peak 32768, 836 of 7,524,342 (0.000111) in 5 s, RMS 3808, loudest 10735 | Blue Ridge, 240.63 to 361.68 s: peak 32768, 2236 of 10,676,610 (0.000209) in 11 s, RMS 4361, loudest 13226 |
 | from the main menu on | 3447 of 21,261,536 (0.000162) | 2935 of 24,871,256 (0.000118) |
 
+Both mixes are active in every second from the main menu on (PPSSPP 277 of 277, the port 235 of 235), their longest
+silences the demo loads (PPSSPP 1.34, 1.03 and 1.08 s, the port 0.25 and 0.23 s: difference 6's shorter loads).
 Both reach full scale and clip in a handful of seconds a demo, at the same rate. Where the content is the same the
 levels agree: the menu music above, and over 250 s of the Free Play idle (port 250 to 500 s, PPSSPP 175.22 to 425.22
 s, aligned by the music) the mixes have RMS 3633 and 3682, the port's 0.966 to 1.004 of PPSSPP's in every second
