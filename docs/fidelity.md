@@ -156,8 +156,8 @@ The other columns, over the whole matrix:
   So they come with the 30-fps modes' result and standings screens. The logs do not say when (a `PURE_METAL_TRACE`
   run would): a candidate for the pre-warm list rather than a known difference.
 - **Stretches; hitches**: the two-vblank stretches (290 in the 60-fps cells, 273 s in all) are item 6's subject,
-  below. A hitch is a race flip 45 ms or more after the one before: 12 cells have one or two, 102 to 295 ms (next
-  section and "The differences").
+  below. A hitch is a race flip 45 ms or more after the one before: 12 cells have one or two, 102 to 295 ms, at no
+  fixed place (next section, and difference 7).
 - **Audio**: the mix is active in every second of every race; the music channel in 97 to 100% of the seconds (the
   audio section).
 - **Saves**: beyond the two requests every boot makes, only the tournaments save (an AUTOSAVE of
@@ -190,14 +190,16 @@ channel's buffer late, and how long the channel went without):
   295 ms after the one before (the matrix's hitches column), with a channel 2 line at the same moment. Nothing else is
   in the log there (no file opened, no save, no load): the virtual clock jumps in one flip and the game's race clock
   moves by its per-frame cap (in Mandrashee 0.067 s for a 295 ms flip). That is what a paced run does when its
-  process is held up: the kernel's clock catches up with real time at once. The cells ran while other work loaded the
-  machine (the audit's PPSSPP captures in the software renderer and its Ghidra decompiles until 21:51, other sessions'
-  work after that), and a hitch cell run again on a quiet machine shows none at the same place (below). A player on a
-  busy machine would see the same stall; the port's own timing is not the cause.
+  process is held up for a moment: the kernel's clock catches up with real time at once. Two of these cells run again
+  at 23:35 (Zone 4 and Free Play Vineta K, `out/fidelity-hitch/`) had hitches again, at other places (117 ms; 117 and
+  167 ms), so they are not tied to a place in the game. Neither run had an idle machine (the audit's PPSSPP captures
+  and Ghidra decompiles until 21:51; a browser, Spotlight indexing and other sessions' work, a load average of about
+  5, at the rerun), and the sweep reads the game's output through a pty while it steers, so a reader held up for a
+  moment holds the game's writes. Whether a player's run has them is open: difference 7.
 - **Channel 2 (the music)**, 34 lines in 23 cells: the hitches above, and once at each change of music track, 15 to
   60 ms just after the new track starts: at 527.3 s of virtual time in every cell that runs that long (the first
   change, 5:24 into the race music), and at the later changes of the long cells (636, 755, 932 and 1224 s). Each
-  follows a silence on the music channel (the audio section): difference 7.
+  follows a silence on the music channel (the audio section): difference 8.
 
 The framework's list of ignored GE commands, summed over the cells (every cell lists the same 65):
 
@@ -423,13 +425,13 @@ Over the 46 cells (3.6 h of audio from the race starts):
     besides the tournaments that run that long (within 0.1 s in each, about 5:24 into the race music, so the same
     tracks in the same order), then the channel 2 underrun of 10 to 60 ms as the next track starts; the later changes
     (the tournaments, whose music stops for each load, and Citta Nuova at Phantom) have shorter silences, 0.6 to 1.0 s
-    at 636, 755, 932 and 1224 s. Difference 7: whether a PSP has the same gap needs PPSSPP's audio (`DumpAudio`),
+    at 636, 755, 932 and 1224 s. Difference 8: whether a PSP has the same gap needs PPSSPP's audio (`DumpAudio`),
     not measured here;
   - the loads between a tournament's races (5.95 to 6.02 s), where the game stops its music; and in Free Play 3.9 s
     from the moment the ship crosses the finish line (Vineta K: the laps add up to 212.8 s, the silence starts at
     213.1 s of race clock) until the results screen, which Time Trial and Single Race do not have (also difference
-    7, to compare);
-  - the hitches (81 to 239 ms), the machine's (previous section).
+    8, to compare);
+  - the hitches (81 to 239 ms; previous section, difference 7).
 - Underruns, the capture's own count per channel over the whole run, are those of the previous section: two on the
   movie channel at boot in every cell, and the hitches and music changes.
 
@@ -631,9 +633,9 @@ follower at Phantom triggers one at about 150 m of Vineta K each lap was not loo
 ## The differences
 
 Ordered by what a player would notice first. Each row is a candidate task; "size" is a guess (small: a day or less
-in one file; medium: a feature across the backend or the framework's state; large: a subsystem). Ten differences:
-three in the race picture, two in the saves, one in loading, two in the audio (both still to confirm against
-the PSP), two small GE states.
+in one file; medium: a feature across the backend or the framework's state; large: a subsystem). Eleven
+differences: three in the race picture, two in the saves, one in loading, one in pacing and two in the audio (those
+three still to confirm), two small GE states.
 
 | # | What a player sees | Where | Evidence | Suspected cause | Size |
 |---|---|---|---|---|---|
@@ -643,10 +645,11 @@ the PSP), two small GE states.
 | 4 | Creating a second profile silently overwrites the first; LOAD offers no choice; no save dialog ever appears | the PROFILE menu, any player with more than one profile | `PURE_TRACE_SAVEDATA`: the second LISTSAVE (`overwrite=0`) writes P0000 again; PPSSPP shows the system save list (`ref/save_dialog.png`) and "Save completed." (`ref/save_completed.png`) | framework: `hle_savedata.cpp` answers LISTSAVE with the first listed name and LISTLOAD with the first save, with no dialog | medium (a list dialog in the framework's UI), small for the data loss alone (LISTSAVE with `overwrite=0` to the first free name) |
 | 5 | A save from a PSP (or PPSSPP) does not load, and a port save would not load on a PSP | the memory stick | PPSSPP's `PROFILE.BIN` is 41586 bytes of ciphertext with the file in `SAVEDATA_FILE_LIST`; the port's 41570 bytes plain | framework: the PSP's savedata encryption (no-key mode) is not done | medium |
 | 6 | Loading screens before a race are shorter than on the PSP (about 0.3 s of game time against 1.5 s in PPSSPP) | every race load | `PURE_TRACE_CALLS` on `sceDisplaySetFrameBuf` against PPSSPP's flip log | framework: file reads complete at once in emulated time, where PPSSPP (like the UMD) takes time over them; arguably welcome, but not 1:1 | small |
-| 7 | The race music stops for about 2 s when it changes tracks, with a 10 to 60 ms underrun as the next starts; in Free Play it stops for 3.9 s at the finish line | all long races at 524.7 to 527.3 s of game time (5:24 into the race music; shorter gaps at the later changes); every Free Play finish | music channel zero runs of 177 ms and 2.15 s at 524.7 and 525.1 s and an underrun at 527.3 s, the same in all 14 cells that get there; Free Play's silence from 213.1 s of race clock on Vineta K (the laps end at 212.8 s) | unknown: the game's own track change and finish, or the framework's sceAtrac feeding the new track late; compare with PPSSPP's audio dump (`DumpAudio`) | small (to check) |
-| 8 | The attract demo's sound clips | the main menu left for 30 s | 3474 clipped samples in the sceSas channel over two demos; the scripted races at most 0.014% | unknown: the framework's SAS mix level, or the PSP clips too | small (to check) |
-| 9 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework (7.7 million writes a cell) | framework GE state: the colour test | small |
-| 10 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws a frame), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state | small each |
+| 7 | The game freezes for 0.1 to 0.3 s now and then, with a gap in the sound | 12 of the 46 cells, one or two times each, at no fixed place (Zone 4 and Free Play Vineta K run again had them elsewhere) | race flips 102 to 295 ms after the one before, with sceSas and music underruns at the same moment and nothing else in the log (the matrix's hitches column, `out/fidelity-hitch/`) | unknown: the host holding the process (the machine was never idle), the sweep's pty reader holding the game's per-frame probe lines, or something of the port's own (the WAV capture, the backend's GPU waits); check on an idle machine in a run like a player's (a window, no probe lines, no WAV) with `PURE_METAL_TRACE` to see where the time goes | small (to check) |
+| 8 | The race music stops for about 2 s when it changes tracks, with a 10 to 60 ms underrun as the next starts; in Free Play it stops for 3.9 s at the finish line | all long races at 524.7 to 527.3 s of game time (5:24 into the race music; shorter gaps at the later changes); every Free Play finish | music channel zero runs of 177 ms and 2.15 s at 524.7 and 525.1 s and an underrun at 527.3 s, the same in all 14 cells that get there; Free Play's silence from 213.1 s of race clock on Vineta K (the laps end at 212.8 s) | unknown: the game's own track change and finish, or the framework's sceAtrac feeding the new track late; compare with PPSSPP's audio dump (`DumpAudio`) | small (to check) |
+| 9 | The attract demo's sound clips | the main menu left for 30 s | 3474 clipped samples in the sceSas channel over two demos; the scripted races at most 0.014% | unknown: the framework's SAS mix level, or the PSP clips too | small (to check) |
+| 10 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework (7.7 million writes a cell) | framework GE state: the colour test | small |
+| 11 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws a frame), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state | small each |
 
 Not differences, though they looked like ones:
 
@@ -654,9 +657,6 @@ Not differences, though they looked like ones:
 - Zone's pace: a PPSSPP run with a capture every vblank seemed to count zones three times as fast, but a run with no
   capture during the race ends exactly as the port does (TOTAL ZONES CLEAR 6, SCORE 4292 against 4291): PPSSPP's
   captures moved its timing, not the port's.
-- The hitches: one or two race flips of 102 to 295 ms in 12 cells, each with an underrun on the sceSas and music
-  channels and nothing else in the log; the cells ran while other work loaded the machine, and a paced run whose
-  process stalls catches the emulated clock up with real time at once.
 - The movie channel's two 1.9 s underruns at boot in every cell: a reserved channel the game sends nothing for a
   while, silent on a PSP too.
 - The follower's stalls (Sinucit's fork, Manor Top, Karbonis at Phantom, a wedge against a wall on Chenghou Project at
