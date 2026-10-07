@@ -151,7 +151,9 @@ or FAIL per check:
 
 It exits 0 when all pass. route, finder and prewarm play the installation, so when setup fails they are reported
 FAIL without running (with no game the app shows its setup screens and waits). It writes only under `DIR`;
-`DIR/data` holds the copy of the image, so `DIR` must stay under the ignored `out/`.
+`DIR/data` holds the copy of the image, so `DIR` must stay under the ignored `out/`. Each run's log is started
+afresh; `open` appends to its `--stdout` file, so before task 042 a second check into the same `DIR` read the first
+one's `finder.log` too.
 
 The runs are silent and use no data directory but `DIR/data` (task 034's follow-up, task 042), as the other tools run
 on their scratch directories. Every run names `PURE_DATA_DIR=DIR/data`, which the packed app honours (the route check
