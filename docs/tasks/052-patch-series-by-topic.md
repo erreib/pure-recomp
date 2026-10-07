@@ -66,7 +66,7 @@ Two patches cannot be folded without changing hunks in a way that alters the tre
 or the identity hash differs after regrouping (report the file: stop, do not "fix" it).
 
 ## Result
-Status: IN PROGRESS (the folding proposal, written and committed before the series changes; the outcome follows it)
+Status: DONE (the proposal below was committed first, dcec168, and carried out as written; the outcome follows it)
 
 ### Proposal (written before the regrouping)
 Nine patches for the twenty, in this order. "Pieces" are an old patch's per-file sections, split at file boundaries
@@ -123,6 +123,107 @@ index over the whole working tree, so the vendor checkout's own index is untouch
 - sha256 of the manifest (mode, sha256, path of each of the 344 files outside .git): 886cbf59285e2642011e9ce01e78f844b93ea7d625cca5808d59c44e79ae16ff
 - sha256 of the full diff against the pin (50 files, binary, full index): a533d876ac1a9e64f1a3e961ecb56b66d33dae1b409831a7406402e308159cdc
 - frame regression before (headless, metal): 18/18, out/052/regress_before/summary.txt
+
+### Outcome
+Carried out as proposed, one step a commit, `tools/patches.sh check` passing after each: 0957d08 (old series
+renamed 10NN), then f17eccb (0001), 409e7af (0002), 6060c1d (0003), c151c4c (0004), 7021d72 (0005), 0d11f59
+(0006), 2a1218e (0007), a60d011 (0008), a11544d (0009); 2dbe1b8 patches/README.md; 09f2d48 docs/upstream.md.
+
+Changed (old to new):
+
+| Old | New |
+|---|---|
+| 0001 | 0001-cmake-embed-nids-verbatim (byte-identical to old 0001) |
+| 0004, 0013, 0014, 0017: ge_state.{hpp,cpp} sections | 0002-ge-state-commands |
+| 0003, 0004 (ge.frag, vulkan_renderer.cpp), 0005, 0006, 0007, 0008, 0013/0014/0017 (vulkan_renderer.cpp, comments) | 0003-vulkan-renderer-fixes |
+| 0009, 0010, 0012, 0013/0014/0017 (ge_record_format.hpp), 0017 (record_backend.cpp) | 0004-ge-backend-and-shell-seams |
+| 0011 | 0005-kernel-host-waits-and-pacing (byte-identical to old 0011) |
+| 0002 | 0006-mpeg-ring-not-empty-while-aus-pending (byte-identical to old 0002) |
+| 0015, 0019 | 0007-savedata-list-and-no-key-mode |
+| 0018 | 0008-sas-reverb (byte-identical to old 0018) |
+| 0020, 0021 | 0009-vfpu-rounding |
+
+Files: patches/ (twenty patches out, nine in; README.md rewritten: the old-to-new table at the top, a row per new
+patch with the old numbers it absorbed, kind and upstream status, then each old row's text under its new patch),
+docs/upstream.md (new), this Result. Not changed: tools/patches.sh (the regrouping needed nothing it lacks: the
+old series was renamed 10NN during the steps so new and old numbers never met), docs/vendor-map.md (it has no
+patch list), vendor/ (nothing committed). Every new patch was generated as one tree diff (the same `git diff`
+options as `tools/patches.sh export`) in a scratch clone of the pin, from the old patches and their per-file
+sections applied in the new order; no hunk was edited, and the four split patches' sections add up to their bytes.
+
+Identity after (out/052/after/, vendor/portablekit rebuilt from the nine by `tools/vendor_setup.sh`, then hashed
+the same way as before):
+- git tree: fcbef3828d8143b437ba91b541340f129f175a38 (before: the same)
+- manifest sha256: 886cbf59285e2642011e9ce01e78f844b93ea7d625cca5808d59c44e79ae16ff (before: the same; the two
+  manifest files compare equal with cmp)
+- full diff against the pin sha256: a533d876ac1a9e64f1a3e961ecb56b66d33dae1b409831a7406402e308159cdc (before: the
+  same; the two diff files compare equal with cmp)
+- `tools/patches.sh check`: "ok: 9 patch(es) reproduce vendor/portablekit at 8b0c3fe"
+- `tools/build.sh profile` after the rebuild: 5 s, every unit a ccache hit. Frame regression: 18/18 with every
+  fraction and delta as before, and the 18 captures byte-identical to the ones before the regrouping
+  (out/052/regress_before/shots and out/052/regress_after/shots).
+- The PureNative binary's sha256 differs from before (e5d5c0f7... then 011895e9...), from the version string only:
+  the build embeds `git describe` of this checkout (743623f before, a11544d after), not anything of the vendor tree.
+
+Files touched by more than one patch: 20 of 50 before, 10 after. vulkan_renderer.cpp by 11 patches before, 2 after
+(0003, 0004), vulkan_renderer.hpp by 3 before, 2 after (the same two); ge_state.{hpp,cpp}, ge_record_format.hpp, ge.frag, record_backend.cpp, shell.hpp, vulkan_shell.cpp,
+layer.cpp, hle_savedata.cpp and allegrex_context.hpp by one patch each now. Left: PortableKit.cmake by 4 (0001, 0004,
+0007, 0009: each a different spot, no shared context), hle_media.cpp by 4 (0003, 0004, 0005, 0008), and six files
+0004 creates or reshapes and 0007 extends for the `save` script step (headless_shell.cpp, script_steps.{hpp,cpp},
+input_script.{hpp,cpp}, menu.cpp).
+
+Dependencies measured for docs/upstream.md (each new patch with `git apply` on a clean pin): 0001, 0002, 0003,
+0006, 0008 and 0009 apply to the pin alone; 0004 needs 0003; 0005 and 0007 need 0004.
+
+Verify output (`tools/verify_task.sh 052`, last 20 lines; its first lines were "ok: 9 patch(es) reproduce
+vendor/portablekit at 8b0c3fe" and the incremental build, which recompiled menu.cpp for the version string):
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0113   0.12   32    0.0112 +0.0001  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0115   0.11   32    0.0116 -0.0001  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 26s)
+verify 052: PASS
+```
+(The first Verify attempt was refused by the one-game guard while another worktree's game ran; the retry, once it
+had finished, is the run above. The 18-row table is identical to the one before the regrouping.)
+
+Open questions:
+1. The shape departs from the brief's in three places, argued in the proposal: the build patch is 0001 alone (the
+   CMake lines of old 0009/0010/0015/0020 are their topics' own sources and the VFPU rule's compile flag); 0004's
+   stencil state went with the other GE state into 0002 before the renderer, and the record format's later fields
+   into the seam patch, instead of one "state and record format" patch (0009 needs the stencil fields, so no order
+   puts them after it); 0002 and 0011 stay apart. If the review prefers all CMake in one patch, that is a re-cut by
+   file of 0004, 0007 and 0009, at the cost of a build patch that names sources before they exist.
+2. Old numbers are still cited outside the May-touch list: docs/metal-backend.md, docs/status.md, docs/fidelity.md,
+   README.md, docs/ge-backend.md, docs/savedata.md, docs/verification.md, docs/ge-effects.md, docs/decisions.md,
+   docs/scorecard.md, docs/timing.md, ref/README.md, comments in tools/ (vfpu_model.py, vfpu_probe.py,
+   gerec/gerec_dump.py, gerec/metal_check.sh, save_interchange.sh, save_roundtrip.sh, scorecard.py) and
+   src/tools/ge_replay.{hpp,cpp}, plus the task files. The table at the top of patches/README.md maps them; a later
+   docs pass could switch them. None uses a patch file name: no tool reads a patch by number.
+3. Three comments inside the vendor tree cite old numbers ("patch 0014" and "patch 0017" in ge_record_format.hpp,
+   "patch 0021" in include/psprecomp/allegrex_context.hpp). Changing them changes the tree (and the last recompiles
+   the corpus), so they stay until a deliberate vendor change touches those lines.
+4. Keeping one patch per topic: `tools/patches.sh export` still writes only a new patch above the last, so the next
+   vendor change becomes 0010 whatever its topic. Folding a change into its topic patch needs either an export mode
+   that regenerates a given patch, or another regrouping pass like this one later. A decision for Fable or Erik;
+   this task left the tool alone.
+5. A branch in flight that exported a vendor patch against the old series (0022 or above) still applies after 0009,
+   since the tree under it is byte-identical; it would be renumbered 0010 and its README row rewritten at merge.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
