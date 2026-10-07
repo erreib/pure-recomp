@@ -241,15 +241,20 @@ def other_game():
     return run_boot.other_games()
 
 
+WAITED = 0.0                           # seconds spent waiting for someone else's game or PPSSPP
+
+
 def wait_until(busy, what, limit=3600.0):
     """Waits while busy() names something (another game, another PPSSPP, a profile on PPSSPP's stick): one game at a
     time, and a process this tool did not start is never touched. False after `limit` seconds."""
+    global WAITED
     t0, said = time.time(), False
     while True:
         b = busy()
         if not b:
             if said:
                 say(f"{what}: free after {time.time() - t0:.0f} s")
+                WAITED += time.time() - t0
             return True
         if not said:
             say(f"waiting: {what} ({b})")
@@ -1218,8 +1223,10 @@ def render_md(result, header=True):
             continue
         counts = [sum(1 for r in c["rows"] if r["grade"] == g) for g in (FAITHFUL, CLOSE, DIFFERS)]
         other = len(c["rows"]) - sum(counts)
+        waited = c.get("waited_s", 0)
         lines.append(f"| {name.capitalize()} | {c['grade']} | {counts[0]} / {counts[1]} / {counts[2]} / {other} | "
-                     f"{c['wall_s']:.0f} s |")
+                     f"{c['wall_s']:.0f} s" + (f" ({waited:.0f} s of it waiting for another task's game)"
+                                               if waited >= 1 else "") + " |")
     for name in CATEGORIES:
         c = result["categories"].get(name)
         if not c:
@@ -1264,7 +1271,7 @@ def run(opts):
              "saves": cat_saves, "coverage": cat_coverage}
     order = [c for c in ("trajectories", "audio", "pictures", "timing", "saves", "coverage") if c in cats]
     for name in order:
-        c0 = time.time()
+        c0, w0 = time.time(), WAITED
         say(f"{name} ...")
         try:
             rows = funcs[name](ctx)
@@ -1273,11 +1280,14 @@ def run(opts):
             traceback.print_exc()
             rows = [row(f"{name}", "-", "-", "-", NOT_MEASURED, "", f"the scorecard failed here: {type(e).__name__}: {e}")]
         grade = worst([r["grade"] for r in rows])
-        result["categories"][name] = {"grade": grade, "rows": rows, "wall_s": round(time.time() - c0, 1)}
+        result["categories"][name] = {"grade": grade, "rows": rows, "wall_s": round(time.time() - c0, 1),
+                                      "waited_s": round(WAITED - w0, 1)}
         say(f"{name}: {grade} ({len(rows)} rows, {time.time() - c0:.0f} s)")
     wall = time.time() - t0
     result["wall_s"] = round(wall, 1)
-    result["wall"] = f"{int(wall // 60)}m {int(wall % 60)}s"
+    result["waited_s"] = round(WAITED, 1)
+    result["wall"] = f"{int(wall // 60)}m {int(wall % 60)}s" + (
+        f", of it {int(WAITED // 60)}m {int(WAITED % 60)}s waiting for another task's game" if WAITED >= 1 else "")
     result["categories"] = {k: result["categories"][k] for k in CATEGORIES if k in result["categories"]}
     (out / "scorecard.json").write_text(json.dumps(result, indent=1, default=str) + "\n")
     md = render_md(result)
