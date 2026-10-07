@@ -162,8 +162,8 @@ The other rows:
   - 3 imports are the profile's constants (sceKernelGetGPI, sceKernelRotateThreadReadyQueue,
     sceKernelGetThreadmanIdList).
   - 30 GE commands are still ignored, and none of them is one a draw of the game uses.
-- **Coverage, not graded:** 26 imports have no implementation and none is called (faithful). Functions entered: not
-  measured.
+- **Coverage, beside those:** the 26 imports with no implementation are never called (that row is faithful), and
+  functions entered is `not measured`.
 
 **Other figures:**
 - Pictures: the 18 suite scenes are at their measured values (race_hud 0.0148). Blue Ridge scores 0.0247, Sinucit
