@@ -1,13 +1,13 @@
 #!/bin/bash
 # Save interchange with PPSSPP (task 045): saves move both ways between the port and a PSP (PPSSPP stands in for one)
-# now that the port writes them in the save-data utility's no-key mode, mode 1, as a PSP does (patch 0019).
+# now that the port writes them in the save-data utility's no-key mode, mode 1, as a PSP does (task 045).
 #   (a) PPSSPP -> port  PPSSPP's profile (ref/saves/ppsspp/UCUS98612P0000: NAME0000, AAA, made by the driver's
 #                       frontend.txt + save_yes.txt + save_dialog.txt) on a fresh memory stick of the port's; the
 #                       port runs config/pad_scripts/profile_load.txt headless with PURE_TRACE_SAVEDATA: LISTLOAD
 #                       loads it with both hashes verified, MAIN MENU matches the suite's reference, SET NAME shows
 #                       NAME0000, and the game's own PROFILE > SAVE (the script's `save P0000`) writes it back in
 #                       mode 1 with "User name: NAME0000" in PARAM.SFO. That save is the round trip's.
-#   plain               a plain save the build before patch 0019 wrote (ref/saves/port-plain/UCUS98612P0000) loads the
+#   plain               a plain save the build before task 045 wrote (ref/saves/port-plain/UCUS98612P0000) loads the
 #                       same way, and the game's PROFILE > SAVE rewrites it in mode 1.
 #   born                the port's own profile: main_menu.txt on an empty stick, headless (the same presses that made
 #                       PPSSPP's), for (c).
@@ -351,7 +351,7 @@ mkdir -p "$OUT/port-roundtrip" && cp -Rp "$OUT/a/game/ms0/PSP/SAVEDATA/$PROFILE"
 OUTCOME[1]="(a) PPSSPP -> port: $(verdict "PPSSPP's NAME0000 loaded (PARAM.SFO and PROFILE.BIN hashes verified), MAIN MENU and SET NAME as on PPSSPP; the game saved it back in mode 1")"
 TOTAL=$((TOTAL + FAILS))
 
-# 2. A plain save from the build before patch 0019.
+# 2. A plain save from the build before task 045.
 echo
 echo "plain: the previous build's plain save"
 FAILS=0

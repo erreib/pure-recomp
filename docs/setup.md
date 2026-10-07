@@ -11,9 +11,6 @@ Machine: Apple M4 Pro, 24 GB, macOS 15.7.9, Command Line Tools only (no Xcode).
 - macOS has no `timeout`; `tools/run_boot.py` enforces its own deadline.
 - Python 3.13 (`/opt/homebrew/bin/python3`) has zlib but no PIL or numpy; `tools/png.py` is dependency-free.
 
-## Installs (spike S1)
-See the install log in `docs/setup.md` once S1 completes.
-
 ## S1 results (2026-10-05)
 Installed through the arm64 Homebrew: cmake, ninja, ccache, pkgconf, sdl3 3.4.18, molten-vk, vulkan-loader and
 vulkan-headers 1.4.363, glslang, vulkan-validationlayers, ghidra 12.1.4 (with openjdk 21), and the cask

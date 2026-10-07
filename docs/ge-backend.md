@@ -1,33 +1,46 @@
-# The GE backend seam (D-003)
+# The GE backend and shell seams (D-003, D-007)
 
-Written 2026-10-06, after patches 0003 to 0008 established what Wipeout Pure asks of a renderer. The vendored
-`VulkanRenderer` (host/gpu/vulkan_renderer.cpp, ~8k lines) fuses two things: the **shell** (SDL window, events, pad
-sampling, scripted input, ImGui, settings, frame pacing and interpolation, capture) and the **GE backend** (what the
-PSP's graphics engine did: targets in VRAM, textures, blending, stencil-as-alpha, read-backs). The Metal backend
-replaces only the second. The seam sits between them.
+The vendored framework's `VulkanRenderer` (`host/gpu/vulkan_renderer.cpp`, about 8k lines) fused two things: the
+**shell** (the SDL window, events, pad sampling, scripted input, ImGui, settings, frame pacing and interpolation,
+capture) and the **GE backend** (what the PSP's graphics engine did: targets in VRAM, textures, blending,
+stencil-as-alpha, read-backs). Two seams put each behind an interface, so the HLE (`host/hle/hle_media.cpp`) talks
+to a `host::Shell` and a `gpu::GeBackend` and to nothing else, and a game adds a backend or a shell in its own
+sources: ours are the Metal backend (`src/gpu/`, docs/metal-backend.md) and the Metal shell
+(`src/host/metal_shell.mm`). Both seams are vendor patch 0004-ge-backend-and-shell-seams (the GE backend seam of task
+021, the shell seam of task 026, the UI platform init of task 027; D-003, D-007), an upstream candidate
+(docs/upstream.md). Paths without a prefix are under `vendor/portablekit/`.
+
+This doc was the seams' design (2026-10-06) with what each task landed added after it; it describes them as they are
+since task 053 (2026-10-07). The design as first written, the order of work, and what tasks 021, 022 and 026
+measured: [docs/history/ge-backend.md](history/ge-backend.md).
 
 ## 1. The backend interface
 
-`portablekit::gpu::GeBackend` (new, vendor patch), implemented by `VulkanGeBackend` (a thin adapter over the existing
-renderer's draw path; the renderer itself is not split) and later `MetalGeBackend` (ours). The shell owns a
-`std::unique_ptr<GeBackend>` chosen by `<prefix>_GE_BACKEND` (`vulkan`, `metal`, `null`, `record`).
+`portablekit::gpu::GeBackend` (`host/gpu/ge_backend.hpp`). The HLE holds one, made by name (section 5), and calls it
+for everything the GE does:
 
 | Method | What it must do (from this game's needs) |
 |---|---|
-| `initialize(const BackendConfig&, std::string& error)` | device, internal scale (1x first; 2x the shell's default today), sharp/filtered textures |
-| `begin_frame()`, `begin_display_list()` | per-frame and per-list bookkeeping (guest-word snapshots of targets are taken at a target's first draw of the frame: patch 0003's lookup depends on it) |
-| `submit(const DrawCall&, const GuestMemory&)` | the whole GE state of one draw: vertex formats (s8/s16/f32 positions, uv, colours, normals, 8 bone weights, morph), through mode, PSP clip z in [-w, w], alpha test with GE numbering (0 NEVER, 1 ALWAYS: patch 0005), colour test, blend equations incl. FIX colours and the 2x/ABSDIFF modes, logic ops, per-channel write masks (PMSKC) and the alpha mask (PMSKA), **stencil ops as alpha writes** with a real stencil attachment and the alpha copy rule (patches 0004/0006), dual-source blending for REPLACE under source-alpha blends, fog, 4 lights, texture binds incl. CLUT4/8/16/32, DXT1/3/5 in the PSP block layout, swizzle, mip levels, and **framebuffer-as-texture binds resolved to the target that starts at the address** (patch 0003) |
-| `block_transfer(const BlockTransfer&, const GuestMemory&)` | GE copies between VRAM rectangles, reading rendered targets back first when the source is one |
+| `name()`, `needs_window()` | the registered name; whether it draws with the window shell's device (asked before `initialize`: the Vulkan backend does, null, record and metal do not) |
+| `initialize(const BackendConfig&, std::string& error)`, `shutdown()` | device, internal scale, sharp or filtered textures (`BackendConfig`: `vulkan_shell`, the window's `VulkanRenderer` or null; `internal_scale`; `sharp_textures`). `shutdown` **frees every per-target resource before the pools they came from** (task 015) |
+| `begin_frame()`, `begin_display_list()` | per-frame and per-list bookkeeping (a target's guest-word snapshot is taken at its first draw of the frame: the framebuffer-texture lookup of section 2 depends on it). `begin_frame()` is called once after `initialize` and after each flip |
+| `gpu_decode()`, `check_gpu_decode()` | whether `GeState` hands transformed draws over undecoded (false unless a backend draws raw vertices, as Vulkan can with `<prefix>_GPU_DECODE=1`) |
+| `submit(const DrawCall&, const GuestMemory&)` | the whole GE state of one draw: vertex formats (s8/s16/f32 positions, uv, colours, normals, 8 bone weights, morph), through mode, PSP clip z in [-w, w], the alpha test by the GE's numbering (0 NEVER, 1 ALWAYS), the colour test, blend equations with FIX colours and the 2x/ABSDIFF modes, per-channel write masks (PMSKC) and the alpha mask (PMSKA), **stencil ops as alpha writes** with a real stencil attachment and the alpha copy rule, dual-source blending for REPLACE under source-alpha blends, fog, 4 lights, the texture map modes, texture binds with CLUT4/8/16/32, DXT1/3/5 in the PSP block layout, swizzle, mip levels, dithering into 16-bit targets, CLIPENABLE's depth clamp, and **framebuffer-as-texture binds resolved to the target that starts at the address** (section 2). What `DrawCall` carries is the framework's GE state with patch 0002-ge-state-commands; what each backend draws of it: docs/metal-backend.md, "Where it differs from the Vulkan backend on purpose" |
+| `block_transfer(const BlockTransfer&, GuestMemory&)` | GE copies between VRAM rectangles: called before the HLE copies the rows (the copy is guest memory, so it stays in the HLE), the backend writing a rendered source back into guest memory first; the HLE then calls `begin_display_list()` |
 | `write_back_frame(GuestMemory&)` | the display target's pixels into guest VRAM when the CPU needs them |
 | `read_back_framebuffer(address, GuestMemory&)` | one target into guest VRAM (block transfers, movie frames) |
-| `write_back_depth(color, depth, stride, GuestMemory&, why)` | the depth target as Z16 into guest VRAM at a SIGNAL (patch 0008: the lens flare reads a 4x4 block around the sun) |
+| `write_back_depth(color, depth, stride, GuestMemory&, why)` | the depth target as Z16 into guest VRAM at a SIGNAL (the lens flare reads a 4x4 block around the sun: docs/ge-effects.md); returns whether it wrote |
 | `upload_frame(display, pixels, w, h, stride)` | a CPU-drawn picture (movies, `show_cpu_picture_in_vram`) into the display target |
-| `present_image(display_address) -> PresentedImage` | the display target at the display address, as an image the shell composites with the UI and presents; the backend never touches the swapchain |
-| `capture_frame(path)` | the presented image as BMP/PNG for the regression suite |
-| `draws_submitted()`, `frames_presented()` | stats the HLE prints |
-| `shutdown()` | **free every per-target resource before the pools they came from** (patch 0007) |
+| `present_image(display_address) -> PresentedImage` | the display target at the display address (or the target drawn last when none is there), as an image the shell composites with the UI and presents; the backend never touches the swapchain. `PresentedImage`: `api` (None, Cpu, Vulkan, Metal), `address`, `width`, `height`, `pixels` (Cpu), `image` and `view` (the API's handles as integers), valid until the next call |
+| `capture_frame(path)` | the presented image as a BMP for the regression suite and the script's `shot` without a window |
+| `draws_submitted()`, `frames_presented()` | the counters the HLE prints |
 
-Out of the backend: window, swapchain, vsync, aspect, fullscreen, UI, pad, scripted input, texture packs, frame
+The frame, as `present_frame` drives it: `upload_frame` (a main-memory framebuffer), the interface,
+`write_back_frame`, `present_image(address)`, then the shell's `present` with that image, the optional capture
+(`capture_frame`; `frames_presented` and `draws_submitted` for the `[render] frame N (D draws)` line), and
+`begin_frame()` for the next frame.
+
+Out of the backend: the window, swapchain, vsync, aspect, fullscreen, UI, pad, scripted input, texture packs, frame
 interpolation (it works on presented images and stays in the shell), fast-forward.
 
 ## 2. Render-target model every backend must share
@@ -38,138 +51,131 @@ interpolation (it works on presented images and stays in the shell), fast-forwar
   0x04132000 lies inside it, 0x04154000 is a 565 target sampled back as a texture (docs/ge-effects.md). A texture
   bind that lands in a target samples that target's image, exact-address target first.
 - Alpha is the PSP's stencil. The stencil attachment is exact; alpha is the copy that sampling, blending, display and
-  write-back read; the copy rule from patch 0006 (stale after ops alpha cannot express, resolved before a
-  destination-alpha read and at the end of the pass) is part of the contract.
-- Depth: PSP z in [0, 65535]; the vertex path remaps clip z from [-w, w]; MINZ/MAXZ and the clip-plane enable may
-  stay ignored (nothing in this game needs them). `write_back_depth` stores round(z x 65535).
+  write-back read; the copy rule (task 011: stale after ops alpha cannot express, resolved before a
+  destination-alpha read and at the end of the pass; docs/ge-effects.md) is part of the contract.
+- Depth: PSP z in [0, 65535]; the vertex path remaps clip z from [-w, w]. With CLIPENABLE on (every transformed draw
+  of this game) the GE clips at the near plane only, clamps each vertex's screen z to 0..65535 and tests MINZ/MAXZ
+  per pixel; the Metal backend draws that rule (task 040), the Vulkan backend clips at both planes, and for this
+  game the two give the same pixels. `write_back_depth` stores round(z x 65535).
 
-## 3. How Metal meets it (from the Bouncer backend, docs in ~/dev/bouncer-recomp/docs/metal-backend.md)
+## 3. The backends
 
-- Programmable blending through framebuffer fetch gives logic ops, per-channel masks and the odd PSP blend
-  equations without extra passes; Metal's own blend units cover the common SA/1-SA cases and dual-source output.
-- Shaders are MSL source compiled at runtime (no Xcode on this machine); one function-constant-specialised
-  uber-shader per vertex-format class, as Yakumo's GLSL does.
-- `mathMode = safe` and explicit `fma` where results must match the CPU rasteriser or the Vulkan backend.
-- Stencil: `MTLPixelFormatDepth32Float_Stencil8`, the same copy rule.
-- `present_image` returns an `MTLTexture`; the shell's Metal presenter (CAMetalLayer via `SDL_Metal_CreateView`,
-  ImGui's Metal backend) composites and presents.
+| Name | Where | What |
+|---|---|---|
+| `vulkan` | `host/gpu/vulkan_ge_backend.cpp` (built with the renderer) | `VulkanGeBackend`, a thin adapter over `VulkanRenderer`'s draw path; it needs the Vulkan shell, whose renderer is `BackendConfig::vulkan_shell`. The renderer still begins its frame lazily at the first draw, upload or present and ends it in the shell's present, which also does the frame write-back's copy, frame interpolation and the swapchain, so `begin_frame()` does nothing and `present_image()` only names the target (`VulkanRenderer::display_image`). Every other method forwards to the renderer method the HLE called before the seam |
+| `null` | `host/gpu/null_backend.cpp` (system layer: built without Vulkan) | counts draws, block transfers and uploads, presents a black 480x272 Cpu image and writes it for `capture_frame`; prints `[render] null backend: frame N, D draws submitted (K in the last 600 frames, F fps)` every 600 frames and a total at exit. It needs no window or GPU, so with `<prefix>_NO_RENDER` set it runs headless |
+| `record` | `host/gpu/record_backend.cpp`, `host/gpu/ge_record_format.hpp` | wraps another backend (`<prefix>_GE_RECORD_INNER`, default vulkan) and writes the calls it sees with the guest memory each read, and each frame's presented image, to a `.gerec` file (section 6) |
+| `metal` | ours: `src/gpu/` | the native backend, the default on macOS (D-008): docs/metal-backend.md. MSL compiled at run time (no Xcode), `Depth32Float_Stencil8` targets with the same stencil copy rule, `present_image` returns the target's `MTLTexture` for the Metal shell to draw (or hands a read-back to the Vulkan shell's window). Registered from our sources with a `BackendRegistration` |
+
+The registry (`register_backend`, `make_backend`, `backend_names`, `backend_description`, `BackendRegistration`)
+lets any source file add a backend before `main()`.
 
 ## 4. Validation
 
-- `null` backend: proves the split (the game runs headless through the seam with no GPU).
-- `record` backend: wraps any backend and serialises DrawCall/BlockTransfer/uploads/read-backs plus the presented
-  images to a `.gerec`; `tools/gerec/ge_replay` feeds a recording to any backend and compares presented images
-  (first differing draw by bisection) and runs `--fuzz` over the GE state space, backend against backend. This is
-  the Bouncer method that found every bookkeeping fault there.
-- `tools/frame_regress.sh --backend metal` (task 020) against the PPSSPP references.
+- The `null` backend proves the split: the game runs headless through the seam with no GPU.
+- The `record` backend and ge_replay (section 7): a recording replayed into any backend, compared with its recorded
+  pictures or backend against backend, the first differing draw found by bisection.
+  `tools/gerec/replay_check.sh` checks the replay itself (Vulkan against its recordings, Vulkan against null);
+  `tools/gerec/metal_check.sh` checks Metal against Vulkan on the TEAM screen and the race (docs/metal-backend.md,
+  "The 3D check", "The race check").
+- `tools/frame_regress.sh` against the PPSSPP references, on both paths (docs/verification.md).
 
-## 5. Order of work
+The design also planned a `--fuzz` mode over the GE state space, backend against backend; it was not built.
 
-021 seam + null + record + Vulkan adapter (vendor patch; no behaviour change for Vulkan: frame_regress must be
-unchanged) → 022 ge_replay → 023 Metal backend, first pictures (frontend, through-mode 2D) → 024 Metal 3D (race
-frame against Vulkan and PPSSPP) → 025 Metal stencil/bloom/depth write-back → 026 the shell seam (section 8: `Shell`
-interface, Vulkan shell adapter, headless shell with pad from the input script; vendor patch 0010) → 027 Metal
-presenter + UI (a `MetalShell` against section 8). 022 and 023 run in parallel after 021; 026 runs in parallel with
-them (it touches the vendor only).
+## 5. Selection
 
-## 6. What landed (task 021, 2026-10-06)
+`ensure_shell_and_backend()` in `hle_media.cpp` (also behind `ensure_renderer()`, which the setup screens call
+first): the backend `<prefix>_GE_BACKEND` names is made first (it is asked `needs_window()`), then the shell
+`<prefix>_SHELL` names (`headless` whenever `<prefix>_NO_RENDER` is set, with any value, also empty), then the backend
+is initialised with `BackendConfig::vulkan_shell` set when the shell is the Vulkan one. Both default to `vulkan` in
+the framework; on macOS our entry point (`src/host/pure_main.cpp`) sets both to `metal` when they are unset (D-008).
+An unknown name prints the registered ones and falls back to vulkan; an empty value means vulkan.
 
-Patch 0009 (`patches/0009-ge-backend-seam.patch`) adds the seam to the vendored framework. Files, all under
-`vendor/portablekit/`:
+| `GE_BACKEND` | `SHELL` `vulkan`, `NO_RENDER` unset | `SHELL` `metal` | `NO_RENDER` set, or `SHELL=headless` |
+|---|---|---|---|
+| vulkan | Vulkan shell, Vulkan draws | draws nothing (the backend needs the Vulkan shell) | no rendering at all, no draw sink, no shell |
+| metal | the Metal backend draws; each picture is read back and shown in the Vulkan window (`PURE_METAL_SHELL=0` turns the hand-over off) | the Metal shell shows the backend's texture: no Vulkan or MoltenVK in the process | headless shell: no window, every draw reaches the backend, which still draws on the GPU |
+| null | Vulkan shell; the null backend's black Cpu image uploaded into the display target and shown; scripted input through the virtual gamepad | the black Cpu image | headless shell: no window, no GPU, every draw reaches the backend, the pad from the script |
+| record | as its inner backend | as its inner backend | as its inner backend |
+
+When the Vulkan shell cannot be made ("Renderer: unavailable (...); running headless"), a backend that needs no
+window runs in the headless shell. The kernel's clock is paced to real time when the shell has a window and unpaced
+when it has none (`Kernel::set_paced`, set where the HLE makes the shell: patch 0005-kernel-host-waits-and-pacing);
+`PURE_PACED_FROM` (README.md) overrides that per run.
+
+## 6. The seam in the vendor tree, and the .gerec format
+
+The GE backend seam's files, all under `vendor/portablekit/` (the shell seam's are in section 8):
 
 | File | What |
 |---|---|
-| `host/gpu/ge_backend.hpp`, `.cpp` | `GeBackend`, `BackendConfig`, `PresentedImage`, the registry (`register_backend`, `make_backend`, `backend_names`, `BackendRegistration`), `selected_backend()` (`<prefix>_GE_BACKEND`, vulkan when unset or empty), a BMP encoder |
+| `host/gpu/ge_backend.hpp`, `.cpp` | `GeBackend`, `BackendConfig`, `PresentedImage`, the registry, `selected_backend()` (`<prefix>_GE_BACKEND`, vulkan when unset or empty), a BMP encoder (`encode_bmp`, `write_bmp_file`) |
 | `host/gpu/vulkan_ge_backend.cpp` | `vulkan`: the adapter over `VulkanRenderer` (renderer sources) |
 | `host/gpu/null_backend.cpp` | `null` (system-layer sources: built without Vulkan) |
 | `host/gpu/record_backend.cpp`, `ge_record_format.hpp` | `record` and the `.gerec` format (Writer and Reader, for ge_replay) |
-| `host/gpu/vulkan_renderer.hpp`, `.cpp` | one new method, `display_image(address)`: the target `present()` would show, as a `PresentedImage`; it changes nothing |
-| `host/hle/hle_media.cpp` | every GE call goes to the backend; the window shell stays the `VulkanRenderer` |
-| `cmake/PortableKit.cmake` | the four new sources (outside the brief's "May touch", but the new files cannot be built without it) |
-
-### The interface as landed
-
-As in section 1, with these differences:
-
-- `block_transfer(const BlockTransfer &, GuestMemory &)`: the memory is not const, because the backend writes a
-  rendered source back into it. It is called before the HLE copies the rows; the copy itself stays in the HLE (it is
-  guest memory), followed by `begin_display_list()` as before.
-- Added: `name()`; `needs_window()` (asked before `initialize`: the Vulkan backend draws with the shell's device and
-  targets); `gpu_decode()` and `check_gpu_decode()` (whether `GeState` hands transformed draws over undecoded; false
-  unless a backend draws raw vertices, as Vulkan can with `<prefix>_GPU_DECODE=1`).
-- `BackendConfig`: `vulkan_shell` (the window's `VulkanRenderer`, null without a window), `internal_scale` and
-  `sharp_textures` (from the settings; the Vulkan backend keeps following the shell's settings itself).
-- `PresentedImage`: `api` (None, Cpu, Vulkan, Metal), `address`, `width`, `height`, `pixels` (Cpu), `image` and
-  `view` (the API handles as integers: for Vulkan the target's `VkImage` and `VkImageView`).
-- The frame, as `present_frame` drives it: `upload_frame` (a main-memory framebuffer), the interface,
-  `write_back_frame`, `present_image(address)`, then the shell's `VulkanRenderer::present`, the optional capture
-  (`capture_frame`, `frames_presented`, `draws_submitted` for the `[render] frame N (D draws)` line), and
-  `begin_frame()` for the next frame. `begin_frame()` is also called once after `initialize`.
-
-What stays fused in the Vulkan pair, and why no output changed: the renderer still begins its frame lazily at the
-first draw, upload or present, and ends it in `VulkanRenderer::present`, which also does the frame write-back's copy,
-frame interpolation and the swapchain. So `VulkanGeBackend::begin_frame()` does nothing and `present_image()` only
-names the image (`display_image`); the shell's present shows the same target. Every other method forwards to the
-renderer method the HLE called before, with the same arguments, at the same point. The frame regression suite gave
-the same fractions before and after (all five scenes +0.0000), and all five captures were pixel-identical to the
-ones before the patch.
-
-### Selection
-
-`ensure_backend()` in `hle_media.cpp` (also behind `ensure_renderer()`, which the setup screens call first) makes the
-backend `<prefix>_GE_BACKEND` names, and the window shell unless `<prefix>_NO_RENDER` is set:
-
-| `GE_BACKEND` | `NO_RENDER` unset | `NO_RENDER` set (any value, also empty) |
-|---|---|---|
-| vulkan (the framework's default; on macOS our entry point selects metal unless set, D-008) | window, Vulkan draws (as before) | no rendering at all, no draw sink (as before) |
-| null | window; the shell's present shows its own, empty targets (black); scripted input works | headless, no window, no GPU, every draw reaches the backend |
-| record | as its inner backend | as its inner backend |
-
-An unknown name prints the registered ones and falls back to vulkan. A backend that needs no window also runs when the
-window cannot be made.
-
-### null
-
-Counts draws, block transfers and uploads, returns a black 480x272 Cpu image, writes it for `capture_frame`. It
-prints `[render] null backend: frame N, D draws submitted (K in the last 600 frames, F fps)` every 600 frames and a
-total at exit. `PURE_GE_BACKEND=null tools/run_boot.py --frames 2000 --env PURE_NO_RENDER=` boots headless to frame
-2000 with 19615 draws submitted (the language screen draws 11 a frame from frame ~690).
-
-Speed: 2000 frames take 106 s with the null backend and 106 s with `PURE_NO_RENDER=1` and no backend at all, about
-19 game frames a second (63% of real time). `PURE_PERF=log` puts render time at 0.0 ms a frame, and the process
-runs at about 4% of one core (`ps`: 1.95 s of CPU in 46 s), about 2 ms of CPU a frame, which would be some 450
-frames a second if nothing slept. The limit is the kernel, not the seam: `user_main` waits for the main thread
-to end (`sceKernelWaitThreadEnd`, a `WaitType::Host` wait) for the whole game, and while any thread is in such a wait
-the unpaced clock sleeps up to 1 ms of real time per step (`Kernel::advance_clock`, kernel.cpp:451). The brief's
-"> 200 fps" needs that changed (task 021, open questions).
+| `host/gpu/vulkan_renderer.hpp`, `.cpp` | `display_image(address)`: the target `present()` would show, as a `PresentedImage` |
+| `host/hle/hle_media.cpp` | every GE call goes to the backend, every window and pad call to the shell |
+| `cmake/PortableKit.cmake` | the new sources |
 
 ### record and the .gerec format
 
-`PURE_GE_BACKEND=record PURE_GE_RECORD=<file> PURE_GE_RECORD_AT=N PURE_GE_RECORD_FRAMES=M PURE_GE_RECORD_INNER=<name>`.
-Frames are numbered as the inner backend's `frames_presented()` counts them once shown, the number the
-`[render] frame N (D draws)` lines carry. Recording starts at the `begin_frame()` after frame N-1 and each frame ends at
-the `begin_frame()` after its flip, where the inner backend's `capture_frame()` gives its image. The format is
-documented at the top of `ge_record_format.hpp`: an 8-byte magic `PKGEREC\0`, a u32 version (1), then records of a u8
-kind, a u32 size and a payload. Kinds: Begin, Memory (guest bytes a call reads: whole VRAM first, then texels and
-palettes and block-transfer sources, each written only when it changed since last written), Words (one word every 256
-bytes of a target's area at its first draw in a frame, what patch 0003's lookup compares), DisplayList, Draw (the
-whole `DrawCall`, decoded vertices and indices, raw vertex bytes and bone matrices when present), Transfer, ReadBack,
-WriteBackFrame, WriteBackDepth, Upload, FrameEnd (frame number, display address, the inner backend's counters, the
-frame's draw and record counts, the image as a BMP), End.
+`PURE_GE_BACKEND=record PURE_GE_RECORD=<file> PURE_GE_RECORD_AT=N PURE_GE_RECORD_FRAMES=M PURE_GE_RECORD_INNER=<name>`
+(defaults: N 1, M 3, the inner backend vulkan, which needs `PURE_SHELL=vulkan` now that the Metal shell is the
+default; `metal` records the Metal backend's draws, headless too). Frames are numbered as the inner backend's
+`frames_presented()` counts them once shown, the number the `[render] frame N (D draws)` lines carry. Recording
+starts at the `begin_frame()` after frame N-1 and each frame ends at the `begin_frame()` after its flip, where the
+inner backend's `capture_frame()` gives its image; a `[render] frame N (D draws) recorded: ...` line marks each.
 
-`tools/gerec/gerec_dump.py FILE [--summary] [--images DIR]` lists the records, parses every Draw in full and checks
-it fills its payload, and prints a per-frame table: Draw records counted in the stream, the count FrameEnd states, and
-the change of the inner backend's cumulative counter since the frame before (Begin holds it before the first frame).
-It exits 1 when they disagree or the file is cut short.
+The format, documented at the top of `host/gpu/ge_record_format.hpp`: the 8 bytes `PKGEREC\0`, a u32 version
+(`kVersion`, 1), then records of a u8 kind, a u32 payload size and the payload, little endian, structures written
+field by field in the order `ge_state.hpp` declares them, without padding (bool one byte, a string a u32 length and
+its bytes, a vector a u32 count and its elements). A reader skips kinds it does not know by their size; kinds and a
+record's fields only grow at the end. A frame is the records after the FrameEnd before it (or after Begin) up to its
+own.
 
-The race recording of the brief (`AT=6014 FRAMES=3`, Vulkan inner, `main_menu.txt` + `single_race.txt` on an empty
-stick): 23.4 MB, 4250 records; frames 6014, 6015, 6016 hold 906, 905 and 906 draws, equal to the Vulkan counter's
-steps (342830 before, then 343736, 344641, 345547) and to the screenshot line `[render] frame 6014 (343736 draws)` of
-the same run. Frame 6016's recorded image is pixel-identical to the suite's `race_hud` capture, and the run's own
-`race_hud` shot is identical too, so recording does not disturb what Vulkan draws. Each frame has one WriteBackDepth
-(the lens-flare SIGNAL); frame 6016 has 12 block transfers (small 16-bit rectangles from RAM into VRAM at
-0x041C9700 and up), the other two none. Memory: 4.8 MB in the first frame (VRAM included), 1.6 MB in each of the
-others, mostly the 1 MB back buffer and the two 256 KB bloom buffers the bloom chain samples.
+| Kind | Payload |
+|---|---|
+| Begin (1) | u32 first frame, u32 frames asked for, string inner backend, string environment prefix, u64 frames presented and u64 draws submitted by the inner backend before the first frame |
+| Memory (2) | u32 address, u32 size, the bytes: guest memory as the call after it reads it, for each range a call reads (texels of every mip level the draw samples, palettes, a block transfer's source rows) that differs from what the recording last wrote there; the first is the whole of VRAM |
+| Words (3) | u32 address, u32 step, u32 count, then count u32: one guest word every `step` bytes of a target's area at its first draw in a frame (what a backend compares to tell whether the CPU wrote under a target it samples) |
+| DisplayList (4) | nothing: `begin_display_list()` |
+| Draw (5) | a `DrawCall`, below: `submit()` |
+| Transfer (6) | a `BlockTransfer`: `block_transfer()`, followed by Memory records of the source rows as the copy reads them, after the backend's read-back; the shell then copies the rows itself |
+| ReadBack (7) | u32 address: `read_back_framebuffer()` |
+| WriteBackFrame (8) | nothing: `write_back_frame()` |
+| WriteBackDepth (9) | u32 colour address, u32 depth address, u32 depth stride, u8 whether it wrote, string why |
+| Upload (10) | u32 display address, u32 width, u32 height, then width x height RGBA pixels: `upload_frame()` |
+| FrameEnd (11) | u32 frame number, u32 display address asked for, u64 frames presented and u64 draws submitted (the inner backend's cumulative counters), u32 draws and u32 records in this frame, u8 `ImageApi` of the presented image, u32 width, u32 height, u32 size and the image's bytes as `capture_frame()` wrote it (a BMP; size 0 when there was none) |
+| End (12) | u32 frames recorded, u64 records in the file before this one |
+
+**The Draw record** (`Writer::put(const DrawCall &)`), in order:
+
+| Part | Fields |
+|---|---|
+| geometry | u8 primitive; u32 vertex count and each vertex (four f32 position, three f32 normal, two f32 texcoord, u32 colour); u32 index count and each u16 index; u8 through |
+| texture | `TextureState` without its mip levels: u8 enabled, u32 address, u32 buffer width, u16 width, u16 height, u8 format, u8 swizzled, u32 CLUT address, format, shift, mask, offset, format word, load bytes and max bytes, u32 function, u8 alpha from texture, u32 min filter, mag filter, wrap s, wrap t, f32 scale u, scale v, offset u, offset v |
+| target and state | `RenderTarget` (u32 colour address, stride, format, depth address, depth stride); `BlendState` (u8 enabled, u32 source and destination factors, equation, the two FIX colours); `DepthState` (u8 test, u8 write, u32 function, u16 range near and far, MINZ/MAXZ); `AlphaTestState` (u8 enabled, u32 function, reference, mask); `ViewportState` (six f32 scales and offsets, u32 scissor x1, y1, x2, y2, f32 offset x and y) |
+| draw flags | u8 culling, u8 cull clockwise, u8 clear mode, u32 clear flags; u32 vertex type, vertex address, index address, primitive count; u32 material colour, u8 lighting enabled, u8 has vertex colour |
+| lighting and fog | `LightingState` (u32 material update, emissive, diffuse, specular, f32 specular power, u32 ambient colour, ambient alpha, mode, u8 reverse normals, then the four `LightState`s: u8 enabled, u32 kind, type, three f32 each of position, direction and attenuation, f32 spot exponent and cutoff, u32 ambient, diffuse, specular); `FogState` (u8 enabled, f32 end, f32 scale, u32 colour); u64 environment version, u64 material version |
+| matrices | the world, view, projection and texture matrices, 16 f32 each |
+| raw data | u32 raw count, raw stride and byte count, then the raw vertex bytes (none when the draw was decoded); u8 whether bone matrices follow, then 96 f32 |
+| stencil and masks | `StencilState` (u8 enabled, u32 function, reference, mask, fail, depth-fail and pass operations); u32 colour write mask, u32 alpha write mask |
+| texture map | u32 map mode, projection source, shade light u, shade light v |
+| mip levels | `Writer::put_levels` (`kLevelBytes`, 100 bytes): u32 level count, then for levels 1 to 7 u32 address, u32 buffer width, u16 width, u16 height; u32 level mode, s32 level bias, f32 LOD slope |
+| colour test, dither, clip | (`kPixelBytes`, 31 bytes) u8 enabled, u32 function, reference, mask; u8 dither enabled and four u32 matrix rows; u8 CLIPENABLE |
+
+The last three parts were added after recordings had been made (tasks 036, 037 and 040), so a Draw may end before
+them: the Reader takes one that ends before the texture map as map mode 0, one that ends before the levels as a single
+level, and one that ends before the last part as no colour test, no dithering and CLIPENABLE off; `kVersion` stayed 1.
+Since task 040 `RecordBackend::submit` also records the texels of every mip level a draw samples (levels 1 to
+`level_count` - 1 when the minification filter's bit 2 is on), so a recording made since then replays mipmapped draws
+exactly; one made between tasks 037 and 040 replays them only with `PURE_NO_MIPMAPS=1` (docs/metal-backend.md,
+"Mipmaps").
+
+`tools/gerec/gerec_dump.py FILE [--summary] [--draws] [--images DIR]` lists the records, parses every Draw in full
+and checks it fills its payload, and prints a per-frame table: the Draw records counted in the stream, the count
+FrameEnd states, and the change of the inner backend's cumulative counter since the frame before (Begin holds it
+before the first frame). It exits 1 when they disagree or the file is cut short.
 
 ## 7. ge_replay (task 022, 2026-10-06)
 
@@ -230,20 +236,21 @@ the difference comes from the records after it.
 - **The flip.** A FrameEnd is a flip in `present_frame`'s order: `present_image(display address)`, then for a backend
   that needs the window the shell's `VulkanRenderer::present` (where the Vulkan backend's frame ends), then
   `capture_frame()`, `begin_frame()` and the shell's `pump_events()`. `begin_frame()` is also called once after
-  `initialize`, as `ensure_backend` does.
+  `initialize`, as the HLE's `ensure_shell_and_backend` does.
 - **Memory.** Each backend gets its own `psprecomp::GuestMemory` of the profile's size (32 MiB), zero at the start.
   Memory records are written into it before the call that reads them: the whole of VRAM first, then texels, palettes
   and transfer sources whenever they changed. What the backend itself writes back (the frame, depth, read-backs before
   transfers) lands there, as it did in the game's memory.
 - **Words.** Words records are written into guest memory too, before their draw. So the snapshot a backend takes at a
-  target's first draw of the frame, and the comparison patch 0003's lookup makes when the target is sampled, see the
-  game's words.
+  target's first draw of the frame, and the comparison the framebuffer-texture lookup (section 2) makes when the
+  target is sampled, see the game's words.
 - **The shell.** A backend that needs the window (`needs_window()`, the Vulkan one) gets a `VulkanRenderer`
-  initialised as `ensure_backend` initialises the game's, passed as `BackendConfig::vulkan_shell`. Its window is titled
-  `... ge_replay (NAME)`, and two Vulkan backends get a window each. The replay draws at the recording's internal scale,
+  initialised as the HLE's `ensure_shell_and_backend` initialises the game's, passed as
+  `BackendConfig::vulkan_shell`. Its window is titled `... ge_replay (NAME)`, and two Vulkan backends get a window
+  each. The replay draws at the recording's internal scale,
   read from the first image's size (it calls the shell's `set_internal_scale` when the settings differ). The other
   settings (sharp textures, texture pack, frame rate, present mode) come from `settings.ini` and the environment, as
-  in the game. null, and later metal, need no shell.
+  in the game. null and metal need no shell.
 - **Determinism.** Two Vulkan replays of the race recording (`--a vulkan --b vulkan`) give identical pictures, which
   are also identical to a single replay of the same file.
 
@@ -278,45 +285,29 @@ from a cold start at any tolerance below 16. Comparing two backends with each ot
 warm-up, as both start equally empty. The frontend and title recordings, 2D screens without such state, replay exactly
 (tol 0) from a cold start.
 
-### The check and its numbers
+### The check
 
-`tools/gerec/replay_check.sh` (the Verify of task 022) records `out/gerec/race.gerec` (frames 6014-6016, 23.4 MB),
-`out/gerec/race_warm.gerec` (6008-6016, 63.6 MB), `out/gerec/frontend.gerec` (690-691) and `out/gerec/title.gerec`
-(1750-1751) when they are missing, each by one windowed run of its route on an empty stick (197, 197, 24 and 59 s),
-and checks each with `gerec_dump.py --summary`. Then it replays:
+`tools/gerec/replay_check.sh` records `out/gerec/race.gerec` (frames 6014-6016), `out/gerec/race_warm.gerec`
+(6008-6016), `out/gerec/frontend.gerec` (690-691) and `out/gerec/title.gerec` (1750-1751) when they are missing, each
+by one windowed run of its route on an empty stick in the Vulkan shell over the Vulkan backend (named explicitly, as
+the default is Metal), and checks each with `gerec_dump.py --summary`. Then it replays `race.gerec` into vulkan with
+`--compare` from a cold start (reported, not a pass condition: the table above), `race_warm.gerec` frames 6014-6016
+into vulkan at `--tol 4 --max-frac 0.001`, `race.gerec` into null, `race.gerec` into vulkan and null with
+`--first-diff --frames 6014` (null draws nothing, so the bisection names draw 1, the clear), and `frontend.gerec` and
+`title.gerec` into vulkan at tol 0. About 8 minutes when every recording has to be made, seconds when none has. Its
+first run's numbers and the replay's times:
+[the history](history/ge-backend.md#ge_replay-the-check-and-its-numbers-task-022-2026-10-06).
 
-- `race.gerec` into vulkan with `--compare` from a cold start: reported, not a pass condition (the table above);
-- `race_warm.gerec` frames 6014-6016 into vulkan at `--tol 4 --max-frac 0.001`: pass, no pixel over the tolerance;
-- `race.gerec` into null with `--out out/gerec/null`: three black 480x272 frames, exit 0;
-- `race.gerec` into vulkan and null with `--first-diff --frames 6014`: the frame fails, as null draws nothing, and the
-  bisection names draw 1 of 906, the full-screen clear sprite that clears the back buffer 0x04088000 to white, in 10
-  steps of about 50 ms each;
-- `frontend.gerec` and `title.gerec` into vulkan at tol 0: pass.
+## 8. The shell seam (D-007)
 
-It takes 8 minutes when every recording has to be made, and a few seconds when none has.
-
-Time a frame in the Verify run (Apple M4 Pro). The first frame of a Vulkan replay also makes its targets and
-pipelines:
-
-| Recording | Backend | First frame | Later frames |
-|---|---|---|---|
-| race (906 draws a frame) | vulkan | 47 ms | 5.5 to 13 ms |
-| race | null | 2.2 ms | 0.6 to 1.1 ms |
-| frontend (11 draws) | vulkan | 27 ms | 5.1 ms |
-| title (28 draws) | vulkan | 26 ms | 5.0 ms |
-
-## 8. The shell seam (D-007, 2026-10-06)
-
-Section 6 left the shell fused in `VulkanRenderer`: window, SDL events, pad sampling, scripted input, ImGui, frame
-pacing and interpolation, the swapchain. A Metal backend's `PresentedImage` has nothing to show it, and a run without
-a window has no pad (docs/status.md Blockers, "Headless input"). The second seam puts the shell behind an interface
-too, so the HLE talks to a `Shell` and a `GeBackend` and nothing else.
+The second seam puts the shell behind an interface too, so a Metal backend's `PresentedImage` has a window to show it
+and a run without a window has a pad.
 
 ### 8.1 The interface
 
-`portablekit::host::Shell` (vendor patch 0010, `host/shell/shell.hpp`), the methods the HLE and the UI layer call
-today on `VulkanRenderer` outside the GE (the list in `vulkan_renderer.hpp`, minus what section 1 moved to the
-backend and minus the texture-pack and internal-scale settings, which are the Vulkan backend's own):
+`portablekit::host::Shell` (`host/shell/shell.hpp`): the methods the HLE and the UI layer called on `VulkanRenderer`
+outside the GE before the seam, minus what section 1 gives the backend and minus the texture-pack and
+internal-scale settings, which are the Vulkan backend's own:
 
 | Group | Methods |
 |---|---|
@@ -326,74 +317,9 @@ backend and minus the texture-pack and internal-scale settings, which are the Vu
 | Interface (ImGui) | `initialize_ui(error)`, `shutdown_ui()`, `begin_ui_frame()`, `set_ui_draw_data(ImDrawData *)`, `present_ui(bool show_game)` |
 
 `PadState`, `MouseMotion`, `CameraReading` and the scripted-mouse constant move to `host/shell/shell.hpp` (the
-renderer header keeps using them). `ShellConfig` is today's `RendererConfig` (the title).
-
-### 8.2 Implementations
-
-- `VulkanShell` (vendor, patch 0010): an adapter over `VulkanRenderer`, as `VulkanGeBackend` is for the GE side. The
-  `vulkan` GE backend needs this shell (`BackendConfig::vulkan_shell` is its renderer). `present()` ignores the image
-  argument for the Vulkan backend (the renderer shows its own target, as today) and, for a `Cpu` image from another
-  backend, uploads and shows it (`upload_frame` into a scratch target, then the usual present): that is how a Metal
-  backend's picture reaches a window before task 027, at the cost of a read-back a frame.
-- `HeadlessShell` (vendor, patch 0010): no window, no GPU. `pad()` comes from the input script
-  (`<prefix>_INPUT_SCRIPT`, the same file format) read at pad level: `pad NAME [FRAMES]` and `axis NAME VALUE`
-  set `PadState` by frame (the names `ui/input_script.cpp` accepts; `shot NAME` asks the GE backend for
-  `capture_frame` into `<prefix>_SCREENSHOT_DIR`; `quit` ends the run; mouse, key and text events are not supported
-  and are reported once). `pump_events()` is true until `quit`. `present()` counts frames. The live file
-  (`<prefix>_INPUT_LIVE`, the sweep's steering channel) is read the same way. This gives every route a headless run.
-- `MetalShell` (ours, task 027, `src/host/metal_shell.mm`): an SDL window with a `CAMetalLayer`
-  (`SDL_Metal_CreateView`), the shared SDL pad sampler, ImGui's SDL3 + Metal backends (`imgui_impl_metal.mm` is not
-  vendored; task 027 adds it under third_party or our sources), presents a `Metal` image by blitting the backend's
-  texture to the drawable, with letterboxing by `game_aspect()`.
-
-The SDL pad sampling (`VulkanRenderer::sample_pad`, the scripted keys, the gamepad attach) is extracted into
-`host/shell/sdl_pad.cpp` so `VulkanShell` and `MetalShell` share it; `ui/input_script.cpp` keeps pushing SDL events
-at `shell.window()` for the SDL shells.
-
-### 8.3 Selection and the HLE
-
-`<prefix>_SHELL=vulkan|headless|metal` (default vulkan). `<prefix>_NO_RENDER` keeps its meaning: the headless shell
-with the backend `<prefix>_GE_BACKEND` names when that backend needs no window, and no rendering at all otherwise
-(the default `vulkan` backend cannot run headless), exactly today's table in section 6. `ensure_backend` becomes
-`ensure_shell_and_backend`: the shell first, then the backend with `BackendConfig::vulkan_shell` set when the shell is
-the Vulkan one. `media().renderer` becomes `media().shell`; `active_renderer()` stays for the UI screens that need
-Vulkan itself (texture packs, device name) and returns the renderer only when the shell is the Vulkan one.
-
-### 8.4 Headless pace (solved by patch 0011, 2026-10-06)
-
-Without a window `Kernel::pace_to_real_time` was off, but `Kernel::advance_clock` slept up to 1 ms of real time per
-clock step while any thread was in a `WaitType::Host` wait, which `user_main`'s `sceKernelWaitThreadEnd` is for the
-whole run: about 19 frames a second (section 6). Patch 0011 (Fable) gives `wait_host` a `real_time` flag that only
-the adhoc network waits set, so the sleep covers waits on the outside world alone, and adds `Kernel::set_paced(bool)`,
-which the HLE sets from the shell (`has_window()`): a headless shell runs unpaced whatever `<prefix>_NO_RENDER` says.
-Measured: the null backend to frame 2000 in 0.5 s (was 106 s); the headless frontend route (`PURE_SHELL=headless
-PURE_GE_BACKEND=null`, no `NO_RENDER`) to frame 2200 in 1.1 s (was 115 s), the same 20643 draws, the same movies
-opened, the four `shot` captures written. Windowed runs are paced before the sleep is reached and are unchanged
-(`lang` 0.0544).
-
-### 8.5 What landed (task 026, 2026-10-06)
-
-Patch 0010 (`patches/0010-shell-seam.patch`) adds the seam to the vendored framework. Files, all under
-`vendor/portablekit/`:
-
-| File | Built with | What |
-|---|---|---|
-| `host/shell/shell.hpp`, `shell.cpp` | system layer | `host::Shell`, `ShellConfig`, `PadState`, `MouseMotion`, `CameraReading`, `kScriptedMouse`, the registry (`register_shell`, `make_shell`, `shell_names`, `shell_description`, `ShellRegistration`), `selected_shell()` (`<prefix>_SHELL`, vulkan when unset or empty) |
-| `host/shell/vulkan_shell.hpp`, `vulkan_shell.cpp` | renderer | `vulkan`: owns the `VulkanRenderer` and forwards every call to it; `host::vulkan_renderer(Shell *)` gives the renderer when the shell is this one, else null |
-| `host/shell/headless_shell.cpp` | system layer | `headless`: no window, no SDL, no GPU; the pad from the input script |
-| `host/shell/sdl_pad.hpp`, `sdl_pad.cpp` | renderer | `host::SdlPad`: the pad sampling, the gamepad attach (open, scan, close, the script's virtual pad taking over) and the scripted keys, moved out of `VulkanRenderer::Impl`, which now derives from it |
-| `host/shell/gamepad.hpp`, `gamepad.cpp` | system layer | the gamepad-to-PSP mapping moved out of the renderer (`read_gamepad`, `PadTuning`, `pad_tuning()`), over SDL-free button and axis numbers and SDL's names, so the headless shell maps a script's `pad a` exactly as the SDL shells map the virtual gamepad; `sdl_pad.cpp` checks the numbers against SDL's with `static_assert`s |
-| `host/shell/script_steps.hpp`, `script_steps.cpp` | system layer | the input script's grammar moved out of `ui/input_script.cpp` (`Step`, `parse_step`, `name_and_frames`, the live file, `load()` of `<prefix>_INPUT_SCRIPT` and `<prefix>_INPUT_LIVE`), shared by both readers |
-| `host/gpu/vulkan_renderer.hpp`, `.cpp` | renderer | moves only: the four types are aliases of the shell's, the pad code is `SdlPad`'s and `gamepad.cpp`'s; `Impl::sample_pad` calls `SdlPad::sample` with the window's pointer, touch controls and frame count |
-| `host/hle/hle_media.cpp` | system layer | `media().shell` (before the backend, so the backend is destroyed first), `ensure_shell_and_backend()`, `present_frame` and sceCtrl through the `Shell` |
-| `host/ui/*.cpp`, `.hpp` | renderer | the interface on a `Shell`: `Layer::attach(host::Shell &)`, `Layer::shell()`; `input_script.cpp` keeps its SDL path (events at `shell().window()`, the virtual gamepad) over the shared grammar |
-| `cmake/PortableKit.cmake` | | the six new sources |
-
-The `metal` shell (task 027) is in our sources, `src/host/metal_shell.mm`, registered with a `ShellRegistration` (docs/metal-backend.md, "The Metal shell"); patch 0012 moved ImGui's SDL3 platform init from `Layer::attach` into `Shell::initialize_ui` for it.
-
-#### The interface as landed
-
-As in 8.1, with these differences:
+renderer header keeps using them). The registry is the backend's in form: `register_shell`, `make_shell`,
+`shell_names`, `shell_description`, `ShellRegistration`, and `selected_shell()` (`<prefix>_SHELL`, vulkan when unset
+or empty). Beside the table:
 
 - `present(image, display_address, moment)`: `moment` is the `std::optional<steady_clock::time_point>` the
   renderer's `present` takes; there is no default argument (a virtual function's default would bind statically).
@@ -411,29 +337,45 @@ As in 8.1, with these differences:
   menu's resolution, texture filter and texture pack rows (left out under another shell) and the texture pack
   screen. `ensure_renderer()` makes the shell and the backend; the setup screens now test `Layer::get().attached()`
   after it, which is the same test under the Vulkan shell and also right for a future windowed shell.
-- `Layer::attach` refuses a shell without a window; ImGui's SDL3 platform backend is still initialised with
-  `ImGui_ImplSDL3_InitForVulkan` (task 027 picks the Metal one).
+- `Layer::attach` refuses a shell without a window. It loads the fonts, calls `shell.initialize_ui`, then sets the
+  gamepad mode: the shell starts ImGui's SDL3 platform backend for its own API (`ImGui_ImplSDL3_InitForVulkan` in
+  the Vulkan shell before the renderer's ImGui Vulkan backend, `ImGui_ImplSDL3_InitForMetal` in ours; task 027).
 - The kernel's idle and poll hooks (frame interpolation between flips) are set only for a shell with a window, as
   they were only set with the renderer before.
 
-#### Selection
+### 8.2 Implementations
 
-`ensure_shell_and_backend()` (also behind `ensure_renderer()`): the backend is made first (it is asked
-`needs_window()`), then the shell `<prefix>_SHELL` names (`headless` whenever `<prefix>_NO_RENDER` is set), then the
-backend is initialised with `BackendConfig::vulkan_shell` set when the shell is the Vulkan one.
+The shell seam's files, all under `vendor/portablekit/`, and ours:
 
-| `GE_BACKEND` | `SHELL` unset or `vulkan`, `NO_RENDER` unset | `NO_RENDER` set (any value, also empty), or `SHELL=headless` |
+| File | Built with | What |
 |---|---|---|
-| vulkan (the framework's default; on macOS our entry point selects metal unless set, D-008) | Vulkan shell, Vulkan draws (as before) | no rendering at all, no draw sink, no shell (as before) |
-| null | Vulkan shell; the null backend's black Cpu image is uploaded into the display target and shown; scripted input through the virtual gamepad | headless shell: no window, no GPU, every draw reaches the backend, the pad from the script |
-| record | as its inner backend | as its inner backend |
+| `host/shell/shell.hpp`, `shell.cpp` | system layer | `host::Shell`, `ShellConfig`, `PadState`, `MouseMotion`, `CameraReading`, `kScriptedMouse`, the registry (`register_shell`, `make_shell`, `shell_names`, `shell_description`, `ShellRegistration`), `selected_shell()` (`<prefix>_SHELL`, vulkan when unset or empty) |
+| `host/shell/vulkan_shell.hpp`, `vulkan_shell.cpp` | renderer | `vulkan`: owns the `VulkanRenderer` and forwards every call to it; `host::vulkan_renderer(Shell *)` gives the renderer when the shell is this one, else null |
+| `host/shell/headless_shell.cpp` | system layer | `headless`: no window, no SDL, no GPU; the pad from the input script |
+| `host/shell/sdl_pad.hpp`, `sdl_pad.cpp` | renderer | `host::SdlPad`: the pad sampling, the gamepad attach (open, scan, close, the script's virtual pad taking over) and the scripted keys, moved out of `VulkanRenderer::Impl`, which now derives from it |
+| `host/shell/gamepad.hpp`, `gamepad.cpp` | system layer | the gamepad-to-PSP mapping moved out of the renderer (`read_gamepad`, `PadTuning`, `pad_tuning()`), over SDL-free button and axis numbers and SDL's names, so the headless shell maps a script's `pad a` exactly as the SDL shells map the virtual gamepad; `sdl_pad.cpp` checks the numbers against SDL's with `static_assert`s |
+| `host/shell/script_steps.hpp`, `script_steps.cpp` | system layer | the input script's grammar moved out of `ui/input_script.cpp` (`Step`, `parse_step`, `name_and_frames`, the live file, `load()` of `<prefix>_INPUT_SCRIPT` and `<prefix>_INPUT_LIVE`), shared by both readers |
+| `host/gpu/vulkan_renderer.hpp`, `.cpp` | renderer | moves only: the four types are aliases of the shell's, the pad code is `SdlPad`'s and `gamepad.cpp`'s; `Impl::sample_pad` calls `SdlPad::sample` with the window's pointer, touch controls and frame count |
+| `host/hle/hle_media.cpp` | system layer | `media().shell` (before the backend, so the backend is destroyed first), `ensure_shell_and_backend()`, `present_frame` and sceCtrl through the `Shell` |
+| `host/ui/*.cpp`, `.hpp` | renderer | the interface on a `Shell`: `Layer::attach(host::Shell &)`, `Layer::shell()`; `input_script.cpp` keeps its SDL path (events at `shell().window()`, the virtual gamepad) over the shared grammar |
+| `cmake/PortableKit.cmake` | | the six new sources |
 
-An unknown `SHELL` prints the registered names and falls back to vulkan. When the Vulkan shell cannot be made
-("Renderer: unavailable (...); running headless"), a backend that needs no window runs in the headless shell. The
-pacing is unchanged: `Kernel::pace_to_real_time` still keys on `<prefix>_NO_RENDER` only, so `SHELL=headless` without
-`NO_RENDER` is paced to real time.
+The `metal` shell (task 027) is in our sources, `src/host/metal_shell.mm`, registered with a `ShellRegistration`
+(docs/metal-backend.md, "The Metal shell").
 
-#### The headless shell
+- `VulkanShell` owns the `VulkanRenderer` and forwards each call to it. `present()` ignores the image for the
+  Vulkan backend (the renderer shows its own target) and, for a `Cpu` image from another backend, uploads it into a
+  scratch target and presents that; the Metal backend's pictures reach this window that way, at the cost of a
+  read-back a frame.
+- `HeadlessShell`: no window, no SDL, no GPU (below).
+- `MetalShell` (ours, task 027, `src/host/metal_shell.mm`): an SDL window with a `CAMetalLayer`, the shared SDL pad
+  sampler, ImGui's SDL3 and Metal backends (`third_party/imgui_metal/`), the backend's texture drawn into the
+  drawable, letterboxed by `game_aspect()` (docs/metal-backend.md, "The Metal shell").
+
+The SDL pad sampling (the scripted keys, the gamepad attach) is `host/shell/sdl_pad.cpp`, shared by the Vulkan and
+Metal shells; `ui/input_script.cpp` keeps pushing SDL events at `shell.window()` for the SDL shells.
+
+### 8.3 The headless shell
 
 `pad()` is built at `present()`, which counts the flips: one script frame per flip, as `ui::draw_over_game()` ticks the
 script once per flip in a window, so a route's frame numbers mean the same in both (the frontend route's
@@ -448,30 +390,18 @@ the image just presented; `quit` makes `pump_events()` false and the HLE stops t
 `key`, `mouse`, `click`, `text` and `drop` print `[script] ACTION steps need a window; the headless shell ignores them`
 once each. The UI methods do nothing and `initialize_ui` fails with a message; the interface never attaches.
 
-#### Numbers
+### 8.4 Headless pace
 
-Frame regression suite (`tools/frame_regress.sh`), before on c394d8b (patches 0001-0009) and after on the patched
-tree, both 7m 8s:
+An unpaced run (no window) used to sleep up to 1 ms of real time per clock step while any thread was in a
+`WaitType::Host` wait, which `user_main`'s `sceKernelWaitThreadEnd` is for the whole run, so a headless run went at
+about 19 frames a second. Patch 0005-kernel-host-waits-and-pacing (Fable, after task 026) gives `wait_host` a
+`real_time` flag that only the adhoc network waits set, so the sleep covers waits on the outside world alone, and
+`Kernel::set_paced(bool)`, which the HLE sets from the shell (`has_window()`): a headless shell runs unpaced, a
+window paced. The headless frontend route reaches frame 2200 in about 1 s.
 
-| Scene | Before | After | Captures, before vs after (`imgdiff.py --tol 0`) |
-|---|---|---|---|
-| lang | 0.0544 | 0.0544 | identical (0 of 522240 px) |
-| title | 0.0302 | 0.0302 | identical |
-| profile | 0.0543 | 0.0543 | identical |
-| main_menu | 0.0331 | 0.0331 | identical |
-| race_hud | 0.0672 | 0.0672 | identical |
+## History
 
-The headless frontend route (`PURE_SHELL=headless PURE_GE_BACKEND=null`, `--script config/pad_scripts/frontend.txt
---frames 2200 --env PURE_NO_RENDER=`): 2200 frames, 20586 draws submitted, in 114.6 s (19.0 frames a second, the
-kernel's headless pace of section 8.4; the seam adds nothing measurable). The script's presses take effect: Cross at
-700, 1600 and 1650 (`[pad] buttons 0x4000` with `PURE_TRACE_PAD`), Start at 1800 (`0x8`), and the game opens
-`Movies/WoFMVNew_US.PMF` after the second and `Movies/Profile_part1.PMF` after Start, as the windowed run does (a
-run with a neutral pad stays on Language Selection from frame 690, task 021). With `--shots`, `lang`, `notice`, `title` and `profile` are written
-(black 480x272, from null) at the script's frames. Other paths checked with short runs: null in the Vulkan window
-(the uploaded black image is what the `shot` captures), `PURE_SHELL=bogus` (falls back to vulkan with the message),
-`PURE_SHELL=headless` with the Vulkan backend (nothing drawn, with the message), `PURE_NO_RENDER=1` with the Vulkan
-backend ("Renderer: disabled", as before), and the live file headless (lines appended during the run are read every
-10 frames; `pad start`, `shot`, `key` reported as ignored, `quit` stops the run).
-
-The patch is 3030 lines (1576 added, 608 removed); `vulkan_renderer.cpp` only loses code (the pad mapping, the
-gamepad attach and the sampler, about 260 lines) and gains the base class and one call.
+[docs/history/ge-backend.md](history/ge-backend.md): the design as written on 2026-10-06 (the interface planned, how
+Metal would meet it, the validation planned, the order of work), what task 021 landed with its numbers (the null
+backend's speed before the headless pace, the race recording), ge_replay's first check (task 022), and the shell
+seam's design, landing and numbers (task 026).

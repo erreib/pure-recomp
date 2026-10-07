@@ -1,6 +1,6 @@
 # PPSSPP driver (tools/ppsspp/ppsspp_ctl.py)
 
-## Status (2026-10-05, after task 006)
+## What it does (task 006, 2026-10-05; later tasks added routes and the audio dump)
 
 Works:
 - Reference captures exist: `ref/` holds frontend (Language Selection), title, profile, main_menu and
@@ -8,6 +8,8 @@ Works:
   `ref/README.md`. The routes are `routes/frontend.txt` (cold boot to MAIN MENU, profile NAME0000 / AAA, SAVE
   PROFILE answered NO) and `routes/vineta_k_start.txt` (MAIN MENU to the Vineta K race start, chained after the
   frontend with a second `--pad-file`). Three runs gave byte-identical PNGs, and two runs byte-identical `.ppdmp`s.
+  Task 035 added the routes of every mode and the unlock code (`tools/ppsspp/routes/`) and thirteen more scenes,
+  task 044 the scorecard's references under `ref/scorecard/`; `ref/README.md` lists them all.
 - `tools/ppsspp/ppsspp_ctl.py` (Python 3 stdlib only, no venv) launches `/Applications/PPSSPPSDL.app` 1.20.4 on
   `disc.iso` in a window at 1x with the WebSocket debugger on, connects to it, plays a frame-indexed pad script,
   saves PNG screenshots and GE dumps (`.ppdmp`) at given frames, and quits PPSSPP cleanly (SIGTERM). `status`,
@@ -19,7 +21,7 @@ Works:
   measured against the game and has no drift.
 - The ini is edited per run and put back afterwards; PPSSPP's own first ini is kept as
   `~/.config/ppsspp/PSP/SYSTEM/ppsspp.ini.orig` (and `controls.ini.orig`). The live ini is currently restored to the
-  `.orig` content and no PPSSPP instance is running.
+  `.orig` content after every run.
 
 - Captures can be one flip apart: a screenshot-only capture leaves the CPU stepping, so the next capture arms its
   breakpoint before the game runs on. Before task 006 every capture resumed and paused again, which let about 16
@@ -36,7 +38,7 @@ Does not work yet / blocked:
 - Save states (`--savestate`) are blocked: the debugger has no save-state event, and the fallback (posting the
   F2 Save State hotkey with CoreGraphics) needs the Accessibility / post-event permission, which this terminal does
   not have (`CGPreflightPostEventAccess` = false). Granting it to the terminal app makes `--savestate` work.
-- The `zone` reference scene is not routed yet (SINGLE PLAYER, DOWN x3 to ZONE, CROSS).
+- (Done in task 035: `routes/zone_start.txt` reaches Zone.)
 
 The exact commands that made `ref/` are in `ref/README.md` ("Regenerate"); each run takes about 2 minutes (the
 emulator runs at real-time speed) and quits PPSSPP and restores the ini at the end. Verified 2026-10-05: the
@@ -112,7 +114,7 @@ frontend route to frame 5257 gave 87.7 s of audio for 87.70 s of emulated time, 
 with no channel apart; PPSSPP closes the file when it shuts down, and the driver repairs the RIFF sizes if it did not
 (a killed run). `--keep-running` is refused with it. The report JSON gets `audio_dump` (path, PPSSPP's file, seconds).
 An emulated-time dump is the same however fast the host runs PPSSPP, so `--renderer hardware` is fine for it.
-docs/fidelity.md ("Differences 7 to 9") has the runs that compare it with the port's `PURE_AUDIO_WAV`;
+docs/history/fidelity.md ("Differences 7 to 9") has the runs that compare it with the port's `PURE_AUDIO_WAV`;
 `routes/free_play_idle_end.txt` leaves the ship on the grid in Free Play past the race music's first track change
 and ends the session from the pause menu.
 

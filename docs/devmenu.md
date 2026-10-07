@@ -33,4 +33,4 @@ is ever opened.
 
 ## Open
 - Whether any dev-menu loader survives under another name (no string evidence; closed unless M1 shows a read of
-  `DevMenu.cfg` in `PURE_IO_TRACE`).
+  `DevMenu.cfg` in `PURE_TRACE_IO`).

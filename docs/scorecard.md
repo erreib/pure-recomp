@@ -8,7 +8,7 @@ Three marks stand in for a grade where none can be given and do not count toward
 (the PPSSPP side is missing: refresh it), `not measured` (no instrument exists) and `accepted (D-011)` (difference 6,
 the faster race loads, which Erik decided to keep). The two differences the audit left open for a decision:
 difference 6 (the race load) is that accepted row; difference 5 (saves plain where the PSP enciphers them) was fixed
-by task 045 (patch 0019), so the Saves rows compare enciphered saves, the data file by its decrypted contents.
+by task 045 (patch 0007-savedata-list-and-no-key-mode), so the Saves rows compare enciphered saves, the data file by its decrypted contents.
 
 | Category | What is compared | Thresholds |
 |---|---|---|
@@ -131,7 +131,7 @@ The Trajectories rows are task 046's `SCORECARD_RACE_CLOCK=ref/race_clock python
 | PARAM.SFO: size | 4912 bytes | 4912 bytes | +0 | faithful | faithful when the same size |  |
 | PIC1.PNG: size | 172944 bytes | 172944 bytes | +0 | faithful | faithful when the same size |  |
 | SND0.AT3: size | 97604 bytes | 97604 bytes | +0 | faithful | faithful when the same size |  |
-| PROFILE.BIN (the data file): size | 41586 bytes | 41586 bytes | +0 | faithful | faithful when the same size | difference 5 (the PSP's savedata encryption, no-key mode): fixed by task 045, patch 0019 |
+| PROFILE.BIN (the data file): size | 41586 bytes | 41586 bytes | +0 | faithful | faithful when the same size | difference 5 (the PSP's savedata encryption, no-key mode): fixed by task 045, patch 0007-savedata-list-and-no-key-mode |
 | PROFILE.BIN: the contents, decrypted by the framework's load path with both hashes checked | 41570 bytes (flag 0x01 (mode 1); PARAM.SFO hash (SAVEDATA_PARAMS) verified; PROFILE.BIN hash (SAVEDATA_FILE_LIST) verified, 41586 bytes; verdict PASS) | 41570 bytes | 71 bytes in 69 words, 69 of them user-RAM addresses on both sides | close | faithful when identical; close when the only differing words hold user-RAM addresses on both sides (the profile keeps heap pointers verbatim; the game sets them again on a load); differs otherwise | tools/save_interchange.sh --check (task 045) |
 | PARAM.SFO TITLE | 'Wipeout Pure' | 'Wipeout Pure' | the same | faithful | faithful when equal |  |
 | PARAM.SFO SAVEDATA_TITLE | 'Profile data' | 'Profile data' | the same | faithful | faithful when equal |  |

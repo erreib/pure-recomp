@@ -27,7 +27,9 @@ the reported "double speed in 30 fps areas".
 - Implement on the virtual clock: `sceDisplayGetVcount` (vblank counter), `sceDisplayWaitVblankStartCB` (block
   until the next vblank, run callbacks), `sceKernelDelayThreadCB`, `sceDisplaySetMode`, `sceDisplaySetFrameBuf`,
   `sceKernelGetGPI` (returns 0). Yakumo does not register `sceDisplayWaitVblankStart*` (MHP3rd paces through
-  `sceCtrlReadBuffer`), so this is new HLE for M2 (patch 0002 or `src/hle/display_pure.cpp`).
+  `sceCtrlReadBuffer`); PortableKit does (`host/hle/hle_media.cpp`: the waits, `sceDisplayGetVcount`), so the port
+  needed no HLE of its own here. Our profile answers `sceKernelGetGPI` (`src/profile/pure_profile.cpp`: 0 as on
+  retail, 1 under the test switch `PURE_TEST_UNLOCK_ALL`).
 - The free-running modes are bounded by `FUN_088eda8c`'s GE sync: with a fast GPU backend they will reach the
   60 fps vblank rate; the vblank itself must still tick at 59.94 Hz on the virtual clock so `GetVcount` is sane.
 - E4 (60 fps in locked modes) is not a one-instruction patch for us: the right change is to find what reads
@@ -35,11 +37,13 @@ the reported "double speed in 30 fps areas".
   `FUN_0886511c`, `FUN_08865f7c` (debug overlay), `LoadingScreen_cpp__088822dc` (loading screen animation).
 - Input is read by `FUN_08898568` / `FUN_0889859c` (`sceCtrlReadBufferPositive`), not tied to pacing.
 
-## Open
-- Which modes set `+0x116c` (expected: Single Race, Tournament) and where `+0x117c` is loaded (expected: after a
-  load or a pause, to settle the frame time).
-- Frame structure: `FUN_088ed190` and `FUN_088ed284` enqueue display lists (`sceGeListEnQueue`); `FUN_088eda8c`
-  syncs; `FUN_088ef5a8`/`FUN_088ef650`/`FUN_088ef6b8` set the frame buffer. See `out/frame.txt`.
+## The two lock fields (answered by the fidelity audit, task 035)
+- `+0x116c` is set to 1 by the race backend's constructor (free-running frames: Single Race and Tournament) and back
+  to 0 by its destructor and by the race managers of Free Play and the other 30-fps modes.
+- `+0x117c` is FxScreen's countdown: the full-screen flash sets it to 2 on every frame it runs (an explosion near
+  the camera, the ship put back on the track, the race-start fade), so a flash and the frame after it wait two
+  vblanks. These are the race's two-vblank stretches, the game's own and PPSSPP's too (docs/fidelity.md; every
+  writer: [What writes the two fields](history/fidelity.md#what-writes-the-two-fields)).
 
 ## Frame structure (from `out/frame.txt`)
 - `FUN_088ed190` is the GE init: `sceGeEdramGetAddr`, `sceKernelCreateEventFlag`, `sceGeSetCallback` (one callback
@@ -65,7 +69,13 @@ this), `sceGeListSync`/`sceGeDrawSync` must block until the list is done on the 
   to 34366 us at 30 fps) where PPSSPP measures the vblank plus the frame's emulated CPU time (15957 to 17201 us in a
   Vineta K race second). Averaged over a second both are the vblank rate; frame by frame the game integrates
   different steps, which is all that parts the player's path from PPSSPP's on Karbonis (difference 14) and part of
-  why the AI ships differ (difference 13). `PURE_TEST_RACE_CLOCK` replays PPSSPP's frame times for the scorecard.
+  why the AI ships differ (difference 13). The test switch `PURE_TEST_RACE_CLOCK` (`src/profile/test_hooks.cpp`)
+  replays PPSSPP's frame times for the scorecard.
+- **The busy-time charge (task 051's finding).** The framework's kernel adds a thread's wall time to the virtual
+  clock when it runs over 100 ms without a wait (`Kernel::charge_busy_time`, up to 250 ms), so on a loaded machine a
+  headless run can take a step of 100 ms or more that a run on an idle one does not, and from there race another
+  race. `PURE_NO_BUSY_CLOCK=1` (the framework's switch) turns the charge off; the shared runner (`tools/purelib`,
+  task 050) sets it for every headless run of the tools, and a player's game keeps the charge.
 - **The race load's length does not reach the race.** The race's two seeds are drawn at the TEAM SELECTION confirm,
   before the load; the load draws the same 2566 random numbers on both sides whether it takes 5 flips (the port) or
   34 (PPSSPP), the frame timer is not called while it runs, and the first frame after it is capped at 0.067 s on
