@@ -25,6 +25,8 @@ PRIMITIVES = ["points", "lines", "line_strip", "triangles", "triangle_strip", "t
 TEXTURE_FORMATS = ["5650", "5551", "4444", "8888", "clut4", "clut8", "clut16", "clut32", "dxt1", "dxt3", "dxt5"]
 TARGET_FORMATS = ["5650", "5551", "4444", "8888"]
 IMAGE_APIS = ["none", "cpu", "vulkan", "metal"]
+LEVEL_BYTES = 4 + 7 * 12 + 12   # a Draw's mip level fields (Writer::put_levels)
+LEVEL_MODES = ["auto", "const", "slope", "mode3"]
 
 
 class Cut(Exception):
@@ -108,6 +110,14 @@ def draw_call(c):
     # The texture map state (patch 0013): map mode, projection source, the two shade lights. Recordings made before
     # it end here, and their draws are map mode 0.
     d["texture_map"] = c.take("<4I") if c.left() >= 16 else (0, 0, 0, 0)
+    # The texture's mip levels (patch 0014): the level count, levels 1 to 7 (address, buffer width, width, height),
+    # the level mode, the bias in 1/16 levels and the LOD slope. Recordings made before end here: one level.
+    t = d["texture"]
+    t["level_count"], t["levels"], t["level_mode"], t["level_bias"], t["lod_slope"] = 1, [], 0, 0, 0.0
+    if c.left() >= LEVEL_BYTES:
+        t["level_count"] = c.u32()
+        t["levels"] = [c.take("<IIHH") for _ in range(7)]
+        t["level_mode"], t["level_bias"], t["lod_slope"] = c.u32(), c.take("<i")[0], c.f32()
     return d
 
 
@@ -129,6 +139,12 @@ def describe_draw(d):
             text += " swz"
         if t["format"] in (4, 5, 6, 7):
             text += f" clut 0x{t['clut_address']:08X}"
+        if t["level_count"] > 1:
+            text += f" levels {t['level_count']} {LEVEL_MODES[t['level_mode'] & 3]}"
+            if t["level_mode"] != 0 or t["level_bias"] != 0:
+                text += f" bias {t['level_bias']}"
+            if t["level_mode"] == 2:
+                text += f" slope {t['lod_slope']:g}"
         mode, source, light_u, light_v = d["texture_map"]
         if not d["through"] and mode == 1:
             text += f" texmatrix {source}"
