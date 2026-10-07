@@ -1,6 +1,6 @@
 # 040: The colour test, dithering and depth clamping (fidelity differences 10 and 11)
 
-Milestone: M8 | Branch: task/040-colour-test-dither-clamp | Status: OPEN (after tasks 036 and 037: the same files)
+Milestone: M8 | Branch: task/040-colour-test-dither-clamp | Status: MERGED (cb99feb, 2026-10-07)
 
 ## Goal
 Three small GE states the framework ignores: the colour test (COLORTEST NOT EQUAL black drops the pure black pixels of
@@ -237,4 +237,31 @@ Open questions:
    `ge_record_format.hpp` is current.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at cb99feb (2026-10-07): `tools/vendor_setup.sh` then
+`tools/patches.sh check` (16 patches reproduce vendor at 8b0c3fe), `tools/build.sh profile`, `tools/verify_task.sh
+040` (suite 18/18 headless Metal in 25 s: race_hud 0.0148, tt_hud 0.0112, fp_hud 0.0113, every other scene at its
+measured value), `tools/hud_check.sh --shell headless` 61 of 61. The Vulkan-path suite was not rerun here: the merged
+code tree equals the worker's 3d120f1 (the merge differs only in two docs), where the worker ran it 18/18 in 19m 47s.
+`tools/fidelity_audit.py`'s exit-line regex still matches (the new `[metal] colour test: ...` stats are a line of
+their own).
+
+Spot-read: patch 0017 (the register numbers against the PSP SDK: 0x1C, 0x20, 0x27, 0xD8 to 0xDA, 0xE2 to 0xE5; the
+signed-nibble dither decode; the 31-byte tail guarded like patch 0014's; the mip levels recorded under the
+minification filter's bit 2 from each level's own address and row length). metal_shaders.h (ge_factor and ge_blend
+against the GE's factor and equation numbering; sixteen_bit's top-bit keep and repeat-bit expansion; the three clip
+distances are each w times a screen-linear quantity, so their sign under perspective-correct interpolation equals the
+per-pixel test's; the colour test is after fog where the alpha test is). metal_backend.mm (the 16-bit path skips
+translate_blend, so the pipeline's blend stays off and the shader blends on [[color(0)]]; destination-alpha reads
+resolve the stencil alpha as before; MTLDepthClipModeClamp with a 0..1 viewport only for transformed draws with
+CLIPENABLE on; the stencil-alpha resolve pass's own blend untouched; `take_later_field` reads old pipeline lists as
+0). Draws outside May touch: none.
+
+Merged: cb99feb into batch/m2 (`git merge --no-ff`).
+
+Notes: the brief's command numbers were wrong (my error: 0xE1/0x23/0xE2/0xE3, 0x25/0xD0-0xD3, 0x1D); the worker used
+the SDK's and said so. The depth clamp goes with CLIPENABLE on, as the hardware notes say, not off as the brief
+guessed; the game never draws with it off. Patch 0016 stays unused (task 038 needed no vendor fix); numbering gaps are
+harmless. Follow-ups to docs/status.md: the six new pipeline keys for `config/metal_pipelines.txt` (1.2 ms at the
+first race frame), `tools/gerec/metal_check.sh` needs `PURE_NO_MIPMAPS=1` when it re-records, docs/ge-backend.md
+section 6 is three parts behind the Draw record, and a PPSSPP reference at the same point of the adverts' cycle
+would compare the dithered billboard screen directly.
