@@ -9,22 +9,24 @@ add_subdirectory(vendor/portablekit portablekit)
 # (both git-ignored), as docs/PROFILE_GUIDE.md in the framework lays out.
 # Our own main() (src/host/pure_main.cpp) runs ge_replay for `--replay` and the framework's main, compiled as
 # portablekit_main, otherwise (task 022).
+# The Metal GE backend's files, by concern (docs/metal-backend.md, "Files"; task 049).
+set(metal_backend_sources src/gpu/metal_backend.mm)
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
     SOURCES src/profile/pure_profile.cpp src/hle/audio_capture.cpp
             src/host/pure_main.cpp src/tools/ge_replay.cpp
-            src/gpu/metal_backend.mm src/gpu/metal_device.mm src/gpu/metal_shell.cpp
+            ${metal_backend_sources} src/gpu/metal_device.mm src/gpu/metal_shell.cpp
             src/host/metal_shell.mm third_party/imgui_metal/imgui_impl_metal.mm)
 
 # The Metal GE backend (PURE_GE_BACKEND=metal, docs/metal-backend.md), the Metal shell (PURE_SHELL=metal) and Dear
 # ImGui's Metal renderer backend (1.92.9b, the vendored ImGui's release, MIT): Objective-C++ with ARC, compiled by the
 # same clang as everything else. Their shaders are MSL source compiled at run time, so no Xcode is needed. The backend
 # and the shell share one device and command queue (src/gpu/metal_device.mm, task 031).
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal_backend.mm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal_device.mm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/host/metal_shell.mm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui_metal/imgui_impl_metal.mm"
+set(objc_sources ${metal_backend_sources} src/gpu/metal_device.mm src/host/metal_shell.mm
+    third_party/imgui_metal/imgui_impl_metal.mm)
+list(TRANSFORM objc_sources PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+set_source_files_properties(${objc_sources}
     PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-x;objective-c++;-fobjc-arc")
 target_include_directories(PureNative PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui_metal")
 # The backend's shaders are src/gpu/shaders/ge.metal, a plain Metal source file (task 049), turned at build time into a
