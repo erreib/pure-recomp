@@ -29,7 +29,8 @@ reference` (the PPSSPP side has not been taken: --refresh-references), `not meas
 --quick (the default; a few minutes) runs pictures, timing, saves and coverage, timing from the matrix's cached cells.
 --full adds trajectories and audio (15 headless port runs) and runs one sweep cell per mode for timing (Single
 Race, Time Trial and Free Play on Vineta K, Zone 1; Tournament stays the matrix's): about 25 minutes. --only runs
-the named categories (with --full's sources). Results go to DIR (default out/scorecard): scorecard.json,
+the named categories (with --full's sources, or --quick's beside --quick). Results go to DIR (default
+out/scorecard): scorecard.json,
 scorecard.md and every run's route, log and capture; a --full run of every category also writes docs/scorecard.md.
 --tracks limits the trajectory and audio circuits (a check, not a scorecard).
 
@@ -120,6 +121,7 @@ FADE_FLIPS = 57                        # the race-start fade: 57 flips at two vb
 PORT_RACE_FRAMES = 7800                # to about 25 s of race clock (GO at about flip 6253)
 PORT_AUDIO_FRAMES = 10200              # to about 65 s
 PP_RACE_SECONDS, PP_AUDIO_SECONDS = 25.0, 65.0
+PP_HOLD_VBLANKS = 9000                 # Cross held this long from READY (the runs stop at their race clock first)
 AUDIO_WINDOW = 60                      # s compared
 
 # The GE commands docs/fidelity.md found no draw of the game using (written once at start-up or with their reset
@@ -190,7 +192,9 @@ def rel(p):
     try:
         return str(Path(p).resolve().relative_to(ROOT))
     except ValueError:
-        return str(p)
+        s = str(p)
+        home = str(Path.home())
+        return "~" + s[len(home):] if s.startswith(home + "/") else s
 
 
 def clean_env(extra=None):
@@ -237,6 +241,42 @@ def other_game():
     return run_boot.other_games()
 
 
+def wait_until(busy, what, limit=3600.0):
+    """Waits while busy() names something (another game, another PPSSPP, a profile on PPSSPP's stick): one game at a
+    time, and a process this tool did not start is never touched. False after `limit` seconds."""
+    t0, said = time.time(), False
+    while True:
+        b = busy()
+        if not b:
+            if said:
+                say(f"{what}: free after {time.time() - t0:.0f} s")
+            return True
+        if not said:
+            say(f"waiting: {what} ({b})")
+            said = True
+        if time.time() - t0 > limit:
+            say(f"gave up waiting after {limit:.0f} s: {what} ({b})")
+            return False
+        time.sleep(10)
+
+
+def wait_game():
+    return wait_until(other_game, "another PureNative is running")
+
+
+def ppsspp_profiles():
+    d = pc.MEMSTICK / "PSP" / "SAVEDATA"
+    return sorted(p.name for p in d.glob("UCUS98612P*")) if d.exists() else []
+
+
+def wait_ppsspp():
+    """PPSSPP is one instance (its debugger port, its ini, its memory stick): wait for it to be free and for its stick
+    to hold no profile (the routes make a new one)."""
+    return (wait_until(pc.ppsspp_pids, "PPSSPPSDL is running") and
+            wait_until(ppsspp_profiles, "PPSSPP's memory stick holds a profile save") and
+            wait_until(pc.ppsspp_pids, "PPSSPPSDL is running"))
+
+
 # ------------------------------------------------------------------------------------------------- port runs
 
 class Ctx:
@@ -276,6 +316,7 @@ def port_run(ctx, name, steps, frames, env=None, shots=False):
     write_route(route, steps)
     log = runs / f"{name}.log"
     game = ctx.make_stick()
+    wait_game()
     cmd = [sys.executable, str(ROOT / "tools" / "run_boot.py"), "--shell", "headless", "--backend", "metal",
            "--script", str(route), "--frames", str(frames), "--seconds", str(max(120, frames // 20)),
            "--max-lines", "600000", "--data-dir", DATA_DIR, "--env", f"PURE_GAME_DIR={game}"]
@@ -366,9 +407,7 @@ def imgdiff_fraction(cap, ref, tol):
 def cat_pictures(ctx):
     rows = []
     regress = ctx.out / "regress"
-    if other_game():
-        return [row("the frame regression suite", "-", "-", "-", NOT_MEASURED, "",
-                    "another PureNative is running; one game at a time")]
+    wait_game()
     t0 = time.time()
     with open(ctx.out / "regress.stdout", "w") as f:
         rc = subprocess.run([str(ROOT / "tools" / "frame_regress.sh"), "--out", str(regress)], cwd=ROOT,
@@ -412,8 +451,20 @@ def cat_pictures(ctx):
 
 # -------------------------------------------------------------------------------------------------- trajectories
 
+def first_lap(samples):
+    """A ship's samples in time order up to its lap clock's first restart (the clock runs from GO through the first
+    crossing of the start line and restarts at the next, docs/tracks.md), with strictly increasing clocks."""
+    out = []
+    for p in samples:
+        if out and p[0] < out[-1][0] - 1.0:
+            break
+        if not out or p[0] > out[-1][0]:
+            out.append(p)
+    return out
+
+
 def read_pp_samples(path):
-    """A PPSSPP race-record CSV (tools/pp_lines.py's columns): {ship: [(clock, x, y, z)]} by clock."""
+    """A PPSSPP race-record CSV (tools/pp_lines.py's columns): {ship: [(clock, x, y, z)]}, the first lap clock."""
     ships = {}
     with open(path) as f:
         next(f)
@@ -423,25 +474,15 @@ def read_pp_samples(path):
                 continue
             k, c = int(w[1]), float(w[2])
             ships.setdefault(k, []).append((c, float(w[3]), float(w[4]), float(w[5])))
-    for k in ships:
-        ships[k].sort()
-    return ships
+    return {k: first_lap(s) for k, s in ships.items()}
 
 
 def port_series(rows):
-    """pp_lines.port_samples rows -> {ship: [(clock, x, y, z)]}, strictly increasing clocks."""
+    """pp_lines.port_samples rows (flip order) -> {ship: [(clock, x, y, z)]}, the first lap clock."""
     ships = {}
     for r in rows:
         ships.setdefault(r[1], []).append((r[2], r[3], r[4], r[5]))
-    out = {}
-    for k, s in ships.items():
-        s.sort()
-        clean = []
-        for p in s:
-            if not clean or p[0] > clean[-1][0]:
-                clean.append(p)
-        out[k] = clean
-    return out
+    return {k: first_lap(s) for k, s in ships.items()}
 
 
 def interp(series, clocks, c):
@@ -548,8 +589,10 @@ def cat_trajectories(ctx):
 # -------------------------------------------------------------------------------------------------------- timing
 
 def race_rate(path):
-    """Flips and race-clock seconds over the race windows of a sweep log (`[pure] ship` lines): every pair of
-    ship lines of one race whose clock moved (a lap restart counts the new clock), up to the finish (lap bit 16)."""
+    """Flips and race-clock seconds over the race windows of a sweep log (`[pure] ship` lines): every pair of ship
+    lines of one race on consecutive flips whose clock moved (a lap restart counts the new clock), up to the finish
+    (lap bit 16). A gap in the lines is a pause (the probe prints only what changes; the clock stands still), not
+    counted."""
     flips, secs, races = 0, 0.0, 0
     prev = None
     with open(path, errors="replace") as f:
@@ -565,11 +608,11 @@ def race_rate(path):
                 prev = None
                 continue
             if prev is None:
-                races += 1 if lap & 0x10000 == 0 and prev is None and clock < 1.0 else 0
+                races += 1
             else:
                 dc = clock - prev[1] if clock >= prev[1] - 1.0 else clock
-                if dc > 0.0 and frame > prev[0]:
-                    flips += frame - prev[0]
+                if dc > 0.0 and frame == prev[0] + 1:
+                    flips += 1
                     secs += dc
             prev = (frame, clock)
     return flips, secs, races
@@ -639,8 +682,7 @@ FRESH_CELLS = [("single_race", "vineta_k"), ("time_trial", "vineta_k"), ("free_p
 def sweep_cell(ctx, mode, track):
     out = ctx.out / "sweep"
     name = cs.cell_name(mode, track)
-    if other_game():
-        return None
+    wait_game()
     t0 = time.time()
     with open(ctx.out / f"sweep-{name}.stdout", "w") as f:
         subprocess.run([sys.executable, str(ROOT / "tools" / "campaign_sweep.py"), mode, track, "--no-damage",
@@ -1131,7 +1173,7 @@ def cat_coverage(ctx):
     rows.append(row("functions of config/function_map.csv entered during the matrix", "-", "-", "-", NOT_MEASURED, "",
                     "no cheap entry count exists: PSPRECOMP_PROFILE_DISPATCH counts the outer dispatch loop only "
                     "(chained calls never show) and slows the run, PSPRECOMP_COUNT_PC takes eight addresses; the "
-                    "VFPU differential test stays task 045's follow-up"))
+                    "VFPU differential test stays a task of its own (the brief's 045)"))
     return rows
 
 
@@ -1206,18 +1248,17 @@ def run(opts):
     if not (ROOT / "build" / "arm64" / "bin" / "PureNative").exists():
         print("scorecard: build/arm64/bin/PureNative missing: tools/build.sh profile")
         return 1
-    if other_game():
-        print("scorecard: another PureNative is running; one game at a time: " + str(other_game()))
-        return 1
     out = Path(opts.out)
     if not out.is_absolute():
         out = ROOT / out
     out.mkdir(parents=True, exist_ok=True)
-    full = opts.full or bool(opts.only)
+    full = opts.full or (bool(opts.only) and not opts.quick)
     ctx = Ctx(out, cats, full, tracks)
     t0 = time.time()
+    mode = "--full" if full else "--quick"
     result = {"tool": "tools/scorecard.py", "date": time.strftime("%Y-%m-%d %H:%M"), "commit": commit_label(),
-              "mode": "--full" if opts.full else "--only " + opts.only if opts.only else "--quick",
+              "mode": mode + (f" --only {opts.only}" if opts.only else "") + (f" --tracks {opts.tracks}" if opts.tracks
+                                                                             else ""),
               "categories": {}, "references": manifest()}
     funcs = {"pictures": cat_pictures, "trajectories": cat_trajectories, "timing": cat_timing, "audio": cat_audio,
              "saves": cat_saves, "coverage": cat_coverage}
@@ -1281,7 +1322,10 @@ def pp_race(track, csv_path, race_seconds, wav=None, wall_limit=900.0):
     race_seconds; every flip logged with its emulated time and the player's clock (a log-only breakpoint on
     sceDisplaySetFrameBuf, as --ppsspp-race does) to <csv>.flips.txt; with wav, PPSSPP's audio dump of the run."""
     files, hold = pp_routes(track)
-    script = "\n".join((PP_ROUTES / f).read_text() for f in files) + f"\n{hold}:CROSS\n"
+    # The release far past the run's end keeps the replay executing: when PPSSPP's replay runs out of items it stops
+    # overriding the pad, which would lift Cross at once (vineta_k_hold_cross.txt releases 3000 vblanks later).
+    script = ("\n".join((PP_ROUTES / f).read_text() for f in files)
+              + f"\n{hold}:CROSS\n{hold + PP_HOLD_VBLANKS}:\n")
     states = pc.parse_pad_script(script)
     csv_path = Path(csv_path)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1289,6 +1333,8 @@ def pp_race(track, csv_path, race_seconds, wav=None, wall_limit=900.0):
     tmp = csv_path.with_suffix(".csv.tmp")
     report = {}
     rows = torn = 0
+    if not wait_ppsspp():
+        return {"error": "PPSSPP did not become free"}
     t0 = time.time()
     before = pc.audio_dumps()
     with pc.IniSession(False, port=pc.DEFAULT_PORT, renderer="hardware", hle_log=False, mute=True,
@@ -1375,14 +1421,6 @@ def refresh(opts):
                   f"coverage has no PPSSPP side), not {c}")
             return 2
     tracks = opts.tracks.split(",") if opts.tracks else TRACKS
-    if pc.ppsspp_pids():
-        print(f"scorecard: PPSSPPSDL is running (pid {pc.ppsspp_pids()}); one PPSSPP at a time")
-        return 1
-    profiles = [p.name for p in ppsspp_saves().glob("UCUS98612P*")] if ppsspp_saves().exists() else []
-    if profiles:
-        print(f"scorecard: PPSSPP's memory stick holds a profile ({', '.join(profiles)} in {ppsspp_saves()}); the "
-              "routes expect none: move it away first")
-        return 1
     REF.mkdir(parents=True, exist_ok=True)
     made = {}
     t0 = time.time()
@@ -1418,6 +1456,7 @@ def refresh(opts):
                "--pad-file", str(PP_ROUTES / "frontend.txt"), "--pad-file", str(PP_ROUTES / "main_menu_music.txt"),
                "--until", "9900", "--renderer", "hardware", "--dump-audio", str(wav)]
         say("PPSSPP main menu music ...")
+        wait_ppsspp()
         if subprocess.run(cmd, cwd=ROOT).returncode == 0 and wav.exists():
             note(wav, "PPSSPP frontend.txt + main_menu_music.txt to vblank 9900; its audio dump")
     if "saves" in cats:
@@ -1426,6 +1465,7 @@ def refresh(opts):
                "--pad-file", str(PP_ROUTES / "frontend.txt"), "--pad-file", str(PP_ROUTES / "save_yes.txt"),
                "--until", "6200", "--renderer", "hardware"]
         say("PPSSPP save of NAME0000 ...")
+        wait_ppsspp()
         subprocess.run(cmd, cwd=ROOT)
         src = ppsspp_saves() / SAVE_FOLDER
         if src.is_dir():
@@ -1440,6 +1480,7 @@ def refresh(opts):
         out = "ref/scorecard/timing"
         shutil.rmtree(ROOT / out / "ppsspp" / "vineta_k", ignore_errors=True)
         say("PPSSPP follower race on Vineta K (fidelity_audit.py --ppsspp-race) ...")
+        wait_ppsspp()
         subprocess.run([sys.executable, str(ROOT / "tools" / "fidelity_audit.py"), "--ppsspp-race", "vineta_k",
                         "--out", out], cwd=ROOT)
         d = ROOT / out / "ppsspp" / "vineta_k"
@@ -1513,6 +1554,8 @@ def selftest():
     check(trajectory_row("T", c, "ref")["grade"] == CLOSE and
           trajectory_row("T", compare_series(port, []), "ref")["grade"] == DIFFERS, "trajectory rows graded")
     a = {0: [(1.0, 0, 0, 0), (2.0, 1, 0, 0)], 7: [(1.0, 5, 5, 5)]}
+    check(first_lap([(0.5, 0, 0, 0), (1.0, 1, 0, 0), (1.0, 1, 0, 0), (60.0, 2, 0, 0), (0.4, 9, 0, 0), (0.5, 9, 0, 0)])
+          == [(0.5, 0, 0, 0), (1.0, 1, 0, 0), (60.0, 2, 0, 0)], "trajectory: the samples end at the lap clock's restart")
     check(deterministic(a, a, [0]) == (2, 0.0) and deterministic(a, {0: [(1.0, 0, 0.5, 0)]}, [0])[1] == 0.5,
           "AI determinism: common clocks compared, the player left out")
     # Timing: a synthetic sweep log.
@@ -1532,7 +1575,7 @@ def selftest():
                          f"dist=1.000 lap=1 shield=100.000")
         clock = 0.0
         for i in range(300):                       # the lap clock restarts at the line
-            frame += 1
+            frame += 1 if i != 150 else 121        # a pause: no line for 120 flips, the clock standing still
             clock += 1 / 60.0
             lines.append(f"[pure] ship frame {frame} t={us} clock={clock:.3f} pos=0,0,0 vel=0,0,0 kmh=0.000 "
                          f"dist=1.000 lap=1 shield=100.000")
@@ -1541,8 +1584,8 @@ def selftest():
         log = tmp / "sweep.log"
         log.write_text("\n".join(lines) + "\n")
         flips, secs, _ = race_rate(log)
-        check(flips == 928 and abs(secs - (598 / 60 + 1.0 + 300 / 60)) < 0.001,
-              f"flips per race second: {flips} flips over {secs:.3f} s with a stretch and a lap restart")
+        check(flips == 927 and abs(secs - (598 / 60 + 1.0 + 299 / 60)) < 0.005,
+              f"flips per race second: {flips} flips over {secs:.3f} s with a stretch, a lap restart and a pause")
         # The load: flips at two vblanks, a 200 ms gap, 57 fade flips at two vblanks, then one vblank a flip.
         v = 16683.3
         t, fl = 0.0, []

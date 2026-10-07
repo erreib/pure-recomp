@@ -1,0 +1,13 @@
+# PPSSPP route: MAIN MENU left with its music, L pressed every 20 s (task 044, 2026-10-07: the scorecard's audio
+# reference). Chain it after frontend.txt (MAIN MENU and its music from about vblank 5340, 89 s):
+#   ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.txt --pad-file tools/ppsspp/routes/main_menu_music.txt \
+#                     --until 9900 --renderer hardware --dump-audio OUT.wav
+# Left alone for 30 s the main menu launches the attract demo (FUN_0894d4c8: no new button for 30 s), whose load stops
+# the music and whose track the game picks itself. Any new button resets that timer; L does nothing else on MAIN
+# MENU and makes no sound (the port's sceSas channel stays silent through the same presses), and a lone L only
+# restarts the unlock sequence. The port's side: config/pad_scripts/main_menu.txt with `pad leftshoulder` at flips
+# 4800, 5400, 6000 and 6600 (tools/scorecard.py), the same moments 14, 34, 54 and 74 s into the music.
+6180:L, 6188:
+7380:L, 7388:
+8580:L, 8588:
+9780:L, 9788:

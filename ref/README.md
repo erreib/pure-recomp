@@ -223,3 +223,30 @@ python3 tools/ppsspp/ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.t
 | File | SHA-256 |
 |---|---|
 | audio/free_play_pause.wav | 6487ea241bb0608d0757683bbabd573e1f5b06830769d9f00f1e7a4b89bb0b70 |
+
+## Task 044 additions (2026-10-07): the scorecard's references
+
+`tools/scorecard.py --refresh-references [CATEGORY]` takes the PPSSPP side of the accuracy scorecard (docs/scorecard.md,
+docs/verification.md "The accuracy scorecard") and keeps it under `ref/scorecard/`, git-ignored like every capture
+here. It lists each file it made, with its size, SHA-256 and the command that made it, in
+`ref/scorecard/manifest.json` and in the table below, which it rewrites between the two markers. Same PPSSPP, settings
+and memory stick as above (`PPCD00001DLS001` only; the tool waits while PPSSPP runs for someone else or while its
+stick holds a profile save, and moves its own save off the stick). The hardware renderer throughout: nothing here is
+read from VRAM.
+
+| Directory | Files | How |
+|---|---|---|
+| `scorecard/trajectories/` | `TRACK.csv` for the 12 circuits, `TRACK.flips.txt`, and `vineta_k.run2.*` | a Single Race at Vector on each circuit from the routes of task 035 (`frontend.txt` + `vineta_k_start.txt` [+ `track_downN.txt`] for Alpha, `frontend.txt` + `unlock_all.txt` + `unlock_race_LEAGUE.txt` [+ `unlock_track_downN.txt`] for Beta and Classic), Cross held from the first READY frame (58 vblanks after the first full-HUD frame) to the end. Every race record is sampled through the debugger's `memory.read` while the CPU runs, as `tools/pp_lines.py` samples them, each block read twice and kept when the two reads agree, until the player's clock reaches 25 s (65 s on the three audio circuits); the CSV has pp_lines' columns. A log-only breakpoint on `sceDisplaySetFrameBuf` gives every flip's emulated time and the player's clock (`.flips.txt`, from vblank 5000). `vineta_k.run2` is a second run of Vineta K, the AI ships' determinism check. About 2.5 to 3.5 minutes a circuit |
+| `scorecard/audio/` | `vineta_k.wav`, `sinucit.wav`, `sagarmatha.wav`, `main_menu.wav` | PPSSPP's audio dump (`--dump-audio`) of the three circuits' runs above, and of `frontend.txt` + `main_menu_music.txt` to vblank 9900 (MAIN MENU's music with L pressed every 20 s, which keeps the attract demo away and makes no sound) |
+| `scorecard/saves/UCUS98612P0000/` | the six files PPSSPP's save of the profile wrote | `frontend.txt` + `save_yes.txt` to vblank 6200: YES on SAVE PROFILE, the system dialog's first slot (frontend.txt's Cross at 5250), "Save completed."; the folder is moved here from PPSSPP's memory stick |
+| `scorecard/timing/ppsspp/vineta_k/` | `summary.json`, `ppsspp.log` | `tools/fidelity_audit.py --ppsspp-race vineta_k --out ref/scorecard/timing`: the sweep's follower drives three laps of Vineta K in PPSSPP; the summary lists the two-vblank stretches and the log every flip (the race load); its shots and samples are removed |
+
+<!-- scorecard references: begin (written by tools/scorecard.py --refresh-references) -->
+| File (under ref/) | Bytes | SHA-256 | Made | How |
+|---|---|---|---|---|
+| scorecard/audio/vineta_k.wav | 33232172 | 55a185843a1f6f4bd6f9e2e3c7bd38e6ff4a37bd73e495545bb193ebae4abcc8 | 2026-10-07 10:05 | PPSSPP frontend.txt + vineta_k_start.txt, Cross from vblank 7213, race records to 65 s of race clock; PPSSPP's audio dump |
+| scorecard/trajectories/vineta_k.csv | 814840 | 4323e4a75ed80b687eb39828c0a5d74221917439d48137300489929ee9314ffa | 2026-10-07 10:05 | PPSSPP frontend.txt + vineta_k_start.txt, Cross from vblank 7213, race records to 65 s of race clock |
+| scorecard/trajectories/vineta_k.flips.txt | 104100 | d0e095f21d3f5ba6b7d87ae9f0d0189d3ccc69f77b5a59df9e7ec0afb4d66997 | 2026-10-07 10:05 | PPSSPP frontend.txt + vineta_k_start.txt, Cross from vblank 7213, race records to 65 s of race clock; every flip (usec, the player's clock) |
+| scorecard/trajectories/vineta_k.run2.csv | 319866 | 9525ce076846cd3258ddb0391dbf295f2f8ce2ad1cafff52769c2c9d81dd338f | 2026-10-07 10:07 | PPSSPP, Vineta K again: the AI ships' determinism check |
+| scorecard/trajectories/vineta_k.run2.flips.txt | 56200 | 53982e757a27ef8c784346af43b7d170a4e770fe2c72ee96e6e1e04475455a9c | 2026-10-07 10:07 | the second run's flips |
+<!-- scorecard references: end -->
