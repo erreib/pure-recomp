@@ -671,7 +671,7 @@ def crsp_second(sv, tv):
 
 
 def crsp_port_ppsspp(s, t, lane, site):
-    """The header since patch 0020 under the test mode: vfpu_dot over two lanes for X and Y; for Z the four-lane
+    """The header since task 047 under the test mode: vfpu_dot over two lanes for X and Y; for Z the four-lane
     view (s0, s1, s2, 0) . (t1, -t0, 0, t2), whose zero lanes add +0 to the chain."""
     if lane < 2:
         sv, tv = crsp_ops(s, t, lane)
@@ -681,7 +681,7 @@ def crsp_port_ppsspp(s, t, lane, site):
 
 
 def crsp_port_old(s, t, lane, site):
-    """The header before patch 0020 (clang's contraction, -ffp-contract=on): X and Y `a*b - c*d` as
+    """The header before task 047 (clang's contraction, -ffp-contract=on): X and Y `a*b - c*d` as
     fma(a, b, -round(c*d)); Z the four-term `s0*t0 + s1*t1 + s2*t2 + s3*t3` of the forced view, as the _ct vdot."""
     if lane < 2:
         sv, tv = crsp_ops(s, t, lane)
@@ -1062,7 +1062,7 @@ def hw_of(p):
 
 
 def mode_line(sites, g, tag=None):
-    """The port's results under the two rounding modes of patch 0020 (vfpu_probe.py port --modes ppsspp,psp):
+    """The port's results under the two rounding modes of task 047 (vfpu_probe.py port --modes ppsspp,psp):
     the test mode against PPSSPP, the default against the PSP's rule. None when the set has no such files."""
     out = []
     pre = f"{tag}." if tag else ""

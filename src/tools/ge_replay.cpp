@@ -1,4 +1,4 @@
-// ge_replay (task 022): the other half of the A/B method of docs/ge-backend.md. A .gerec file (patch 0009's record
+// ge_replay (task 022): the other half of the A/B method of docs/ge-backend.md. A .gerec file (the record
 // backend, format in vendor/portablekit/host/gpu/ge_record_format.hpp) holds the calls the shell made on a GE backend,
 // with the guest memory each call read and the image each frame presented. This feeds those calls, in their order, to
 // any registered backend outside the game and compares what it presents with the recorded images, or two backends

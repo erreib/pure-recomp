@@ -152,7 +152,7 @@ fi
 
 if [ -s "$OUT/race_1x.gerec" ]; then
   step "3. race_1x.gerec frame 6016 into vulkan and metal, tol 24, max-frac 0.02"
-  # The Metal backend maps textures from normals and the texture matrix (task 036, patch 0013) and the Vulkan
+  # The Metal backend maps textures from normals and the texture matrix (task 036) and the Vulkan
   # backend does not: the race A/B compares the two with that feature off on both sides.
   PURE_NO_TEXMAP=1 replay "$OUT/metal_race.log" "$OUT/race_1x.gerec" --a vulkan --b metal --frames 6016 --tol 24 --max-frac 0.02 \
     --first-diff --out "$OUT/metal_race"

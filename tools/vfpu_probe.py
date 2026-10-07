@@ -718,7 +718,7 @@ def cmd_port(a):
     cpp, exe = WORK / f"port_harness{tag}.cpp", WORK / f"port_harness{tag}"
     cpp.write_text("".join(src))
     # The corpus's flags (build/arm64/compile_commands.json for generated_unit_*.cpp): -O2 -std=gnu++20 -arch arm64
-    # -ffp-contract=off (patch 0020); --fp-contract on gives the flags of the corpus before patch 0020.
+    # -ffp-contract=off (task 047); --fp-contract on gives the flags of the corpus before task 047's rounding.
     include = Path(a.include) if a.include else ROOT / "vendor" / "portablekit" / "include"
     cmd = ["/usr/bin/clang++", "-O2", "-std=gnu++20", "-arch", "arm64", f"-ffp-contract={a.fp_contract}",
            f"-I{include}", str(cpp), "-o", str(exe)]

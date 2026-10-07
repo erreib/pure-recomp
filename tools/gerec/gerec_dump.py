@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Lists the records of a GE backend recording (.gerec, written by the record backend of patch 0009).
+"""Lists the records of a GE backend recording (.gerec, written by the record backend of patch
+0004-ge-backend-and-shell-seams).
 
   tools/gerec/gerec_dump.py [--summary] [--draws] [--images DIR] FILE.gerec
 
@@ -27,7 +28,7 @@ TARGET_FORMATS = ["5650", "5551", "4444", "8888"]
 IMAGE_APIS = ["none", "cpu", "vulkan", "metal"]
 LEVEL_BYTES = 4 + 7 * 12 + 12   # a Draw's mip level fields (Writer::put_levels)
 LEVEL_MODES = ["auto", "const", "slope", "mode3"]
-PIXEL_BYTES = 13 + 17 + 1       # a Draw's colour test, dithering and CLIPENABLE (patch 0017)
+PIXEL_BYTES = 13 + 17 + 1       # a Draw's colour test, dithering and CLIPENABLE (task 040)
 COLOR_TEST_FUNCTIONS = ["never", "always", "equal", "notequal"]
 
 
@@ -109,10 +110,10 @@ def draw_call(c):
         c.floats(96)
     d["stencil"] = (c.flag(),) + c.take("<6I")
     d["color_write_mask"], d["alpha_write_mask"] = c.u32(), c.u32()
-    # The texture map state (patch 0013): map mode, projection source, the two shade lights. Recordings made before
+    # The texture map state (task 036): map mode, projection source, the two shade lights. Recordings made before
     # it end here, and their draws are map mode 0.
     d["texture_map"] = c.take("<4I") if c.left() >= 16 else (0, 0, 0, 0)
-    # The texture's mip levels (patch 0014): the level count, levels 1 to 7 (address, buffer width, width, height),
+    # The texture's mip levels (task 037): the level count, levels 1 to 7 (address, buffer width, width, height),
     # the level mode, the bias in 1/16 levels and the LOD slope. Recordings made before end here: one level.
     t = d["texture"]
     t["level_count"], t["levels"], t["level_mode"], t["level_bias"], t["lod_slope"] = 1, [], 0, 0, 0.0
@@ -121,7 +122,7 @@ def draw_call(c):
         t["levels"] = [c.take("<IIHH") for _ in range(7)]
         t["level_mode"], t["level_bias"], t["lod_slope"] = c.u32(), c.take("<i")[0], c.f32()
     # The colour test (enabled, function, reference, mask), dithering (enabled, the matrix's four rows) and
-    # CLIPENABLE (patch 0017). Recordings made before end here: no colour test, no dithering, CLIPENABLE off.
+    # CLIPENABLE (task 040). Recordings made before end here: no colour test, no dithering, CLIPENABLE off.
     d["color_test"], d["dither"], d["clip"] = (False, 0, 0, 0xFFFFFF), (False, (0, 0, 0, 0)), False
     if c.left() >= PIXEL_BYTES:
         d["color_test"] = (c.flag(),) + c.take("<3I")
