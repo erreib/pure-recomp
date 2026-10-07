@@ -173,7 +173,5 @@ The follow-ups resolved since they were collected, with what resolved them:
   headless run; a player's game keeps the charge (task 051). Resolved: task 050: the shared runner sets
   `PURE_NO_BUSY_CLOCK=1` for every headless run.
 
-## History
-
-[docs/history/sessions.md](history/sessions.md): the resume notes of every session, and the milestone
-table as it stood before task 053.
+The resume notes of every session, and the milestone table as it stood before task 053:
+[docs/history/sessions.md](history/sessions.md).
