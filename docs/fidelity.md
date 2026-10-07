@@ -40,8 +40,8 @@ To read the list below in proportion, what the audit found the same as the origi
 - **Saves round-trip.** The autosaves after a Single Race and after the tournament's races write the profile, and a
   reboot that LOADs it shows the records the races set and the play times.
 - **Audio keeps going.** Every race has its mix and its effects active in every second from the start and its music
-  in 97 to 100% of them (the gaps: loads, music track changes, Free Play's finish; difference 8 asks whether the PSP
-  has the last two), with clipping in at most 0.014% of the samples.
+  in 97 to 100% of them (the gaps: loads, music track changes, Free Play's finish; PPSSPP has the last two as well,
+  task 041), with clipping in at most 0.014% of the samples.
 - **Every circuit reachable.** All 12 circuits race in Single Race at Vector and Phantom and in Time Trial, Free Play
   on each league, the tournaments and the four Zone tracks; where the follower fails (Sinucit's fork, Manor Top,
   Karbonis at Phantom, a wedge on Chenghou Project) the game itself behaves.
@@ -198,7 +198,9 @@ channel's buffer late, and how long the channel went without):
   had none. Neither the matrix nor the rerun had an idle machine (the audit's PPSSPP captures and Ghidra decompiles
   until 21:51; a browser, Spotlight indexing and other sessions' work, a load average of about 5, at the rerun), and
   the sweep reads the game's output through a pty while it steers, so a reader held up for a moment holds the game's
-  writes. Whether a player's run has them is open: difference 7.
+  writes. Whether a player's run has them is open: difference 7. (Task 041: it does not. They come with the
+  headless runs, from host contention and once a pipeline compile, with or without the probe lines and the WAV
+  capture; "Differences 7 to 9" at the end.)
 - **Channel 2 (the music)**, 34 lines in 23 cells: the hitches above, and once at each change of music track, 10 to
   60 ms just after the new track starts: at 527.3 s of virtual time in every cell but the tournaments that runs that
   long (the first change, about 5:24 into the race music), and at the later changes of the long cells (636, 755, 932
@@ -437,7 +439,7 @@ Over the 46 cells (3.6 h of audio from the race starts):
     tracks in the same order), then the channel 2 underrun of 10 to 60 ms as the next track starts; the later changes
     (the tournaments, whose music stops for each load, and Citta Nuova at Phantom) have shorter silences, 0.6 to 1.0 s
     at 636, 755, 932 and 1224 s. Difference 8: whether a PSP has the same gap needs PPSSPP's audio (`DumpAudio`),
-    not measured here;
+    not measured here (task 041: it has; the gap is the first track's own ending, "Differences 7 to 9");
   - the loads between a tournament's races (5.95 to 6.02 s), where the game stops its music; and in Free Play 3.9 s
     from the moment the ship crosses the finish line (Vineta K: the laps add up to 212.8 s, the silence starts at
     213.1 s of race clock) until the results screen, which Time Trial and Single Race do not have (also difference
@@ -460,7 +462,7 @@ The mix clips in the demos' races: 2611 samples at full scale over the window (0
 and 276 s, up to 1000 samples in one second, and the sceSas channel itself holds 3474 clipped samples: the clipping is
 in what the sceSas mixer hands the game, before sceAudio. The scripted races clip far less (at most 0.000105 of the
 mix's samples, Citta Nuova at Vector). Whether the PSP's own SAS mixer clips there too was not measured (PPSSPP can dump its audio,
-`DumpAudio` in its ini, not used here).
+`DumpAudio` in its ini, not used here). Task 041 measured it: PPSSPP's demos clip as much ("Differences 7 to 9").
 
 ## Saves and records (item 5)
 
@@ -644,9 +646,10 @@ follower at Phantom triggers one at about 150 m of Vineta K each lap was not loo
 ## The differences
 
 Ordered by what a player would notice first. Each row is a candidate task; "size" is a guess (small: a day or less
-in one file; medium: a feature across the backend or the framework's state; large: a subsystem). Eleven
-differences: three in the race picture, two in the saves, one in loading, one in pacing and two in the audio (those
-three still to confirm), two small GE states.
+in one file; medium: a feature across the backend or the framework's state; large: a subsystem). Twelve
+differences: three in the race picture, two in the saves, one in loading, one in pacing, three in the audio and two
+small GE states. Task 041 checked 7, 8 and 9 against PPSSPP's audio dump and runs in a window: none of the three is
+the port's; it found 12 on the way.
 
 | # | What a player sees | Where | Evidence | Suspected cause | Size |
 |---|---|---|---|---|---|
@@ -656,11 +659,12 @@ three still to confirm), two small GE states.
 | 4 | Creating a second profile silently overwrites the first; LOAD offers no choice; no save dialog ever appears | the PROFILE menu, any player with more than one profile | `PURE_TRACE_SAVEDATA`: the second LISTSAVE (`overwrite=0`) writes P0000 again; PPSSPP shows the system save list (`ref/save_dialog.png`) and "Save completed." (`ref/save_completed.png`) | framework: `hle_savedata.cpp` answers LISTSAVE with the first listed name and LISTLOAD with the first save, with no dialog. **Done in task 039** (patch 0015, docs/savedata.md "What the dialog shows"): in a window the save list opens when there is a choice (LISTLOAD with two saves, LISTSAVE beside a save, the game's PROFILE > DELETE, which is mode 7 with no name), drawn over the game's grey save screen as the PSP's (icons, title, date, size, detail, NEW DATA, "Do you want to overwrite the data?", "Save completed."); without one, LISTSAVE takes the first free slot and LISTLOAD the newest save; the input script answers it with `save SLOT`. `tools/save_roundtrip.sh` runs 4 and 5: a second profile goes to P0001, P0000 keeps NAME0000, and LOAD lists and loads either. Left: the interface's font and button symbols, no fade, mode 7 lists only this game's folders | medium (a list dialog in the framework's UI), small for the data loss alone (LISTSAVE with `overwrite=0` to the first free name) |
 | 5 | A save from a PSP (or PPSSPP) does not load, and a port save would not load on a PSP | the memory stick | PPSSPP's `PROFILE.BIN` is 41586 bytes of ciphertext with the file in `SAVEDATA_FILE_LIST`; the port's 41570 bytes plain | framework: the PSP's savedata encryption (no-key mode) is not done | medium |
 | 6 | Loading screens before a race are shorter than on the PSP (about 0.3 s of game time against 1.5 s in PPSSPP) | every race load | `PURE_TRACE_CALLS` on `sceDisplaySetFrameBuf` against PPSSPP's flip log | framework: file reads complete at once in emulated time, where PPSSPP (like the UMD) takes time over them; arguably welcome, but not 1:1 | small |
-| 7 | The game freezes for 0.1 to 0.3 s now and then, with a gap in the sound | 12 of the 46 cells, one or two times each, at no fixed place (Zone 4 and Free Play Vineta K run again had them elsewhere) | race flips 102 to 295 ms after the one before, with sceSas and music underruns at the same moment and nothing else in the log (the matrix's hitches column, `out/fidelity-hitch/`) | unknown: the host holding the process (the machine was never idle), the sweep's pty reader holding the game's per-frame probe lines, or something of the port's own (the WAV capture, the backend's GPU waits); check on an idle machine in a run like a player's (a window, no probe lines, no WAV) with `PURE_METAL_TRACE` to see where the time goes | small (to check) |
-| 8 | The race music stops for about 2 s when it changes tracks, with a 10 to 60 ms underrun as the next starts; in Free Play it stops for 3.9 s at the finish line | all long races at 524.7 to 527.3 s of game time (5:24 into the race music; shorter gaps at the later changes); every Free Play finish | music channel zero runs of 177 ms and 2.15 s at 524.7 and 525.1 s and an underrun at 527.3 s, the same in all 14 cells that get there; Free Play's silence from 213.1 s of race clock on Vineta K (the laps end at 212.8 s) | unknown: the game's own track change and finish, or the framework's sceAtrac feeding the new track late; compare with PPSSPP's audio dump (`DumpAudio`) | small (to check) |
-| 9 | The attract demo's sound clips | the main menu left for 30 s | 3474 clipped samples in the sceSas channel over two demos; the scripted races at most 0.014% | unknown: the framework's SAS mix level, or the PSP clips too | small (to check) |
+| 7 | The game freezes for 0.1 to 0.3 s now and then, with a gap in the sound | 12 of the 46 cells, one or two times each, at no fixed place (Zone 4 and Free Play Vineta K run again had them elsewhere) | race flips 102 to 295 ms after the one before, with sceSas and music underruns at the same moment and nothing else in the log (the matrix's hitches column, `out/fidelity-hitch/`) | **checked (task 041, 2026-10-07): the headless test runs', not a player's.** Five runs in the Metal window with the audio device on (Single Race Vineta K twice with neither the probe lines nor the WAV capture, once with the probe lines, once with both; Free Play Vineta K with the probe lines) had no race frame of 100 ms or more (longest 39 to 71 ms: four SIGNAL depth waits, once 59 ms outside the backend); three headless runs as the matrix ran them had four (115 to 323 ms) with the matrix's signature (the virtual clock jumping 101 to 250 ms in one flip, sceSas and music underruns of 17 to 190 ms). `PURE_METAL_TRACE` names two causes: host contention, three times (the whole process slowed: the backend's submit 4 to 164 ms with nothing made or decoded, the rest 109 to 170 ms; a headless PureNative runs all its threads at scheduling priority 31, a windowed one its main thread at 46 and the others at 37, on a machine with 44.5 GB of swap in use), and once two render pipelines the pre-warm list lacks, made in the race on a cold shader cache (242.7 ms; 0.76 ms in the next run, warm). The probe lines and the WAV capture change nothing. "Differences 7 to 9" below | none for play; the 30-fps modes' missing pre-warm entries are a follow-up (below) |
+| 8 | The race music stops for about 2 s when it changes tracks, with a 10 to 60 ms underrun as the next starts; in Free Play it stops for 3.9 s at the finish line | all long races at 524.7 to 527.3 s of game time (5:24 into the race music; shorter gaps at the later changes); every Free Play finish | music channel zero runs of 177 ms and 2.15 s at 524.7 and 525.1 s and an underrun at 527.3 s, the same in all 14 cells that get there; Free Play's silence from 213.1 s of race clock on Vineta K (the laps end at 212.8 s) | **checked (task 041): the game's own.** The first race track (14,380,032 samples, 326.08 s) ends in a fade and 2.15 s of digital silence: the port decodes every frame of it to the track's end, none past the data the game added, and PPSSPP's audio dump of the same Free Play route plays the same track at a constant offset to the sample from 140 to 425 s of the dump; the next track starts 38.5 ms sooner after it in PPSSPP than in the port (the port's 26 ms underrun at the switch), inside that silence. The change at 755 s is the second track's end (227.86 s). Free Play's 3.9 s is the pause menu: the music and the effects stop at START in both, and the screen after END SESSION brings sound back 4.0 s later in both | none (the 38 ms lie inside the track's own silence) |
+| 9 | The attract demo's sound clips | the main menu left for 30 s | 3474 clipped samples in the sceSas channel over two demos; the scripted races at most 0.014% | **checked (task 041): the game's own.** PPSSPP's attract demos clip too: 699 and 2236 clipped samples (0.0065% and 0.0209%) in its first two (Vineta K, Blue Ridge; the game picks the demo, differently in each run) against the port's 2611 and 836 (0.0246% and 0.0111%; Modesto Heights, Citta Nuova), full-scale peaks in all four, the loudest second's RMS 11817 and 13226 against 11863 and 10735. The levels agree where the content is the same: the main menu's music at RMS 1686 in both, and over 250 s of the Free Play idle the port's mix is 0.966 to 1.004 of PPSSPP's per second (mean 0.986). The SAS mix level is not the cause | none |
 | 10 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework (7.7 million writes a cell) | framework GE state: the colour test. **Fixed by task 040 (2026-10-07)**: patch 0017 carries COLORTESTENABLE, COLORTEST, COLORREF and COLORTESTMASK (0x27, 0xD8 to 0xDA), and the Metal backend discards by the GE's function on the 8-bit colour under the mask, after fog, as the alpha test (docs/metal-backend.md, "The colour test, 16-bit writes and the depth clamp"). The draws are light glows blended additively, so a black fragment adds no colour; what the test changes is the bloom mask's stencil 255 their black texels wrote. Headless Metal at tol 32: race_hud 0.014874 to 0.014828 with the dither below (the colour test alone changes 640 pixels, all in a lamp's glow, whose region (307,107) 26x34 goes from 0.0328 to 0.0260, 0.2285 to 0.1765 at tol 16); tt_hud and fp_hud have no colour-tested draw on screen. The Vulkan backend keeps every fragment | small |
 | 11 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws a frame), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state. **Fixed by task 040 (2026-10-07)**: patch 0017 carries DITHERENABLE, DITH0 to DITH3 (0x20, 0xE2 to 0xE5) and CLIPENABLE (0x1C). Dithering: the port's 16-bit targets had kept 8 bits a channel (they are RGBA8 textures, cut to the format only when stored in guest memory), so the Metal backend now writes a 5650, 5551 or 4444 target as the PSP does: the blend in the shader on the target's colour, the matrix's offset (row y & 3, column x & 3, as PPSSPP's software renderer shows on all 16384 pixels of Vineta K's fourth billboard round), one clamp, the format's top bits. Every dithered draw of the dumps is into the 565 billboard target; after the task its pixels are all 565 values ordered as the round's matrix, as PPSSPP's are (before: 0.0 to 99.6% 565 values, no dither). The billboard screens show other adverts than PPSSPP's frames, so their regions hardly move (race_hud (201,126) 16x8 0.8828 both; tt_hud (195,114) 29x29 0.4245 to 0.4221, fp_hud 0.4269 to 0.3912); the scenes: tt_hud 0.011221 to 0.011213, fp_hud 0.011566 to 0.011336. Depth clamp: the hardware notes put it with CLIPENABLE on (near-plane clipping only, each vertex's screen z clamped to 0..65535, MINZ/MAXZ per pixel), which every transformed draw of the game has; the backend draws that rule, and it changes no pixel of the 18 scenes, as the dumps predict (no vertex beyond the far plane, MINZ/MAXZ the viewport's own range). The Vulkan backend draws neither | small each |
+| 12 | The race's effects have no reverb: they stop dead where the PSP's ring on (at a pause the PSP's sound fades out over half a second, the port's stops) | every race, from the race load (traced in Free Play) | the game calls `__sceSasRevType` with type 5, `__sceSasRevVON` with the dry and the wet send on and `__sceSasRevEVOL` 0x666 (a ramp down from 0xFFF at the race load) through the race, and keeps the wet send off in the menus; the framework accepts all four and drops them (`hle_media.cpp`: "Reverb is not modelled"). PPSSPP applies them: its dump of the Free Play pause decays over 0.5 s (RMS 2148, 600, 198, 125, 64, 33 down to 1 in 100 ms steps) and stays at RMS 1, where the port's falls to exact zeros within 100 ms (task 041) | framework: the SAS reverb (the effect type, the wet send and its volume) is not modelled in `sas_core.cpp` | medium |
 
 Not differences, though they looked like ones:
 
@@ -677,9 +681,14 @@ Not differences, though they looked like ones:
 
 Follow-ups that are not differences:
 
-- Three render pipelines of the 30-fps modes' result and standings screens are missing from
-  `config/metal_pipelines.txt` (made by a draw in every Time Trial, Free Play and Tournament cell that got that far):
-  a pre-warm entry for each would rule out a first-use stall.
+- Three render pipelines of the 30-fps modes are missing from `config/metal_pipelines.txt` (made by a draw in every
+  Time Trial, Free Play and Tournament cell that got that far). `PURE_METAL_TRACE` (task 041) shows when: not at the
+  results screen but once in the race, two in one frame and in two runs of three the third 21 to 25 flips later
+  (Free Play Vineta K: at the end of the second lap in two headless runs, 6.7 s into the second lap in a windowed
+  one). On a cold shader cache the two took 242.7 ms, the longest frame of that run; on a warm one 0.76 ms. A
+  pre-warm entry for each (and for the six that every run makes at the race load) would move them to start-up, where
+  they are made asynchronously (`PURE_METAL_PIPELINES_OUT` lists the keys a run used): a one-line-per-key change to
+  `config/`, outside task 041's files.
 - The scenes with no route in `config/pad_scripts/` (OPTIONS, CONTROLS, the other Alpha circuits' and the Beta and
   Classic circuits' first race frames, the pause menu) could join the suite once a task may add the routes; their
   fractions are in the reference table above.
@@ -841,3 +850,159 @@ long they spent in the menus, on a PSP as in the port. The PPSSPP references of 
 as references of those runs; a suite row for them would need the port to reach the same mist state (or to compare
 with the mist values substituted, as above). Nothing was changed in the framework or the backends, so the suite's
 fractions are unchanged (task 038's Result has both runs).
+
+## Differences 7 to 9: checked in a window and against PPSSPP's audio (task 041, 2026-10-07)
+
+**Findings.** None of the three is the port's. The hitches (7) come with the headless test runs: on the same machine
+five runs in the Metal window with the audio device on had none, three headless runs had four, and their frame trace
+shows host contention of the windowless process and once a pipeline compile on a cold shader cache. The music's 2 s
+stop (8) is the first race track's own ending, which PPSSPP plays sample for sample, and Free Play's 3.9 s is the
+pause menu, which silences PPSSPP for as long. PPSSPP's attract demos clip as much as the port's (9), and the mix
+levels agree where the content is the same. On the way: the game asks for a SAS reverb in races that the framework
+drops (difference 12).
+
+### The machine
+
+Not idle, and not one this task could make idle (the other processes were not its own): from 03:20 to 04:30 a
+browser renderer at 100% of a core, suggestd at 85 to 92%, mediaanalysisd at 55 to 86%, mds_stores at 30 to 40% and,
+when the first run began, a Steam helper at 280%; load averages over each run with medians of 5.7 to 7.8 and maxima
+of 7.0 to 18.0; 24 GB of memory with 44.5 GB of the 45 GB swap in use, and 140 to 510 MB of PureNative's own memory
+compressed while it ran. The display was asleep: in no windowed run did a picture reach the screen (the drawable's
+presented time never came back) and `nextDrawable` never waited. No other run of the task overlapped a hitch run.
+
+### The hitch runs (difference 7)
+
+Each run has `PURE_METAL_TRACE`; the race window is from the race clock's first second to 300 flips before the
+results panel (Single Race) or to the results (Free Play). "Probe" is the sweep's per-flip `[pure] ship` line
+(`PURE_WATCH_SHIP`), which the follower steers from; the sweep cannot run without it, so P1 and P2 launched
+PureNative directly (stdout to a file, no pty) with the sweep's own script for the cell and the steering S1's
+follower sent, replayed by flip (open loop; `PURE_TEST_NO_DAMAGE` as in the sweep).
+
+| Run | Cell | How | Shell | Audio device, pacing | Probe | WAV | Load median / max |
+|---|---|---|---|---|---|---|---|
+| S1 | Single Race Vineta K | `campaign_sweep.py --shell metal --no-damage --sound` | Metal window | on, paced from flip 0 | yes | no | 7.7 / 18.0 |
+| P1 | the same | PureNative directly, S1's steering replayed | Metal window | on, paced from 0 | no | no | 7.8 / 13.5 |
+| P2 | the same | as P1 | Metal window | on, paced from 0 | no | no | 6.9 / 10.9 |
+| W1 | the same | as S1, with `PURE_AUDIO_WAV` | Metal window | on, paced from 0 | yes | yes | 6.8 / 10.5 |
+| W2 | Free Play Vineta K | as S1 | Metal window | on, paced from 0 | yes | no | 5.9 / 7.3 |
+| A1 | Single Race Vineta K | `campaign_sweep.py --no-damage` with `PURE_AUDIO_WAV`: the matrix's own way | headless | none, paced from flip 6100 | yes | yes | 6.6 / 9.1 |
+| A2 | Free Play Vineta K | as A1 | headless | none, paced from 5900 | yes | yes | 5.8 / 7.0 |
+| A3 | Free Play Vineta K | A2 again | headless | none, paced from 5900 | yes | yes | 5.7 / 7.1 |
+
+| Run | Race flips | Frames | Mean | Median | 99th pct | Longest | 50 ms or more | 100 ms or more | The longest (or each of 100 ms), by the trace's columns | Clock jumps of 45 ms (the matrix's rule); underruns ch 1 / ch 2 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S1 | 6312-17830 | 11519 | 16.72 | 16.69 | 18.64 | 50.89 | 1 | 0 | flip 10052: GPU wait 44.4 (the SIGNAL depth write-back) | none; no WAV |
+| P1 | 6312-17830 | 11519 | 16.80 | 16.68 | 19.00 | 39.27 | 0 | 0 | flip 17760: GPU wait 20.1, submit 14.6 | no probe; no WAV |
+| P2 | 6312-17830 | 11519 | 16.71 | 16.67 | 18.70 | 39.05 | 0 | 0 | flip 16288: GPU wait 33.1 (depth) | no probe; no WAV |
+| W1 | 6312-17180 | 10869 | 16.81 | 16.70 | 19.48 | 62.81 | 1 | 0 | flip 9197: GPU wait 57.5 (depth) | none; 0 / 0 |
+| W2 | 6046-12400 | 6355 | 33.37 | 33.37 | 34.67 | 70.51 | 1 | 0 | flip 8190: other 59.2 | none; no WAV |
+| A1 | 6312-17770 | 11459 | 16.85 | 16.70 | 32.30 | 233.83 | 7 | 1 | flip 7076: submit 59.4 (no pipeline, texture 5.2 with nothing decoded), other 169.5 | flip 7076, 101 ms; 69 / 17 ms |
+| A2 | 6046-12040 | 5995 | 33.42 | 33.36 | 35.11 | 251.11 | 6 | 1 | flip 10142: submit 245.0, of it pipeline 242.7 (two render pipelines not in the pre-warm list), other 5.1 | flip 10142, 250 ms; 190 / 174 ms |
+| A3 | 6046-12520 | 6475 | 33.42 | 33.34 | 35.16 | 323.44 | 10 | 2 | flip 9588: submit 163.9 (texture 69.2 with nothing decoded), GPU waits 14.4, other 130.4; flip 7790: other 109.0 | flip 9588, 133 ms; 84 / 57 ms |
+
+(Milliseconds; Free Play runs at 30 flips a second.)
+
+What makes them:
+
+- **Not the probe lines, not the WAV capture.** The windowed runs with the probe lines (S1, W1, W2) and with the WAV
+  capture too (W1) are like those with neither (P1, P2): over 16.2 minutes of race in the window, no frame of 100
+  ms, no clock jump of 45 ms, no underrun on the effects or the music; the longest frames are task 033's SIGNAL depth
+  wait (44 to 58 ms) and once 59 ms outside the backend.
+- **Host contention of a headless process** (A1 flip 7076, A3 flips 7790 and 9588; 10.2 minutes of headless race in
+  all). Every part of the frame grows at once: the backend's own CPU work (submit 59 and 164 ms, with texture hashing
+  at 69 ms and nothing decoded) as well as the rest, and the frames around them are slow too (A1: submit 6 to 18 ms
+  in flips 7072 to 7080 against 1.9 on average). The process is starved, not waiting on anything of its own. A
+  headless PureNative has no window and is a background process to macOS: `ps -M` shows all its threads at
+  scheduling priority 31, where a windowed one's main thread runs at 46 and the others at 37. On this machine, short
+  of memory and busy, that was enough to lose the CPU for up to 0.3 s three times in ten minutes. A3's flip 7790 grew
+  outside the backend only, so a held write of a probe line cannot be ruled out there; the windowed probe runs never
+  showed one.
+- **A pipeline compile on a cold shader cache** (A2 flip 10142): two render pipelines missing from
+  `config/metal_pipelines.txt` were made by a draw at the end of the second lap, 242.7 ms, the first time this build's
+  shaders met those keys on this machine. The same two took 0.76 ms in W2 and A3 (warm). A player's first run of a
+  new build would meet them once; "Follow-ups that are not differences" has the pre-warm entries this needs.
+
+So the matrix's hitches are the test harness's (every cell ran headless, on a busy machine) plus the cold-cache
+compile; a player's windowed run has neither the first nor, after its first race of a mode, the second. Nothing was
+changed: no wait or buffer of the port's own is involved, and the pre-warm list is under `config/`.
+
+### The audio dumps (differences 8 and 9)
+
+PPSSPP's own audio dump (`DumpAudio`, the driver's `--dump-audio`, docs/ppsspp.md) records the PSP's sceAudio
+channels mixed and clamped, 44.1 kHz stereo on emulated time from boot, so it compares directly with the port's
+`PURE_AUDIO_WAV` mix; it has no per-channel files. The routes:
+
+```
+P=tools/ppsspp/ppsspp_ctl.py; R=tools/ppsspp/routes
+python3 $P run --pad-file $R/frontend.txt --pad-file $R/free_play_start.txt --pad-file $R/free_play_idle_end.txt \
+    --until 29700 --renderer hardware --dump-audio out/041/pp_fp_idle.wav          # 495.5 s, 8 min of wall time
+python3 $P run --pad-file $R/frontend.txt --until 22000 --renderer hardware \
+    --log out/041/pp_menu_idle.log --dump-audio out/041/pp_menu_idle.wav             # 367.0 s
+```
+
+The port's side, headless from an empty memory stick: the Free Play idle as `main_menu.txt` and `free_play.txt`
+without its Cross hold, then `16700:pad start`, `16740:pad dpdown`, `16780:pad dpdown`, `16820:pad a`, to flip 17500
+with `PURE_AUDIO_WAV`, `PURE_TRACE_ATRAC` and `PURE_WATCH_SHIP` (584.7 s); the menu idle as `main_menu.txt` to flip
+17000 (381.1 s) and, as the audit ran it, to 13500 (320.7 s: 2611 clipped samples in the mix and 3474 on channel 1,
+the audit's figures exactly). `tools/audio_compare.py` (docs/verification.md) made the comparisons.
+
+**Difference 8, the track change.** In the race the effects are louder than the music (the idle mix is at RMS 2500 to
+4400, the music at about 1000), so the music cannot be told from the mix's level; `audio_compare.py --locate` finds
+the port's music channel inside PPSSPP's mix instead.
+
+| | Port (channel 2) | PPSSPP (the mix) |
+|---|---|---|
+| race track 1 (14,380,032 samples, 326.08 s; streamed, 3,932,976 bytes) | from 201.181 s | at the port's time minus 74.78293 s: port 215.000 s found at 140.21707 s (correlation 0.44), port 500.000 s at 425.21707 s (0.67): the same samples in between |
+| its ending | below RMS 100 from 520 s, then zero runs of 177 ms at 524.755 s and 2153 ms at 525.179 s; every frame decoded to the track's end (`at=14378640 count=1392 ... end`), none past the data the game added | the same data (the effects cover it in the mix) |
+| the switch | the game releases track 1, tries `Music/Cosmos/music.at3` (not on the disc), sets track 2 (2,748,576 bytes, 227.86 s) at 527.27 to 527.30 s; channel 2 underrun of 26 ms at 527.2997 s; track 2 from 527.332 s | at the port's time minus 74.74447 s: port 528.000 s at 453.25553 s (0.34), port 535.000 s at 460.25553 s (0.45) |
+| track 1's start to track 2's | 326.151 s | 326.113 s: track 2 comes 38.5 ms (1696 samples) sooner |
+
+The 2.15 s of silence is in the track, so a PSP has it; the port's switch adds 38.5 ms to it, inside the silence and
+below one 30-fps frame (not chased further). The matrix's later change at 755 s is track 2's end (527.33 + 227.86 s);
+the tournaments' changes come with their loads.
+
+**Difference 8, Free Play's finish.** The sweep pauses after the third lap and picks END SESSION (START, DOWN, DOWN,
+Cross, 40 flips apart); the routes above do the same with the ship on the grid. From the race music's start to past
+the end screen (368 s, the windows aligned by the music) both mixes are active in 367 seconds, the same 367, with no
+clipping (peaks 21403 in the port, 24186 in PPSSPP); the music channel alone is active in 347 of 354.
+
+| | Port | PPSSPP |
+|---|---|---|
+| START | flip 16700, the sound drops at 558.05 s | vblank 28800 (480.48 s), drops at 480.55 s |
+| the drop (RMS in 100 ms steps) | 3836, 1628, then exact zeros | 2148, 600, 198, 125, 64, 33, 17, 9, 4, 2, then 1 |
+| silences between the menu's sounds (10 ms blocks at RMS 100 or less; the windows aligned by the music) | 1220, 1240 and 1210 ms, all zero | 970, 1250 and 1250 ms, at RMS 1, not zero |
+| sound back (the session's end screen) | 3.9 s after the drop | 4.0 s after the drop |
+
+The pause silences the music and the effects on a PSP too, for as long. What differs is the drop: PPSSPP's sound dies
+away over half a second and keeps a residue where the port's stops; that is the reverb below.
+
+**Difference 9, the attract demo.** The game picks the demo's tracks, and differently from run to run: PPSSPP (whose
+route answers NO on SAVE PROFILE) played Vineta K, Blue Ridge and Vineta K again; the port from an empty memory stick
+Modesto Heights and Citta Nuova (in the audit's run and this task's), with a second profile Citta Nuova and Sinucit,
+answering NO Sol 2. So the demos compare as demos, not sample for sample:
+
+| | Port | PPSSPP |
+|---|---|---|
+| main menu, music only | 146 to 175.5 s: RMS 1686, peak 10813 | 89 to 119.1 s: RMS 1686, peak 12550 |
+| demo 1 | Modesto Heights, 175.51 to 295.69 s: peak 32768, 2611 of 10,599,876 samples clipped (0.000246) in 10 s, RMS 4118, loudest second 11863 | Vineta K, 119.09 to 240.63 s: peak 32768, 699 of 10,719,828 (0.000065) in 5 s, RMS 3956, loudest 11817 |
+| demo 2 | Citta Nuova, 295.69 to 381.0 s (the run's end): peak 32768, 836 of 7,524,342 (0.000111) in 5 s, RMS 3808, loudest 10735 | Blue Ridge, 240.63 to 361.68 s: peak 32768, 2236 of 10,676,610 (0.000209) in 11 s, RMS 4361, loudest 13226 |
+| from the main menu on | 3447 of 21,261,536 (0.000162) | 2935 of 24,871,256 (0.000118) |
+
+Both mixes are active in every second from the main menu on (PPSSPP 277 of 277, the port 235 of 235), their longest
+silences the demo loads (PPSSPP 1.34, 1.03 and 1.08 s, the port 0.25 and 0.23 s: difference 6's shorter loads).
+Both reach full scale and clip in a handful of seconds a demo, at the same rate. Where the content is the same the
+levels agree: the menu music above, and over 250 s of the Free Play idle (port 250 to 500 s, PPSSPP 175.22 to 425.22
+s, aligned by the music) the mixes have RMS 3633 and 3682, the port's 0.966 to 1.004 of PPSSPP's in every second
+(mean 0.986), neither clipping. The SAS mix level is the PSP's.
+
+### Difference 12: the reverb the game asks for
+
+`PURE_TRACE_CALLS=sceSasCore:0x33D4AB37,sceSasCore:0x267A6DD2,sceSasCore:0xD5A229C9,sceSasCore:0xF983B186` on the
+Free Play route (headless, to flip 6500): at start-up `__sceSasRevType` -1 then 5 (4.07 s); through the menus
+`__sceSasRevVON` (dry on, wet off) and `__sceSasRevEVOL` (0, 0) about 30 times a second; from the race load (191.13
+s) `__sceSasRevVON` with the wet send on and `__sceSasRevEVOL` stepping from 0xFFF down to 0x669 in 0.26 s, then
+0x666, 30 times a second to the run's end. The framework binds the four to "accepted and dropped"
+(`hle_media.cpp`), and `sas_core.cpp` mixes the dry voices only. PPSSPP applies the reverb, which fits its
+half-second decay and residue at the pause and the 1.4% more level of its idle race mix. A player hears the race's
+effects dry. Implementing it (the effect types' parameters, the wet send and its volume, the feedback) is a
+framework task; a PPSSPP dump of a race and `audio_compare.py` are the check.
