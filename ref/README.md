@@ -204,3 +204,22 @@ docs/fidelity.md, whose captures came during the load.
 | zone_end.png | a20fcb80d2823f818a9d915ca6c38b972aaac56eb5c58c40b5e46a559374425f |
 | zone_change.png | a192682e6ddf59f033d4797d0ab848eff2d0f2efecce3b7e17235cb0475a7bed |
 | zone_change.ppdmp | 985cd7a5224f2a3e06eea5ceca140aed48cf7d6a8a9286eae9e6015a236b5f2b |
+
+## Task 043 addition (2026-10-07): the Free Play pause audio dump
+
+`audio/free_play_pause.wav` is PPSSPP's own audio dump (`--dump-audio`, docs/ppsspp.md "Audio dumps": the sceAudio
+channels mixed and clamped, 44.1 kHz stereo on emulated time from boot) of task 041's Free Play pause route: the ship
+left on Vineta K's grid past the race music's first track change, START at vblank 28800 (480.479 s), then END
+SESSION. 495.5 s, 87,399,468 bytes. `tools/sas_reverb_check.sh` compares the port's sound after the pause with it
+(docs/verification.md, "The SAS reverb check"). Same PPSSPP and memory stick as above; the hardware renderer, which
+does not change an emulated-time dump. About 8 minutes:
+
+```
+python3 tools/ppsspp/ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.txt \
+  --pad-file tools/ppsspp/routes/free_play_start.txt --pad-file tools/ppsspp/routes/free_play_idle_end.txt \
+  --until 29700 --renderer hardware --dump-audio ref/audio/free_play_pause.wav
+```
+
+| File | SHA-256 |
+|---|---|
+| audio/free_play_pause.wav | 6487ea241bb0608d0757683bbabd573e1f5b06830769d9f00f1e7a4b89bb0b70 |
