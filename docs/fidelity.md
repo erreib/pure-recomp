@@ -182,7 +182,23 @@ name, and the same presses made it NAME1111), SAVE PROFILE YES, then PROFILE > L
   `P0000` again: the first profile (NAME0000) is gone, and the stick holds one profile, NAME1111;
 - LISTLOAD then loads `P0000`, the only save, without a list on screen.
 
-<!-- SAVE_DIALOG -->
+What a PSP shows instead, from PPSSPP (`frontend.txt` + `save_yes.txt`, which answers YES on SAVE PROFILE; shots
+every 10 vblanks from 5100, `ref/save_dialog.png` and `ref/save_completed.png`): the system's save dialog takes the
+screen, titled Save, with the game's list as a column of entries, here five NEW DATA slots with the game's empty
+profile icon, and "× Enter ○ Back"; the player picks a slot (the route's next Cross took the first), and the dialog
+says "Save completed." beside the profile's icon, "Profile data", the date and 366 KB, until ○ Back closes it. With a
+profile on the stick its entry would sit in that list with its icon and the "User name: ..." detail, and LOAD's
+dialog lists the saves to pick from. The port shows none of this: the game's PROFILE page stays up while the
+framework answers in a few polls, picks the first slot to write and the first existing save to load, and never
+asks before writing over one.
+
+PPSSPP's save also differs in its bytes: its `PROFILE.BIN` is 41586 bytes of ciphertext and its `PARAM.SFO` lists
+the file in `SAVEDATA_FILE_LIST` (the list a PSP keeps of its encrypted files), while the port writes the 41570 plain bytes with an empty
+list (task 014 took the game's 0x5DC-byte parameter block, which has no key field, to mean the PSP leaves the file
+plain; PPSSPP encrypts it with the PSP's no-key savedata encryption). The other five files are byte-for-byte the
+same size. So a save made on a PSP (or in PPSSPP) will not load in the port, which would read the ciphertext as a
+profile, and a port save copied to a PSP would not load there. The PPSSPP save was moved out of its memory stick
+afterwards (`out/035/pp/savedata-moved/` in the worktree), as the routes expect none.
 
 ## The two-vblank stretches (item 6): the game's own rule, and PPSSPP has them too
 
