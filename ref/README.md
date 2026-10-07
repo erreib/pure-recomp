@@ -68,7 +68,7 @@ since task 035 (below).
 
 The same PPSSPP, settings and memory stick as above (`PPCD00001DLS001` only; `save_yes.txt` writes a profile, which
 was moved out afterwards). Routes in `tools/ppsspp/routes/`, each chained after `frontend.txt`; the comparisons with the
-port and the suite rows they feed are in docs/fidelity.md ("PPSSPP references beyond the five") and
+port and the suite rows they feed are in docs/history/fidelity.md ("PPSSPP references beyond the five") and
 docs/verification.md.
 
 A capture holds the CPU at a breakpoint while PPSSPP's file reads go on in real time, so a capture during a load ends
@@ -154,7 +154,7 @@ Captures before a load do not move what follows: a run of `time_trial_start.txt`
 (TRACK SELECTION) and a shot at 7340, and one with the shot alone, captured the same flip (vblank 7342) with the same
 pixels. The first worktree had found 0.98 of the pixels differing between a capture at 7302 and burst C's file, but
 that file is vblank 7340, 38 vblanks later; the load-timing effect above rests on the two Zone runs of
-docs/fidelity.md, whose captures came during the load.
+docs/history/fidelity.md, whose captures came during the load.
 
 | File | SHA-256 |
 |---|---|
@@ -236,7 +236,7 @@ python3 tools/ppsspp/ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.t
   decrypted contents are identical.
 - `ref/saves/ppsspp/PPCD00001DLS001/`: PPSSPP's first-boot autosave (the online system's info), copied from its
   memory stick, where trial 6 of task 006 wrote it on 2026-10-05.
-- `ref/saves/port-plain/UCUS98612P0000/`: a plain save written by the port before patch 0019 (batch/m2 at aa9128a,
+- `ref/saves/port-plain/UCUS98612P0000/`: a plain save written by the port before task 045 (batch/m2 at aa9128a,
   `config/pad_scripts/main_menu.txt` headless on an empty stick, 2026-10-07 09:54): the kind of save every port build
   wrote until then (SAVEDATA_PARAMS flag 0, `SAVEDATA_FILE_LIST` empty, `PROFILE.BIN` 41570 bytes plain).
 
@@ -366,8 +366,9 @@ more hits (no `vcrs`, `vqmul`, `vavg` or `vrot` ran). `048_karbonis_dot`: every 
 transcendental site (711) from 6.0 to 7.0 s of race clock, the stretch before the port's Karbonis player first parts
 from PPSSPP's (its 1422 breakpoints move PPSSPP's AI by up to 31 m and its player by 4 cm at 7.6 s; each row is still
 one execution). The port files: `<ADDR>.port.ppsspp.csv` and `.port.psp.csv` (the corpus in generated/ of 2026-10-07,
-patch 0020, under each mode), `.port.pre0020.csv` (patch 0020's header hunk reversed, `--fp-contract on`: the corpus
-before it), `.port.candidate.<mode>.csv` (the header of docs/tasks/048's Result, in a copy). A digest is the SHA-256
+with task 047's rounding, under each mode), `.port.pre0020.csv` (the header hunk of that rounding reversed,
+`--fp-contract on`: the corpus before it; the file names keep the old patch number, 0020, now part of patch
+0009-vfpu-rounding), `.port.candidate.<mode>.csv` (the header of docs/tasks/048's Result, in a copy). A digest is the SHA-256
 of `shasum -a 256` over the files in name order (`ls [0-9A-F]*.csv | grep -v port | sort | xargs shasum -a 256 |
 shasum -a 256` for PPSSPP's rows; `ls *.port.ppsspp.csv | sort | ...` for a port file set).
 
@@ -398,13 +399,13 @@ $P tools/vfpu_probe.py port ref/vfpu/jit --modes ppsspp,psp                     
 | vfpu/jit/048_karbonis/[0-9A-F]*.csv (62) | 64516343 | digest 1254af558e16f3cfef113626bf0da171c7980cfd9719bb8156da8783c0f35938 | the same run |
 | vfpu/jit/048_karbonis/*.port.ppsspp.csv (62) | | digest 25e8196e219d5a423df3015941a0a41c715660a01f0a3de6f349fe0162f1bb9c | `port --modes ppsspp,psp` |
 | vfpu/jit/048_karbonis/*.port.psp.csv (62) | | digest 35a76d0e2a10ae87505670dfa96905399132768dad0f6a7426d5f3429d0da6dc | the same |
-| vfpu/jit/048_karbonis/*.port.pre0020.csv (62) | | digest de9390e29042b180244f6c89db084ea2da3426db41d5092283667a3f7bc866ae | the corpus before patch 0020 |
+| vfpu/jit/048_karbonis/*.port.pre0020.csv (62) | | digest de9390e29042b180244f6c89db084ea2da3426db41d5092283667a3f7bc866ae | the corpus before task 047's rounding |
 | vfpu/jit/048_karbonis/*.port.candidate.ppsspp.csv (62) | | digest a82012adddfc02599edf8a1aa52775031ab7404dd23203310e5407074ef255ab | the Result's header, test mode |
 | vfpu/jit/048_karbonis/*.port.candidate.psp.csv (62) | | digest db53e942421d8ebf24fa70c85e888629a9e5081c1cb49ed1eb451257a3978dd1 | the same, default mode |
 | vfpu/jit/048_karbonis_dot/sites.json | 428367 | d4f4f768626c2cca3885f6af6e7e5c4249d772c0e1e51aee0f36e25e49b8aba2 | 2026-10-07 16:31, 711 sites, 213 with rows, 259370 rows |
 | vfpu/jit/048_karbonis_dot/[0-9A-F]*.csv (711) | 24213988 | digest 8f092e00fd6eaa503eb015f8dc4505d38f56339820fef8d6cf80aa688aa2ef25 | the same run |
 | vfpu/jit/048_karbonis_dot/*.port.ppsspp.csv (710) | | digest c44da6d3c73cc7ad27873cb21f7511b492ad49658ff479d68ecd9348c4124932 | `port --modes ppsspp,psp` (0x08887FFC, no rows, has no block of its own) |
-| vfpu/jit/*.port.ppsspp.csv (195) | | digest d9b709d8680af433ec6108553d1fe7054c4cc1bc74dfb7acdbc97fa3f1c381e5 | task 047's set, `port --modes ppsspp,psp` on the corpus of patch 0020 |
+| vfpu/jit/*.port.ppsspp.csv (195) | | digest d9b709d8680af433ec6108553d1fe7054c4cc1bc74dfb7acdbc97fa3f1c381e5 | task 047's set, `port --modes ppsspp,psp` on the corpus with task 047's rounding |
 | vfpu/jit/*.port.psp.csv (195) | | digest 45f59fda32d05d4df57c297883661808861c60fc9a6ac40c6c2711bfe73760b7 | the same |
 
 The Vineta K set's `.port.pre0020.csv` and `.port.candidate.<mode>.csv` are made the same way as Karbonis'. PPSSPP's
