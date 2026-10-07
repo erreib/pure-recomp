@@ -14,6 +14,7 @@
 | D-010 | 2026-10-07 | The SAS reverb's two constants are fitted to PPSSPP's output (the formula at 44.1 kHz, the sends at half), not taken from the documentation | accepted |
 | D-011 | 2026-10-07 | Load times stay the port's own (no UMD read timing): fidelity difference 6 closed as accepted | accepted (Erik) |
 | D-012 | 2026-10-07 | The expanded version gets its own save format (the game's profile blob in our container, with an extensions area); the PSP format stays as the import/export bridge; designed when the DLC loader and the first sequel feature are concrete | accepted (Erik), scheduled |
+| D-013 | 2026-10-07 | VFPU dot products round as the real PSP does (pspautotests' truncating rule); PPSSPP's fused chain is a test-only mode for the scorecard's comparisons | accepted (Fable; Erik informed) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -166,4 +167,25 @@ Consequences: task 045 proceeds as briefed (the bridge is wanted either way). Th
 for saves; nothing else should learn the memory-stick layout. When the format is designed, docs/savedata.md gets the
 container's specification and a migration note, and the framework's import/export is kept working against it.
 Status: accepted, scheduled for the expanded version.
+
+## D-013  2026-10-07  The dot product rounds as the PSP does; PPSSPP's rounding is a test mode
+Context: task 047 measured 1.17 million dot products at the game's own VFPU sites. Three rules exist: the real PSP's
+(pspautotests' `vector.expected`, a hardware run: products aligned to the largest exponent with two extra bits,
+truncated toward zero, summed exactly, cut to 24 bits toward zero; the only rule that gives all 150 results), PPSSPP's
+(its JIT fuses vdot and vtfm in lane order and leaves vmmul unfused, its interpreter fuses vmmul's last element: the
+emulator's own compiler on this machine, reproducing 40 percent of the PSP's results), and the port's (clang's fusion
+of the framework's expression, starting at another lane). PPSSPP is the project's oracle with tolerance, but here its
+output is an artefact of its build, not a model of the console, and D-009 asks for the original.
+Decision: the port's generated code rounds dot products (vdot, vhdp, the rows of vtfm and vhtfm, the elements of
+vmmul, the dot lanes of vcrsp and vqmul) by the PSP's rule, with contraction off for the whole corpus so every
+translated instruction rounds on its own. PPSSPP's JIT rule is available as a test-only mode (`PURE_VFPU_DOT=ppsspp`)
+for the scorecard's trajectory rows and `tools/ai_seed_check.sh`, which compare against PPSSPP's references and would
+otherwise never be faithful by construction; a player's game never uses it.
+Consequences: patch 0020 (the codegen header and the Vtfm/Vmmul emitters), a regeneration and a full corpus rebuild;
+`tools/vfpu_probe.py port` and `tools/vfpu_model.py --check` verify the new code against the samples under both
+rules; docs/scorecard.md's Trajectories section says the AI rows run under the PPSSPP mode. The PSP rule's unmeasured
+corners (subnormals, cancelling sums' sign, prefix constants past the encoded length) follow IEEE until a hardware
+sample says otherwise. The transcendentals stay as they are: the port's vrcp, vrsq and vsqrt match PPSSPP's JIT on
+every sample; the PSP's own vrcp is known to be inaccurate in its lowest bits and no hardware sample of it exists here.
+Status: accepted (Fable); Erik informed, may overrule.
 

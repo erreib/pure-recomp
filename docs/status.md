@@ -144,10 +144,11 @@ Last updated: 2026-10-06, M6 complete (session 4; see "Resume" below)
   amplifies a 1 to 3 km/h contact difference). Merged 2026-10-07: 046 (the AI's start is `rand()` seeded from the time since boot and the game's frame clock at
   TEAM SELECTION, plus the unlocked team set and the port's 1 ms frame-time quanta; pinned by the test switch
   `PURE_TEST_RACE_CLOCK`, all 12 player trajectories are faithful, Karbonis included; the load is not involved; the AI
-  still parts over a 1-ulp VFPU dot product in the codegen). Running: 047 (a worker: the VFPU probe through PPSSPP's debugger, thousands of
-  samples per site, the rounding model that reproduces them, the transcendentals' error); then Fable puts the rule
-  into the codegen header (patch 0020, corpus rebuild) and runs `tools/ai_seed_check.sh --tracks`; then the
-  organisation pass, then enhancements.
+  still parts over a 1-ulp VFPU dot product in the codegen). Merged 2026-10-07: 047 (the probe and the rule: PPSSPP's JIT fuses vdot/vtfm in lane order
+  and leaves vmmul unfused, its own compiler's doing; the real PSP, from pspautotests, truncates aligned products with
+  two extra bits; the port fuses from another lane). D-013: the port rounds as the PSP, PPSSPP's rule is a test mode.
+  Running (Fable): patch 0020 in the codegen header and the Vtfm/Vmmul emitters, regeneration, full corpus rebuild,
+  `vfpu_model.py --check` under both rules, `tools/ai_seed_check.sh --tracks`; then the organisation pass.
   Open for Erik: a finer virtual-time answer than the kernel's 1 ms starvation tick. Erik, 2026-10-06: finish this round first; then consider an accuracy scorecard (pictures,
   trajectory divergence per track with the AI seed pinned, timing, audio correlation, save files byte for byte,
   coverage, a VFPU differential test) before any enhancement. The game's own unlock code on MAIN MENU: LEFT, RIGHT,

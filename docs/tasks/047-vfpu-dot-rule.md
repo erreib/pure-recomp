@@ -1,6 +1,6 @@
 # 047: The VFPU's dot-product rounding, measured against PPSSPP (fidelity difference 13, what is left)
 
-Milestone: M8 | Branch: task/047-vfpu-dot-rule | Status: OPEN (the probe and the rule; the codegen change is Fable's)
+Milestone: M8 | Branch: task/047-vfpu-dot-rule | Status: MERGED (8c1f9ba, 2026-10-07); the codegen change is patch 0020 (D-013)
 
 ## Goal
 With the AI's start pinned (task 046), the ships still part over the last bit of `vdot`: the framework computes the
@@ -272,4 +272,21 @@ Open questions:
    `vrcp`; it was used only for its rows.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: PASS from the main checkout at 8c1f9ba (2026-10-07): `vfpu_model --selftest` PASS, `--check ref/vfpu`
+PASS (every dot-product sample reproduced by the named rule per instruction and per PPSSPP core), race_hud 0.0148.
+The samples (87 MB) copied from the worker's ref/vfpu with the hashes ref/README.md lists.
+
+Spot-read: tools/vfpu_probe.py (log-only breakpoints armed at boot; the port side computed by building each site's
+corpus code with the corpus's flags, so no port run was needed; the interpreter core set for one session and put
+back), tools/vfpu_model.py (the candidate models and the `c` grid search; the pspautotests cross-check), the
+fidelity section (the three rules stated precisely). Files outside May touch: none. The worker was cut off once by a
+usage limit after its fourth commit and resumed with its context.
+
+Merged: 8c1f9ba into batch/m2.
+
+Notes: the finding reverses task 046's reading: PPSSPP does not model the hardware's rounding at all; its JIT fuses
+vdot and vtfm in lane order (its own compiler's doing on this machine) and leaves vmmul unfused, its interpreter fuses
+vmmul's last element, and the real PSP (pspautotests' 150 results, 6 of which discriminate) truncates aligned
+products with two extra bits. D-013 decides what the port does. Unmeasured and recorded: vhdp (absent), prefix
+constants past n, subnormals, cancelling sums' sign, vsin/vcos (two sites each the race never runs), vcrsp/vqmul's
+dot lanes, and the PSP's inaccurate vrcp (the interpreter's differs from 1/x by up to 5 ulp; the JIT's is exact).
