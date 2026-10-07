@@ -1301,7 +1301,7 @@ Blue Ridge frame, the shimmer sequence and the decode counts.
 
 `tools/verify_task.sh 040` (`tools/patches.sh check && tools/build.sh profile && tools/frame_regress.sh`, 2026-10-07,
 M4 Pro): 16 patches reproduce the vendor tree (0001 to 0015 and 0017; 0016 is reserved); the suite passes 18/18
-headless in 25 s, the 15 other scenes pixel for pixel as before (Zone's colour-tested draws change none of their pixels),
+headless in 24 s, the 15 other scenes pixel for pixel as before (Zone's colour-tested draws change none of their pixels),
 race_hud 0.0148 (0.0149 before), tt_hud 0.0112 (0.0112), fp_hud 0.0113 (0.0116). Beyond the Verify line:
 `tools/frame_regress.sh --shell vulkan --backend vulkan` 18/18, every scene within 0.0005 of its vulkan column
 (19m 47s); `tools/hud_check.sh --shell headless` 61 of 61 shots with the HUD; `PURE_NO_COLOR_TEST=1 PURE_NO_DITHER=1
