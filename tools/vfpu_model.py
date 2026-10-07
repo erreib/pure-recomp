@@ -7,6 +7,19 @@
                                       sample, else the failing rows; then the transcendental report
   vfpu_model.py --report [DIR]        every candidate model over every sample set, per instruction and lane count
   vfpu_model.py --search [DIR]        the parameter grid of the aligned-truncation family (model c)
+  vfpu_model.py --check DIR --tag T   the same, with the port's results under both modes from <ADDR>.port.T.<mode>.csv
+  vfpu_model.py --diff [DIR] [--which ppsspp] [--limit N]
+                                      every sampled result where the port (<ADDR>.port.<which>.csv) differs from
+                                      PPSSPP's, per site and in time order (task 048: where a divergence can start)
+
+Task 048 adds the kinds beside the dot forms, each result lane a problem with its own candidates (kind_models):
+vcrs.t (one product), vcrsp.t (a difference of two products: the first rounded and the second fused, the reverse,
+unfused, exact, the PSP's), vqmul.q (four products: chains in either lane order, unfused, clang's contraction, exact,
+the PSP's), vfad (in lane order from s0 or from +0, a tree, exact, the PSP's), vavg (the framework's weighted sum,
+sum / n, sum * (1/n), the PSP's), vrot (sinf/cosf of the float x * pi/2, sin/cos in double) and vmscl (one product).
+RULES_048 holds PPSSPP's JIT's measured rule a kind, HW_048 the PSP's (what the header's default mode computes);
+--check also reports the port's results under the two modes of patch 0020 (vfpu_probe.py port --modes ppsspp,psp):
+the test mode against PPSSPP, the default against the PSP's rule.
 
 The samples are tools/vfpu_probe.py's: a directory with sites.json (which PPSSPP core made them, the sites, their
 prefixes) and one <ADDR>.csv a site with PPSSPP's source lanes and result lanes as bit patterns, and <ADDR>.port.csv
@@ -816,7 +829,12 @@ def kind_models(kind):
 
 
 # The measured rule of each PPSSPP core for these kinds (model names of kind_models), and what the PSP's default
-# mode of the header computes (its `hw` where a sum of products is involved, an IEEE product otherwise).
+# mode of the header should compute (its `hw` where a sum of products is involved, an IEEE product otherwise).
+# Measured on PPSSPP's JIT (task 048, Vineta K and Karbonis, READY to 13 s): vcrsp.t unfused, vfad sequential (from
+# s0; from +0 gives the same on every sample), vmscl one IEEE product. Not measured, because the game's code has no
+# vcrs.t, vqmul.q or vavg and no vrot ran in either race: vcrs is one product in every model; vqmul's and vavg's
+# entries are vcrsp's and vfad's rule carried over and vrot's is the port's helper, so --check applies them only to
+# pspautotests' integer cases.
 RULES_048 = {
     1: {"vcrs": "ieee", "vcrsp": "unfused", "vqmul": "unfused", "vfad": "sequential", "vavg": "sum / n",
         "vrot": "port", "vmscl": "ieee"},
@@ -996,8 +1014,11 @@ def report_others(sites, core):
             ok, tot, _ = evaluate_other(fn, probs)
             mark = " (the rule)" if rule48.get(kind) == name else (" (hw)" if HW_048.get(kind) == name else "")
             print(f"    {name + mark:34} {ok:8}/{tot} {100.0 * ok / max(tot, 1):8.3f}%")
-        for which, label in (("port", "the port today"), ("ppsspp", "the port, test mode"),
-                             ("psp", "the port, default mode")):
+        names = {"port": "the port (.port.csv)", "ppsspp": "the port, test mode", "psp": "the port, default mode",
+                 "pre0020": "the port before patch 0020"}
+        tags = sorted({k for s_ in sites for k in s_[0].get("_ports", {})})
+        for which in ["port"] + tags:
+            label = names.get(which, f"the port, {which}")
             gg = other_groups(sites, which).get(g, [])
             ok, n = port_agreement(gg)
             if n:
@@ -1076,8 +1097,9 @@ def cmd_check(d, tag=None):
             ok, tot, bad = evaluate_rule(rule, probs)
             have = [p for p in probs if p[6] is not None]
             port_ok = sum(1 for p in have if p[6] == p[5])
-            print(f"  {g:40} {rule_label(rule, kind):24} {ok}/{tot} ({100.0 * ok / tot:.3f}%); "
-                  f"the port today {port_ok}/{len(have)} ({100.0 * port_ok / max(len(have), 1):.3f}%)")
+            print(f"  {g:40} {rule_label(rule, kind):24} {ok}/{tot} ({100.0 * ok / tot:.3f}%)"
+                  + (f"; the port (.port.csv) {port_ok}/{len(have)} ({100.0 * port_ok / len(have):.3f}%)"
+                     if have else ""))
             ml = mode_line(sites, g, tag)
             if ml:
                 print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0020'}: {ml}")
@@ -1090,7 +1112,7 @@ def cmd_check(d, tag=None):
             ok, tot, bad = evaluate_other(kind_models(kind)[name], probs)
             port_ok, port_n = port_agreement(probs)
             print(f"  {g + ' (result lanes)':40} {name:24} {ok}/{tot} ({100.0 * ok / tot:.3f}%)"
-                  + (f"; the port today {port_ok}/{port_n} ({100.0 * port_ok / port_n:.3f}%)" if port_n else ""))
+                  + (f"; the port (.port.csv) {port_ok}/{port_n} ({100.0 * port_ok / port_n:.3f}%)" if port_n else ""))
             ml = mode_line(sites, g, tag)
             if ml:
                 print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0020'}: {ml}")
