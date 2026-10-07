@@ -97,14 +97,15 @@ CLIP_FAITHFUL, CLIP_CLOSE = 0.0001, 0.001   # the port's clipped fraction above 
 
 # The extra first-race frames of docs/fidelity.md item 3: the sweep's picks after main_menu.txt + single_race.txt,
 # the frame of the first full HUD, the PPSSPP reference, tol, limit and the measured value (task 044's three
-# headless runs on the Metal backend, 2026-10-07; the limit by docs/verification.md's re-baselining rule: the
-# largest run plus 0.015 to 0.02, rounded up to a hundredth). Sinucit and Sebenco Climb compare two weather-mist
-# states (difference 3, task 038), so their fractions are high whatever the renderer does.
+# headless runs on the Metal backend, 2026-10-07, each the same to four places, after tasks 036, 037 and 040; the
+# limit by docs/verification.md's re-baselining rule: the largest run plus 0.015 to 0.02, rounded up to a
+# hundredth). Sinucit and Sebenco Climb compare two weather-mist states (difference 3, task 038), so their fractions
+# are high whatever the renderer does (task 038: 0.3207 and 0.1163 before tasks 036 and 037).
 EXTRA_SCENES = [
     # scene              track            frame  reference                   tol  limit  measured  unlock
     ("blue_ridge_hud",    "blue_ridge",    6016, "ref/blue_ridge_hud.png",    32, 0.05,  0.0247,  False),
-    ("sinucit_hud",       "sinucit",       6016, "ref/sinucit_hud.png",       32, 0.14,  0.1163,  True),
-    ("sebenco_climb_hud", "sebenco_climb", 6018, "ref/sebenco_climb_hud.png", 32, 0.34,  0.3207,  True),
+    ("sinucit_hud",       "sinucit",       6016, "ref/sinucit_hud.png",       32, 0.11,  0.0877,  True),
+    ("sebenco_climb_hud", "sebenco_climb", 6018, "ref/sebenco_climb_hud.png", 32, 0.32,  0.2993,  True),
 ]
 
 # PPSSPP's routes to each circuit's grid (tools/ppsspp/routes, task 035) and the vblank of the first full-HUD frame
@@ -746,11 +747,11 @@ def cat_timing(ctx):
     pp_sum = REF / "timing" / "ppsspp" / "vineta_k" / "summary.json"
     port_log, port_src = None, ""
     if "single_race" in fresh:
-        port_log, port_src = fresh["single_race"][0], "this run's sweep cell single_race-vineta_k"
+        port_log, port_src = fresh["single_race"][0], f"this run's sweep cell single_race-vineta_k ({fresh['single_race'][1]})"
     else:
         c = next((c for c in cells if c["cell"] == "single_race-vineta_k"), None)
         if c and c["_log"].exists():
-            port_log, port_src = c["_log"], f"the matrix's single_race-vineta_k ({rel(mdir)})"
+            port_log, port_src = c["_log"], f"the matrix's single_race-vineta_k ({c['outcome']}, {rel(mdir)})"
     port_st = fa.scan_log(port_log, 60)["stretches"] if port_log else None
     port_txt = "-" if port_st is None else f"{len(port_st)} ({', '.join(str(s['flips']) for s in port_st)} flips)"
     if not pp_sum.exists():
@@ -760,13 +761,16 @@ def cat_timing(ctx):
         rows.append(row("two-vblank stretches over a follower-driven Vineta K race", "-", "-", "-", NOT_MEASURED, srule,
                         "no port race log (the matrix's cell or --full's sweep cell)"))
     else:
-        pps = json.loads(pp_sum.read_text())["stretches"]
+        summ = json.loads(pp_sum.read_text())
+        pps = summ["stretches"]
         d = len(port_st) - len(pps)
+        laps = ", ".join(f"{t:.1f}" for t in summ.get("laps", []))
         rows.append(row("two-vblank stretches over a follower-driven Vineta K race", port_txt,
                         f"{len(pps)} ({', '.join(str(s['flips']) for s in pps)} flips), {ref_note(pp_sum)}", f"{d:+d}",
                         grade_low(abs(d), STRETCH_FAITHFUL + 1, STRETCH_CLOSE + 1), srule,
-                        f"{port_src}; where they fall follows the weapons, which differ run to run on both",
-                        {"port": len(port_st), "ppsspp": len(pps)}))
+                        f"port: {port_src}; PPSSPP: {summ.get('outcome')} (laps {laps} s, {summ.get('contacts')} "
+                        "contacts); where they fall follows the weapons and the follower's put-backs, which differ run "
+                        "to run on both", {"port": len(port_st), "ppsspp": len(pps)}))
     # The race load (difference 6, accepted by D-011).
     if "vineta_k" in ctx.race_runs:
         log = ctx.race_runs["vineta_k"][0]
@@ -1403,6 +1407,9 @@ def pp_race(track, csv_path, race_seconds, wav=None, wall_limit=900.0):
                 pc.take_audio_dump(before, str(wav), report)
     if "error" in report:
         tmp.unlink(missing_ok=True)
+        raw_log.unlink(missing_ok=True)
+        if wav:
+            Path(wav).unlink(missing_ok=True)      # a broken run's dump is no reference
         return report
     tmp.replace(csv_path)
     flips = []
@@ -1446,7 +1453,11 @@ def refresh(opts):
             audio = track in AUDIO_TRACKS
             csv_path = tdir / f"{track}.csv"
             wav = adir / f"{track}.wav" if audio else None
-            rep = pp_race(track, csv_path, PP_AUDIO_SECONDS if audio else PP_RACE_SECONDS, wav)
+            for attempt in (1, 2):           # PPSSPP's debugger has stopped answering once in about twenty runs
+                rep = pp_race(track, csv_path, PP_AUDIO_SECONDS if audio else PP_RACE_SECONDS, wav)
+                if "error" not in rep:
+                    break
+                say(f"PPSSPP {track}: attempt {attempt} failed ({rep['error']})")
             if "error" in rep:
                 continue
             how = (f"PPSSPP {' + '.join(rep['routes'])}, Cross from vblank {rep['hold']}, race records to "

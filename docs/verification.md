@@ -424,3 +424,81 @@ tt_hud (0.0229), fp_hud (0.0232), zone_hud (0.0122) and zone_change (0.0353). Th
 mode 0), and `tools/gerec/metal_check.sh` runs the race A/B with `PURE_NO_TEXMAP=1` so both backends draw mode 0.
 
 Re-baselined again 2026-10-07 after task 037 (mipmaps): race_hud 0.0149, tt_hud 0.0112, fp_hud 0.0116, zone_hud 0.0121.
+
+# The accuracy scorecard (task 044, 2026-10-07)
+
+```
+tools/scorecard.py [--quick | --full] [--only CATEGORY[,CATEGORY...]] [--out DIR] [--tracks TRACK[,...]]
+tools/scorecard.py --refresh-references [CATEGORY] [--tracks TRACK[,...]]
+tools/scorecard.py --selftest
+```
+
+The standing answer to "how accurate is the port" (D-009): six categories, each row measured on the port headless and
+compared with PPSSPP or with the game's own facts, graded `faithful`, `close` or `differs` by a stated threshold.
+`docs/scorecard.md` holds the latest `--full` run of this branch, its header the thresholds of every category. The
+tool writes `scorecard.json` (every row with its figures) and `scorecard.md` to `--out` (default `out/scorecard`),
+with every run's route, log, captures and WAVs under `<out>/runs/`; a `--full` run of every category also rewrites
+`docs/scorecard.md`. Exit 0 once the scorecard is written, whatever the grades.
+
+| Mode | Categories | Port runs | Time on this Mac |
+|---|---|---|---|
+| `--quick` (the default) | pictures, timing (from the matrix's cells), saves, coverage | the suite, three extra race frames, a short race for the load, a profile | about 2 minutes |
+| `--full` | all six | also 12 straight-on races (three with `PURE_AUDIO_WAV`), the main menu with `PURE_AUDIO_WAV`, four sweep cells (Single Race, Time Trial and Free Play on Vineta K, Zone 1; races paced) | about 25 minutes |
+| `--only CATEGORY,...` | the named ones, with `--full`'s sources (or `--quick`'s beside `--quick`) | | |
+
+Every port run is `tools/run_boot.py --shell headless --backend metal` on an empty memory stick of its own
+(`<out>/game`), silent, with the data directory `out/data/scorecard`, and no `PURE_*` switch inherited from the shell;
+the suite and the sweep cells run with their own headless defaults. One game at a time: when another task's
+PureNative (or PPSSPP, for the references) is running, the tool waits for it and never touches it; the report gives
+the time spent waiting beside the wall time.
+
+How each category measures:
+
+- **Pictures.** `tools/frame_regress.sh --out <out>/regress` as it is, its `summary.txt` read for the 18 scenes; then
+  the first full-HUD frames of Blue Ridge (flip 6016), Sinucit (6016) and Sebenco Climb (6018, with the unlock
+  switch), the sweep's picks after `main_menu.txt` + `single_race.txt`, against `ref/blue_ridge_hud.png`,
+  `sinucit_hud.png` and `sebenco_climb_hud.png` at tol 32. Their measured values and limits are in the tool's
+  `EXTRA_SCENES`, set by the re-baselining rule above; Sinucit's and Sebenco Climb's compare two states of the weather
+  mist (difference 3, task 038), so their fractions stay high whatever the renderer does.
+- **Trajectories.** Each circuit's Single Race at Vector by the sweep's route (`main_menu.txt`, `single_race.txt`, the
+  picks of `tools/campaign_sweep.py`), `PURE_TEST_UNLOCK_ALL=1` on all twelve, Cross held from flip 6100, no steering,
+  `PURE_WATCH_GRID=1`, to flip 7800 (about 25 s of race clock; 10200 on the three audio circuits). PPSSPP's side is the
+  same race through the routes of task 035 with Cross held from the first READY frame, its race records sampled as
+  `tools/pp_lines.py` samples them (its block and parser), each block read twice and kept only when both reads agree.
+  Both sides are cut at each ship's first lap-clock restart; the port's positions, every flip, are interpolated at
+  PPSSPP's race clocks. Two PPSSPP runs of Vineta K agree at every common clock, so PPSSPP's AI is repeatable and the
+  AI ships get a row per circuit (the worst of the seven).
+- **Timing.** Flips per race-clock second: pairs of `[pure] ship` lines on consecutive flips whose clock moved (a
+  lap-clock restart counts the new clock; a pause, when the probe prints nothing, does not count), over the matrix's
+  cells at Vector in `--quick`, over this run's sweep cells in `--full` (Tournament stays the matrix's: its cell takes
+  17 minutes). The stretches: `tools/fidelity_audit.py`'s `scan_log` on the Vineta K race (the matrix's cell or this
+  run's) against the summary of `--ppsspp-race vineta_k`. The race load: from the TEAM SELECTION confirm (port flip
+  5700, PPSSPP vblank 6700) to the first of the 57 two-vblank flips of the race-start fade, which end where the race's
+  one-vblank flips begin, in game time (the port's `PURE_TRACE_CALLS` on `sceDisplaySetFrameBuf`, PPSSPP's flip log);
+  graded `accepted (D-011)`.
+- **Audio.** The main menu: `main_menu.txt` with L every 600 flips (20 s) from 4800, to flip 6900, against PPSSPP's dump
+  of `frontend.txt` + `main_menu_music.txt` (L every 1200 vblanks): the attract demo, which would start 30 s after the
+  last new button and play a track the game picks itself, never comes, and L makes no sound there (the port's
+  sceSas channel stays silent). `--locate` finds three two-second stretches of the port's mix (4, 24 and 44 s into
+  the music) in PPSSPP's dump; the lowest correlation is graded, and the per-second RMS ratio over the aligned 60 s.
+  The races: the port's music channel (`.ch2.wav`) located in PPSSPP's mix at five stretches from GO + 10 s, the
+  median correlation graded; then the two mixes over 60 s from GO aligned by the best stretch's offset: the share of
+  seconds where both or neither are active, and the clipped samples. The AI ships differ in the port, so the effects
+  do too; the RMS ratio of the race mixes is reported, not graded.
+- **Saves.** `tools/save_roundtrip.sh`'s first run, `main_menu.txt` on an empty stick (NEW, NAME0000, AAA, SAVE
+  PROFILE YES), made headless in seconds (the script itself runs five windowed runs in 13 minutes and has no option for
+  one), against PPSSPP's save of the same profile (`ref/scorecard/saves/UCUS98612P0000`). The data file, PROFILE.BIN,
+  is compared by size only and `SAVEDATA_FILE_LIST` lists it only in PPSSPP's: difference 5, open (task 045).
+- **Coverage.** The cell results of `tools/fidelity_audit.py` from `out/035-wip/fidelity` (this checkout's, else the
+  main checkout's, else `out/fidelity`); without them the rows say which command makes them (about 4 hours; the
+  scorecard never runs the matrix). The 278 imports by state from `config/imports.csv`, the start-up list of
+  unimplemented imports and the `[hle-stub]` and `UNVERIFIED` lines of the matrix's logs (the brief names
+  `config/hle_coverage.csv`, which does not exist). The GE commands still ignored from this run's exit list. Functions
+  entered: not measured (no cheap entry count exists).
+
+`--refresh-references [CATEGORY]` (trajectories, audio, saves or timing; all four without one) takes the PPSSPP side
+into `ref/scorecard/`, one PPSSPP at a time, waiting while PPSSPP runs for another task or while its memory stick
+holds a profile save, and lists every file with its SHA-256 in `ref/scorecard/manifest.json` and `ref/README.md`
+(the commands are there too). A row whose reference is missing says `no reference` and names the command; it does not
+fail the run. `--selftest` checks every grader, the parsers and the report on synthetic inputs (PASS in about a
+second).
