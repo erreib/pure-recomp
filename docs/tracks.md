@@ -491,3 +491,7 @@ a good lap, not the presses (a replayed pad script diverges, since the AI grid d
 3. `python3 tools/campaign_sweep.py single_race TRACK --no-damage`: the follower on your line.
 
 The sweep's cells of that track then run on your line until the file is replaced again.
+
+Checked 2026-10-06 on a follower-driven Vineta K race logged with `PURE_WATCH_GRID=1`: `--ships player` kept the
+player's fastest whole pass (57.2 s of 82117 samples) as a line 8.3 m mean from the AI line (max 27 m at 2490 m,
+where the follower had left the line), so the conversion runs end to end; a human lap has not been recorded yet.
