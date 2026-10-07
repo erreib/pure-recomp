@@ -1,45 +1,24 @@
 # The Metal backend's render pipelines and depth-stencil states, made at start (task 033, docs/metal-backend.md
-# "Frame times"): the render pipelines asynchronously on Metal's threads, the depth-stencil states at once. A key not
-# listed is still made on first use. Every key the draws of the Vineta K Single Race cell used (tools/campaign_sweep.py
-# single_race vineta_k --no-damage: boot, the frontend, the race with pickups used, the results screen), written by
-# PURE_METAL_PIPELINES_OUT=FILE in a headless and a windowed run (2026-10-06) and merged. Fields: Metal's values for the
-# blend factors, operations, write masks and the depth compare; the GE's for the stencil function and operations
-# (metal_backend.mm, RenderKey and DepthStencilKey).
-render blend=0 source=1 destination=0 operation=0 write_mask=0 alpha_destination=0 dual_source=0 textured=0 alpha_test=0
-render blend=0 source=1 destination=0 operation=0 write_mask=1 alpha_destination=0 dual_source=0 textured=0 alpha_test=0
-render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0
-render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1
-render blend=0 source=1 destination=0 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=0 alpha_test=0
-render blend=0 source=1 destination=0 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=0 source=1 destination=0 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=1
-render blend=1 source=1 destination=0 operation=0 write_mask=1 alpha_destination=1 dual_source=0 textured=0 alpha_test=0
-render blend=1 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=1 source=1 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=1 source=1 destination=1 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=1 source=1 destination=11 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=0 alpha_test=0
-render blend=1 source=1 destination=4 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=0
-render blend=1 source=4 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=1 source=4 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0
-render blend=1 source=4 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=1 source=4 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1
-render blend=1 source=4 destination=1 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=1
-render blend=1 source=4 destination=5 operation=0 write_mask=1 alpha_destination=0 dual_source=0 textured=1 alpha_test=1
-render blend=1 source=4 destination=5 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0
-render blend=1 source=4 destination=5 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
-render blend=1 source=4 destination=5 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1
-render blend=1 source=4 destination=5 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=0
-render blend=1 source=4 destination=5 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=1
-render blend=1 source=8 destination=1 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=0
+# "The pre-warm list"): the render pipelines asynchronously on Metal's threads, the depth-stencil states at once. A key
+# not listed is still made on first use. The app carries a copy in Contents/Resources (tools/bundle.sh, task 042).
+# Refreshed 2026-10-07 (task 042) as the union of the keys PURE_METAL_PIPELINES_OUT=FILE wrote in headless sweep cells
+# (tools/campaign_sweep.py) over the campaign: Single Race on all twelve circuits of the Vector class (--unlock-all
+# --no-damage; Sinucit, Karbonis and Manor Top stalled part of the way, as the follower does there), Time Trial and
+# Free Play on Vineta K (--no-damage), Zone 1, and the Alpha Tournament's four races (--no-damage): boot, the
+# frontend, the race loads, the races with the follower's pickups used, the end screens and the standings. Fields:
+# Metal's values for the blend factors, operations, write masks and the depth compare; the GE's for the stencil
+# function and operations; color_test and sixteen since task 040 (metal_backend.mm, RenderKey and DepthStencilKey).
 depth compare=2 write=0 stencil=0 function=0 fail=0 depth_fail=0 pass=0 compare_mask=0 write_mask=0
 depth compare=2 write=0 stencil=1 function=1 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=255
 depth compare=2 write=1 stencil=0 function=0 fail=0 depth_fail=0 pass=0 compare_mask=0 write_mask=0
 depth compare=2 write=1 stencil=1 function=1 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=0
 depth compare=2 write=1 stencil=1 function=1 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=255
 depth compare=4 write=0 stencil=0 function=0 fail=0 depth_fail=0 pass=0 compare_mask=0 write_mask=0
+depth compare=4 write=0 stencil=1 function=1 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=0
 depth compare=4 write=0 stencil=1 function=1 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=255
 depth compare=4 write=0 stencil=1 function=1 fail=0 depth_fail=4 pass=0 compare_mask=0 write_mask=255
 depth compare=4 write=0 stencil=1 function=1 fail=0 depth_fail=5 pass=0 compare_mask=0 write_mask=255
+depth compare=4 write=0 stencil=1 function=6 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=0
 depth compare=4 write=0 stencil=1 function=6 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=255
 depth compare=4 write=1 stencil=0 function=0 fail=0 depth_fail=0 pass=0 compare_mask=0 write_mask=0
 depth compare=4 write=1 stencil=1 function=1 fail=0 depth_fail=0 pass=2 compare_mask=255 write_mask=0
@@ -59,3 +38,40 @@ depth compare=7 write=0 stencil=1 function=6 fail=0 depth_fail=0 pass=2 compare_
 depth compare=7 write=0 stencil=1 function=6 fail=2 depth_fail=2 pass=2 compare_mask=255 write_mask=255
 depth compare=7 write=1 stencil=0 function=0 fail=0 depth_fail=0 pass=0 compare_mask=0 write_mask=0
 depth compare=7 write=1 stencil=1 function=1 fail=2 depth_fail=2 pass=2 compare_mask=255 write_mask=255
+render blend=0 source=1 destination=0 operation=0 write_mask=0 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=0 source=1 destination=0 operation=0 write_mask=1 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=0 source=1 destination=0 operation=0 write_mask=1 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=1
+render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=0 sixteen=1
+render blend=0 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=1 sixteen=1
+render blend=0 source=1 destination=0 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=0 source=1 destination=0 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=1
+render blend=0 source=1 destination=0 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=0 source=1 destination=0 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=1 source=0 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=0 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=0 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=1 source=0 destination=11 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=1 destination=0 operation=0 write_mask=1 alpha_destination=1 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=1 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=1 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=1 destination=1 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=1 destination=11 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=1 source=1 destination=11 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=1 destination=4 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=4 destination=0 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=4 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=4 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=4 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=1 sixteen=0
+render blend=1 source=4 destination=1 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=1 sixteen=0
+render blend=1 source=4 destination=1 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=1 source=4 destination=1 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=1 color_test=1 sixteen=0
+render blend=1 source=4 destination=5 operation=0 write_mask=1 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=1 source=4 destination=5 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=0 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=4 destination=5 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=4 destination=5 operation=0 write_mask=14 alpha_destination=0 dual_source=0 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=1 source=4 destination=5 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=0 color_test=0 sixteen=0
+render blend=1 source=4 destination=5 operation=0 write_mask=15 alpha_destination=0 dual_source=1 textured=1 alpha_test=1 color_test=0 sixteen=0
+render blend=1 source=8 destination=1 operation=0 write_mask=15 alpha_destination=0 dual_source=0 textured=1 alpha_test=0 color_test=0 sixteen=0

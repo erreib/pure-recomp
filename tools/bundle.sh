@@ -8,8 +8,11 @@
 # which fetches the pinned SDL3, Vulkan loader, MoltenVK, CJK font and FFmpeg source (each checked by SHA-256), builds
 # SDL3 and the loader for macOS 13 once (out/release-macos/deps), assembles the app in out/release-macos/stage, links
 # every library inside it, marks the binaries for macOS 13 once their system imports are found in the macOS 13 SDK,
-# signs everything ad hoc and checks the app for game data and paths of this machine.
-#   --zip    also the zip archive, in out/release-macos/dist with the FFmpeg source archive and SHA256SUMS
+# signs everything ad hoc and checks the app for game data and paths of this machine. Before the packer runs,
+# config/metal_pipelines.txt is copied into build/release/bin/app_resources, whose contents packaging/release.env's
+# RELEASE_RESOURCES ships in Contents/Resources (task 042: the Metal backend's pre-warm list, which it looks for there
+# first), so the app is signed with the list inside.
+#   --zip   also the zip archive, in out/release-macos/dist with the FFmpeg source archive and SHA256SUMS
 #   --dist   the disk image and the zip archive, in out/release-macos/dist
 # The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty].
 #
@@ -33,9 +36,14 @@
 #   finder   open "<app>" (LaunchServices, as a double click in Finder; --env passes the same data directory and
 #            route, --stdout DIR/finder.log): the Metal window opens and the route's title shot,
 #            DIR/finder_shots/title.png (the window's picture, 960x544), is within the same limit
+#   prewarm  (task 042) Contents/Resources/metal_pipelines.txt is config/metal_pipelines.txt, and the route and finder
+#            runs each print `[metal] pre-warm: R render pipelines ... and D depth-stencil states from` that copy,
+#            with its own counts; their exit lines' "not in the list" counts are reported
 # route and finder need the installation: when setup fails they are reported FAIL without running (with no game the
-# app would show its setup screens and wait). Prints PASS or FAIL per check and the bundle's files with their sizes
-# (also in DIR/bundle_files.txt).
+# app would show its setup screens and wait). They run silent (task 042): after the setup, DIR/data/settings.ini gets
+# audio.mute=1, the in-game menu's Mute, so the app opens the audio device at gain 0; the app uses no data directory
+# but DIR/data. Prints PASS or FAIL per check and the bundle's files with their sizes (also in
+# DIR/bundle_files.txt).
 set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
@@ -50,6 +58,8 @@ STAGE=out/release-macos/stage
 APP="$ROOT/$STAGE/$NAME.app"
 EXE="$APP/Contents/MacOS/$NAME"
 BUILD=build/release
+RESOURCES=app_resources   # the folder of $BUILD/bin whose contents RELEASE_RESOURCES ships in Contents/Resources
+LIST=metal_pipelines.txt  # the Metal backend's pre-warm list, config/metal_pipelines.txt, in Contents/Resources
 TITLE_TOL=24
 TITLE_MAX_FRAC=0.05
 ROUTE_FRAMES=2200
@@ -65,6 +75,10 @@ disc_image() {   # Erik's disc image: where disc.iso points
   printf '%s\n' "$target"
 }
 
+list_counts() {   # list_counts FILE: "R render pipelines, D depth-stencil states", as the pre-warm reads a list
+  printf '%s render pipelines, %s depth-stencil states' "$(grep -c '^render ' "$1")" "$(grep -c '^depth ' "$1")"
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 pack() {
   local packer_args=(--no-dmg) newer version
@@ -78,9 +92,11 @@ pack() {
     echo "== $BUILD/bin/PureNative is missing: tools/build.sh release (10 to 20 minutes the first time)"
     tools/build.sh release || exit 1
   else
+    # config/metal_pipelines.txt is not compiled in: the packer ships it (below), so a newer list needs no build.
     newer=$(find src config patches CMakeLists.txt CMakePresets.json generated/ vendor/portablekit/host \
               vendor/portablekit/src vendor/portablekit/include vendor/portablekit/cmake \
-              vendor/portablekit/CMakeLists.txt third_party -type f -newer $BUILD/bin/PureNative 2>/dev/null | head -1)
+              vendor/portablekit/CMakeLists.txt third_party -type f ! -path config/metal_pipelines.txt \
+              -newer $BUILD/bin/PureNative 2>/dev/null | head -1)
     if [ -n "$newer" ]; then
       echo "== $BUILD/bin/PureNative is older than $newer: tools/build.sh release"
       tools/build.sh release || exit 1
@@ -88,6 +104,13 @@ pack() {
       echo "== $BUILD/bin/PureNative is up to date"
     fi
   fi
+  # The Metal backend's pre-warm list (task 042): packaging/release.env's RELEASE_RESOURCES ships the contents of
+  # $BUILD/bin/$RESOURCES in Contents/Resources, where the backend looks for metal_pipelines.txt first; the packer
+  # signs the app after copying them, so the list is sealed with it.
+  rm -rf "$BUILD/bin/$RESOURCES"
+  mkdir -p "$BUILD/bin/$RESOURCES"
+  cp "config/$LIST" "$BUILD/bin/$RESOURCES/" || exit 1
+  echo "== $BUILD/bin/$RESOURCES/$LIST for Contents/Resources: $(list_counts "config/$LIST")"
   version="$(sed -n 's/^project(PureRecomp VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)-$(git describe --always --dirty)"
   echo "== packing $NAME $version: release_macos.sh --game . ${packer_args[*]} $BUILD"
   # The packer is not executable at the pin (mode 100644), so bash runs it.
@@ -186,6 +209,8 @@ route_check() {   # route_check DIR DATA SCRIPT
 # finder: the same through LaunchServices, as a double click in Finder starts it.
 finder_check() {   # finder_check DIR DATA SCRIPT
   local dir=$1 data=$2 script=$3 line shell_line finder_pid ticks=0
+  # open appends to --stdout and --stderr: without this a check run into the same DIR would read an earlier run's log.
+  rm -f "$dir/finder.log" "$dir/finder.stderr.log"
   open -n -W --env PURE_DATA_DIR="$data" --env "PURE_INPUT_SCRIPT=$script" \
     --env PURE_SCREENSHOT_DIR="$dir/finder_shots" --env PURE_SCREENSHOT_EVERY=0 --env PURE_EXIT_AT_FRAME=$ROUTE_FRAMES \
     --stdout "$dir/finder.log" --stderr "$dir/finder.stderr.log" "$APP" &
@@ -208,6 +233,41 @@ finder_check() {   # finder_check DIR DATA SCRIPT
     if [ $? -eq 0 ]; then result finder PASS "open \"$NAME.app\": $shell_line; window picture $dir/finder_shots/title.png: $line"
     else result finder FAIL "title: $line"; fi
   fi
+}
+
+# prewarm: the app carries the checkout's pre-warm list in Contents/Resources, and both runs of the packed app (route
+# and finder) pre-warmed from that copy (task 042). The backend looks there first (metal_backend.mm,
+# find_pipeline_list) and prints `[metal] pre-warm: R render pipelines (made asynchronously) and D depth-stencil
+# states from PATH, T ms at start`; R and D must be the copy's own counts. The exit line's "not in the list" count is
+# reported, not checked: it measures the list's coverage of the route, not the bundle.
+prewarm_check() {   # prewarm_check DIR
+  local dir=$1 packed="$APP/Contents/Resources/$LIST" log run line fields renders depths path ended bad="" detail=""
+  local want_renders want_depths
+  if [ ! -f "$packed" ]; then
+    result prewarm FAIL "no $LIST in Contents/Resources (tools/bundle.sh stages it for the packer)"
+    return
+  fi
+  want_renders=$(grep -c '^render ' "$packed")
+  want_depths=$(grep -c '^depth ' "$packed")
+  cmp -s "$packed" "config/$LIST" || bad+="Contents/Resources/$LIST is not config/$LIST (pack again); "
+  for run in route finder; do
+    log="$dir/$run.log"
+    line=$(grep -m1 '^\[metal\] pre-warm: ' "$log" 2> /dev/null || true)
+    fields=$(printf '%s\n' "$line" | sed -n 's/^\[metal\] pre-warm: \([0-9]*\) render pipelines (made asynchronously) and \([0-9]*\) depth-stencil states from \(.*\), [^,]* ms at start.*$/\1 \2 \3/p')
+    renders="" depths="" path=""
+    [ -n "$fields" ] && read -r renders depths path <<< "$fields"
+    if [ -z "$line" ]; then
+      bad+="$run: no [metal] pre-warm line (log $log); "
+    elif [ -z "$fields" ] || [ ! "$path" -ef "$packed" ]; then
+      bad+="$run: not the Resources copy: '$line'; "
+    elif [ "$renders" != "$want_renders" ] || [ "$depths" != "$want_depths" ] || [[ "$line" == *"lines not read"* ]]; then
+      bad+="$run: read $renders render pipelines and $depths depth-stencil states of $want_renders and $want_depths: '$line'; "
+    fi
+    ended=$(grep '^\[metal\] pipelines: ' "$log" 2> /dev/null | tail -1 | sed -n 's/.*made by a draw (\(.*\)), [0-9]* taken from the pre-warm.*/\1/p')
+    detail+="; $run: ${ended:-no exit line}"
+  done
+  if [ -n "$bad" ]; then result prewarm FAIL "$bad"
+  else result prewarm PASS "route and finder pre-warmed from Contents/Resources/$LIST (config/$LIST, $want_renders render pipelines, $want_depths depth-stencil states)$detail"; fi
 }
 
 check() {
@@ -332,11 +392,19 @@ check() {
   local script
   script=$(route_script)
   if [ $installed = yes ]; then
+    # Silent (task 034's follow-up, task 042): the runs play the installation with the in-game menu's Mute on,
+    # audio.mute=1 in DIR/data/settings.ini, which the app reads from PURE_DATA_DIR (the environment has no variable
+    # for it, so `open --env` could not pass it). The audio sink still opens the device, at gain 0, as a player's app
+    # does with Mute on. The setup wrote the file without the key; of two lines with one key the later one counts.
+    printf 'audio.mute=1\n' >> "$data/settings.ini"
+    echo "silent: audio.mute=1 in $data/settings.ini for route and finder"
     route_check "$dir" "$data" "$script"
     finder_check "$dir" "$data" "$script"
+    prewarm_check "$dir"
   else
     result route FAIL "not run: no installation in $data (setup failed)"
     result finder FAIL "not run: no installation in $data (setup failed)"
+    result prewarm FAIL "not run: no installation in $data (setup failed)"
   fi
 
   # The bundle's files.

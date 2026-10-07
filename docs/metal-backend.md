@@ -45,7 +45,7 @@ tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile  
 | `PURE_NO_DEPTH_READBACK=1` | the framework's switch (patch 0008): the HLE does not ask for the depth write-back at a SIGNAL, so the lens flare is never occluded. ge_replay replays a recording's WriteBackDepth records regardless |
 | `PURE_TRACE_STENCIL_COPY=1`, `PURE_TRACE_DEPTH_READBACK=1` | the framework's traces, as the Vulkan backend prints them: `[metal] stencil copied into the alpha of 0x... in frame N (reason)` for each copy of the stencil into the alpha, and `[metal] frame N signal 0x200: depth of 0x... written back to 0x4110000 stride 512, z MIN-MAX, T ms (GPU wait W ms)` for each depth write-back |
 | `PURE_METAL_TRACE=FILE` | (task 033) a CSV row per flip with where the time between two flips went: submit, pipeline creation, texture decodes, each kind of GPU wait, the Metal shell's present and when the picture reached the screen ("Frame times"); `tools/frame_times.py FILE` summarises it |
-| `PURE_METAL_PIPELINES=FILE` or `0` | (task 033) the pipeline list made at start instead of `config/metal_pipelines.txt`; `0` turns the pre-warm off ("Frame times", "The pre-warm list") |
+| `PURE_METAL_PIPELINES=FILE` or `0` | (task 033) the pipeline list made at start instead of `config/metal_pipelines.txt` (in the app, its copy in `Contents/Resources`, task 042); `0` turns the pre-warm off ("Frame times", "The pre-warm list") |
 | `PURE_METAL_PIPELINES_OUT=FILE` | (task 033) at exit, every render pipeline and depth-stencil key the run's draws used, in the list's form |
 | `PURE_METAL_PACE=0` | (task 033) the Metal shell shows each picture as soon as it can, instead of at the real time of the PSP vblank after its frame began |
 | `PURE_NO_TEXMAP=1` | (task 036) every draw takes its UVs through the texture scale and offset (texture map mode 0), as before task 036: the texture matrix and environment map modes are not drawn ("Texture mapping modes") |
@@ -69,7 +69,7 @@ about 0.7 s the first time, before macOS has cached the compiled library, and 0.
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
 | `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), and the frame trace's hook through which the shell reports its presents (task 033, "Frame times"). Objective-C++ with ARC |
-| `config/metal_pipelines.txt` | the render pipelines and depth-stencil states made at start (task 033, "The pre-warm list") |
+| `config/metal_pipelines.txt` | the render pipelines and depth-stencil states made at start (task 033, "The pre-warm list"); since task 042 it covers the campaign and the app carries a copy in `Contents/Resources` |
 | `tools/frame_times.py` | the frame trace's summary (task 033, "Frame times") |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
 | `CMakeLists.txt` | the sources in `portablekit_add_game(... SOURCES ...)`, the four `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
@@ -526,29 +526,93 @@ queue empty, for 5.5 ms more latency than showing each picture at once.
 
 ### The pre-warm list
 
-`config/metal_pipelines.txt` holds the 26 render pipelines and 28 depth-stencil states the race cell's draws used, a
-key a line (`render blend=1 source=4 destination=5 ...`, `depth compare=4 write=1 stencil=1 ...`: the fields of
-`RenderKey` and `DepthStencilKey`, Metal's values for the blend factors, operations, write masks and depth compare, the
-GE's for the stencil function and operations). The backend looks for it at `PURE_METAL_PIPELINES` (`0` turns the
-pre-warm off), then as `metal_pipelines.txt` in an app's `Contents/Resources`, then as `config/metal_pipelines.txt`
-three directories above the executable (`build/<preset>/bin` in a checkout or a worktree), then under the working
-directory. At start it prints `[metal] pre-warm: 26 render pipelines (made asynchronously) and 28 depth-stencil states
-from PATH, T ms at start`, then `[metal] pre-warm done: ...`, and at exit `[metal] pipelines: N render pipelines used, M
-made by a draw (W of them waited for the pre-warm, X not in the list), ...`.
+`config/metal_pipelines.txt` holds 37 render pipelines and 30 depth-stencil states (task 042; 26 and 28 from the Vineta
+K cell alone before it), a key a line (`render blend=1 source=4 destination=5 ...`, `depth compare=4 write=1 stencil=1
+...`: the fields of `RenderKey` and `DepthStencilKey`, Metal's values for the blend factors, operations, write masks and
+depth compare, the GE's for the stencil function and operations). The backend looks for it at `PURE_METAL_PIPELINES`
+(`0` turns the pre-warm off), then as `metal_pipelines.txt` in an app's `Contents/Resources`, then as
+`config/metal_pipelines.txt` three directories above the executable (`build/<preset>/bin` in a checkout or a worktree),
+then under the working directory. The app carries a copy in `Contents/Resources` (task 042: `tools/bundle.sh` stages it
+for the packer, which seals it with the app; docs/release.md), so the installed app pre-warms from it. At start it
+prints `[metal] pre-warm: 37 render pipelines (made asynchronously) and 30 depth-stencil states from PATH, T ms at
+start`, then `[metal] pre-warm done: ...`, and at exit `[metal] pipelines: N render pipelines used, M made by a draw (W
+of them waited for the pre-warm, X not in the list), ...`.
 
 To refresh it, run what should be covered with `PURE_METAL_PIPELINES_OUT=FILE`, which writes every key the run's draws
 used at exit, and merge the files into the list (the lines are canonical, so the union of the files is the new list):
 
 ```sh
-PURE_METAL_PIPELINES_OUT=out/keys_race.txt python3 tools/campaign_sweep.py single_race vineta_k --no-damage
-PURE_METAL_PIPELINES_OUT=out/keys_zone.txt python3 tools/campaign_sweep.py zone zone_1
-( grep '^#' config/metal_pipelines.txt; cat config/metal_pipelines.txt out/keys_*.txt | grep -v '^#' | sort -u ) > out/list.txt
+for t in vineta_k modesto_heights chenghou_project blue_ridge sinucit citta_nuova sebenco_climb sol_2 karbonis \
+         sagarmatha manor_top mandrashee; do
+  PURE_METAL_PIPELINES_OUT=out/keys/single_race-$t.txt python3 tools/campaign_sweep.py single_race $t --unlock-all --no-damage
+done
+PURE_METAL_PIPELINES_OUT=out/keys/time_trial.txt python3 tools/campaign_sweep.py time_trial vineta_k --no-damage
+PURE_METAL_PIPELINES_OUT=out/keys/free_play.txt python3 tools/campaign_sweep.py free_play vineta_k --no-damage
+PURE_METAL_PIPELINES_OUT=out/keys/zone.txt python3 tools/campaign_sweep.py zone zone_1
+PURE_METAL_PIPELINES_OUT=out/keys/tournament.txt python3 tools/campaign_sweep.py tournament alpha --no-damage
+( grep '^#' config/metal_pipelines.txt; cat out/keys/*.txt | grep -v '^#' | sort -u ) > out/list.txt
 mv out/list.txt config/metal_pipelines.txt
 ```
 
-(`sort -u` puts the `depth` lines before the `render` lines; the order does not matter.) A run's exit line counts the
-keys "not in the list"; each was made on first use, about 1 ms on a warm shader cache and 10 to 95 ms on a cold one.
-Only the Vineta K cell is in the list today: other tracks, Zone and the weapons this follower never fired may need more.
+(`sort -u` puts the `depth` lines before the `render` lines; the order does not matter.) The cells run headless and
+silent, one at a time (the sweep's defaults and its one-game guard); a cell takes 75 s (Zone) to 6 minutes (Citta
+Nuova), the Tournament 19 minutes, the whole set about 80 minutes. The new list is the union of the files alone, so a
+key no draw makes any more (task 040 split two of the first list's keys into colour-test and 16-bit ones) drops out;
+to keep the old keys, add `config/metal_pipelines.txt` to the `cat`. A run's exit line counts the keys "not in the
+list"; each was made on first use, about 1 ms on a warm shader cache and 10 to 95 ms on a cold one. Then
+`tools/bundle.sh` packs the new list into the app.
+
+What the list covers since task 042 (2026-10-07), each cell headless with the list of task 033 (26 render pipelines,
+28 depth-stencil states) in force:
+
+| Cell | Outcome | Render keys used | Depth-stencil keys | Made by a draw (not in task 033's list) |
+|---|---|---|---|---|
+| Single Race Vineta K | PASS, 3 laps, 197 s | 29 | 26 | 6 render pipelines |
+| Single Race Modesto Heights | PASS, 3 laps, 292 s | 26 | 27 | 6, and 2 depth-stencil states |
+| Single Race Chenghou Project | PASS, 3 laps, 269 s | 26 | 27 | 6, and 2 depth-stencil states |
+| Single Race Blue Ridge | PASS, 3 laps, 280 s | 29 | 24 | 6 |
+| Single Race Sinucit | STALL in lap 2 (left the track at Sinucit's fork, 880 to 1010 m), 164 s | 25 | 24 | 5 |
+| Single Race Citta Nuova | PASS, 3 laps, 359 s | 26 | 27 | 6, and 2 depth-stencil states |
+| Single Race Sebenco Climb | PASS, 3 laps, 331 s | 26 | 27 | 6, and 2 depth-stencil states |
+| Single Race Sol 2 | PASS, 3 laps, 264 s | 26 | 25 | 6, and 1 depth-stencil state |
+| Single Race Karbonis | STALL in lap 3 (the follower left the track at 2600 to 2760 m), 180 s | 24 | 23 | 3 |
+| Single Race Sagarmatha | PASS, 3 laps, 224 s | 24 | 23 | 3 |
+| Single Race Manor Top | STALL in lap 1 (left the track at 2250 to 2490 m), 95 s | 24 | 23 | 3 |
+| Single Race Mandrashee | PASS, 3 laps, 247 s | 24 | 24 | 3 |
+| Time Trial Vineta K | PASS, 3 laps, 235 s | 32 | 25 | 9 |
+| Free Play Vineta K | PASS, 3 laps, 216 s | 32 | 25 | 9 |
+| Zone 1 | PASS, 6 zones, 75 s | 23 | 23 | 2 |
+| Tournament, Alpha league | PASS, 4 races, 1121 s | 32 | 30 | 9, and 2 depth-stencil states |
+
+37 render keys and 30 depth-stencil keys in all. Of task 033's list, 24 render keys and all 28 depth-stencil keys are
+still used; two render keys are gone, because the draws that made them make their colour-test or 16-bit variants
+since task 040. The 13 new render keys:
+
+- the six of task 040 (four `sixteen=1`, two `color_test=1`) that the Vineta K race makes, and the other Alpha and Beta
+  circuits too;
+- three that only Time Trial and Free Play drew: with the six, the nine every 30-fps run made by a draw (task 041);
+- three untextured blends with source factor zero, drawn only by the Tournament's screens between races;
+- one colour-test key without the alpha test (`source=4 destination=1 ... alpha_test=0 color_test=1`). The Classic
+  circuits and Zone draw it, and they make no 16-bit draw.
+
+The two new depth-stencil states (depth compare 4 with a stencil test, functions 1 and 6) come from Modesto Heights,
+Chenghou Project, Citta Nuova, Sebenco Climb, Sol 2 and the Tournament. The stalled cells still cover their race
+loads and laps; the results screens are the same on every circuit.
+
+A second run of each acceptance cell with the new list, the exit lines:
+
+| Cell (second run) | Outcome | `[metal] pipelines:` exit line |
+|---|---|---|
+| Single Race Vineta K (`--unlock-all --no-damage`) | PASS, 201 s | 29 render pipelines used, 0 made by a draw (0 of them waited for the pre-warm, 0 not in the list), 29 taken from the pre-warm of 37; 30 depth-stencil states, 0 made by a draw, 30 pre-warmed |
+| Single Race Vineta K (`--no-damage`, task 033's cell) | PASS, 197 s | 29 render pipelines used, 0 made by a draw (0 of them waited for the pre-warm, 0 not in the list), 29 taken from the pre-warm of 37; 30 depth-stencil states, 0 made by a draw, 30 pre-warmed |
+| Time Trial Vineta K (`--no-damage`) | PASS, 246 s | 32 render pipelines used, 0 made by a draw (0 of them waited for the pre-warm, 0 not in the list), 32 taken from the pre-warm of 37; 30 depth-stencil states, 0 made by a draw, 30 pre-warmed |
+| Free Play Vineta K (`--no-damage`) | PASS, 222 s | 32 render pipelines used, 0 made by a draw (0 of them waited for the pre-warm, 0 not in the list), 32 taken from the pre-warm of 37; 30 depth-stencil states, 0 made by a draw, 30 pre-warmed |
+| Zone 1 | PASS, 75 s | 23 render pipelines used, 0 made by a draw (0 of them waited for the pre-warm, 0 not in the list), 23 taken from the pre-warm of 37; 30 depth-stencil states, 0 made by a draw, 30 pre-warmed |
+
+No draw of these runs made a pipeline or a depth-stencil state, and none waited for the pre-warm: on this machine's
+warm shader cache the 37 pipelines were made on Metal's threads in 2.2 to 5.1 ms (`[metal] pre-warm done: ... (frame
+1)`), and the pre-warm took 2.2 to 5.0 ms on the calling thread at start. On a cold cache the pipelines take longer to
+make: task 033 measured 46 to 73 ms for its 26, all made by flip 4, thousands of flips before the first race load.
 
 ### Not changed
 
@@ -558,9 +622,9 @@ Only the Vineta K cell is in the list today: other tracks, Zone and the weapons 
   a frame: a change to the picture, left alone.
 - Hashing the textures a display list binds costs about 0.5 ms a frame (`texture_ms`). Caching by address alone would
   miss a texture rewritten in place, a change to the picture; it is no long frame's cause.
-- The app (`tools/bundle.sh`) does not carry `config/metal_pipelines.txt` yet; the backend looks for it in the app's
-  `Contents/Resources`. Until the bundle copies it there, the app makes pipelines on first use, which costs only its
-  first race after an install (the shader cache is warm afterwards).
+- (Done in task 042.) The app (`tools/bundle.sh`) did not carry `config/metal_pipelines.txt`, so it made its
+  pipelines on first use, which cost its first race after an install (the shader cache is warm afterwards). Since task
+  042 the bundle ships the list in `Contents/Resources`, where the backend looks first ("The pre-warm list").
 - With the window occluded macOS shows nothing and may hold `nextDrawable` back for up to a second; not a player's case.
 
 ### The Vulkan path, for comparison
@@ -1011,9 +1075,9 @@ clamp moves in that configuration, (146,124), is a depth tie between two draws t
 (z times the z scale plus w times the offset, over 65535) rounds the other way from the viewport's; as built, no pixel
 of the frame or of the suite's 18 scenes moves with the clamp.
 
-The pre-warm list (`config/metal_pipelines.txt`) has none of the new keys: a race run makes 6 render pipelines on
+The pre-warm list (`config/metal_pipelines.txt`) had none of the new keys: a race run made 6 render pipelines on
 first use (four `sixteen=1`, two `color_test=1`), 1.2 ms at its first race frame and 0.24 ms later on this machine
-(`PURE_METAL_TRACE`), which the list could take with `PURE_METAL_PIPELINES_OUT`.
+(`PURE_METAL_TRACE`). Task 042 refreshed the list with them ("The pre-warm list").
 
 ## What is not done yet
 
