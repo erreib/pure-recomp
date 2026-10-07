@@ -145,7 +145,7 @@ were, old patch numbers marked "old":
   the depth clamp's polarity (040), and the PSP "truncation" rule for dot products (046 to 047), which was PPSSPP's
   compiler's behaviour, not the hardware's. Each cost a worker hours of verification against a false premise; each
   was caught because the brief named the documentation to read and the worker read it. Keep naming the sources.
-- **The rounding chase ran one task too long.** Patch 0020 (the PSP's rule) was the goal and was right; the
+- **The rounding chase ran one task too long.** The VFPU rounding patch (old 0020, now 0009-vfpu-rounding; the PSP's rule) was the goal and was right; the
   test-mode chase to make the scorecard's AI rows faithful against PPSSPP's JIT was never achievable, since any
   1-ulp difference anywhere amplifies through the AI, and it was only stated after two corpus rebuilds. State the
   stopping rule in the brief.
