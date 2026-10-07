@@ -47,7 +47,8 @@ fixes what is the port's if it is small, or reports it as a task.
 (`--selftest` checks the tool on two generated WAVs; the comparisons themselves are reported in docs/fidelity.md.)
 
 ## May touch
-- tools/audio_compare.py (new), tools/ppsspp/routes/ (audio-dump routes), docs/fidelity.md (differences 7 to 9),
+- tools/audio_compare.py (new), tools/ppsspp/routes/ (audio-dump routes), tools/ppsspp/ (the driver: an audio-dump
+  option if it has none, with its docs/ppsspp.md row), docs/fidelity.md (differences 7 to 9),
   docs/verification.md; for a small fix: src/hle/audio_capture.cpp, or a vendor patch to host/audio/ or host/hle/hle_atrac.cpp
   via `tools/patches.sh export 0018-<cause>` with its patches/README.md row
 
