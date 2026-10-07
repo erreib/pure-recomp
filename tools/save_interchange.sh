@@ -399,7 +399,7 @@ trap 'restore_stick; exit 130' INT TERM
 if [ $PORT_ONLY -eq 1 ]; then
   echo "        not run (--port-only)"
 elif [ -d "$PPSSPP_SAVEDATA" ]; then
-  found=$(ls "$PPSSPP_SAVEDATA" | sort | tr '\n' ' ')
+  found=$(ls "$PPSSPP_SAVEDATA" | sort | paste -sd ' ' -)
   for f in "$PPSSPP_SAVEDATA"/UCUS98612P*; do
     [ -e "$f" ] || continue
     echo "        PPSSPP's stick holds $(basename "$f"); moved aside to $OUT/b/stick-before/ and put back afterwards"
@@ -429,10 +429,10 @@ elif [ -d "$PPSSPP_SAVEDATA" ]; then
   fi
   python3 tools/imgdiff.py "$OUT/b/shots/name-loaded.png" "$OUT/born/shots/fresh-name.png" --region "$DIGITS" --tol 24 \
     --max-frac 0.05 > "$OUT/b/control.txt" 2>&1
-  [ $? -eq 1 ] && ok "and differs from SET NAME on an empty stick past NAME ($(cut -d' ' -f1-3 "$OUT/b/control.txt"))" ||
+  [ $? -eq 1 ] && ok "and differs from SET NAME on an empty stick past NAME ($(cut -d' ' -f2-3 "$OUT/b/control.txt") of the digits)" ||
     bad "PPSSPP's SET NAME is not told apart from the empty stick's: $(head -1 "$OUT/b/control.txt")"
   restore_stick
-  left=$(ls "$PPSSPP_SAVEDATA" | sort | tr '\n' ' ')
+  left=$(ls "$PPSSPP_SAVEDATA" | sort | paste -sd ' ' -)
   if [ "$left" = "$found" ]; then ok "PPSSPP's stick left as it was found ($found)"
   else bad "PPSSPP's stick holds $left, not $found as before"; fi
 else
