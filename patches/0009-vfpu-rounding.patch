@@ -23,10 +23,10 @@ index 0f0c0e7..2af20fc 100644
          set_target_properties(${variant_target} PROPERTIES
              JOB_POOL_COMPILE psprecomp_generated
 diff --git a/include/psprecomp/allegrex_context.hpp b/include/psprecomp/allegrex_context.hpp
-index a32c3a2..4030436 100644
+index a32c3a2..0eacebf 100644
 --- a/include/psprecomp/allegrex_context.hpp
 +++ b/include/psprecomp/allegrex_context.hpp
-@@ -742,6 +742,95 @@ struct alignas(16) AllegrexContext {
+@@ -742,6 +742,111 @@ struct alignas(16) AllegrexContext {
          write_vfpu_vector_with_destination_prefix(result, destination_register, length);
      }
  
@@ -119,10 +119,26 @@ index a32c3a2..4030436 100644
 +        return vfpu_dot(s, t, lanes);
 +    }
 +
++    // The cross product's lanes (task 048, patch 0021). Test mode: PPSSPP's JIT rounds both products of each lane
++    // and then their difference, nothing fused (every one of 1592532 sampled result lanes). Default: the PSP's rule,
++    // vfpu_dot's.
++    static float vfpu_cross_dot(const float *s, const float *t, std::uint32_t n) noexcept {
++#if defined(__clang__)
++#pragma clang fp contract(off)
++#endif
++        if (vfpu_dot_mode() != 1u) return vfpu_dot_psp(s, t, n);
++        float r = s[0] * t[0];
++        for (std::uint32_t i = 1u; i < n; ++i) {
++            const float p = s[i] * t[i];
++            r = r + p;
++        }
++        return r;
++    }
++
      template <std::uint32_t DestinationScalarRegister, std::uint32_t SourceRegister,
                std::uint32_t TargetRegister, std::uint32_t Length>
      PSPRECOMP_CONTEXT_FORCEINLINE void execute_vfpu_vdot_ct() noexcept {
-@@ -753,10 +842,7 @@ struct alignas(16) AllegrexContext {
+@@ -753,10 +858,7 @@ struct alignas(16) AllegrexContext {
          // VDOT prefix semantics use a four-lane view even for a shorter encoded vector.
          apply_vfpu_source_prefix_ct<4u, 0u>(source);
          apply_vfpu_source_prefix_ct<4u, 1u>(target);
@@ -134,7 +150,7 @@ index a32c3a2..4030436 100644
          write_vfpu_vector_with_destination_prefix_ct<DestinationScalarRegister, 1u>(result);
      }
  
-@@ -776,10 +862,7 @@ struct alignas(16) AllegrexContext {
+@@ -776,10 +878,7 @@ struct alignas(16) AllegrexContext {
          apply_vfpu_source_prefix(source, 4u, 0u);
          apply_vfpu_source_prefix(target, 4u, 1u);
  
@@ -146,7 +162,7 @@ index a32c3a2..4030436 100644
          write_vfpu_vector_with_destination_prefix(result, destination_scalar_register, 1u);
      }
  
-@@ -811,10 +894,7 @@ struct alignas(16) AllegrexContext {
+@@ -811,10 +910,7 @@ struct alignas(16) AllegrexContext {
          vfpu_ctrl[0] = original_source_prefix;
          apply_vfpu_source_prefix(target, 4u, 1u);
  
@@ -158,7 +174,27 @@ index a32c3a2..4030436 100644
          if (std::isnan(sum)) sum = std::fabs(sum);
  
          const float result[1]{sum};
-@@ -907,30 +987,34 @@ struct alignas(16) AllegrexContext {
+@@ -857,9 +953,17 @@ struct alignas(16) AllegrexContext {
+         apply_vfpu_source_prefix(weights, 4u, 1u);
+         vfpu_ctrl[1] = original_target_prefix;
+ 
++        // vfad and vavg (task 048, patch 0021). Test mode: PPSSPP's JIT sums in lane order, unfused (every sampled
++        // vfad result; the two statements keep it unfused outside the corpus's -ffp-contract=off). Default: the PSP's
++        // rule over the four-lane view, which gives pspautotests' 15 vfad and 15 vavg results.
+         float result[1]{0.0f};
+-        for (std::uint32_t lane = 0u; lane < 4u; ++lane) {
+-            result[0] += source[lane] * weights[lane];
++        if (vfpu_dot_mode() != 1u) {
++            result[0] = vfpu_dot_psp(source, weights, 4u);
++        } else {
++            for (std::uint32_t lane = 0u; lane < 4u; ++lane) {
++                const float p = source[lane] * weights[lane];
++                result[0] = result[0] + p;
++            }
+         }
+         write_vfpu_vector_with_destination_prefix(result, destination_scalar_register, 1u);
+     }
+@@ -907,30 +1011,36 @@ struct alignas(16) AllegrexContext {
          if (length == 3u) { // VCRSP.T
              // X/Y are produced directly from the unprefixed inputs.  The PSP
              // applies rewritten S/T prefixes only to the final dot-product lane.
@@ -167,8 +203,8 @@ index a32c3a2..4030436 100644
 +            {
 +                const float s0[2]{source[1], source[2]}, t0[2]{target[2], -target[1]};
 +                const float s1[2]{source[2], source[0]}, t1[2]{target[0], -target[2]};
-+                result[0] = vfpu_dot(s0, t0, 2u);
-+                result[1] = vfpu_dot(s1, t1, 2u);
++                result[0] = vfpu_cross_dot(s0, t0, 2u);
++                result[1] = vfpu_cross_dot(s1, t1, 2u);
 +            }
  
              // Forced T view: [T.y, -T.x, T.w, T.z], while retaining the
@@ -178,7 +214,9 @@ index a32c3a2..4030436 100644
              apply_vfpu_source_prefix(source, 4u, 0u);
 -            result[2] = source[0] * target[0] + source[1] * target[1] +
 -                        source[2] * target[2] + source[3] * target[3];
-+            result[2] = vfpu_dot(source, target, 4u);
++            // Z is the first two lanes of the forced views, s.x*t.y + s.y*(-t.x): lanes 2 and 3 (s.z*t.w, 0*t.z)
++            // are no part of it on the PSP (pspautotests: an infinite s.z or t.z leaves Z finite).
++            result[2] = vfpu_cross_dot(source, target, 2u);
          } else if (length == 4u) { // VQMUL.Q
 -            result[0] = source[0] * target[3] + source[1] * target[2] -
 -                        source[2] * target[1] + source[3] * target[0];
