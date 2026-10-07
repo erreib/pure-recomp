@@ -4,9 +4,21 @@
   vfpu_probe.py scan [--kinds K,...]              the dot-product and transcendental sites of EBOOT.ELF
   vfpu_probe.py cover [--track T] [--seconds S]   which of them a race executes, and how often (PPSSPP)
   vfpu_probe.py sample [--track T] [--seconds S] [--sites all|auto|ADDR,...] [--cap N] [--cpu-core 0|1] [--out DIR]
+                      [--coverage DIR] [--window FROM,TO] [--span-from CLOCK]
                                                   operands and results at the sites, one CSV a site (PPSSPP)
-  vfpu_probe.py port [DIR]                        the port's results for the same operands, from the corpus's own
+  vfpu_probe.py port [DIR] [--modes ppsspp,psp] [--tag T] [--include DIR] [--fp-contract off|on] [--kinds K,...]
+                                                  the port's results for the same operands, from the corpus's own
                                                   code for each site, compiled with the corpus's flags
+
+The kinds (task 047, then 048): the dot products vdot, vhdp, vtfm, vmmul and the transcendentals vrcp, vrsq, vsqrt,
+vsin, vcos, vexp2, vlog2, vasin; then vcrs.t, vcrsp.t, vqmul.q (execute_vfpu_cross_quat, and the codegen's inline
+vcrs), vfad, vavg (execute_vfpu_horizontal), vrot and vmscl. In the game's code: 108 vcrsp.t, 61 vfad (.p .t .q), 24
+vrot (.t .q), 4 vmscl (.t .q); vcrs.t, vqmul.q and vavg occur only in data. `sample --window FROM,TO` logs every
+execution of every site between two race clocks (placed on PPSSPP's emulated time by the scorecard's reference race),
+`--cap 0` every execution from READY. `port --modes ppsspp,psp` writes the port's results under each rounding mode of
+patch 0020 (PURE_VFPU_DOT) to <ADDR>.port.<mode>.csv; `--tag T --include DIR` builds the harness on another copy of
+include/ (a header experiment, or patch 0020 reversed with `--fp-contract on` for the corpus before it) and writes
+<ADDR>.port.T[.<mode>].csv.
 
 How the PPSSPP side works. The route is the scorecard's reference route for the circuit (tools/scorecard.py
 pp_routes: the frontend, the circuit, Cross held from READY), so the race is the reference race the race clock of
@@ -54,6 +66,9 @@ TASK046_SITES = (0x089196B8, 0x08926E08)   # the two vdot.t sites task 046 compa
 UNARY = {16: "vrcp", 17: "vrsq", 18: "vsin", 19: "vcos", 20: "vexp2", 21: "vlog2", 22: "vsqrt", 23: "vasin",
          24: "vnrcp", 26: "vnsin", 28: "vrexp2"}
 DOT_KINDS = ("vdot", "vhdp", "vmmul", "vtfm")
+# Task 048: the products and sums beside the dot forms (execute_vfpu_cross_quat, execute_vfpu_horizontal,
+# execute_vfpu_vrot, execute_vfpu_vmscl, and vcrs.t, which the codegen emits inline).
+NEW_KINDS = ("vcrs", "vcrsp", "vqmul", "vfad", "vavg", "vrot", "vmscl")
 CORES = {0: "interpreter", 1: "JIT", 2: "IR interpreter", 3: "JIT using IR"}
 
 
@@ -149,6 +164,24 @@ def decode(word):
         op = UNARY[(word >> 16) & 0x7F]
         return {"kind": op, "mnemonic": f"{op}.{'sptq'[size]}", "length": n,
                 "s": vector_lanes(vs, n), "t": [], "d": vector_lanes(vd, n)}
+    # Task 048's kinds (the decoder of vendor/portablekit/src/decoder.cpp, the encodings of vfpu-docs).
+    if top9 == 0b011001101 and n == 3:                   # vcrs.t: (s.y*t.z, s.z*t.x, s.x*t.y), triples only
+        return {"kind": "vcrs", "mnemonic": "vcrs.t", "length": 3,
+                "s": vector_lanes(vs, 3), "t": vector_lanes(vt, 3), "d": vector_lanes(vd, 3)}
+    if top9 == 0b111100101 and n in (3, 4):              # vcrsp.t (the cross product), vqmul.q (quaternions)
+        kind = "vcrsp" if n == 3 else "vqmul"
+        return {"kind": kind, "mnemonic": f"{kind}.{'sptq'[size]}", "length": n,
+                "s": vector_lanes(vs, n), "t": vector_lanes(vt, n), "d": vector_lanes(vd, n)}
+    if word >> 21 == 0b11010000010 and ((word >> 16) & 31) in (6, 7) and n >= 2:   # vfad, vavg: one sum
+        kind = "vfad" if ((word >> 16) & 31) == 6 else "vavg"
+        return {"kind": kind, "mnemonic": f"{kind}.{'sptq'[size]}", "length": n,
+                "s": vector_lanes(vs, n), "t": [], "d": vector_lanes(vd, 1)}
+    if word >> 21 == 0b11110011101:                     # vrot: a rotation row from the scalar angle vs
+        return {"kind": "vrot", "mnemonic": f"vrot.{'sptq'[size]}", "length": n, "imm": (word >> 16) & 31,
+                "s": vector_lanes(vs, 1), "t": [], "d": vector_lanes(vd, n)}
+    if top9 == 0b111100100:                              # vmscl: a matrix times the scalar vt
+        return {"kind": "vmscl", "mnemonic": f"vmscl.{'sptq'[size]}", "length": n, "side": n,
+                "s": matrix_lanes(vs, n), "t": vector_lanes(vt, 1), "d": matrix_lanes(vd, n)}
     return None
 
 
@@ -216,6 +249,7 @@ def reachable_addresses():
 def site_json(s):
     return {"addr": f"0x{s['addr']:08X}", "word": f"0x{s['word']:08X}", "mnemonic": s["mnemonic"],
             "kind": s["kind"], "length": s["length"], **({"side": s["side"]} if "side" in s else {}),
+            **({"imm": s["imm"]} if "imm" in s else {}),
             "function": s["function"], "prefixes": {k: f"0x{v:06X}" for k, v in s["prefixes"].items()},
             "next": [f"0x{a:08X}" for a in s["next"]] if s["next"] else None,
             "s": [scalar_name(r) for r in s["s"]], "t": [scalar_name(r) for r in s["t"]],
@@ -463,12 +497,32 @@ def pick_sites(out, how, per_kind, minimum):
     return sorted(chosen)
 
 
+def ready_usec(track):
+    """The emulated usec of READY on the track's reference route (where ppsspp_race arms its breakpoints)."""
+    import ppsspp_ctl as pc
+    import scorecard as sc
+    return int(pc.vblank_us(sc.pp_routes(track)[1]))
+
+
+def clock_usec(track, clock):
+    """PPSSPP's emulated usec when the player's race clock first reaches `clock` in the scorecard's reference race
+    (ref/scorecard/trajectories/<track>.csv)."""
+    import scorecard as sc
+    with open(sc.REF / "trajectories" / f"{track}.csv") as f:
+        next(f)
+        for line in f:
+            w = line.split(",")
+            if int(w[1]) == sc.PLAYER and 0.0 < float(w[2]) and float(w[2]) >= clock:
+                return int(w[0])
+    sys.exit(f"vfpu_probe: the reference race of {track} never reaches race clock {clock}")
+
+
 def cmd_sample(a):
     all_sites = {s["addr"]: s for s in scan()}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    cov = next((d for d in (out, out.parent) if (d / "coverage.csv").exists() and (d / "coverage.json").exists()),
-               None)
+    cov = next((d for d in ([Path(a.coverage)] if a.coverage else [out, out.parent])
+                if (d / "coverage.csv").exists() and (d / "coverage.json").exists()), None)
     if a.sites in ("auto", "all"):
         if cov is None:
             sys.exit(f"vfpu_probe: no coverage.csv in {out} or {out.parent}: run `cover` first or name the sites")
@@ -496,6 +550,10 @@ def cmd_sample(a):
     # longest of their spans.
     full = (a.seconds + 4.0) * 1e6
     go = int(200 * 16683.3)
+    if a.span_from:
+        # Task 048: a hot site's span starts at this race clock instead of GO (the race clock runs from GO on
+        # emulated time, so READY + 200 vblanks + the clock), to sample the stretch before a divergence.
+        go += int(a.span_from * 1e6)
     span = {}
     for s_ in sites:
         rate = rates.get(s_["addr"], (0.0, None))[0]
@@ -503,6 +561,15 @@ def cmd_sample(a):
         if a.cap and rate * full / 1e6 > a.cap and s_["addr"] not in TASK046_SITES:
             sp = max(int(a.cap / rate * 1e6), 200000)
         span[s_["addr"]] = sp
+    if a.window:
+        # Task 048: every site logs every execution between two race clocks (no cap), placed on emulated time by the
+        # scorecard's reference race (its player samples carry PPSSPP's usec), so that a divergence's frames are
+        # covered whole.
+        c0, c1 = (float(x) for x in a.window.split(","))
+        u0, u1 = clock_usec(a.track, c0), clock_usec(a.track, c1)
+        go = u0 - ready_usec(a.track)
+        span = {s_["addr"]: u1 - u0 for s_ in sites}
+        say(f"window: race clock {c0} to {c1} s, usec {u0} to {u1}")
     bps = []
     for addr in sorted(plan):
         p = plan[addr]
@@ -561,7 +628,8 @@ def cmd_sample(a):
         rs = rows[s["addr"]]
         j["rows"] = len(rs)
         j["span_s"] = None if span[s["addr"]] is None else round(span[s["addr"]] / 1e6, 3)
-        j["run"] = {"track": a.track, "until_clock": a.seconds, "date": time.strftime("%Y-%m-%d")}
+        j["run"] = {"track": a.track, "until_clock": a.seconds, "date": time.strftime("%Y-%m-%d"),
+                    **({"window": a.window} if a.window else {})}
         meta.append(j)
         name = f"{s['addr']:08X}.csv"
         with open(out / name, "w", newline="") as f:
@@ -595,6 +663,10 @@ HARNESS_HEAD = r"""// Generated by tools/vfpu_probe.py port: the corpus's own co
 #include <bit>
 using psprecomp::AllegrexContext;
 static std::size_t idx(unsigned r) { return ((r >> 2) & 7u) * 16u + (r & 3u) * 4u + ((r >> 5) & 3u); }
+// The rounding mode of patch 0020 (PURE_VFPU_DOT), where the header has one (a header from before it has none).
+template <class C> static void set_dot_mode(unsigned m) {
+  if constexpr (requires { C::vfpu_dot_mode(); }) C::vfpu_dot_mode() = m;
+}
 """
 
 
@@ -608,14 +680,16 @@ def snippet(addr, units):
         body = text[i + len(lab) + 2:]
         j = body.find("\n    goto L_")
         k = body.find("\nL_")
-        end = min(x for x in (j, k) if x >= 0)
-        return body[:end]
+        ends = [x for x in (j, k) if x >= 0]
+        return body[:min(ends)] if ends else None      # the function's last block: not a block of its own
     return None
 
 
 def cmd_port(a):
     d = Path(a.dir)
     meta = json.loads((d / "sites.json").read_text())["sites"]
+    if a.kinds:
+        meta = [j for j in meta if j["kind"] in a.kinds.split(",")]
     units = [f.read_text() for f in sorted((ROOT / "generated").glob("generated_unit_*.cpp"))]
     names = {}
     for r in range(128):
@@ -647,7 +721,7 @@ def cmd_port(a):
         cases.append((j, fn, len(s_regs), len(d_regs)))
     src.append("int main(int argc, char **argv) {\n  if (argc < 4) return 2;\n"
                "  std::uint32_t in[64], out[64]; static AllegrexContext ctx{};\n"
-               "  if (const char *m = std::getenv(\"PURE_VFPU_DOT\")) AllegrexContext::vfpu_dot_mode() = std::strcmp(m, \"ppsspp\") == 0 ? 1u : 0u;\n"
+               "  if (const char *m = std::getenv(\"PURE_VFPU_DOT\")) set_dot_mode<AllegrexContext>(std::strcmp(m, \"ppsspp\") == 0 ? 1u : 0u);\n"
                "  FILE *f = std::fopen(argv[2], \"r\"), *g = std::fopen(argv[3], \"w\");\n"
                "  if (!f || !g) return 3;\n  char line[4096];\n  std::fgets(line, sizeof line, f);\n")
     for j, fn, ns, nd in cases:
@@ -661,21 +735,34 @@ def cmd_port(a):
                    f"      std::fprintf(g, \"\\n\");\n    }}\n    return 0;\n  }}\n")
     src.append("  return 1;\n}\n")
     WORK.mkdir(parents=True, exist_ok=True)
-    cpp, exe = WORK / "port_harness.cpp", WORK / "port_harness"
+    tag = f"_{a.tag}" if a.tag else ""
+    cpp, exe = WORK / f"port_harness{tag}.cpp", WORK / f"port_harness{tag}"
     cpp.write_text("".join(src))
-    # The corpus's flags (build/arm64/compile_commands.json for generated_unit_*.cpp): -O2 -std=gnu++20 -arch arm64.
-    cmd = ["/usr/bin/clang++", "-O2", "-std=gnu++20", "-arch", "arm64",
-           f"-I{ROOT / 'vendor' / 'portablekit' / 'include'}", str(cpp), "-o", str(exe)]
+    # The corpus's flags (build/arm64/compile_commands.json for generated_unit_*.cpp): -O2 -std=gnu++20 -arch arm64
+    # -ffp-contract=off (patch 0020); --fp-contract on gives the flags of the corpus before patch 0020.
+    include = Path(a.include) if a.include else ROOT / "vendor" / "portablekit" / "include"
+    cmd = ["/usr/bin/clang++", "-O2", "-std=gnu++20", "-arch", "arm64", f"-ffp-contract={a.fp_contract}",
+           f"-I{include}", str(cpp), "-o", str(exe)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         sys.exit("vfpu_probe: the harness did not compile:\n" + r.stderr[-3000:])
-    for j, fn, ns, nd in cases:
-        src_csv = d / f"{int(j['addr'], 16):08X}.csv"
-        dst = d / f"{int(j['addr'], 16):08X}.port.csv"
-        r = subprocess.run([str(exe), j["addr"], str(src_csv), str(dst)])
-        if r.returncode:
-            sys.exit(f"vfpu_probe: the harness failed on {j['addr']} ({r.returncode})")
-        say(f"  {j['addr']} {j['mnemonic']:10} -> {dst}")
+    # Without --modes the rounding mode is the environment's (PURE_VFPU_DOT; the default is the PSP's) and the
+    # results go to <ADDR>.port.csv; with --modes each mode's go to <ADDR>.port.<mode>.csv (with --tag:
+    # <ADDR>.port.<tag>.<mode>.csv), so that one set holds the port's results under both.
+    import os
+    runs = [(m, f".port.{a.tag + '.' if a.tag else ''}{m}.csv") for m in a.modes.split(",")] if a.modes \
+        else [(os.environ.get("PURE_VFPU_DOT"), f".port{'.' + a.tag if a.tag else ''}.csv")]
+    for mode, suffix in runs:
+        env = dict(os.environ)
+        if mode:
+            env["PURE_VFPU_DOT"] = mode
+        for j, fn, ns, nd in cases:
+            src_csv = d / f"{int(j['addr'], 16):08X}.csv"
+            dst = d / f"{int(j['addr'], 16):08X}{suffix}"
+            r = subprocess.run([str(exe), j["addr"], str(src_csv), str(dst)], env=env)
+            if r.returncode:
+                sys.exit(f"vfpu_probe: the harness failed on {j['addr']} ({r.returncode})")
+        say(f"{len(cases)} sites under PURE_VFPU_DOT={mode or 'unset'} -> {d}/<ADDR>{suffix}")
 
 
 def main():
@@ -704,8 +791,20 @@ def main():
                            help="about this many rows a site: hotter sites log for a shorter time (0: no cap)")
             s.add_argument("--per-kind", type=int, default=4, help="auto: sites per mnemonic")
             s.add_argument("--min-hits", type=int, default=50, help="auto: least hits in the coverage run")
+            s.add_argument("--coverage", help="the directory with coverage.csv and coverage.json (default: --out, "
+                                              "then its parent)")
+            s.add_argument("--span-from", type=float, default=0.0,
+                           help="a hot site logs from this race clock (s) instead of from GO")
+            s.add_argument("--window", help="FROM,TO: every site logs every execution between these race clocks (s)"
+                                            " and nothing else (placed by the scorecard's reference race)")
     s = sub.add_parser("port", help="the port's results for the samples")
     s.add_argument("dir", nargs="?", default=str(OUT))
+    s.add_argument("--modes", help="ppsspp,psp: run under each rounding mode (PURE_VFPU_DOT), one file each")
+    s.add_argument("--kinds", help="only the sites of these kinds")
+    s.add_argument("--include", help="another include directory for the harness (header experiments)")
+    s.add_argument("--fp-contract", default="off", choices=["off", "on", "fast"],
+                   help="clang's -ffp-contract (the corpus: off since patch 0020, on before)")
+    s.add_argument("--tag", help="a name for the results (<ADDR>.port.<tag>[.<mode>].csv) and the harness")
     s.set_defaults(fn=cmd_port)
     a = ap.parse_args()
     a.fn(a)
