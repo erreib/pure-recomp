@@ -504,7 +504,10 @@ How each category measures:
   `tools/pp_lines.py` samples them (its block and parser), each block read twice and kept only when both reads agree.
   Both sides are cut at each ship's first lap-clock restart; the port's positions, every flip, are interpolated at
   PPSSPP's race clocks. Two PPSSPP runs of Vineta K agree at every common clock, so PPSSPP's AI is repeatable and the
-  AI ships get a row per circuit (the worst of the seven).
+  AI ships get a row per circuit (the worst of the seven). The port's headless runs repeat themselves as well, AI
+  included (two runs each of Karbonis and Sinucit: 0 m apart at every common clock), so where the port's AI parts
+  from PPSSPP's it is another race, not noise. A player row that differs names the nearest AI ship on each side at
+  the clock it first parts (a contact with an AI ship that is somewhere else in the other run).
 - **Timing.** Flips per race-clock second: pairs of `[pure] ship` lines on consecutive flips whose clock moved (a
   lap-clock restart counts the new clock; a pause, when the probe prints nothing, does not count), over the matrix's
   cells at Vector in `--quick`, over this run's sweep cells in `--full` (Tournament stays the matrix's: its cell takes
