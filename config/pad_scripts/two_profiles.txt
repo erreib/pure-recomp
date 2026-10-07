@@ -1,0 +1,54 @@
+# A window only (the save list is the interface's). On a memory stick that holds one profile (UCUS98612P0000,
+# NAME0000, made by main_menu.txt): boot -> title -> profile LOAD (one save: no list) -> MAIN MENU -> PROFILE > NEW >
+# YES -> SET NAME (pre-filled NAME0000; main_menu.txt's presses make it NAME1111) -> SET TAG AAA -> the game saves at
+# once (LISTSAVE): the save list opens on the first free slot, P0001 (shot list-save) -> Cross saves there ("Save
+# completed.", shot save-completed) -> Cross closes it -> PROFILE (focus NEW) > LOAD -> the list of both saves, on
+# the newest, P0001 (shot list-load) -> Up to P0000 (shot list-load-p0000) -> Cross loads it ("Load completed.") ->
+# Cross -> PROFILE (focus LOAD) > NEW > YES -> SET NAME, pre-filled with the loaded NAME0000 (shot name-p0000).
+# Measured 2026-10-07 (task 039) in the Metal window: the list opens one flip after the press that asks for it, and
+# the game keeps flipping behind it (a grey screen with a blinking memory stick), so the frames count as without it.
+700:pad a
+1600:pad a
+1650:pad a
+1800:pad start
+2100:pad a
+2400:pad dpdown
+2450:pad dpdown
+2500:pad a
+2800:pad a
+3100:pad a
+3260:pad a
+3360:pad a
+3460:pad a
+3560:pad a
+3660:pad dpdown
+3700:pad a
+3810:pad dpdown
+3850:pad a
+3960:pad dpdown
+4000:pad a
+4110:pad dpdown
+4150:pad a
+4260:pad a
+4360:pad a
+4510:pad a
+4610:pad a
+4710:pad a
+4810:pad a
+5010:pad dpdown
+5060:pad a
+5120:shot list-save
+5170:pad a
+5220:shot save-completed
+5270:pad a
+5400:pad dpdown
+5450:pad a
+5510:shot list-load
+5550:pad dpup
+5590:shot list-load-p0000
+5630:pad a
+5680:pad a
+5900:pad dpup
+5950:pad a
+6200:pad a
+6400:shot name-p0000

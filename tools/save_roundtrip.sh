@@ -5,12 +5,19 @@
 #            LISTSAVE writes UCUS98612P0000 with PARAM.SFO, PROFILE.BIN and ICON0.PNG; PARAM.SFO names the folder and
 #            the pilot; MAIN MENU is reached. A capture of SET NAME on the empty stick ("NAME") is the control.
 #   2. LOAD  config/pad_scripts/profile_load.txt on that stick: LISTLOAD loads P0000, MAIN MENU matches run 1's,
-#            the game's own PROFILE > SAVE writes the loaded profile back (LISTSAVE), and SET NAME shows the loaded
-#            name ("NAME0000": region variance on the digits, which are blank on the control).
+#            the game's own PROFILE > SAVE writes the loaded profile back (LISTSAVE, answered by the route's
+#            `save P0000`, where a player would pick the profile's slot in the save list), and SET NAME shows the
+#            loaded name ("NAME0000": region variance on the digits, which are blank on the control).
 #   3. DLC   run 2 again with an empty sibling UCUS98612DGAMMAPACK1 (a download-pack folder without PI.WAD): the
 #            game's SAVEDATA scan sees it, the profile still loads and shows, and the run reaches its last frame.
-# Exit 0 only when all three hold. Logs, captures and the stick stay in out/014/. About 7 minutes: input scripts need
-# the renderer's pad, so every run is windowed. The runs are silent and use the data directory
+#   4. TWO   a second profile on the same stick (config/pad_scripts/two_profiles.txt, task 039): PROFILE > NEW makes
+#            NAME1111 and the game's LISTSAVE opens the save list (P0000 beside four free slots) on the first free
+#            slot; Cross saves UCUS98612P0001 and P0000 is not written; PROFILE > LOAD lists both, Up and Cross load
+#            P0000, and SET NAME shows NAME0000 again.
+#   5. LIST  a restart (config/pad_scripts/profile_list_load.txt): the boot LOAD lists both profiles on the newest,
+#            P0001; Cross loads it and SET NAME shows NAME1111. Both folders hold their own pilots.
+# Exit 0 only when all five hold. Logs, captures and the stick stay in out/014/ (the save list's captures in
+# out/014/run4/ and run5/). About 13 minutes: input scripts need the renderer's pad, so every run is windowed. The runs are silent and use the data directory
 # out/data/save_roundtrip (settings.ini, save backups), not the player's, unless the environment sets PURE_NO_AUDIO or
 # PURE_DATA_DIR (tools/run_boot.py; task 034).
 #   tools/save_roundtrip.sh
@@ -22,9 +29,12 @@ GAME=$OUT/game
 SAVE=$GAME/ms0/PSP/SAVEDATA
 FOLDER=UCUS98612P0000
 NAME=NAME0000
+SECOND=UCUS98612P0001   # task 039: the second profile, which the save list puts in the first free slot
+SECOND_NAME=NAME1111
 DLC=UCUS98612DGAMMAPACK1
 DIGITS=200,92,115,26   # PSP pixels: the 5th to 8th letters of the SET NAME field, blank for the default "NAME"
 MIN_NAME_VARIANCE=500  # measured: 1545 with NAME0000 loaded, 0 on the empty stick
+MIN_ONES_VARIANCE=200  # measured: 449 with NAME1111 loaded (thin digits), 0 on the empty stick (task 039)
 
 [ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
@@ -33,7 +43,7 @@ MIN_NAME_VARIANCE=500  # measured: 1545 with NAME0000 loaded, 0 on the empty sti
 mkdir -p "$GAME"
 ln -sfn "$ROOT/game/EBOOT.ELF" "$GAME/EBOOT.ELF"
 ln -sfn "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$GAME/disc.iso"
-rm -rf "$GAME/ms0" "$OUT"/run1 "$OUT"/run2 "$OUT"/run3
+rm -rf "$GAME/ms0" "$OUT"/run1 "$OUT"/run2 "$OUT"/run3 "$OUT"/run4 "$OUT"/run5
 mkdir -p "$SAVE"
 
 FAILS=0
@@ -62,9 +72,11 @@ variance() {
     python3 -c 'import json, sys; print(int(json.load(sys.stdin)["max_variance"]))'
 }
 
-# folder_check: the save folder's PSP layout, its PARAM.SFO and the pilot in PROFILE.BIN. Exit code = failures.
+# folder_check [FOLDER PILOT]: the save folder's PSP layout, its PARAM.SFO and the pilot in PROFILE.BIN (default
+# $FOLDER, $NAME). Exit code = failures.
 folder_check() {
-  python3 - "$SAVE/$FOLDER" "$FOLDER" "$NAME" <<'EOF'
+  local folder=${1:-$FOLDER} pilot=${2:-$NAME}
+  python3 - "$SAVE/$folder" "$folder" "$pilot" <<'EOF'
 import os, struct, sys
 folder, expect_dir, expect_name = sys.argv[1:4]
 fails = 0
@@ -197,7 +209,74 @@ load_checks run3
 OUTCOME[3]="run 3 DLC door (+ empty $DLC): $(verdict "seen by the SAVEDATA scan, $dlc_note; profile loaded, saved and shown (variance $v); last frame reached")"
 TOTAL=$((TOTAL + FAILS))
 
+# 4. A second profile, through the save list (task 039).
+FAILS=0
+mtime_first=$(stat -f %m "$SAVE/$FOLDER/PROFILE.BIN" 2>/dev/null || echo 0)
+run run4 config/pad_scripts/two_profiles.txt 6450
+if grep -q "^\[savedata\] LISTSAVE: the save list is open (5 entries)" "$OUT/run4.log" &&
+   grep -q "^\[ui\] save list open: Save, 5 entries, on P0001" "$OUT/run4.log"; then
+  ok "the second profile's LISTSAVE opened the save list on the first free slot, P0001"
+else
+  bad "no save list for the second profile's LISTSAVE in $OUT/run4.log"
+  grep "^\[savedata\]\|^\[ui\]" "$OUT/run4.log" | grep -v "status [0-4]$" | tail -12
+fi
+if grep -q "^\[savedata\] saved [0-9]* bytes to .*/$SECOND\$" "$OUT/run4.log"; then
+  ok "Cross on the free slot saved $SECOND"
+else
+  bad "no save into $SECOND in $OUT/run4.log"
+fi
+if grep -q "^\[savedata\] saved [0-9]* bytes to .*/$FOLDER\$" "$OUT/run4.log" ||
+   [ "$(stat -f %m "$SAVE/$FOLDER/PROFILE.BIN" 2>/dev/null || echo 0)" != "$mtime_first" ]; then
+  bad "$FOLDER was written during run 4 (the second profile overwrote the first)"
+else
+  ok "$FOLDER not written by the second profile"
+fi
+if grep -q "^\[savedata\] LISTLOAD: the save list is open (2 entries)" "$OUT/run4.log" &&
+   grep -q "^\[savedata\] loaded [0-9]* bytes from .*/$FOLDER\$" "$OUT/run4.log"; then
+  ok "PROFILE > LOAD listed both saves and Up + Cross loaded $FOLDER"
+else
+  bad "no LISTLOAD list or no load of $FOLDER in $OUT/run4.log"
+fi
+for shot in list-save save-completed list-load list-load-p0000; do
+  [ -f "$OUT/run4/$shot.png" ] && ok "captured $OUT/run4/$shot.png" || bad "no capture $OUT/run4/$shot.png"
+done
+if python3 tools/imgdiff.py "$OUT/run4/name-p0000.png" "$OUT/run2/name-loaded.png" --region "$DIGITS" --tol 32 \
+     --max-frac 0.05 > "$OUT/run4.name.txt" 2>&1; then
+  ok "SET NAME after loading $FOLDER from the list shows $NAME, as run 2's ($(cut -d' ' -f1-3 "$OUT/run4.name.txt"))"
+else
+  bad "SET NAME after the list's load: $(head -1 "$OUT/run4.name.txt")"
+fi
+folder_check "$FOLDER" "$NAME"
+folder_check "$SECOND" "$SECOND_NAME"
+OUTCOME[4]="run 4 second profile (two_profiles.txt): $(verdict "the save list put $SECOND_NAME in $SECOND, $FOLDER kept $NAME; LOAD listed both and loaded $FOLDER by choice")"
+TOTAL=$((TOTAL + FAILS))
+
+# 5. Restart and LOAD: the list of both, on the newest.
+FAILS=0
+run run5 config/pad_scripts/profile_list_load.txt 3400
+if grep -q "^\[ui\] save list open: Load, 2 entries, on P0001" "$OUT/run5.log" &&
+   grep -q "^\[savedata\] loaded [0-9]* bytes from .*/$SECOND\$" "$OUT/run5.log"; then
+  ok "the boot LOAD listed both profiles on the newest, P0001, and Cross loaded $SECOND"
+else
+  bad "no LISTLOAD list on P0001 or no load of $SECOND in $OUT/run5.log"
+  grep "^\[savedata\]\|^\[ui\]" "$OUT/run5.log" | grep -v "status [0-4]$" | tail -12
+fi
+[ -f "$OUT/run5/list-boot.png" ] && ok "captured $OUT/run5/list-boot.png" || bad "no capture $OUT/run5/list-boot.png"
+v5=$(variance "$OUT/run5/name-p0001.png" "$DIGITS")
+python3 tools/imgdiff.py "$OUT/run5/name-p0001.png" "$OUT/run2/name-loaded.png" --region "$DIGITS" --tol 32 \
+  --max-frac 0.05 > "$OUT/run5.name.txt" 2>&1
+differs=$?
+if [ "$v5" -ge "$MIN_ONES_VARIANCE" ] && [ $differs -eq 1 ]; then
+  ok "SET NAME shows a loaded name past NAME other than $NAME (variance $v5 >= $MIN_ONES_VARIANCE; against run 2's: $(cut -d' ' -f1-3 "$OUT/run5.name.txt"))"
+else
+  bad "SET NAME capture $OUT/run5/name-p0001.png: variance $v5, against run 2's $NAME: $(head -1 "$OUT/run5.name.txt")"
+fi
+folder_check "$FOLDER" "$NAME"
+folder_check "$SECOND" "$SECOND_NAME"
+OUTCOME[5]="run 5 restart LOAD (profile_list_load.txt): $(verdict "the list showed both on the newest; $SECOND ($SECOND_NAME) loaded and shown (variance $v5); both folders hold their own pilots")"
+TOTAL=$((TOTAL + FAILS))
+
 echo
-for i in 1 2 3; do echo "${OUTCOME[$i]}"; done
+for i in 1 2 3 4 5; do echo "${OUTCOME[$i]}"; done
 if [ $TOTAL -eq 0 ]; then echo "save round trip: PASS"; exit 0; fi
 echo "save round trip: FAIL ($TOTAL checks)"; exit 1
