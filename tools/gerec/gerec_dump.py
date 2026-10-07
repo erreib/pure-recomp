@@ -27,6 +27,8 @@ TARGET_FORMATS = ["5650", "5551", "4444", "8888"]
 IMAGE_APIS = ["none", "cpu", "vulkan", "metal"]
 LEVEL_BYTES = 4 + 7 * 12 + 12   # a Draw's mip level fields (Writer::put_levels)
 LEVEL_MODES = ["auto", "const", "slope", "mode3"]
+PIXEL_BYTES = 13 + 17 + 1       # a Draw's colour test, dithering and CLIPENABLE (patch 0017)
+COLOR_TEST_FUNCTIONS = ["never", "always", "equal", "notequal"]
 
 
 class Cut(Exception):
@@ -118,6 +120,13 @@ def draw_call(c):
         t["level_count"] = c.u32()
         t["levels"] = [c.take("<IIHH") for _ in range(7)]
         t["level_mode"], t["level_bias"], t["lod_slope"] = c.u32(), c.take("<i")[0], c.f32()
+    # The colour test (enabled, function, reference, mask), dithering (enabled, the matrix's four rows) and
+    # CLIPENABLE (patch 0017). Recordings made before end here: no colour test, no dithering, CLIPENABLE off.
+    d["color_test"], d["dither"], d["clip"] = (False, 0, 0, 0xFFFFFF), (False, (0, 0, 0, 0)), False
+    if c.left() >= PIXEL_BYTES:
+        d["color_test"] = (c.flag(),) + c.take("<3I")
+        d["dither"] = (c.flag(), c.take("<4I"))
+        d["clip"] = c.flag()
     return d
 
 
@@ -150,9 +159,15 @@ def describe_draw(d):
             text += f" texmatrix {source}"
         elif not d["through"] and mode == 2:
             text += f" envmap {light_u},{light_v}"
+    on, function, reference, mask = d["color_test"]
+    if on and not d["clear_mode"]:
+        name = COLOR_TEST_FUNCTIONS[function & 3]
+        text += f" ctest {name} {reference:06X}/{mask:06X}"
+    if d["dither"][0]:
+        text += " dither " + ",".join(f"{row:04X}" for row in d["dither"][1])
     flags = [name for name, on in (("through", d["through"]), ("clear", d["clear_mode"]), ("blend", d["blend"][0]),
                                    ("ztest", d["depth"][0]), ("stencil", d["stencil"][0]), ("lit", d["lighting"]),
-                                   ("fog", d["fog"])) if on]
+                                   ("fog", d["fog"]), ("noclip", not d["through"] and not d["clip"])) if on]
     if flags:
         text += " " + ",".join(flags)
     return text
