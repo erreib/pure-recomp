@@ -36,7 +36,7 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
 
 1. **Build and boot (one task).** A CMake preset for Windows (clang-cl preferred, MSVC as the fallback), the
    toolchain notes in docs/setup.md, FFmpeg as the framework's scripts fetch it, the data directory under the user's
-   profile (`%APPDATA%`), the disc image path, `tools/build.sh`'s equivalents (a `tools/build.ps1` or the same script
+   profile (`%APPDATA%`), the disc image path, `tools/build.sh`'s equivalent (a PowerShell script to be written, or the same script
    under Git Bash). Exit: the frontend route to the main menu and a Vineta K race on the Vulkan path, headless and in a
    window; `tools/frame_regress.sh --shell vulkan --backend vulkan` against the Vulkan column (docs/verification.md).
 2. **Tools (one task).** Every Python tool runs; the bash tools run under Git Bash or WSL; the PPSSPP driver drives
@@ -56,7 +56,7 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
    Exit: the suite's Vulkan column within 0.005 of the Metal column on every race scene; `tools/gerec/metal_check.sh`'s
    A/B then compares two complete backends.
 4. **Packaging (one task).** The Windows zip through the framework's release script, the game-data check, a
-   first-run setup that takes the disc image, the pre-warm list shipped, a `tools/bundle_check` equivalent.
+   first-run setup that takes the disc image, the pre-warm list shipped, a bundle check equivalent to the macOS one.
 
 ## What to decide before starting
 
