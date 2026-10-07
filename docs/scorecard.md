@@ -20,7 +20,7 @@ by task 045 (patch 0019), so the Saves rows compare enciphered saves, the data f
 | Coverage | the matrix's 46 cells (`tools/fidelity_audit.py`'s cell results, reused from `out/035-wip/fidelity`, never run here), the 278 imports by state, the GE commands the framework still ignores (this run's exit list), the functions entered | halts, stubs, unsupported instructions, skipped draws: faithful at 0; imports: close while a constant or a documentation-only answer stands in; GE: close while every command left is one no draw of the game uses |
 
 Run it: `python3 tools/scorecard.py --quick` (pictures, timing from the matrix's cells, saves, coverage; about a
-minute and a half) or `--full` (all six, with fresh sweep cells for timing; about 18 minutes; a full run of every category
+minute) or `--full` (all six, with fresh sweep cells for timing; about 18 minutes; a full run of every category
 rewrites this file). `--only CATEGORY[,...]` runs some. Refresh the PPSSPP side: `python3 tools/scorecard.py
 --refresh-references [CATEGORY]` (about an hour for all; docs/verification.md, "The accuracy scorecard").
 

@@ -479,7 +479,7 @@ with every run's route, log, captures and WAVs under `<out>/runs/`; a `--full` r
 
 | Mode | Categories | Port runs | Time on this Mac |
 |---|---|---|---|
-| `--quick` (the default) | pictures, timing (from the matrix's cells), saves, coverage | the suite, three extra race frames, a short race for the load, a profile | about a minute and a half |
+| `--quick` (the default) | pictures, timing (from the matrix's cells), saves, coverage | the suite, three extra race frames, a short race for the load, a profile | about a minute |
 | `--full` | all six | also 12 straight-on races (three with `PURE_AUDIO_WAV`), the main menu with `PURE_AUDIO_WAV`, four sweep cells (Single Race, Time Trial and Free Play on Vineta K, Zone 1; races paced) | about 18 minutes |
 | `--only CATEGORY,...` | the named ones, with `--full`'s sources (or `--quick`'s beside `--quick`) | | |
 
