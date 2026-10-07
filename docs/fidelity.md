@@ -662,7 +662,8 @@ Ordered by what a player would notice first. Each row is a candidate task; "size
 in one file; medium: a feature across the backend or the framework's state; large: a subsystem). Twelve
 differences: three in the race picture, two in the saves, one in loading, one in pacing, three in the audio and two
 small GE states. Task 041 checked 7, 8 and 9 against PPSSPP's audio dump and runs in a window: none of the three is
-the port's; it found 12 on the way, which task 043 models (patch 0018).
+the port's; it found 12 on the way, which task 043 models (patch 0018). The scorecard (task 044) added two in the
+race's paths, 13 and 14, which task 046 traced to the clock the race reads and, past that, to the VFPU's dot product.
 
 | # | What a player sees | Where | Evidence | Suspected cause | Size |
 |---|---|---|---|---|---|
@@ -678,6 +679,8 @@ the port's; it found 12 on the way, which task 043 models (patch 0018).
 | 10 | Pure black pixels of a few draws (the billboard screens' content, a few small objects) are drawn where the PSP drops them | every race, 3 to 14 draws a frame | COLORTEST NOT EQUAL black in PPSSPP's dumps; ignored by the framework (7.7 million writes a cell) | framework GE state: the colour test. **Fixed by task 040 (2026-10-07)**: patch 0017 carries COLORTESTENABLE, COLORTEST, COLORREF and COLORTESTMASK (0x27, 0xD8 to 0xDA), and the Metal backend discards by the GE's function on the 8-bit colour under the mask, after fog, as the alpha test (docs/metal-backend.md, "The colour test, 16-bit writes and the depth clamp"). The draws are light glows blended additively, so a black fragment adds no colour; what the test changes is the bloom mask's stencil 255 their black texels wrote. Headless Metal at tol 32: race_hud 0.014874 to 0.014828 with the dither below (the colour test alone changes 640 pixels, all in a lamp's glow, whose region (307,107) 26x34 goes from 0.0328 to 0.0260, 0.2285 to 0.1765 at tol 16); tt_hud and fp_hud have no colour-tested draw on screen. The Vulkan backend keeps every fragment | small |
 | 11 | Dithering on 16-bit targets, depth clamping at the depth range's ends | every race | DITHERENABLE (6 to 95 draws a frame), CLIPENABLE (every 3D draw) in the dumps; ignored | framework GE state. **Fixed by task 040 (2026-10-07)**: patch 0017 carries DITHERENABLE, DITH0 to DITH3 (0x20, 0xE2 to 0xE5) and CLIPENABLE (0x1C). Dithering: the port's 16-bit targets had kept 8 bits a channel (they are RGBA8 textures, cut to the format only when stored in guest memory), so the Metal backend now writes a 5650, 5551 or 4444 target as the PSP does: the blend in the shader on the target's colour, the matrix's offset (row y & 3, column x & 3, as PPSSPP's software renderer shows on all 16384 pixels of Vineta K's fourth billboard round), one clamp, the format's top bits. Every dithered draw of the dumps is into the 565 billboard target; after the task its pixels are all 565 values ordered as the round's matrix, as PPSSPP's are (before: 0.0 to 99.6% 565 values, no dither). The billboard screens show other adverts than PPSSPP's frames, so their regions hardly move (race_hud (201,126) 16x8 0.8828 both; tt_hud (195,114) 29x29 0.4245 to 0.4221, fp_hud 0.4269 to 0.3912); the scenes: tt_hud 0.011221 to 0.011213, fp_hud 0.011566 to 0.011336. Depth clamp: the hardware notes put it with CLIPENABLE on (near-plane clipping only, each vertex's screen z clamped to 0..65535, MINZ/MAXZ per pixel), which every transformed draw of the game has; the backend draws that rule, and it changes no pixel of the 18 scenes, as the dumps predict (no vertex beyond the far plane, MINZ/MAXZ the viewport's own range). The Vulkan backend draws neither | small each |
 | 12 | The race's effects have no reverb: they stop dead where the PSP's ring on (at a pause the PSP's sound fades out over half a second, the port's stops) | every race, from the race load (traced in Free Play) | the game calls `__sceSasRevType` with type 5, `__sceSasRevVON` with the dry and the wet send on and `__sceSasRevEVOL` 0x666 (a ramp down from 0xFFF at the race load) through the race, and keeps the wet send off in the menus; the framework accepts all four and drops them (`hle_media.cpp`: "Reverb is not modelled"). PPSSPP applies them: its dump of the Free Play pause decays over 0.5 s (RMS 2148, 600, 198, 125, 64, 33 down to 1 in 100 ms steps) and stays at RMS 1, where the port's falls to exact zeros within 100 ms (task 041) | framework: the SAS reverb (the effect type, the wet send and its volume) is not modelled in `sas_core.cpp`. **Fixed by task 043 (2026-10-07)**: patch 0018 runs the SPU reverb formula and HALL preset of the PlayStation's documentation on the voices' effect sends and adds it at the wet volumes, stepped once a sample at 44.1 kHz with the sends at half, the two things PPSSPP's output requires ("Difference 12: the SAS reverb" below). `tools/sas_reverb_check.sh`, the Free Play pause against PPSSPP's dump in 100 ms steps from where the held effects end: PPSSPP 383, 194, 116, 60, 31; the port before 254, then exact zeros (FAIL); after 487, 234, 131, 63, 35 (1.05 to 1.27 of PPSSPP's, PASS), and on through the first second at 1.1 to 1.3. The effects' level over 250 s of the Free Play idle is 1.008 of PPSSPP's (0.976 before) and over 40 s of a Vineta K race with the AI 1.000 (0.980). `PURE_NO_REVERB=1` restores the dry mix | medium |
+| 13 | The AI ships run another race than in PPSSPP: the scorecard's straight-on runs part from PPSSPP's 0.4 s after GO on every circuit (up to 500 m by 20 s), and three player rows move where an AI ship comes near (Sinucit, Mandrashee, Sol 2) | every Single Race; on a PSP every race is a different one too | the scorecard's Trajectories (task 044): each side repeats its own AI exactly from run to run | **found (task 046)**: the race's random numbers start from two clock readings at the TEAM SELECTION confirm, and the race runs on the frame times the game measures; neither is the same in two scripted runs on two machines. With PPSSPP's clock pinned (`PURE_TEST_RACE_CLOCK`, `tools/ai_seed_check.sh`) the random sequence is PPSSPP's to the end of the 20 s, all 12 player rows are faithful (0.00 to 0.41 m) and the AI ships part 3 to 16 s after GO instead of 0.4 s (Mandrashee's stay within 0.46 m for the 20 s). What remains is the VFPU's dot product: the port rounds `vdot` as an IEEE fused chain where the PSP truncates (1 ulp on 26% of one call site's results). "Difference 13: the AI's start" below | none for play (the seeds are meant to differ from race to race); the dot product is a framework task (`include/psprecomp/allegrex_context.hpp`, a full corpus rebuild) |
+| 14 | On Karbonis the player's ship scrapes a wall from 4.9 s and comes out 1 to 3 km/h faster than in PPSSPP, 34 m apart by 20 s | any long wall contact | the scorecard's Karbonis player row (task 044) | **found (task 046): the time step, not the contact response.** The first contact gives the same speed on both sides (218.2 against 218.3 km/h); the ship was already 0.4 m along its path from PPSSPP's (the frames' measured times differ), so the following contacts meet the wall at other points and the scrape's outcome drifts. With PPSSPP's frame times replayed the player's path on Karbonis stays within 0.01 m of PPSSPP's for the whole 20 s, scrape included. "Difference 14: the Karbonis contact" below | none (the port's frame times jitter by 1 ms, the kernel's time quantum; difference 13) |
 
 Not differences, though they looked like ones:
 
@@ -1123,3 +1126,119 @@ later, so a file taken again can differ in length and hash but not in content. I
   table were not checked against PPSSPP.
 - **The menus.** They keep the wet switch off. The unit runs there (it runs whenever a type is set) but adds nothing.
 - **Attract-demo clipping.** Difference 9's figures for the demos were not measured again with the reverb.
+
+## Difference 13: the AI's start (task 046, 2026-10-07)
+
+The scorecard (task 044) found the seven AI ships of every circuit a different race from PPSSPP's from 0.4 s after
+GO, while each side repeats its own exactly. The race's random numbers, the clock it reads and, last, the VFPU's
+arithmetic explain it, in that order.
+
+### What the race draws from
+- **One generator.** The game's random numbers in a race are the C library's `rand()` (FUN_088e0568: state =
+  state * 1103515245 + 12345, the result its low 31 bits), its state the word at +0x58 of the structure the pointer
+  at 0x08AB1A6C names (0x08AB1780 in PPSSPP). The AI, the particle systems, the weather, the billboards and the
+  replay camera all draw from it. The executable's other generator, a Mersenne Twister at 0x08AB2904, belongs to the
+  network message client (FUN_088f84f8) and is not seeded in a Single Race.
+- **Two seeds, both clocks.** `srand()` (FUN_088e0558) is called twice when the player confirms TEAM SELECTION:
+  - FUN_0880e0d0, the AI team pick: `srand(sceKernelGetSystemTimeWide())`, the low word of the microseconds since
+    boot, then `rand() % teams` until it has seven distinct unlocked teams other than the player's: the order of
+    the AI teams on the grid. Vineta K: 0x0B61BCDE in the port (190.95 s after boot on the scorecard's route),
+    0x06AF1873 in PPSSPP (112.14 s on its route).
+  - The Billboard constructor (Billboard_cpp__08860044) copies the frontend root's +0x44 to DAT_08a8e7d0 and calls
+    FUN_0886011c, which seeds with it and shuffles the 31 billboard adverts (62 `rand()` calls). +0x44 is the game's
+    own clock, the float sum of every frame's measured time since the frontend started: 186.152 s in the port
+    (0x433A26F3), 105.237 s in PPSSPP (0x42D27933). Every later `rand()` of the race continues this sequence.
+
+  On a PSP both differ from play to play with the moment the player presses Cross; PPSSPP repeats them because its
+  route is frame-exact on emulated time, the port because its virtual clock is deterministic headless. Neither is the
+  RTC (the driver's pinned RTC base plays no part), and the race load (D-011) comes after both.
+- **The candidates of the team pick.** It only draws teams the frontend's lock check (FUN_088b43d4) passes. The
+  scorecard runs every port race with `PURE_TEST_UNLOCK_ALL`, which on the Alpha circuits adds ZONE and MEDIEVIL to
+  the eight teams PPSSPP's reference (a new profile, nothing unlocked) draws from; the Beta and Classic references
+  run the game's own unlock code, so there the sets agree.
+- **The frame times.** The frame timer (FUN_08804390) measures each frame with `sceKernelGetSystemTimeWide` and caps
+  the difference at 0.067 s; the physics, the camera and the timers integrate it. The port's virtual clock advances in
+  1 ms quanta (the kernel's starvation tick, every 20000 dispatches), so its frames measure 15683, 16683 or 17683 us
+  in the 60 fps race and 32366 to 34366 us in the 30 fps intro, where PPSSPP's follow each frame's emulated CPU time
+  (15957 to 17201 us over the race's first second on Vineta K, once 24423 and then 9932). Random draws depend on it: in the race intro FUN_0886d688 calls
+  `rand()` for an object only when its bounding box is in the camera's frustum (FUN_08861430), and the camera's path
+  follows the frame times, so the two sides draw a different number of random numbers before GO (4594 against 4591
+  on Vineta K with the seeds equal).
+
+### Evidence, step by step (Vineta K, the worst AI ship, the scorecard's measure)
+| What the port's run has of PPSSPP's | First more than 1 m apart | Largest over 20 s | The player |
+|---|---|---|---|
+| nothing (task 044) | 0.38 s | 134.36 m | 0.98 m |
+| the two seeds | 0.40 s (ships 1 and 4 start with other teams) | 256.97 m | 0.83 m |
+| the two seeds and the reference's team set (no unlock) | 2.17 s | 116.83 m | 0.82 m |
+| the seeds, the team set and the frame times (`PURE_TEST_RACE_CLOCK`) | 13.45 s | 4.05 m | 0.02 m |
+
+With the whole race clock the libc state at every flip is one PPSSPP had, to the end of PPSSPP's log (race clock
+20.7 s, 1792 flips on Vineta K and 1791 on Karbonis), and the race load's length makes no difference: the port's
+load is 5 flips and PPSSPP's 34, both draw 2566 numbers through it (the shuffle's 62, then 2397 and 107 as the
+race's objects are made), and both run 58 flips from its end to the race's switch to 60 fps. So this is not D-011's
+"new finding": the load's only way into the race is the first frame after it, whose time is capped at 0.067 s on
+both sides. Probes: `PURE_WATCH_RAND=1|2`, `PURE_TRACE_RAND=1`, `PURE_WATCH_WORDS` (README.md); on PPSSPP's side
+log-only breakpoints on srand, on the frame timer's `sceKernelGetSystemTimeWide` and at every flip.
+
+### The pin: `PURE_TEST_RACE_CLOCK` (a test switch, never for play)
+`tools/ai_seed_check.sh` takes PPSSPP's race clock for a circuit into `ref/race_clock/<track>.txt` (the scorecard's
+reference route through the driver, with the log-only breakpoints above; it checks that the player ends where the
+task 044 reference does, 0.0004 m on Vineta K, so the clock is the reference race's), and runs the scorecard's
+trajectory measure with `SCORECARD_RACE_CLOCK=ref/race_clock`, which hands each port race `PURE_TEST_RACE_CLOCK`. The
+profile then replaces `srand()` by a native copy that stores PPSSPP's seed for the two callers, answers the frame
+timer's `sceKernelGetSystemTimeWide` with PPSSPP's differences from the race seed on (every other caller gets the
+port's time), and answers `sceKernelGetGPI` as the reference's route had it. A player's game reads the real clock.
+The scorecard's Trajectories with it (docs/scorecard.md):
+
+| Rows | Task 044 | With the race clock pinned |
+|---|---|---|
+| players | 8 faithful, Sol 2 close (3.25 m), Sinucit 13.89 m, Mandrashee 6.23 m, Karbonis 34.07 m | 12 faithful, 0.00 to 0.41 m |
+| AI ships | 12 differ, first more than 1 m apart at 0.38 to 0.45 s, 109 to 500 m | Mandrashee faithful (0.46 m), Vineta K close (4.05 m), 10 differ; first more than 1 m apart at 3.05 to 16.35 s |
+
+### What is left: the VFPU's dot product
+With the random sequence, the frame times and the input the same, the ships' state still differs from the first
+physics step after the load, in the last bits: Vineta K's ship 0 after its first step has a height of 34.907314
+against PPSSPP's 34.907318 and a vertical speed of -10.305353 against -10.305360, its position along x the same bit
+for bit. The player's path stays within 0.41 m on every circuit, but the AI's paths amplify such bits: Vineta K's
+ship 0 is 5 mm to the side at GO and 0.05 m off its PPSSPP path at 13.03 s, then gains less on a speed pad (338.8
+against 329.3 km/h at 13.08 s, 404.4 against 395.7 km/h at the peak), and the gap grows from there.
+PPSSPP's log of the ship code's VFPU instructions over the first 3 s of Vineta K, each operand set run through the
+framework's own helpers (`execute_vfpu_vdot_ct`, built with the corpus's flags):
+
+| Instruction | Function | Results compared | Different |
+|---|---|---|---|
+| `vdot.t S000,C400,C400` at 0x089196B8 | FUN_08919394 (the race record's speed) | 1488 | 389 (26%), 1 ulp each |
+| `vdot.t S000,C000,C000` at 0x08926E08 | FUN_08926ae4 (the ship update) | 5848 | 76 (1.3%), 1 ulp each |
+| `vsqrt.s S000,S000` at 0x089196BC | FUN_08919394 | 1488 | 0 |
+
+For example the squared length of (-0.852767, 0.00194, 0.033974) (bits 0xBF5A4EEF, 0x3AFE5500, 0x3D0B28A3): PPSSPP
+0x3F3A766B, the port 0x3F3A766C. The port's is the nearest float to the exact sum, PPSSPP's is not: the
+framework computes `s0*t0 + s1*t1 + s2*t2 + s3*t3` in one C++ expression, which clang contracts into a fused
+multiply-add chain, while the PSP's VFPU (as PPSSPP reproduces it) aligns the products to the largest exponent with
+two extra bits and truncates before it rounds. The dot product is also inside `vmmul`, `vtfm`, `vhdp` and the other
+matrix forms. Making it the hardware's is a change to `include/psprecomp/allegrex_context.hpp` (and a full corpus
+rebuild), outside task 046: the next task, which should also compare the transcendental instructions (`vsin`,
+`vcos`, `vrcp`, `vrsq`, `vexp2`, `vlog2`, `vasin`; PPSSPP takes them from tables of the hardware's results) the same
+way.
+
+## Difference 14: the Karbonis contact (task 046, 2026-10-07)
+
+The scorecard's Karbonis player row (34.07 m by 20 s) was read as a contact response that differs. The race records
+say otherwise:
+
+- **Before the wall.** The ship is already 0.4 to 0.5 m from PPSSPP's along its path at 4.6 s (straight-on at 304 to
+  308 km/h on both): the frames' measured times differ (difference 13), and a 1 ms difference in a frame is 8.5 cm
+  at that speed.
+- **The first contact (4.854 s in the port).** The same response: 308.7 km/h before it and 218.2 km/h after it
+  (velocity -16.11, 0.06, -58.44), against 308.8 and 218.3 km/h (-16.10, 0.06, -58.47) in PPSSPP; the shield falls
+  to 98.833.
+- **The scrape.** The difference does not appear at once but accumulates: the next contacts meet the wall at other
+  points of the path, 178.2 against 174.9 km/h at 4.955 s, 121.3 against 108.1 km/h at 5.356 s, and from there the
+  port's ship scrapes along at 1 to 3 km/h more (about 30 km/h from 7 s), the gap growing once it is free (12 m by
+  12 s, 34 m by 20 s). The speed along the wall differs first; the normal component and the shield follow the
+  contacts' points.
+- **With PPSSPP's frame times** (`PURE_TEST_RACE_CLOCK`) the player's path is within 0.01 m of PPSSPP's at every
+  sample of the 20 s, the scrape included. The collision path (FUN_08926ae4, task 017) computes the same contacts
+  from the same frames; the cause is the time step. Nothing to fix in the contact code; a player's ship scrapes the
+  same wall in the same way, only from slightly different frames, as on a PSP whose frame times also vary.
