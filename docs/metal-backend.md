@@ -15,6 +15,8 @@ at 0.0379 against PPSSPP (Vulkan's 0.067). The Metal shell (task 027, "The Metal
 pictures in a window of its own, with no Vulkan involved. Task 036 added the GE's texture mapping modes, the
 texture matrix and the environment map (patch 0013 carries them in the draw state): the ships' hulls and canopies,
 glass and shiny roofs show their reflections ("Texture mapping modes" below), which the Vulkan backend does not draw.
+Task 037 added the mip levels (patch 0014 carries them): a texture the GE names levels for is a mipmapped texture,
+sampled at the level the GE's rule picks, so distant textures no longer shimmer ("Mipmaps" below).
 
 ## Quick start
 
@@ -45,6 +47,7 @@ tools/frame_regress.sh --shell metal --backend metal --only lang,title,profile  
 | `PURE_METAL_PIPELINES_OUT=FILE` | (task 033) at exit, every render pipeline and depth-stencil key the run's draws used, in the list's form |
 | `PURE_METAL_PACE=0` | (task 033) the Metal shell shows each picture as soon as it can, instead of at the real time of the PSP vblank after its frame began |
 | `PURE_NO_TEXMAP=1` | (task 036) every draw takes its UVs through the texture scale and offset (texture map mode 0), as before task 036: the texture matrix and environment map modes are not drawn ("Texture mapping modes") |
+| `PURE_NO_MIPMAPS=1` | (task 037) every texture is uploaded and sampled at level 0 alone, as before task 037, whatever levels the GE names ("Mipmaps"); its pictures are those of the build before the task |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -85,7 +88,7 @@ only the Metal compiler that comes with macOS. A compile error is the message `i
 | Transformed | `projection x view x world`; the GE viewport (`screen = ndc x scale + offset - region offset`) folded into clip x and y, so the Metal viewport stays the whole target; clip z remapped from the PSP's [-w, w] to Metal's [0, w], and the GE's z scale and offset become the viewport's `znear` and `zfar` (reversed when the game reverses the range), as the Vulkan backend folds them into `minDepth`/`maxDepth` |
 | Texture coordinates | texels divided by the texture's size in through mode; transformed, by the GE's texture map mode (task 036): the UVs through the GE's scale and offset (mode 0), the texture matrix applied to the position, UV or normal with s and t divided by q per pixel (mode 1), or the environment map from the normal and two lights (mode 2), "Texture mapping modes" |
 | Texture function | modulate, decal, blend, replace and add, with TCC (alpha from the texture or not). The blend function's environment colour is not in the draw state; the texel stands in for it, as in `ge.frag` |
-| Filtering and wrap | the GE's own filter bits (nearest or linear for magnification and minification, the base level only) and wrap bits (clamp or repeat) choose one of 16 samplers; `sharp_textures` forces nearest |
+| Filtering and wrap | the GE's own filter bits (nearest or linear for magnification and minification; with mip levels, nearest or linear between them: task 037, "Mipmaps") and wrap bits (clamp or repeat) choose one of 48 samplers; `sharp_textures` forces nearest within a level |
 | Alpha test | in the fragment shader, by the GE's numbering (0 NEVER, 1 ALWAYS, then EQUAL ... GEQUAL: patch 0005), on the 8-bit alpha and reference under the test's mask, with `discard_fragment`. Draws without a test, or with ALWAYS, use a fragment function compiled without it |
 | Blend | Metal's blend units for the GE factors and the equations ADD, SUBTRACT, REVERSE SUBTRACT, MIN and MAX (MIN and MAX take no factors). A FIX source factor is applied in the shader (the colour arrives multiplied, the blend takes it ONE), so any pair of FIX colours is exact, unless the destination factor reads the source colour, when it is the blend colour; a FIX destination is ONE, ZERO or the blend colour. The doubled factors (2xSA and so on) are drawn single and ABSDIFF as ADD, each logged once (`[metal] ... is not emulated`). A draw that stores a stencil value under a blend that reads the source alpha blends with the fragment's own alpha from a second output (dual-source blending, below). The alpha channel's own blend stores the fragment's alpha (ONE, ZERO): the stencil value or a clear's alpha |
 | Write masks | whole colour channels the mask (0xE8) keeps are not written; a partial channel mask is written whole and logged once. The alpha, the PSP's stencil, is written only as "The stencil and the alpha" says; the alpha mask (0xE9) is the stencil attachment's write mask (~0xE9) |
@@ -112,7 +115,7 @@ z, the mode: through, sprite corners in clip space, fog, lighting, and since tas
 the texture matrix, the viewer's direction and the texture's place in the image sampled; 240 bytes), the fragment
 uniforms (FIX colour, texture function, TCC, opaque texel alpha, whether the coordinates are divided by q, alpha
 test function, reference and mask, fog colour, the stencil value the
-alpha stores), the blend colour, the stencil reference, the viewport's depth range, the scissor and the cull mode
+alpha stores, and since task 037 the mip level rule: 112 bytes), the blend colour, the stencil reference, the viewport's depth range, the scissor and the cull mode
 are set on the encoder when they changed, and the lighting
 block (world matrix, global ambient, material colours, update mask and flags, the four lights, fog end and scale)
 when a lit, fogged or environment-mapped draw changed it, or the pass is new. Lighting and fog are uniform branches in the one vertex
@@ -146,7 +149,9 @@ for now) and a `Depth32Float_Stencil8` texture, both private to the GPU: interna
   format, shift, mask and offset and every palette entry the format's indices can reach. A changed texture or
   palette is a new key and is uploaded again; an unchanged one is found. Within a display list a bind's key is
   hashed once. Up to 1024 textures are kept, the least recently used dropped first (a command buffer that still
-  uses one keeps it alive). A texture that cannot be decoded is drawn white and logged once.
+  uses one keeps it alive). A texture that cannot be decoded is drawn white and logged once. A texture with mip
+  levels (task 037) is one mipmapped texture, its key covering every level's address, size, row length and texels
+  ("Mipmaps").
 
 In the frontend route 57 textures are decoded by frame 600 and 347 by frame 2130, over 19853 draws: unchanged
 textures are found again rather than decoded. (The language page draws the paused intro movie's picture as a
@@ -680,6 +685,151 @@ So on a recording made since patch 0013 the Metal-against-Vulkan comparison is l
 `PURE_NO_TEXMAP=1` (ge_replay hands the environment to both backends; the Vulkan backend has no such switch and draws
 mode 0 regardless).
 
+## Mipmaps (task 037, 2026-10-07)
+
+The GE samples a texture from up to eight levels, each half the size of the one before, picking the level per pixel
+by a rule the draw chooses. The framework's GE state ignored the levels until patch 0014, so every backend sampled
+level 0 and distant textures (Blue Ridge's grandstand crowds, the track's far surface, windows) were sharper than on
+the PSP and shimmered as the camera moved: difference 2 of docs/fidelity.md. Patch 0014 carries the levels in
+`TextureState`; this backend uploads them and picks the level as the GE does. The Vulkan backend still samples level
+0.
+
+### The registers and the rule
+
+The register layout is the PSP SDK's (`sceGuTexImage(level, ...)`, `sceGuTexMode`, `sceGuTexLevelMode`,
+`sceGuTexSlope`, `sceGuTexFilter`); the rule is PPSSPP's hardware notes'
+(<https://www.ppsspp.org/docs/psp-hardware/gpu/raster-pipeline/>, "Mip level selection", and
+<https://www.ppsspp.org/docs/psp-hardware/gpu/arithmetic/>, "A float-bits logarithm"), read as documentation; no
+PPSSPP code was read for it.
+
+| Register | What | In `TextureState` |
+|---|---|---|
+| TEXADDRn, TEXBUFWIDTHn, TEXSIZEn (0xA0 + n, 0xA8 + n, 0xB8 + n) | level n's address (TEXBUFWIDTHn bits 16..23 its top byte), row length, log2 width and height, as level 0's | `levels[n - 1]` (`TextureLevel`: `address`, `buffer_width`, `width`, `height`) for levels 1 to 7 |
+| TEXMODE (0xC2) bits 16..18 | the highest level the GE may sample | `level_count` (that plus one) |
+| TEXLEVEL (0xC8) | bits 0..1 the mode (0 auto, 1 constant, 2 slope), bits 16..23 a signed bias in 1/16 levels | `level_mode`, `level_bias` |
+| TEXLODSLOPE (0xD0) | a float | `lod_slope` |
+| TEXFILTER (0xC6) bits 0..2 | the minification filter: bit 2 on (4 to 7) samples the levels, bit 1 linear between two levels (6, 7) or the nearest (4, 5), bit 0 nearest or linear within a level | `min_filter`, as before |
+
+The level D, in 1/16 levels:
+
+| Mode | D |
+|---|---|
+| 0, auto | log16(g) - log16(q): g the largest of the s and t planes' four screen gradients, in texels of level 0 a pixel; q the pixel's q (1/w, times the texture matrix's q) |
+| 1, constant | bias |
+| 2, slope | 16 + log16(slope) - log16(q) + bias |
+
+log16(x) is the GE's logarithm, `((bits >> 19) & 0xFFF) - 127 x 16` of the float's bits: its exponent and the
+top four bits of its mantissa, a piecewise linear 16 x log2 floored to 1/16. D is clamped to 0..16 x (levels - 1);
+the linear mip filter blends level D >> 4 with the next by D & 15, the nearest takes level (D + 8) >> 4.
+
+### How the game uses them
+
+In PPSSPP's dumps of the race frames every draw with levels uses the minification filter 7 (linear within and
+between levels) but three a frame (filter 1), and every level halves the one before. Blue Ridge's first full-HUD
+frame (`blue_ridge_hud.ppdmp`): 830 of its 949 textured draws have levels (17 two, 18 three, 763 four, 32 five), 224
+in auto mode with bias 0 and 606 in slope mode with a bias the game sets per draw (-90 to 89 in that frame, -101 to
+110 over the five race dumps), the slope always 1/256 (so D = bias - 112 + 16 x log2 w). No draw uses the constant
+mode, the separate CLUT per level (TEXMODE bit 8) or a through-mode draw with levels. The other race dumps
+(Vineta K, Sebenco Climb, Sinucit, the zone change) are the same in kind.
+
+### Upload
+
+`mip_levels` gives a draw's level count: the GE's `level_count` when `min_filter` bit 2 is on, else 1 (a texture
+whose draws take no levels is drawn as before). Each level after the first must be half the one before (Metal's
+mipmap sizes), lie in guest memory and overlap no render target; a texture with a level that does not is drawn at
+level 0 alone and named once (`[metal] texture 0x... level N ... drawn at level 0 alone`). None did in the suite's
+runs or the Blue Ridge runs. `decoded_texture` makes a `MTLTexture` with that many levels and decodes each with the
+framework's `decode_texture` from a `TextureState` holding the level's address, row length and size (level 0's
+format, swizzle and palette), so no decoder of our own and no per-level entry point in the framework. The content
+key hashes, for every level, its address, size, row length and every byte of its texels, then the palette entries
+the format reaches, as before; the memo of a display list's keys (`TextureIdentity`) holds the level count and a
+hash of the levels' places. A texture read from a render target has no levels.
+
+The exit line counts the textures decoded as before, plus the draws that sampled levels and the levels decoded
+after the first: `... N textures decoded, ..., M mipmapped draws (L mip levels decoded after the first), ...`. The
+number of textures decoded does not change; each texture with levels adds its levels.
+
+### The level in the shader
+
+The sampler's mip filter (bits 4 and 5 of the sampler index) follows `min_filter` bit 1. `set_level_rule` puts the
+mode, the part of D that is the same for the whole draw (0 for auto, the bias for constant, 16 + log16(slope) + bias
+for slope) and level 0's size in `FragmentUniforms::level`, and 16 x (levels - 1) in `level_range`. In
+`sample_texture` (`metal_shaders.h`) q is `position.w` (Metal hands the fragment 1/w there) times the texture
+matrix's q, s and t are the coordinates times that q, so their `dfdx`/`dfdy` are the GE's plane gradients, and D is
+the table's with the same float-bits log16; the texel is `sample(..., level(clamp(D, 0, range) / 16))`. A draw
+without levels samples as before, with Metal's own derivatives on a texture of one level.
+
+Not done, as the game does not need them: the GE takes q once per 4-pixel span rather than per pixel; the auto mode's
+bias (the notes' formula has none, and the game's auto draws all have bias 0); the separate CLUT per level; and a
+minification filter without bit 2 (0 to 3) on a texture with levels samples level 0, as the SDK's names for it
+(nearest, linear) say, which the notes do not cover (three draws a race frame).
+
+### The check
+
+Headless Metal, 2026-10-07, M4 Pro. "Before" is `PURE_NO_MIPMAPS=1`, whose 18 suite captures and Blue Ridge frame are
+pixel-identical to the build before the task (the suite's captures by that build, run from a tree holding its
+binary, against this build's with the switch: 0 pixels differ in each).
+
+**Blue Ridge's first race frame** against PPSSPP's (`ref/blue_ridge_hud.png` of the audit's run J, made again for
+this task with the command in `ref/README.md`: the PNG and the GE dump came out byte-identical to the hashes there).
+Blue Ridge has no route in `config/pad_scripts/`, so the port's frame is the audit's: main_menu.txt + single_race.txt
+without their shot steps, plus DOWN at 5380, 5410 and 5440 on TRACK SELECTION, flip 6016, on an empty memory stick.
+
+| Compared with PPSSPP | Before | After |
+|---|---|---|
+| the whole frame, tol 32 | 0.0392 | 0.0247 |
+| the whole frame, tol 16 | 0.0912 | 0.0487 |
+| the right grandstand, (300,60) 180x90, tol 32 | 0.1418 | 0.0920 |
+
+(The audit's 0.0534 was before task 036's environment maps.) The crowds, the stands' roofs and the far track are
+soft as in PPSSPP's frame; what still differs is the AI grid (other ships than PPSSPP's) and the BLUERIDGE banner,
+brighter and wider in PPSSPP's frame.
+
+**The slope rule against the reference.** The same frame with D moved by a constant in slope mode (a throwaway
+switch, not kept), against PPSSPP:
+
+| D offset (1/16 levels) | -48 | -32 | -16 | -8 | 0 | +8 | +16 | +32 | +48 |
+|---|---|---|---|---|---|---|---|---|---|
+| tol 32 | 0.0388 | 0.0374 | 0.0323 | 0.0298 | 0.0247 | 0.0237 | 0.0256 | 0.0352 | 0.0526 |
+| tol 16 | 0.0900 | 0.0859 | 0.0675 | 0.0560 | **0.0487** | 0.0549 | 0.0664 | 0.0943 | 0.1268 |
+
+The documented rule (offset 0) is the best at tol 16 and within half a level of the best at tol 32, so it is kept
+as the notes give it. Moving the auto mode's D by -32 to +32 changes the frame by at most 0.0007 (its draws cover
+little of it).
+
+**The shimmer.** 60 consecutive flips of Blue Ridge's start straight between the grandstands (6340 to 6399, the
+ship accelerating from about 110 to 200 km/h with Cross held), each against the next at tol 32:
+
+| Region | Before: mean (min to max) | After |
+|---|---|---|
+| the whole frame | 0.0845 (0.0650 to 0.1149) | 0.0603 (0.0426 to 0.0926) |
+| the right grandstand, (300,60) 180x90 | 0.1902 (0.1625 to 0.2466) | 0.1124 (0.0793 to 0.1887) |
+| the left grandstand, (0,60) 180x90 | 0.1248 (0.0975 to 0.1546) | 0.0586 (0.0321 to 0.0862) |
+| the track, (0,130) 480x80 | 0.0745 (0.0559 to 0.1007) | 0.0596 (0.0424 to 0.0874) |
+
+The mean absolute change between consecutive frames falls from 7.30 to 5.88 levels over the whole frame (15.24 to
+11.11 on the right grandstand).
+
+**The suite** (`tools/frame_regress.sh`, tol 32): race_hud 0.0262 to 0.0149, tt_hud 0.0229 to 0.0112, fp_hud
+0.0232 to 0.0116, zone_hud 0.0122 to 0.0121, zone_change 0.0353 to 0.0353 (120 pixels change); the 13 frontend
+scenes are unchanged pixel for pixel (none of their textures has levels).
+
+**Decodes.** The race route of the suite (to flip 6046) decodes 646 textures before and after, and after it 596
+levels besides (192857 draws sampled levels); Blue Ridge to flip 6020, 612 textures before and after, plus 525
+levels. The Time Trial route: 566 textures both, plus 361 levels; Zone: 433 both, plus 52 levels.
+
+### Recordings
+
+`record_backend.cpp` (outside this task) records the bytes level 0's texels lie in, not the other levels'. A
+recording made since patch 0014 replays with the levels after the first decoded from whatever ge_replay's guest
+memory holds there (zero unless an earlier record wrote it), so a replay of a mipmapped draw is not the game's
+picture; replay such recordings with `PURE_NO_MIPMAPS=1` until the record backend writes every level. Blue Ridge's
+frame 6016 recorded through Metal replays 0.0913 off its recorded picture at tol 32 (336 of the frame's mipmapped
+draws in PPSSPP's dump have their texture in main memory); recorded and replayed with `PURE_NO_MIPMAPS=1` it is
+exact, and `gerec_dump.py --draws` parses the recording (831 draws with levels, listed `levels N auto|slope bias B
+slope S`). Older recordings read as one level and replay as before (the main checkout's `race_1x.gerec` parses as
+it did).
+
 ## What is not done yet
 
 | Task | What |
@@ -694,7 +844,8 @@ are written to the rules above and the Vulkan backend's, and checked by no recor
 Not in the draw state (`DrawCall`), so neither backend draws them, and they wait for the framework's GE state to
 carry them: the colour test, logic ops, the texture environment colour (the blend texture function's), colour
 doubling, and the depth range clamp (MINZ/MAXZ, which `docs/ge-backend.md` section 2 lets stay ignored). The texture
-map modes are carried since patch 0013 and drawn by this backend since task 036.
+map modes are carried since patch 0013 and drawn by this backend since task 036, the mip levels since patch 0014 and
+task 037.
 
 ## Where it differs from the Vulkan backend on purpose
 
@@ -710,6 +861,8 @@ map modes are carried since patch 0013 and drawn by this backend since task 036.
 - The texture map modes are drawn (task 036): the texture matrix (mode 1) and the environment map (mode 2). The
   Vulkan backend draws every draw with its UVs, so on a recording made since patch 0013 the race differs between the
   two by every mapped draw ("Texture mapping modes", the A/B).
+- Mip levels are uploaded and sampled at the level the GE's rule picks (task 037, "Mipmaps"); the Vulkan backend
+  samples every texture at level 0.
 - Transformed draws are clipped only at the target's edges and the scissor, as the GE clips them: the GE viewport is
   folded into clip space and the Metal viewport is the whole target. The Vulkan backend makes the GE viewport its
   `VkViewport`, which clips at the viewport's edges: the race's HUD is drawn with a viewport shifted one pixel right
