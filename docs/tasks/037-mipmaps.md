@@ -204,15 +204,15 @@ Open questions:
 3. **The suite's metal column is stale for the race scenes.** They moved by -0.011, which is under the 0.03 drift
    flag. Re-baselining needs `tools/frame_regress.sh`, which is Must not touch. The new values are race_hud 0.0149,
    tt_hud 0.0112, fp_hud 0.0116 and zone_hud 0.0121.
-4. **Rules the notes do not settle**, none of which the game exercises:
+4. **Rules the notes do not settle.** The game exercises only the second, in three draws a frame:
    - The auto mode's bias: the notes' formula has none, and every auto draw in the game has bias 0.
    - A min filter without bit 2 on a texture with levels: I draw level 0, going by the SDK's names (three draws a
      frame).
    - The GE takes q once per 4-pixel span; I take it per pixel.
    - A CLUT per level (TEXMODE bit 8) is not carried.
-5. **What still differs on Blue Ridge.** The BLUERIDGE banner is brighter and wider in PPSSPP's frame, and the AI
-   grid differs. Neither looks like a level choice: the offset scan made the grandstand region keep improving up to
-   +32, while the whole frame got worse.
+5. **What still differs on Blue Ridge.** The AI grid differs, and the BLUERIDGE banner is brighter and wider in
+   PPSSPP's frame. The banner may still be a level question for that one draw: in the offset scan the right
+   grandstand region kept improving up to +32 while the whole frame got worse. I did not look into it.
 6. **Files outside May touch that are now out of date:**
    - `tools/fidelity_audit.py`'s `METAL_EXIT_RE` has not matched the exit line since task 036 inserted "texture-mapped
      draws". This task keeps the line's start and adds its counts after that.
