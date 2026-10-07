@@ -70,7 +70,7 @@ private:
     void read_back(Target &target);
     void copy_to_buffer(Target &target, id<MTLBuffer> buffer);
 
-    // Targets and guest memory: the target cache, transfers, read-backs, write-backs, CPU pictures (metal_backend.mm)
+    // Targets and guest memory: the target cache, transfers, read-backs, write-backs, CPU pictures (metal_targets.mm)
     Target &target_for(const TargetKey &key);
     Target *latest_target_at(std::uint32_t address);
     void snapshot_guest_words(const GuestMemory &memory, Target &target);
