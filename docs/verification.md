@@ -147,20 +147,24 @@ takes about 23 s.
 
 | Scene | Route (`config/pad_scripts/`) | Frame | Reference (PPSSPP vblank) | Tol | Limit | Vulkan measured | Metal measured |
 |---|---|---|---|---|---|---|---|
-| `single_player` | `main_menu.txt` + `single_race.txt` | 4765 | `ref/single_player.png` (5850) | 24 | VLIM | VSP | 0.0000 |
-| `class_select` | the same | 4990 | `ref/class_select.png` (6050) | 24 | VLIM | VCS | 0.0000 |
-| `league_select` | the same | 5185 | `ref/league_select.png` (6250) | 24 | VLIM | VLS | 0.0000 |
-| `track_select` | the same | 5390 | `ref/track_select.png` (6450) | 24 | VLIM | VTS | 0.0000 |
-| `team_select` | the same | 5600 | `ref/team_select.png` (6690) | 24 | VLIM | VTE | 0.0000 |
-| `tt_track_select` | `main_menu.txt` + `time_trial.txt` | 5375 | `ref/tt_track_select.png` (6650) | 24 | VLIM | VTT | 0.0000 |
-| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7302) | 32 | VLIMH | VTH | 0.0617 |
-| `fp_track_select` | `main_menu.txt` + `free_play.txt` | 5375 | `ref/fp_track_select.png` (6650) | 24 | VLIM | VFT | 0.0000 |
-| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7302) | 32 | VLIMH | VFH | 0.0620 |
-| `tournament_select` | `main_menu.txt` + `tournament.txt` | 5185 | `ref/tournament_select.png` (6450) | 24 | VLIM | VTO | 0.0000 |
-| `zone_track_select` | `main_menu.txt` + `zone.txt` | 4975 | `ref/zone_track_select.png` (6250) | 24 | VLIM | VZT | 0.0000 |
-| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6668) | 32 | VLIMZ | VZH | 0.0348 |
+| `single_player` | `main_menu.txt` + `single_race.txt` | 4765 | `ref/single_player.png` (5850) | 24 | 0.05 | 0.025 | 0.0000 |
+| `class_select` | the same | 4990 | `ref/class_select.png` (6050) | 24 | 0.07 | 0.045 | 0.0000 |
+| `league_select` | the same | 5185 | `ref/league_select.png` (6250) | 24 | 0.08 | 0.062 | 0.0000 |
+| `track_select` | the same | 5390 | `ref/track_select.png` (6450) | 24 | 0.06 | 0.041 | 0.0000 |
+| `team_select` | the same | 5600 | `ref/team_select.png` (6690) | 24 | 0.06 | 0.042 | 0.0000 |
+| `tt_track_select` | `main_menu.txt` + `time_trial.txt` | 5375 | `ref/tt_track_select.png` (6650) | 24 | 0.06 | 0.040 | 0.0000 |
+| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7302) | 32 | 0.12 | 0.096 | 0.0617 |
+| `fp_track_select` | `main_menu.txt` + `free_play.txt` | 5375 | `ref/fp_track_select.png` (6650) | 24 | 0.06 | 0.041 | 0.0000 |
+| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7302) | 32 | 0.11 | 0.095 | 0.0620 |
+| `tournament_select` | `main_menu.txt` + `tournament.txt` | 5185 | `ref/tournament_select.png` (6450) | 24 | 0.08 | 0.063 | 0.0000 |
+| `zone_track_select` | `main_menu.txt` + `zone.txt` | 4975 | `ref/zone_track_select.png` (6250) | 24 | 0.05 | 0.033 | 0.0000 |
+| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6668) | 32 | 0.09 | 0.065 | 0.0348 |
 
 - The menus match PPSSPP exactly on the Metal backend (0 pixels over tol 24): the frontend's 2D draws at 480x272.
+  On the Vulkan path (one windowed run, `--shell vulkan --backend vulkan`, 15.5 min for the five routes) they score
+  0.025 to 0.063, the one-pixel edges of glyphs and lines that its 2x-to-1x reduction moves, as `lang` and `profile`
+  do. The limits follow the re-baselining rule below: the larger backend's value plus about 0.015, rounded up to a
+  hundredth.
   Each frame sits inside a run of identical port frames, away from the blinking cursor's changes.
 - The three race scenes are the first frame with the HUD fully faded in (as `race_hud` is): CURRENT, BEST and the
   bronze time in Time Trial and Free Play, SCORE and ZONE in Zone. The player is alone in those modes, so the frames
