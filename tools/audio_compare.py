@@ -3,6 +3,7 @@
 
   tools/audio_compare.py A.wav B.wav [--from S] [--from-b S] [--seconds N] [--floor RMS] [--block-ms MS]
                          [--top N] [--quiet] [--detail S:E]
+  tools/audio_compare.py A.wav B.wav --locate T:LEN:FROM:TO
   tools/audio_compare.py --selftest
 
 Made to compare the port's capture (PURE_AUDIO_WAV, the mix or one channel) with PPSSPP's audio dump
@@ -20,6 +21,13 @@ or under the floor, with `all zero` when every sample of the run is 0 (a dropout
 quiet passage). --quiet leaves out the per-second rows. --detail S:E adds rows of ten blocks (100 ms by default)
 from S to E seconds after the window starts, each file's RMS and `z` when every sample of the row is 0: the
 sample-level view of a gap. Exit 0, or 2 on bad input.
+
+--locate T:LEN:FROM:TO finds where B's stretch from T to T+LEN seconds (in B's file) occurs in A between FROM and TO
+(in A's file), by normalised cross-correlation of the two files' mono sum (8 times decimated first, then at the full
+rate around the best match), and prints the time in A, the offset (A minus B) and the correlation (1 is identical).
+It finds a channel inside a mix: the port's music channel (PURE_AUDIO_WAV's ch2) in PPSSPP's dump, where the effects
+are louder than the music, matches at 0.3 to 0.7; the same offset at two times shows the two played the same samples
+in between. About a second per 4 s searched with LEN 2.
 
 --selftest writes two WAVs with known gaps and clipping to a temporary directory, runs the analysis on them and
 checks the figures it prints against the ones the files were made with: PASS (exit 0) or FAIL (exit 1). Pure Python
@@ -46,6 +54,7 @@ def parse(argv):
     p.add_argument("--top", type=int, default=5)
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--detail", metavar="S:E")
+    p.add_argument("--locate", metavar="T:LEN:FROM:TO")
     p.add_argument("--selftest", action="store_true")
     opts = p.parse_args(argv)
     if not opts.selftest and (opts.a is None or opts.b is None):
@@ -126,6 +135,55 @@ class Track:
         rel = first * self.block_ms / 1000
         return (f"{count * self.block_ms:.0f} ms at +{rel:.2f} s ({self.window_start() + rel:.2f} s)"
                 f"{' all zero' if zero else ''}")
+
+
+def read_mono(path, start, seconds):
+    """(rate, the mono sum (L+R)/2 as floats) of `seconds` from `start`."""
+    try:
+        with wave.open(path, "rb") as w:
+            rate, channels = w.getframerate(), w.getnchannels()
+            if w.getsampwidth() != 2:
+                raise ValueError(f"{path}: only 16-bit PCM is read")
+            w.setpos(min(w.getnframes(), max(0, int(round(start * rate)))))
+            data = array("h")
+            data.frombytes(w.readframes(int(round(seconds * rate))))
+    except (OSError, EOFError, wave.Error) as e:
+        raise ValueError(f"cannot read {path}: {e}")
+    if sys.byteorder != "little":
+        data.byteswap()
+    if channels == 1:
+        return rate, [float(v) for v in data]
+    return rate, [(data[i] + data[i + 1]) / 2 for i in range(0, len(data) - 1, channels)]
+
+
+def correlate(hay, tpl, offsets):
+    """Normalised cross-correlation of tpl against hay at each offset."""
+    n = len(tpl)
+    norm = math.sqrt(math.sumprod(tpl, tpl)) or 1.0
+    out = []
+    for o in offsets:
+        part = hay[o:o + n]
+        energy = math.sumprod(part, part)
+        out.append(math.sumprod(part, tpl) / (norm * math.sqrt(energy)) if energy > 0 else 0.0)
+    return out
+
+
+def locate(path_a, path_b, spec):
+    """Where B's [T, T+LEN) occurs in A's [FROM, TO): (time in A, correlation)."""
+    t, length, frm, to = (float(v) for v in spec.split(":"))
+    rate, tpl = read_mono(path_b, t, length)
+    rate_a, hay = read_mono(path_a, frm, to - frm + length)
+    if rate != rate_a or len(tpl) < 64 or len(hay) < len(tpl):
+        raise ValueError("--locate needs two files at one rate, a template and a search range inside the files")
+    k = 8
+    dec = lambda x: [sum(x[i:i + k]) / k for i in range(0, len(x) - k + 1, k)]
+    coarse_tpl, coarse_hay = dec(tpl), dec(hay)
+    coarse = correlate(coarse_hay, coarse_tpl, range(len(coarse_hay) - len(coarse_tpl) + 1))
+    best = max(range(len(coarse)), key=lambda i: coarse[i]) * k
+    near = range(max(0, best - 2 * k), min(len(hay) - len(tpl), best + 2 * k) + 1)
+    fine = correlate(hay, tpl, near)
+    j = max(range(len(fine)), key=lambda i: fine[i])
+    return frm + near[j] / rate, fine[j]
 
 
 def dbfs(peak):
@@ -236,6 +294,25 @@ def selftest():
              [ln.split("|")[0].strip() for ln in lines if "<>" in ln] == ["2"]),
             ("the summary counts that one row", lines[-1].endswith(": 1")),
         ]
+        # --locate: B2 holds A2's noise from 1.0 s on, starting at 0.5 s (B2's t is A2's t + 0.5), under louder noise.
+        seed = [12345]
+
+        def noise(n, amp):
+            out = []
+            for _ in range(n):
+                seed[0] = (seed[0] * 1103515245 + 12345) & 0x7FFFFFFF
+                out.append(int(amp * ((seed[0] >> 8) / (1 << 22) - 1.0)))
+            return out
+        base = noise(4 * rate, 3000)
+        cover = noise(4 * rate, 6000)
+        shifted = [0] * (rate // 2) + base[rate:]
+        pa2, pb2 = os.path.join(tmp, "a2.wav"), os.path.join(tmp, "b2.wav")
+        write_wav(pa2, rate, 1, base)
+        write_wav(pb2, rate, 1, [max(-32768, min(32767, shifted[i] + cover[i])) for i in range(len(shifted))])
+        at, score = locate(pa2, pb2, "2.0:0.5:0:3.5")
+        print(f"locate: B2 2.0 s found in A2 at {at:.5f} s (ncc {score:.3f})")
+        checks.append(("--locate finds a stretch under louder noise to the sample (A2 2.5 s)",
+                       abs(at - 2.5) < 0.5 / rate and 0.3 < score < 0.6))
         try:
             Track(os.path.join(tmp, "missing.wav"), 0.0, None, 100.0, 10.0)
             checks.append(("a missing file is refused", False))
@@ -253,6 +330,15 @@ def main(argv=None):
     opts = parse(sys.argv[1:] if argv is None else argv)
     if opts.selftest:
         return selftest()
+    if opts.locate:
+        try:
+            at, score = locate(opts.a, opts.b, opts.locate)
+        except ValueError as e:
+            print(f"audio_compare: {e}")
+            return 2
+        t = float(opts.locate.split(":")[0])
+        print(f"B {opts.b} at {t:.3f} s is A {opts.a} at {at:.5f} s: offset A - B {at - t:+.5f} s, ncc {score:.3f}")
+        return 0
     try:
         a = Track(opts.a, opts.start, opts.seconds, opts.floor, opts.block_ms)
         b = Track(opts.b, opts.start if opts.start_b is None else opts.start_b, opts.seconds, opts.floor,
