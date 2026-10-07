@@ -18,6 +18,7 @@ introduction), and so are results below the smallest normal.
 The dot-product models over the n lanes the encoding names (a vtfm or vmmul result lane is the same n-lane dot of a
 matrix row and a vector):
   a      unfused: each product rounded to float, then summed in lane order, rounding after each addition
+  a0     the same from +0 (r = +0, then r = r + round(s_i * t_i)): only the sign of an exact zero differs from a
   chain  fused in lane order: r = s0*t0 rounded, then r = fma(s_i, t_i, r) for i = 1 .. n-1 (one rounding each)
   b      the port today: clang's contraction of the framework's C++. The _ct vdot `s0*t0 + s1*t1 + s2*t2 + s3*t3`
          is fma(s3,t3, fma(s2,t2, fma(s0,t0, s1*t1))) over a four-lane view (lane 1's product is the one rounded);
@@ -34,9 +35,11 @@ matrix row and a vector):
   d3     products rounded to float, summed as a tree ((p0+p1)+(p2+p3)), rounding after each addition
 
 What the samples showed (docs/fidelity.md, difference 13): PPSSPP's JIT (CPU core 1, the core of every reference in
-ref/) computes vdot and vtfm as `chain` and vmmul as `a`, on 100 percent of the samples; the port's vdot differs from
-it only by its contraction order (lane 1's product rounded first instead of lane 0's), its vtfm only in the sign of
-an exact zero (its chain starts from +0), its vmmul by fusing. RULES holds the measured rule of each core.
+ref/) computes vdot and vtfm as `chain` and vmmul as `a0`, on 100 percent of the samples; its interpreter (core 0)
+the same, except that it fuses (`chain`) the last element of a vmmul's result. The port's vdot differs from them only
+by its contraction order (lane 1's product rounded first instead of lane 0's), its vtfm only in the sign of an exact
+zero (its chain starts from +0), its vmmul by fusing. Neither core is the PSP's rule (`hw`). RULES holds the measured
+rule of each core.
 """
 import argparse, csv, json, math, random, re, struct, sys
 from fractions import Fraction
@@ -50,11 +53,14 @@ DOT_KINDS = ("vdot", "vhdp", "vtfm", "vmmul")
 TRANS_KINDS = ("vsin", "vcos", "vrcp", "vrsq", "vsqrt", "vexp2", "vlog2", "vasin", "vnrcp", "vnsin", "vrexp2")
 HW = ("c", {"n": 2, "align": "raw", "trunc": "mag", "final": "rtz"})
 
-# The measured rule of each PPSSPP CPU core, per instruction kind: (model, params).
+# The measured rule of each PPSSPP CPU core, per instruction kind: (model, params); `vmmul_last` is the model of the
+# result matrix's last element where it differs. vhdp has no samples (the game has no vhdp in its code): it is given
+# vdot's rule.
 RULES = {
     1: {"name": "PPSSPP's JIT", "vdot": ("chain", None), "vhdp": ("chain", None), "vtfm": ("chain", None),
-        "vmmul": ("a", None)},
-    0: {"name": "PPSSPP's interpreter", "vdot": HW, "vhdp": HW, "vtfm": HW, "vmmul": HW},
+        "vmmul": ("a0", None)},
+    0: {"name": "PPSSPP's interpreter", "vdot": ("chain", None), "vhdp": ("chain", None), "vtfm": ("chain", None),
+        "vmmul": ("a0", None), "vmmul_last": ("chain", None)},
 }
 
 
@@ -266,8 +272,17 @@ def dot_chain(s, t):
     return acc
 
 
+def dot_a0(s, t):
+    """Unfused from +0: r = +0, then r = r + round(s_i * t_i) (PPSSPP's vmmul)."""
+    acc = 0
+    for x, y in zip(s, t):
+        acc = fadd(acc, fmul(x, y))
+    return acc
+
+
 MODELS = {
     "a": dot_a,
+    "a0": dot_a0,
     "chain": dot_chain,
     "exact": dot_exact,
     "d1": lambda s, t: dot_round_products(s, t, "rne"),
@@ -404,8 +419,39 @@ def evaluate(model, problems):
     return ok, len(problems), bad
 
 
+def rule_model(rule, p):
+    """The (model, params) a core's rule gives the dot product p (site, row, lane, ...)."""
+    site, lane = p[0], p[2]
+    kind = site["kind"]
+    if kind == "vmmul" and "vmmul_last" in rule and lane == site["length"] ** 2 - 1:
+        return rule["vmmul_last"]
+    return rule[kind]
+
+
+def evaluate_rule(rule, problems):
+    """evaluate() with the model the rule gives each problem."""
+    ok, bad = 0, []
+    for p in problems:
+        name, params = rule_model(rule, p)
+        got = special_dot(p[3], p[4]) if any(is_special(x) for x in list(p[3]) + list(p[4])) \
+            else model_fn(name, params)(p[3], p[4])
+        if got == p[5]:
+            ok += 1
+        else:
+            bad.append((p, got))
+    return ok, len(problems), bad
+
+
+def rule_label(rule, kind):
+    name, params = rule[kind]
+    lab = model_label(name, params)
+    if kind == "vmmul" and "vmmul_last" in rule:
+        lab += f", last element {model_label(*rule['vmmul_last'])}"
+    return lab
+
+
 def candidates():
-    out = [("a", None), ("chain", None), ("exact", None), ("d1", None), ("d2", None), ("d3", None), HW]
+    out = [("a", None), ("a0", None), ("chain", None), ("exact", None), ("d1", None), ("d2", None), ("d3", None), HW]
     for n in (0, 1, 2, 3, 4):
         out.append(("c", {"n": n, "align": "raw", "trunc": "mag", "final": "rne"}))
     out.append(("c", {"n": 2, "align": "norm", "trunc": "mag", "final": "rtz"}))
@@ -598,7 +644,7 @@ def trans_summary(sites, out=print):
                and not any(m.startswith(k + ".") for m in agg)]
     if missing:
         out(f"  not in these samples: {', '.join(missing)} (tools/vfpu_probe.py scan: vsin and vcos have two sites "
-            f"each, outside the race's code; vexp2, vlog2 and vasin none in the executable)")
+            f"each, which the race did not run; vexp2, vlog2 and vasin occur nowhere in the executable)")
     return agg
 
 
@@ -609,16 +655,20 @@ def cmd_report(d):
         cands = candidates()
         print("  " + ", ".join(f"{g} {len(v)}" for g, v in groups.items()))
         print(f"  {'model':30}" + "".join(f"{g.split(' ')[0]:>22}" for g in groups))
-        for name, params in [("port", None)] + cands:
+        rule = RULES.get(core_of(meta))
+        for name, params in [("port", None)] + ([("rule", None)] if rule else []) + cands:
             cells = []
             for g, probs in groups.items():
                 if name == "port":
                     have = [p for p in probs if p[6] is not None]
                     ok, tot = sum(1 for p in have if p[6] == p[5]), len(have)
+                elif name == "rule":
+                    ok, tot, _ = evaluate_rule(rule, probs)
                 else:
                     ok, tot, _ = evaluate(model_fn(name, params), probs)
                 cells.append(f"{100.0 * ok / max(tot, 1):.3f}%")
-            print(f"  {model_label(name, params):30}" + "".join(f"{c:>22}" for c in cells))
+            lab = f"the rule of {rule['name']}" if name == "rule" else model_label(name, params)
+            print(f"  {lab:30}" + "".join(f"{c:>22}" for c in cells))
         for g, probs in groups.items():
             have = [p for p in probs if p[6] is not None]
             if have:
@@ -662,11 +712,10 @@ def cmd_check(d):
             continue
         for g, probs in by_group(sites).items():
             kind = probs[0][0]["kind"]
-            name, params = rule[kind]
-            ok, tot, bad = evaluate(model_fn(name, params), probs)
+            ok, tot, bad = evaluate_rule(rule, probs)
             have = [p for p in probs if p[6] is not None]
             port_ok = sum(1 for p in have if p[6] == p[5])
-            print(f"  {g:40} {model_label(name, params):24} {ok}/{tot} ({100.0 * ok / tot:.3f}%); "
+            print(f"  {g:40} {rule_label(rule, kind):24} {ok}/{tot} ({100.0 * ok / tot:.3f}%); "
                   f"the port today {port_ok}/{len(have)} ({100.0 * port_ok / max(len(have), 1):.3f}%)")
             for p, got in bad[:20]:
                 print("    FAIL " + fmt_row(p, got))
