@@ -1,0 +1,14 @@
+# PPSSPP route: after unlock_all.txt, a Single Race on the Beta league at Vector (task 035, 2026-10-06). Chain:
+#   frontend.txt, unlock_all.txt, unlock_race_beta.txt [, unlock_track_downN.txt]
+# CROSS dismisses the "Everything" panel, then SINGLE PLAYER, SINGLE RACE, VECTOR; one DOWN on LEAGUE SELECTION
+# (ALPHA, BETA, CLASSIC); the track is the league's first (SINUCIT) unless unlock_track_downN.txt adds DOWN presses
+# on TRACK SELECTION (CITTA NUOVA, SEBENCO CLIMB, SOL 2); FEISAR. The first full-HUD frame comes about 460 vblanks
+# after the TEAM SELECTION press at 7200, as on vineta_k_start.txt.
+5900:CROSS, 5908:                 # the unlock panel ("CONGRATULATIONS! YOU HAVE UNLOCKED: EVERYTHING") -> MAIN MENU
+6200:CROSS, 6208:                 # MAIN MENU: SINGLE PLAYER
+6400:CROSS, 6408:                 # SINGLE RACE
+6600:CROSS, 6608:                 # CLASS SELECTION: VECTOR
+6700:DOWN, 6708:                  # LEAGUE SELECTION: ALPHA -> BETA
+6800:CROSS, 6808:                 # BETA -> TRACK SELECTION
+7000:CROSS, 7008:                 # the track -> TEAM SELECTION
+7200:CROSS, 7208:                 # FEISAR -> LOADING

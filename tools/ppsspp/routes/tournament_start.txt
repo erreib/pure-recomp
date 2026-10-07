@@ -1,0 +1,9 @@
+# PPSSPP route: MAIN MENU to the first race of the Alpha tournament (task 035, 2026-10-06). Chain it after
+# frontend.txt. One DOWN on SINGLE PLAYER picks TOURNAMENT (the port's tournament.txt: flip 4800); the screens are
+# CLASS SELECTION, TOURNAMENT SELECTION (ALPHA alone on a new profile) and TEAM SELECTION, no track screen.
+5700:CROSS, 5708:                 # MAIN MENU: SINGLE PLAYER
+5900:DOWN, 5908:                  # SINGLE RACE -> TOURNAMENT
+6100:CROSS, 6108:                 # TOURNAMENT -> CLASS SELECTION
+6300:CROSS, 6308:                 # VECTOR -> TOURNAMENT SELECTION
+6500:CROSS, 6508:                 # ALPHA -> TEAM SELECTION
+6700:CROSS, 6708:                 # FEISAR -> LOADING, race 1 (Vineta K)

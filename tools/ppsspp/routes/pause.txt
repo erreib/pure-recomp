@@ -1,0 +1,6 @@
+# PPSSPP route: the game's pause menu in the Vineta K race (task 035, 2026-10-06). Chain it after frontend.txt,
+# vineta_k_start.txt and vineta_k_hold_cross.txt: START about 450 frames after GO (the port's single_race.txt race
+# with `6700:pad start` added is the same moment). Cross stays held through the press: releasing it and pressing it
+# again would confirm CONTINUE (the menu's first entry) and close the menu at once.
+# The menu: CONTINUE, RESTART, QUIT, PRESS X TO CONFIRM, over the race frozen behind it.
+7850:START+CROSS, 7858:CROSS

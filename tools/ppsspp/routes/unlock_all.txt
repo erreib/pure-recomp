@@ -1,0 +1,20 @@
+# PPSSPP route: the game's own "unlock everything" button sequence on MAIN MENU (task 035, 2026-10-06). Chain it
+# after frontend.txt (MAIN MENU at ~5340), then a route whose first press comes after 5900 (league_race_*.txt).
+# FUN_0894d4c8 (the MAIN MENU page's update) compares each new button press with the table at 0x08AB480C: the
+# game's button codes 2, 3, 2, 8, 9, 8, 3, 2, 3, 9, 8, 9, which FUN_08898870 numbers from the pad as 0 UP, 1 DOWN,
+# 2 LEFT, 3 RIGHT, 4 CIRCLE, 5 CROSS, 6 TRIANGLE, 7 SQUARE, 8 L, 9 R: LEFT RIGHT LEFT L R L RIGHT LEFT RIGHT R L R.
+# Any other press starts the sequence again. At its end the game sets the profile's byte +0x381 (the one every lock
+# check reads, docs/tracks.md) and shows "Everything" in the unlock panel. The port's test switch
+# PURE_TEST_UNLOCK_ALL=1 reaches the same checks through GPI bit 0 instead.
+5400:LEFT, 5408:
+5430:RIGHT, 5438:
+5460:LEFT, 5468:
+5490:L, 5498:
+5520:R, 5528:
+5550:L, 5558:
+5580:RIGHT, 5588:
+5610:LEFT, 5618:
+5640:RIGHT, 5648:
+5670:R, 5678:
+5700:L, 5708:
+5730:R, 5738:

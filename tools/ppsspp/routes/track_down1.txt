@@ -1,0 +1,4 @@
+# PPSSPP route: one DOWN on TRACK SELECTION, so the race of vineta_k_start.txt is Modesto Heights (task 035,
+# 2026-10-06; the presses tools/pp_lines.py makes for --downs, 30 vblanks apart from 6400). Chain it after
+# frontend.txt and vineta_k_start.txt, whose CROSS at 6500 then confirms this track.
+6400:DOWN, 6408:

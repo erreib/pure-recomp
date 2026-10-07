@@ -1,0 +1,4 @@
+# PPSSPP route: two DOWN presses on TRACK SELECTION for unlock_race_beta.txt / unlock_race_classic.txt (task 035):
+# the league's third track.
+6900:DOWN, 6908:
+6930:DOWN, 6938:

@@ -1,0 +1,14 @@
+# PPSSPP route: MAIN MENU to the Time Trial race start on Vineta K (task 035, 2026-10-06). Chain it after
+# frontend.txt; frames are absolute vblank counts since boot:
+#   ppsspp_ctl.py run --pad-file tools/ppsspp/routes/frontend.txt --pad-file tools/ppsspp/routes/time_trial_start.txt
+# SINGLE PLAYER lists SINGLE RACE, TOURNAMENT, TIME TRIAL, ZONE, FREE PLAY; two DOWN presses pick TIME TRIAL (the
+# port's config/pad_scripts/time_trial.txt does the same at flips 4800 and 4830). Then each first entry: VECTOR,
+# ALPHA, VINETA K, FEISAR; presses about 150 vblanks after each screen appears, as in vineta_k_start.txt.
+5700:CROSS, 5708:                 # MAIN MENU: SINGLE PLAYER
+5900:DOWN, 5908:                  # SINGLE PLAYER: SINGLE RACE -> TOURNAMENT
+5960:DOWN, 5968:                  # -> TIME TRIAL
+6100:CROSS, 6108:                 # TIME TRIAL -> CLASS SELECTION
+6300:CROSS, 6308:                 # CLASS SELECTION: VECTOR -> LEAGUE SELECTION
+6500:CROSS, 6508:                 # LEAGUE SELECTION: ALPHA -> TRACK SELECTION (records, bronze/silver/gold times)
+6700:CROSS, 6708:                 # TRACK SELECTION: VINETA K -> TEAM SELECTION
+6900:CROSS, 6908:                 # TEAM SELECTION: FEISAR -> LOADING, the race alone at 30 frames a second
