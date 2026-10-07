@@ -25,7 +25,7 @@
 namespace pure::gpu::metal_backend {
 
 // Helpers more than one of the files uses, each defined in the file named beside it.
-std::array<float, 4> unpack_color(std::uint32_t color, float fourth = 1.0f);  // metal_backend.mm
+std::array<float, 4> unpack_color(std::uint32_t color, float fourth = 1.0f);  // metal_draw.mm
 void not_emulated(const char *what, std::uint32_t value);                     // metal_backend.mm
 MTLCompareFunction to_compare(std::uint32_t function);                        // metal_pipelines.mm
 std::uint32_t stored_reference(const DrawCall &call);                         // metal_effects.mm
@@ -124,7 +124,7 @@ private:
     void report();
     void report_guest_writes();
 
-    // Draws: a DrawCall from the GE's state to the encoder (metal_backend.mm)
+    // Draws: a DrawCall from the GE's state to the encoder (metal_draw.mm)
     struct ViewportScissor {
         NSUInteger x{}, y{}, width{}, height{};
     };
