@@ -624,3 +624,48 @@ rebuild: the test mode 100 percent at vdot.t (466447), vdot.q (7506), vtfm3.t (2
 (384704); the default mode equal to the hardware rule on every one of the same 1172943 dot products. The probe's
 harness compiles the header, so the check runs without a game; the vtfm and vmmul sites need the regenerated corpus
 (`tools/regen.sh`), since their code is emitted inline.
+
+### The other kinds (task 048, 2026-10-07)
+
+```sh
+P=/opt/homebrew/bin/python3
+K=vcrs,vcrsp,vqmul,vfad,vavg,vrot,vmscl
+for t in vineta_k karbonis; do
+  $P tools/vfpu_probe.py cover --track $t --kinds $K --seconds 13 --out ref/vfpu/jit/048_$t        # 2.5 min each
+  $P tools/vfpu_probe.py sample --track $t --out ref/vfpu/jit/048_$t --sites all --cap 0 --seconds 13   # 4 min each
+  $P tools/vfpu_probe.py port ref/vfpu/jit/048_$t --modes ppsspp,psp
+done
+python3 tools/vfpu_model.py --check ref/vfpu          # every set: the dot forms, the other kinds, both modes
+python3 tools/vfpu_model.py --diff ref/vfpu/jit/048_karbonis --limit 20    # where the test mode differs, in time order
+```
+
+The same check as the dot products' for the kinds beside them: `vcrs.t`, `vcrsp.t`, `vqmul.q`
+(`execute_vfpu_cross_quat` and the codegen's inline `vcrs`), `vfad`, `vavg` (`execute_vfpu_horizontal`), `vrot` and
+`vmscl`. Each result lane is one problem (a cross product's three lanes, a horizontal sum's one, a vmscl's sixteen
+elements), with its own candidate models in `vfpu_model.kind_models` and PPSSPP's measured rule in `RULES_048`. The
+game's code has only `vcrsp.t`, `vfad`, `vrot` and `vmscl`; `vcrs.t`, `vqmul.q` and `vavg` decode only in data, so
+their models are checked against pspautotests' `vector.expected` alone (`--selftest`), and no `vrot` ran from READY to
+13 s on either circuit.
+
+What is new in the tools:
+- `sample --cap 0` logs every execution from READY (these kinds run rarely enough: 0.9 million rows a circuit), and
+  `--window FROM,TO` logs every execution of every listed site between two race clocks and nothing else, placed on
+  PPSSPP's emulated time by the player's samples of the scorecard's reference race (`--sites` may then name sites
+  that never run; they give empty files). Karbonis' dot and transcendental window (`048_karbonis_dot`, 711 sites, 6.0 to
+  7.0 s) was taken with `--sites` set to every dot and transcendental site of `scan`.
+- `port --modes ppsspp,psp` runs the harness under each rounding mode of patch 0020 and writes
+  `<ADDR>.port.<mode>.csv`; `--check` then prints, under every rule line, the test mode against PPSSPP and the default
+  mode against the PSP's rule (`hw_of`: the hardware dot product, or `HW_048`'s model). The harness now compiles with
+  `-ffp-contract=off`, as the corpus does since patch 0020.
+- A header experiment never touches `vendor/`: copy `vendor/portablekit/include` to `out/048/candidate/include`, edit
+  it there, then `port DIR --modes ppsspp,psp --tag candidate --include out/048/candidate/include` and
+  `vfpu_model.py --check DIR --tag candidate`. The corpus before patch 0020 is the same with the header hunk of
+  `patches/0020-vfpu-dot-rounding.patch` reversed in the copy and `--fp-contract on --tag pre0020`.
+- `vfpu_model.py --diff DIR [--which ppsspp]` lists, per site and then in time order, every sampled result where the
+  port differs from PPSSPP: the candidates a divergence can start from.
+
+On 2026-10-07 (PPSSPP 1.20.4, JIT): `vcrsp.t` is unfused (both products rounded, then their difference) on all
+1592532 result lanes of the two circuits, which the port's test mode gives on 75.9% (Vineta K) and 79.8% (Karbonis);
+`vfad` in lane order and `vmscl` one IEEE product on all, which the port gives on all. With the header copy of the
+Result of docs/tasks/048 the test mode reproduces every one and the default mode equals the PSP's rule on every one.
+The check runs in about 2.5 minutes over every set under `ref/vfpu`.

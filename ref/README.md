@@ -356,3 +356,56 @@ $P tools/vfpu_probe.py port ref/vfpu/jit && $P tools/vfpu_probe.py port ref/vfpu
 
 PPSSPP's memory stick held `PPCD00001DLS001` only, before and after every run; each run's ini was put back (CPU core
 1, the machine's setting, after the interpreter's).
+
+## Task 048 (2026-10-07): PPSSPP's samples of the other kinds
+
+Three more sets under `ref/vfpu/jit/` (docs/verification.md, "The other kinds"; docs/fidelity.md, difference 13), each
+with its own coverage files: PPSSPP 1.20.4's JIT on the scorecard's reference routes. `048_vineta_k` and
+`048_karbonis`: every execution from READY to 13 s of race clock of every `vcrsp`, `vfad` and `vmscl` site with 50 or
+more hits (no `vcrs`, `vqmul`, `vavg` or `vrot` ran). `048_karbonis_dot`: every execution of every dot-product and
+transcendental site (711) from 6.0 to 7.0 s of race clock, the stretch before the port's Karbonis player first parts
+from PPSSPP's (its 1422 breakpoints move PPSSPP's AI by up to 31 m and its player by 4 cm at 7.6 s; each row is still
+one execution). The port files: `<ADDR>.port.ppsspp.csv` and `.port.psp.csv` (the corpus in generated/ of 2026-10-07,
+patch 0020, under each mode), `.port.pre0020.csv` (patch 0020's header hunk reversed, `--fp-contract on`: the corpus
+before it), `.port.candidate.<mode>.csv` (the header of docs/tasks/048's Result, in a copy). A digest is the SHA-256
+of `shasum -a 256` over the files in name order (`ls [0-9A-F]*.csv | grep -v port | sort | xargs shasum -a 256 |
+shasum -a 256` for PPSSPP's rows; `ls *.port.ppsspp.csv | sort | ...` for a port file set).
+
+```
+P=/opt/homebrew/bin/python3; K=vcrs,vcrsp,vqmul,vfad,vavg,vrot,vmscl
+$P tools/vfpu_probe.py cover --track vineta_k --kinds $K --seconds 13 --out ref/vfpu/jit/048_vineta_k     # 2.5 min
+$P tools/vfpu_probe.py sample --track vineta_k --out ref/vfpu/jit/048_vineta_k --sites all --cap 0 --seconds 13   # 4 min
+$P tools/vfpu_probe.py cover --track karbonis --kinds $K --seconds 13 --out ref/vfpu/jit/048_karbonis     # 2.5 min
+$P tools/vfpu_probe.py sample --track karbonis --out ref/vfpu/jit/048_karbonis --sites all --cap 0 --seconds 13   # 3.5 min
+$P tools/vfpu_probe.py sample --track karbonis --out ref/vfpu/jit/048_karbonis_dot --window 6.0,7.0 --seconds 7.2 \
+  --sites "$($P tools/vfpu_probe.py scan --kinds vdot,vhdp,vmmul,vtfm,vrcp,vrsq,vsin,vcos,vsqrt,vexp2,vlog2,vasin,vnrcp,vnsin,vrexp2 \
+  | awk '/^0x/ {print substr($1,3)}' | paste -sd, -)"                                                     # 3 min
+for s in 048_vineta_k 048_karbonis 048_karbonis_dot; do $P tools/vfpu_probe.py port ref/vfpu/jit/$s --modes ppsspp,psp; done
+$P tools/vfpu_probe.py port ref/vfpu/jit --modes ppsspp,psp                                             # task 047's set
+```
+
+| File or set | Size | SHA-256 | Made |
+|---|---|---|---|
+| vfpu/jit/048_vineta_k/coverage.csv | 7033 | 40653fd77ecdc1944c748c405a44247bc9d5803fc3ed2beb2c23388818106454 | 2026-10-07 16:24, 197 sites, 101 run to 13.1 s |
+| vfpu/jit/048_vineta_k/coverage.json | 622 | b2fb44788e8a5054d0dfbf3e1c045807e532de883f95a427d47a255ed13e025b | the same run |
+| vfpu/jit/048_vineta_k/sites.json | 37525 | 76a8084eb0115b6fb231eba8fc7b47b31497aaed32337d7341edcf9eccab8af6 | 2026-10-07 16:28, 65 sites, 905848 rows |
+| vfpu/jit/048_vineta_k/[0-9A-F]*.csv (65) | 80546081 | digest 1ec8c0035d87a5c8c3fdc898e4bd6d352471b71e7e8213ff70fda85eeed57ff1 | the same run |
+| vfpu/jit/048_vineta_k/*.port.ppsspp.csv (65) | | digest c5bdc9be6367dcc6a0f48862bc150045072bcde5834e62f44315ce8ccf6bb0ea | `port --modes ppsspp,psp` |
+| vfpu/jit/048_vineta_k/*.port.psp.csv (65) | | digest 8bfc28c1a2f5c15b434ae4a9fdae988144173a294ebfb3fdac6aaa86b1aa9301 | the same |
+| vfpu/jit/048_karbonis/coverage.csv | 7012 | b73f1ad30148b4d25a8c7d9c9a316b18a7734551f26be3a14b3fb6391e8a13a9 | 2026-10-07 16:13, 197 sites, 72 run to 13.2 s |
+| vfpu/jit/048_karbonis/coverage.json | 646 | 9a6e501bd5ce7a7b1cfebfa022b1a0d3933bae5405925a07d0b7b2f590f302da | the same run |
+| vfpu/jit/048_karbonis/sites.json | 36214 | 91fd976520b05dc7fe344ed8ab938c95329b2ed860717c4ff0d2c67a258f32f1 | 2026-10-07 16:18, 62 sites, 869416 rows |
+| vfpu/jit/048_karbonis/[0-9A-F]*.csv (62) | 64516343 | digest 1254af558e16f3cfef113626bf0da171c7980cfd9719bb8156da8783c0f35938 | the same run |
+| vfpu/jit/048_karbonis/*.port.ppsspp.csv (62) | | digest 25e8196e219d5a423df3015941a0a41c715660a01f0a3de6f349fe0162f1bb9c | `port --modes ppsspp,psp` |
+| vfpu/jit/048_karbonis/*.port.psp.csv (62) | | digest 35a76d0e2a10ae87505670dfa96905399132768dad0f6a7426d5f3429d0da6dc | the same |
+| vfpu/jit/048_karbonis/*.port.pre0020.csv (62) | | digest de9390e29042b180244f6c89db084ea2da3426db41d5092283667a3f7bc866ae | the corpus before patch 0020 |
+| vfpu/jit/048_karbonis/*.port.candidate.ppsspp.csv (62) | | digest a82012adddfc02599edf8a1aa52775031ab7404dd23203310e5407074ef255ab | the Result's header, test mode |
+| vfpu/jit/048_karbonis/*.port.candidate.psp.csv (62) | | digest db53e942421d8ebf24fa70c85e888629a9e5081c1cb49ed1eb451257a3978dd1 | the same, default mode |
+| vfpu/jit/048_karbonis_dot/sites.json | 428367 | d4f4f768626c2cca3885f6af6e7e5c4249d772c0e1e51aee0f36e25e49b8aba2 | 2026-10-07 16:31, 711 sites, 213 with rows, 259370 rows |
+| vfpu/jit/048_karbonis_dot/[0-9A-F]*.csv (711) | 24213988 | digest 8f092e00fd6eaa503eb015f8dc4505d38f56339820fef8d6cf80aa688aa2ef25 | the same run |
+| vfpu/jit/048_karbonis_dot/*.port.ppsspp.csv (710) | | digest c44da6d3c73cc7ad27873cb21f7511b492ad49658ff479d68ecd9348c4124932 | `port --modes ppsspp,psp` (0x08887FFC, no rows, has no block of its own) |
+| vfpu/jit/*.port.ppsspp.csv (195) | | digest d9b709d8680af433ec6108553d1fe7054c4cc1bc74dfb7acdbc97fa3f1c381e5 | task 047's set, `port --modes ppsspp,psp` on the corpus of patch 0020 |
+| vfpu/jit/*.port.psp.csv (195) | | digest 45f59fda32d05d4df57c297883661808861c60fc9a6ac40c6c2711bfe73760b7 | the same |
+
+The Vineta K set's `.port.pre0020.csv` and `.port.candidate.<mode>.csv` are made the same way as Karbonis'. PPSSPP's
+memory stick held `PPCD00001DLS001` only, before and after every run; every run's ini was put back (CPU core 1).
