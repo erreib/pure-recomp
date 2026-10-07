@@ -58,7 +58,8 @@ stick, headless on the Metal backend, the race paced, with `PURE_AUDIO_WAV`; `(e
 picks the sweep's tables lack, added by the audit in the sweep's process (README.md). The table is in the brief's
 order; the run of 2026-10-06 went in that of `out/fidelity/order.txt` (four cells that tried the extended routes and
 Phantom first, then the rest). The three cells of `--quick` (Single Race Vineta K, Zone 1, Time Trial Vineta K) are
-those of the Verify. Columns: the sweep's outcome
+those of the Verify; its runs of them (2026-10-07: PASS, PASS, PASS, race clocks within 4 s of the matrix's) were moved to
+`out/fidelity-verify-quick/`, so `out/fidelity/` holds the matrix run the tables come from. Columns: the sweep's outcome
 and the flip it ended at, laps, the race clock and the wall time; the tracks whose `TrackStartup.xml` the race load
 opened (the proof that the route picked the track); halts and stubs, then other warning lines; how many distinct GE
 commands the framework ignored; the two-vblank stretches and hitches; the lowest of the Metal backend's per-600-frame
@@ -193,10 +194,11 @@ channel's buffer late, and how long the channel went without):
   moves by its per-frame cap (in Mandrashee 0.067 s for a 295 ms flip). That is what a paced run does when its
   process is held up for a moment: the kernel's clock catches up with real time at once. Two of these cells run again
   at 23:35 (Zone 4 and Free Play Vineta K, `out/fidelity-hitch/`) had hitches again, at other places (117 ms; 117 and
-  167 ms), so they are not tied to a place in the game. Neither run had an idle machine (the audit's PPSSPP captures
-  and Ghidra decompiles until 21:51; a browser, Spotlight indexing and other sessions' work, a load average of about
-  5, at the rerun), and the sweep reads the game's output through a pty while it steers, so a reader held up for a
-  moment holds the game's writes. Whether a player's run has them is open: difference 7.
+  167 ms), so they are not tied to a place in the game; the Verify's three cells (2026-10-07 00:00, 8 minutes paced)
+  had none. Neither the matrix nor the rerun had an idle machine (the audit's PPSSPP captures and Ghidra decompiles
+  until 21:51; a browser, Spotlight indexing and other sessions' work, a load average of about 5, at the rerun), and
+  the sweep reads the game's output through a pty while it steers, so a reader held up for a moment holds the game's
+  writes. Whether a player's run has them is open: difference 7.
 - **Channel 2 (the music)**, 34 lines in 23 cells: the hitches above, and once at each change of music track, 10 to
   60 ms just after the new track starts: at 527.3 s of virtual time in every cell but the tournaments that runs that
   long (the first change, about 5:24 into the race music), and at the later changes of the long cells (636, 755, 932
