@@ -1,0 +1,343 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index 6d555ec..2bb509c 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -21,6 +21,15 @@ layout(set = 0, binding = 0) uniform sampler2D guest_texture;
+ // keep their early depth test and hidden surface removal for them.
+ layout(constant_id = 0) const bool kAlphaTest = true;
+ 
++// The GE's colour test (COLORTESTENABLE, COLORTEST, COLORREF, COLORTESTMASK;
++// patch 0013): the function (0 NEVER, 1 ALWAYS, 2 EQUAL, 3 NOTEQUAL), the
++// reference and the mask, colours as 0x00BBGGRR. kColorTest is false for
++// draws without the test or with ALWAYS, which compiles the discard out.
++layout(constant_id = 1) const bool kColorTest = false;
++layout(constant_id = 2) const uint kColorFunction = 1u;
++layout(constant_id = 3) const uint kColorReference = 0u;
++layout(constant_id = 4) const uint kColorMask = 0x00FFFFFFu;
++
+ layout(push_constant) uniform Push {
+     mat4 transform;
+     vec4 viewport;
+@@ -114,6 +123,19 @@ void main() {
+     color.rgb = min(color.rgb + frag_specular, vec3(1.0));
+     if ((int(push.viewport.w + 0.5) & 1) != 0) color.rgb = mix(lighting.fog_color.rgb, color.rgb, clamp(frag_fog, 0.0, 1.0));
+ 
++    // The colour test, after fog, where the alpha test is: the fragment's
++    // 8-bit colour under the mask against the reference under the mask. A
++    // fragment that fails writes nothing (no colour, depth or stencil).
++    if (kColorTest) {
++        uvec3 c = uvec3(roundEven(clamp(color.rgb, 0.0, 1.0) * 255.0));
++        uint value = (c.r | (c.g << 8u) | (c.b << 16u)) & kColorMask;
++        uint reference = kColorReference & kColorMask;
++        bool passed = kColorFunction == 2u ? value == reference
++                    : kColorFunction == 3u ? value != reference
++                                           : kColorFunction != 0u;
++        if (!passed) discard;
++    }
++
+     // PSP alpha test, evaluated per fragment. The function is the GE's own
+     // number, as for the depth test: 0 NEVER, 1 ALWAYS, then EQUAL, NOTEQUAL,
+     // LESS, LEQUAL, GREATER, GEQUAL. Reading 1 as "never" discarded every
+diff --git a/host/gpu/shaders/ge.vert b/host/gpu/shaders/ge.vert
+index c47877b..fdbb5b8 100644
+--- a/host/gpu/shaders/ge.vert
++++ b/host/gpu/shaders/ge.vert
+@@ -168,6 +168,12 @@ layout(location = 4) flat out vec4 frag_uv_rect;
+ // (texture_params.x bit 4); 1 otherwise.
+ layout(location = 5) out float frag_q;
+ 
++// CLIPENABLE's depth clamp (patch 0013), for transformed draws with
++// CLIPENABLE on: the near plane and MINZ/MAXZ are these three clip distances
++// (the pipeline also has depthClampEnable). Every other draw keeps them at 1.
++layout(constant_id = 0) const bool kDepthClamp = false;
++out float gl_ClipDistance[3];
++
+ layout(push_constant) uniform Push {
+     mat4 transform;      // WVP, or identity for through vertices
+     vec4 viewport;       // xy: target size in PSP pixels, z: through, w: 1 fog + 2 lighting
+@@ -190,6 +196,7 @@ layout(set = 1, binding = 0) uniform Environment {
+     vec4 light_ambient[4];
+     vec4 light_diffuse[4];
+     vec4 light_specular[4];
++    vec4 depth;             // the depth clamp: x, y the GE's z scale and offset, z, w MINZ and MAXZ
+ } lighting;
+ 
+ // A lit draw's world matrix and material; the layout matches ObjectBlock.
+@@ -331,6 +338,9 @@ void main() {
+     frag_fog = 1.0;
+     frag_q = 1.0;
+     frag_uv_rect = vec4(-1e30, -1e30, 1e30, 1e30);
++    gl_ClipDistance[0] = 1.0;
++    gl_ClipDistance[1] = 1.0;
++    gl_ClipDistance[2] = 1.0;
+     if (push.viewport.z > 0.5) {
+         vec4 rect = vec4(in_normal.xy, in_normal.z, in_position.w);
+         frag_uv_rect = vec4(rect.xy * push.uv_transform.xy + push.uv_transform.zw,
+@@ -347,6 +357,25 @@ void main() {
+             frag_fog = (dot(push.view_z, vec4(in_position.xyz, 1.0)) + lighting.fog.x) * lighting.fog.y;
+         if ((int(push.texture_params.x + 0.5) & 8) != 0) map_texture();
+         vec4 clip = push.transform * vec4(in_position.xyz, 1.0);
++        if (kDepthClamp) {
++            // CLIPENABLE on (PPSSPP's hardware notes, "Z Clipper", "Clipping
++            // enabled", "MinZ and MaxZ", "Z Clamp"; ge.metal's rule): the GE
++            // clips at the near plane (z = -w) only, clamps each vertex's
++            // screen z to 0..65535 before it is interpolated, and leaves the
++            // far side to the per-pixel MINZ/MAXZ test. The pipeline does not
++            // clip z (depthClampEnable, a viewport of 0..1); the near plane
++            // and MINZ/MAXZ are clip distances on the screen z, which, like
++            // the depth, is linear across the screen. zw is that z times w; a
++            // vertex behind the near plane keeps it unclamped, so the near
++            // plane's clipper interpolates it as the GE does.
++            float zw = clip.z * lighting.depth.x + clip.w * lighting.depth.y;
++            if (clip.w > 0.0 && clip.z >= -clip.w) zw = clamp(zw, 0.0, 65535.0 * clip.w);
++            gl_ClipDistance[0] = clip.z + clip.w;
++            gl_ClipDistance[1] = zw - lighting.depth.z * clip.w;
++            gl_ClipDistance[2] = lighting.depth.w * clip.w - zw;
++            gl_Position = vec4(clip.xy, zw / 65535.0, clip.w);
++            return;
++        }
+         // PSP clip space follows OpenGL with z in [-w, w]; Vulkan clips against
+         // [0, w], so without this remap the near half of every frustum is lost.
+         // The PSP viewport's z scale and offset are folded into the Vulkan
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 9db16f0..6ba6c7c 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -222,9 +222,13 @@ struct EnvironmentBlock {
+     std::array<std::array<float, 4>, 4> light_ambient{};
+     std::array<std::array<float, 4>, 4> light_diffuse{};
+     std::array<std::array<float, 4>, 4> light_specular{};
++    // CLIPENABLE's depth clamp (patch 0013), read by the vertex shader of a
++    // pipeline with PipelineKey::depth_clamp: the GE viewport's z scale and
++    // offset, MINZ and MAXZ. Written again when a clamped draw needs others.
++    std::array<float, 4> depth{};
+ };
+ 
+-static_assert(sizeof(EnvironmentBlock) == 496u, "EnvironmentBlock must match the std140 layout in ge.vert");
++static_assert(sizeof(EnvironmentBlock) == 512u, "EnvironmentBlock must match the std140 layout in ge.vert");
+ 
+ // What a lit draw adds: its world matrix and material. Consecutive draws of
+ // one mesh share it, so it is written only when it differs from the last one.
+@@ -301,6 +305,14 @@ struct PipelineKey {
+     // of stencil_values.
+     std::uint32_t stencil{};
+     std::uint32_t stencil_values{};
++    // The colour test (kColorTest and its constants in ge.frag; patch 0013):
++    // 0 for none or ALWAYS, else 1 | the GE's function << 1; the reference
++    // and the mask, colours as 0x00BBGGRR.
++    std::uint32_t color_test{};
++    std::uint32_t color_reference{};
++    std::uint32_t color_test_mask{};
++    // CLIPENABLE's depth clamp (kDepthClamp in ge.vert, depthClampEnable).
++    bool depth_clamp{};
+ 
+     auto operator<=>(const PipelineKey &) const = default;
+ };
+@@ -724,6 +736,9 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     // turns it off): the fragment shader as compiled, for kAlphaDual.
+     bool dual_source{};
+     VkShaderModule dual_fragment_shader{};
++    // CLIPENABLE's depth clamp (patch 0013): the depthClamp and
++    // shaderClipDistance features, both on.
++    bool depth_clamp{};
+     void choose_depth_format() {
+         if (portablekit::env("NO_STENCIL_BUFFER") == nullptr && portablekit::env("NO_STENCIL_ALPHA") == nullptr) {
+             for (const VkFormat format : {VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT}) {
+@@ -1370,6 +1385,7 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     // state stays the same; begin_frame() drops them with the vertex buffer.
+     std::uint64_t environment_version{};    // 0: none written this frame
+     std::uint32_t environment_offset{};
++    std::array<float, 4> environment_depth{};  // EnvironmentBlock::depth as last written
+     ObjectBlock last_object{};
+     std::uint32_t object_offset{};
+     bool object_valid{};
+@@ -2251,6 +2267,17 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+         enabled_features.dualSrcBlend = VK_TRUE;
+         impl.dual_source = true;
+     }
++    // CLIPENABLE's depth clamp (patch 0013): the pipeline clamps instead of
++    // clipping at the depth range's ends (depthClampEnable) and the vertex
++    // shader clips at the near plane and MINZ/MAXZ (gl_ClipDistance).
++    if (supported_features.depthClamp == VK_TRUE && supported_features.shaderClipDistance == VK_TRUE) {
++        enabled_features.depthClamp = VK_TRUE;
++        enabled_features.shaderClipDistance = VK_TRUE;
++        impl.depth_clamp = true;
++    } else {
++        std::cout << "[render] the depth clamp needs depthClamp and shaderClipDistance, which this device lacks: "
++                     "every transformed draw is clipped at both depth planes\n";
++    }
+     std::cout << "[render] robust buffer access " << (enabled_features.robustBufferAccess ? "on" : "off") << "\n";
+     VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+     device_info.pEnabledFeatures = &enabled_features;
+@@ -4655,15 +4682,16 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+ namespace {
+ 
+ constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
+-constexpr std::uint32_t kPipelineKeysVersion = 3u;
+-constexpr std::uint32_t kPipelineKeyWords = 15u;
++constexpr std::uint32_t kPipelineKeysVersion = 4u;
++constexpr std::uint32_t kPipelineKeyWords = 18u;
+ constexpr std::uint32_t kMaxPipelineKeys = 4096u;
+ 
+ std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
+     return {key.blend ? 1u : 0u, key.source_factor,  key.destination_factor, key.equation,
+             key.depth_test ? 1u : 0u, key.depth_write ? 1u : 0u, key.depth_function, key.cull ? 1u : 0u,
+             key.cull_clockwise ? 1u : 0u, key.color_mask, key.alpha_test ? 1u : 0u, key.raw ? 1u : 0u,
+-            key.alpha_blend, key.stencil, key.stencil_values};
++            key.alpha_blend, key.stencil, key.stencil_values,
++            key.color_test | (key.depth_clamp ? 1u << 3u : 0u), key.color_reference, key.color_test_mask};
+ }
+ 
+ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
+@@ -4683,6 +4711,10 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+     key.alpha_blend = words[12] <= kAlphaAdd ? words[12] : kAlphaFragment;
+     key.stencil = words[13] & 0x1FFFu;
+     key.stencil_values = words[14] & 0xFFFFFFu;
++    key.color_test = words[15] & 7u;
++    key.depth_clamp = (words[15] & 8u) != 0u;
++    key.color_reference = words[16] & 0xFFFFFFu;
++    key.color_test_mask = words[17] & 0xFFFFFFu;
+     return key;
+ }
+ 
+@@ -4842,7 +4874,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     stages[1].module = key.alpha_blend == kAlphaDual ? dual_fragment_shader : fragment_shader;
+     // A key saved by a run with dual-source blending or the stencil
+     // attachment, prewarmed in a run without it (prewarm_pipelines).
+-    if (stages[1].module == VK_NULL_HANDLE || (key.stencil != 0u && !stencil_buffer)) return VK_NULL_HANDLE;
++    if (stages[1].module == VK_NULL_HANDLE || (key.stencil != 0u && !stencil_buffer) ||
++        (key.depth_clamp && !depth_clamp))
++        return VK_NULL_HANDLE;
+ 
+     VkVertexInputBindingDescription binding{0u, sizeof(GpuVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+     std::array<VkVertexInputAttributeDescription, 4> attributes{
+@@ -4878,6 +4912,10 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     raster.cullMode = key.cull ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
+     raster.frontFace = key.cull_clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
+     raster.lineWidth = 1.0f;
++    // CLIPENABLE's depth clamp: no clipping at the depth range's ends, the
++    // fragment's depth clamped to the viewport's 0..1 (ge.vert clips at the
++    // near plane and MINZ/MAXZ itself).
++    raster.depthClampEnable = key.depth_clamp ? VK_TRUE : VK_FALSE;
+ 
+     VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+     multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+@@ -4927,15 +4965,29 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     blend.attachmentCount = 1u;
+     blend.pAttachments = &blend_attachment;
+ 
+-    // kAlphaTest in ge.frag.
+-    const VkBool32 alpha_test = key.alpha_test ? VK_TRUE : VK_FALSE;
+-    const VkSpecializationMapEntry alpha_entry{0u, 0u, sizeof(VkBool32)};
++    // kAlphaTest, kColorTest and the colour test's function, reference and
++    // mask in ge.frag.
++    const std::array<std::uint32_t, 5> fragment_constants{
++        key.alpha_test ? VK_TRUE : VK_FALSE, key.color_test != 0u ? VK_TRUE : VK_FALSE, key.color_test >> 1u,
++        key.color_reference, key.color_test_mask};
++    std::array<VkSpecializationMapEntry, 5> fragment_entries{};
++    for (std::uint32_t i = 0; i < fragment_entries.size(); ++i)
++        fragment_entries[i] = {i, i * 4u, sizeof(std::uint32_t)};
+     VkSpecializationInfo specialization{};
+-    specialization.mapEntryCount = 1u;
+-    specialization.pMapEntries = &alpha_entry;
+-    specialization.dataSize = sizeof(alpha_test);
+-    specialization.pData = &alpha_test;
++    specialization.mapEntryCount = static_cast<std::uint32_t>(fragment_entries.size());
++    specialization.pMapEntries = fragment_entries.data();
++    specialization.dataSize = sizeof(fragment_constants);
++    specialization.pData = fragment_constants.data();
+     stages[1].pSpecializationInfo = &specialization;
++    // kDepthClamp in ge.vert.
++    const VkBool32 depth_clamp_constant = key.depth_clamp ? VK_TRUE : VK_FALSE;
++    const VkSpecializationMapEntry depth_clamp_entry{0u, 0u, sizeof(VkBool32)};
++    VkSpecializationInfo vertex_specialization{};
++    vertex_specialization.mapEntryCount = 1u;
++    vertex_specialization.pMapEntries = &depth_clamp_entry;
++    vertex_specialization.dataSize = sizeof(depth_clamp_constant);
++    vertex_specialization.pData = &depth_clamp_constant;
++    stages[0].pSpecializationInfo = &vertex_specialization;
+ 
+     VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+     info.stageCount = static_cast<std::uint32_t>(stages.size());
+@@ -6055,7 +6107,25 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // only when it changed, and the vertices follow whatever was written.
+     const bool fogged = call.fog.enabled && !no_fog && !call.through && !call.clear_mode;
+     const auto view_world = multiply(call.view, call.world);
+-    if ((lit || fogged || map_mode == 2u) && impl.environment_version != call.environment_version) {
++    // CLIPENABLE's depth clamp (patch 0013; PPSSPP's hardware notes, "Z
++    // Clipper", "Clipping enabled", "MinZ and MaxZ", "Z Clamp"): with it on, a
++    // transformed draw is clipped at the near plane only, each vertex's
++    // screen z is clamped to 0..65535, and MINZ/MAXZ are tested per pixel
++    // (ge.vert, kDepthClamp). Its values go in the environment block, written
++    // again when they change. CLIPENABLE off is drawn as before, clipped at
++    // both depth planes. <prefix>_NO_DEPTH_CLAMP (the Metal backend's name)
++    // draws every transformed draw that way, as before.
++    static const bool no_depth_clamp = portablekit::env("NO_DEPTH_CLAMP") != nullptr;
++    const bool clamp_depth = !call.through && call.clip_enabled && impl.depth_clamp && !no_depth_clamp;
++    if (!call.through && !call.clip_enabled && !no_depth_clamp)
++        report_not_emulated("CLIPENABLE off on a transformed draw (drawn clipped at both depth planes)", 0u);
++    const std::array<float, 4> clamp_values =
++        clamp_depth ? std::array<float, 4>{call.viewport.z_scale, call.viewport.z_offset,
++                                           static_cast<float>(call.depth.range_near),
++                                           static_cast<float>(call.depth.range_far)}
++                    : impl.environment_depth;
++    if (((lit || fogged || map_mode == 2u) && impl.environment_version != call.environment_version) ||
++        (clamp_depth && (impl.environment_version == 0u || clamp_values != impl.environment_depth))) {
+         const LightingState &state = call.lighting;
+         EnvironmentBlock environment{};
+         environment.ambient = unpack_color(state.ambient_color, static_cast<float>(state.ambient_alpha) / 255.0f);
+@@ -6074,8 +6144,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             environment.light_diffuse[i] = unpack_color(light.diffuse);
+             environment.light_specular[i] = unpack_color(light.specular);
+         }
++        environment.depth = clamp_values;
+         if (!impl.write_uniform(&environment, sizeof(environment), impl.environment_offset)) return;
+         impl.environment_version = call.environment_version;
++        impl.environment_depth = clamp_values;
+     }
+     if (lit || mapped) {
+         const LightingState &state = call.lighting;
+@@ -6391,6 +6463,17 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     key.alpha_test = no_alpha_variants || perf::alternate_off(perf::NewPath::Alpha) ||
+                      (!call.clear_mode && call.alpha_test.enabled && call.alpha_test.function != 1u);
+     key.raw = raw;
++    // The colour test (patch 0013): the pipeline's fragment shader discards by
++    // the GE's function (ge.frag, kColorTest); none without the test or with
++    // ALWAYS (1). <prefix>_NO_COLOR_TEST (the Metal backend's name) keeps
++    // every fragment, as before.
++    static const bool no_color_test = portablekit::env("NO_COLOR_TEST") != nullptr;
++    if (!call.clear_mode && call.color_test.enabled && call.color_test.function != 1u && !no_color_test) {
++        key.color_test = 1u | (call.color_test.function & 3u) << 1u;
++        key.color_reference = call.color_test.reference & 0xFFFFFFu;
++        key.color_test_mask = call.color_test.mask & 0xFFFFFFu;
++    }
++    key.depth_clamp = clamp_depth;
+     // Escape hatch for bisecting "nothing is visible" reports.
+     static const bool no_cull = portablekit::env("NO_CULL") != nullptr;
+     static const bool no_depth = portablekit::env("NO_DEPTH") != nullptr;
+@@ -6415,10 +6498,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     const float wrap_flags = no_texture_clamp ? 0.0f
+                                               : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
+                                                     (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
+-    // The alpha test only: the colour test (DrawCall::color_test) is not
+-    // drawn by this renderer, nor dithering (DrawCall::dither: 16-bit targets
+-    // are drawn at 8 bits a channel), nor CLIPENABLE's depth clamp
+-    // (DrawCall::clip_enabled: every draw is clipped at both depth planes).
++    // The alpha test; the colour test is in the pipeline (key.color_test).
++    // Dithering (DrawCall::dither) is not drawn by this renderer: 16-bit
++    // targets are drawn at 8 bits a channel.
+     push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
+@@ -6569,6 +6651,11 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             vk_viewport.maxDepth = std::clamp((vp.z_offset + vp.z_scale) / 65535.0f, 0.0f, 1.0f);
+         }
+     }
++    // The depth clamp: ge.vert hands over the GE's screen z / 65535.
++    if (clamp_depth) {
++        vk_viewport.minDepth = 0.0f;
++        vk_viewport.maxDepth = 1.0f;
++    }
+ 
+     // Whichever side asked for the constant decides its colour; the source wins
+     // when both do, because the destination is then its complement.

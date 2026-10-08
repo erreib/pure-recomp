@@ -55,6 +55,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0010-vulkan-viewport-into-clip-space | (task 056) | Bug | candidate | The GE viewport's x and y folded into the draw's transform and the `VkViewport` the whole target, so an offset GE viewport keeps column 0 and row 0 (the race HUD) |
 | 0011-vulkan-texture-mapping | (task 057) | Missing feature | candidate | Texture map modes 1 (the texture matrix, s and t divided by q per pixel) and 2 (the environment map from the normal and two lights) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_TEXMAP` draws every draw with its UVs |
 | 0012-vulkan-mipmaps | (task 058) | Missing feature | candidate | The mip levels a draw names uploaded by the Vulkan renderer and sampled at the level the GE's rule picks (auto, constant, slope), the mip filter from the minification filter's bits, as the Metal backend does; `<prefix>_NO_MIPMAPS` samples level 0 alone |
+| 0013-vulkan-colortest-depthclamp | (task 059) | Missing feature | candidate | The GE's colour test (NEVER, ALWAYS, EQUAL, NOTEQUAL under COLORTESTMASK against COLORREF, a discard after fog) and CLIPENABLE's depth clamp (near plane only, screen z clamped per vertex, MINZ/MAXZ as clip distances, `depthClampEnable`) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_COLOR_TEST` and `<prefix>_NO_DEPTH_CLAMP` restore the old paths |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -304,3 +305,19 @@ sampled through a sampler of its own (`mip_sampler`, linear between levels). `te
 logarithm and samples with `textureLod`, as `sample_texture` in `src/gpu/shaders/ge.metal` (task 037). At an internal
 scale above 1 the auto rule's gradient is taken per PSP pixel. A texture of one level is drawn as before;
 `<prefix>_NO_MIPMAPS` (the name the Metal backend reads) restores the old path.
+
+### 0013-vulkan-colortest-depthclamp
+Task 059. The renderer kept every fragment and clipped every transformed draw at both ends of the depth range; the
+colour test and CLIPENABLE with MINZ/MAXZ, carried in `DrawCall::color_test`, `clip_enabled` and `depth` since patch
+0002-ge-state-commands, went unread here. The colour test is in the pipeline: `PipelineKey` gains the function,
+reference and mask, which become `ge.frag`'s specialisation constants `kColorTest`, `kColorFunction`,
+`kColorReference` and `kColorMask`; after fog, where the alpha test is, the fragment's 8-bit colour under the mask
+is compared with the reference under it and a failing fragment is discarded (no colour, depth or stencil). Without the
+test or with ALWAYS the discard is compiled out. The depth clamp follows the GE's rule with CLIPENABLE on, as
+`ge_vertex` in `src/gpu/shaders/ge.metal` (task 040): `ge.vert` (`kDepthClamp`) computes the screen z times w,
+clamps it to 0..65535 w for a vertex in front of the near plane, hands z / 65535 to a viewport of 0..1, and makes the
+near plane, MINZ and MAXZ three `gl_ClipDistance`s; the pipeline has `depthClampEnable`, so nothing is clipped at the
+depth range's ends. The z scale, offset, MINZ and MAXZ go in the environment block (496 to 512 bytes), written again
+when a clamped draw needs other values. It needs the depthClamp and shaderClipDistance features (said once when the
+device lacks them). The pipeline key list's version goes from 3 to 4 (18 words), so an older list is not prewarmed
+once. `<prefix>_NO_COLOR_TEST` and `<prefix>_NO_DEPTH_CLAMP` (the Metal backend's names) restore the old paths.
