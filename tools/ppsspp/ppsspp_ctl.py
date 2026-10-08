@@ -1,5 +1,5 @@
 #!/opt/homebrew/bin/python3
-"""Scripted driver for PPSSPP (SDL build, macOS) through its WebSocket debugger.
+"""Scripted driver for PPSSPP (SDL build on macOS, PPSSPPWindows64 on Windows) through its WebSocket debugger.
 
 Boots a PSP image in PPSSPPSDL, feeds a frame-indexed button script, saves display screenshots and GE dumps at
 given frames, optionally saves a state, and quits. Python 3 standard library only. Full notes: docs/ppsspp.md.
@@ -32,8 +32,16 @@ from pathlib import Path
 
 VERSION = "1.0"
 REPO = Path(__file__).resolve().parents[2]
-APP = Path("/Applications/PPSSPPSDL.app/Contents/MacOS/PPSSPPSDL")
-MEMSTICK = Path.home() / ".config/ppsspp"          # SDL build on macOS: $HOME/.config/ppsspp (checked 2026-10-05)
+WINDOWS = os.name == "nt"
+if WINDOWS:
+    # Windows (task 055): the official portable zip of the same 1.20.4, unpacked beside the repo (docs/setup.md,
+    # "Windows setup"). Portable mode (no installed.txt): the memory stick is memstick/ next to the executable.
+    APP = Path("H:/errei/Documents/dev-stuff/deps/ppsspp-1.20.4/PPSSPPWindows64.exe")
+    MEMSTICK = APP.parent / "memstick"
+else:
+    APP = Path("/Applications/PPSSPPSDL.app/Contents/MacOS/PPSSPPSDL")
+    MEMSTICK = Path.home() / ".config/ppsspp"      # SDL build on macOS: $HOME/.config/ppsspp (checked 2026-10-05)
+APP_NAME = APP.name if WINDOWS else "PPSSPPSDL"    # the process name ppsspp_pids looks for
 SYSDIR = MEMSTICK / "PSP/SYSTEM"
 INI = SYSDIR / "ppsspp.ini"
 CONTROLS = SYSDIR / "controls.ini"
@@ -319,12 +327,50 @@ class IniSession:
 # ---------------------------------------------------------------- process control
 
 def ppsspp_pids():
+    if WINDOWS:
+        r = subprocess.run(["tasklist", "/FO", "CSV", "/NH", "/FI", f"IMAGENAME eq {APP_NAME}"],
+                           capture_output=True, text=True)
+        rows = [ln.strip().strip('"').split('","') for ln in r.stdout.splitlines()]
+        return [int(row[1]) for row in rows if len(row) > 1 and row[0].lower() == APP_NAME.lower()]
     r = subprocess.run(["pgrep", "-x", "PPSSPPSDL"], capture_output=True, text=True)
     return [int(x) for x in r.stdout.split()]
 
 
+def _stop_windows(pid, popen, timeout):
+    """Windows: `taskkill` without /F posts WM_CLOSE to PPSSPP's window, which shuts down normally and saves its
+    config (os.kill's SIGTERM would be TerminateProcess); /F after timeout."""
+    alive = (lambda: popen.poll() is None) if popen is not None else (lambda: pid in ppsspp_pids())
+    if not alive():
+        return True
+    subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True)
+    t0, resumed = time.time(), False
+    while time.time() - t0 < timeout:
+        if not alive():
+            return True
+        if not resumed and time.time() - t0 > 2.0:
+            # A CPU stopped in the debugger keeps PPSSPP for Windows from closing (macOS's SIGTERM path closes it
+            # anyway): resume it through a fresh debugger connection and ask again.
+            resumed = True
+            try:
+                for port in listening_ports(pid)[:1]:
+                    d = Debugger(port)
+                    d.resume()
+                    d.close()
+                subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True)
+            except (OSError, ConnectionError, RuntimeError, TimeoutError) as e:
+                log(f"could not resume PPSSPP before closing it: {e}")
+        time.sleep(0.2)
+    log(f"PPSSPP pid {pid} ignored WM_CLOSE for {timeout:.0f}s; killing it")
+    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+    if popen is not None:
+        popen.wait(5)
+    return False
+
+
 def stop_process(pid, popen=None, timeout=15.0):
     """SIGTERM makes SDL post SDL_QUIT; PPSSPP then shuts down normally and saves its config."""
+    if WINDOWS:
+        return _stop_windows(pid, popen, timeout)
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -349,12 +395,13 @@ def stop_process(pid, popen=None, timeout=15.0):
 
 def launch(iso, logfile=None, stdout_path=None):
     if not APP.exists():
-        die(f"{APP} not found (brew install --cask ppsspp-emulator)")
+        die(f"{APP} not found (" + ("the portable zip, docs/setup.md \"Windows setup\")" if WINDOWS else
+                                 "brew install --cask ppsspp-emulator)"))
     iso = Path(iso)
     if not iso.exists():
         die(f"ISO {iso} does not exist (dangling disc.iso symlink?)")
     if ppsspp_pids():
-        die(f"PPSSPPSDL is already running (pid {ppsspp_pids()}); quit it first or use the attach commands")
+        die(f"{APP_NAME} is already running (pid {ppsspp_pids()}); quit it first or use the attach commands")
     cmd = [str(APP), "--windowed", "--pause-menu-exit"]
     if logfile:
         logfile = Path(logfile).resolve()
@@ -370,6 +417,9 @@ def launch(iso, logfile=None, stdout_path=None):
 
 
 def listening_ports(pid):
+    if WINDOWS:
+        r = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True)
+        return [int(m.group(1)) for m in re.finditer(rf":(\d+)\s+\S+\s+LISTENING\s+{pid}\s*$", r.stdout, re.M)]
     r = subprocess.run(["lsof", "-nP", "-a", "-p", str(pid), "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True)
     return [int(m.group(1)) for m in re.finditer(r":(\d+) \(LISTEN\)", r.stdout)]
 
@@ -763,6 +813,8 @@ def capture(dbg, setfb, frame_start_us, shot=None, gedump=None, renderer="softwa
 def save_state(pid, dest, timeout=20.0):
     """PPSSPP has no debugger event for save states, so press the Save State hotkey (F2, mapped in controls.ini)
     through CoreGraphics. That needs the Accessibility (post event) permission for the process running this."""
+    if WINDOWS:
+        return None, "not on Windows: the hotkey path posts the key through CoreGraphics (macOS only)"
     cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
     cg.CGPreflightPostEventAccess.restype = ctypes.c_bool
     if not cg.CGPreflightPostEventAccess():
@@ -960,7 +1012,7 @@ def cmd_launch(a):
 def attach(a):
     pids = ppsspp_pids()
     if not pids:
-        die("PPSSPPSDL is not running")
+        die(f"{APP_NAME} is not running")
     dbg, _ = connect(a.port, pids[0], timeout=5.0)
     return dbg, pids[0]
 
@@ -1017,7 +1069,7 @@ def cmd_press(a):
 def cmd_quit(a):
     pids = ppsspp_pids()
     if not pids:
-        log("PPSSPPSDL is not running")
+        log(f"{APP_NAME} is not running")
     for pid in pids:
         log(f"pid {pid}: {'quit cleanly' if stop_process(pid) else 'killed'}")
 
