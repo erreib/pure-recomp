@@ -134,4 +134,13 @@ Open questions:
    of lower modes was not measured: this was one full run.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge (11 patches reproduce the pin), 2026-10-08: PASS, 18/18 in
+20m 14s; race_hud 0.059x, fp_hud 0.0576 this run — the moved-more-than-0.03 flags are all downward, toward the
+reference.
+Spot-read: patch 0011 (342 lines) follows the Metal reference closely; the off switch goes through
+portablekit::env("NO_TEXMAP") so both backends read one name; mode 0 proven byte-identical with a
+reversed-patch binary.
+Merged: the merge commit after 8f12fb6 into batch/m2.
+Notes: the docs/metal-backend.md corrections are legitimate (statements the patch falsified). Mode 1 on screen
+stays an open follow-up shared with Metal (task 036: the projected plane is off screen in the suite's frames).
+The column re-measure stays parked at step 3's exit, per task 056's review.
