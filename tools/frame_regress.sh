@@ -125,8 +125,10 @@ OUT=$(cd "$OUT" && pwd)
 rm -rf "$OUT/shots" "$OUT/game"
 rm -f "$OUT"/*.log "$OUT"/*.stdout "$OUT"/*.route.txt "$OUT"/*.diff.png "$OUT/summary.txt"
 mkdir -p "$OUT/shots" "$OUT/game"
-ln -s "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
-ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
+# Hard links on Windows: Git Bash's `ln -s` copies (253 MB of disc.iso per run) without Developer Mode (task 054).
+case "$(uname -s)" in MINGW*|MSYS*) LNS="ln" ;; *) LNS="ln -s" ;; esac
+$LNS "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
+$LNS "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
 
 START=$SECONDS
 SUMMARY=()
