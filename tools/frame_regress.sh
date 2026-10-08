@@ -71,6 +71,8 @@ SHELL_NAME=headless
 ONLY=
 ENVS=()
 PARALLEL=no
+# Windows (task 055): the Vulkan backend draws only in the Vulkan shell's window, so the suite defaults to it there.
+case "$(uname -s)" in MINGW*|MSYS*) BACKEND=vulkan; SHELL_NAME=vulkan ;; esac
 usage() {
   echo "usage: tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...] [--allow-parallel]"
   exit 2

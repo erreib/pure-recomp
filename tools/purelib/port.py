@@ -21,6 +21,10 @@ ROOT = Path(os.path.abspath(__file__)).parents[2]
 # The build directory is the preset's (CMakePresets.json): arm64 on macOS, win-x64 on Windows (task 054).
 EXE = ROOT / "build" / ("win-x64" if WINDOWS else "arm64") / "bin" / ("PureNative.exe" if WINDOWS else "PureNative")
 GAME = ROOT / "game"
+# The shell and GE backend of a run whose pictures are read (screenshots, the sweep's end screens): headless on Metal
+# on macOS; on Windows the Vulkan backend draws only through the Vulkan shell's window (headless, nothing is drawn),
+# so such runs open a window there (task 055). Runs that read no pictures stay headless on both.
+DRAWING = ("vulkan", "vulkan") if WINDOWS else ("headless", "metal")
 FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the frame exit before it is killed
 # What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
 # over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings.
@@ -392,6 +396,10 @@ def headless_run(log, script, frames, shell="headless", backend="metal", paced_f
 def run_tool(cmd, out=None, env=None):
     """Runs a command (another tool) from the checkout's root, its stdout and stderr to the file out (else this
     process's), with env (else this process's); returns its exit code."""
+    if WINDOWS and str(cmd[0]).endswith(".sh"):
+        # No shebangs on Windows: the bash tools go through Git Bash's bash, found on PATH (CreateProcess would find
+        # System32's bash.exe, WSL's, first).
+        cmd = [shutil.which("bash") or "bash", str(cmd[0])] + list(cmd[1:])
     if out is None:
         return subprocess.run(cmd, cwd=ROOT, env=env).returncode
     with open(out, "w") as f:

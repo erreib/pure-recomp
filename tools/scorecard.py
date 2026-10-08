@@ -246,8 +246,9 @@ def port_run(ctx, name, steps, frames, env=None, shots=False):
     game = port.fresh_stick(ctx.stick)
     port.wait_game(say)
     t0 = time.time()
-    r = port.headless_run(log, route, frames, env=env, shots=runs / f"{name}.shots" if shots else None, game=game,
-                          data_dir=DATA_DIR, max_lines=600000, stdout=runs / f"{name}.stdout")
+    shell, backend = port.DRAWING if shots else ("headless", "metal")   # a window on Windows (task 055)
+    r = port.headless_run(log, route, frames, shell=shell, backend=backend,
+                          shots=runs / f"{name}.shots" if shots else None, env=env, game=game, data_dir=DATA_DIR, max_lines=600000, stdout=runs / f"{name}.stdout")
     say(f"run {name}: exit {r.code}, frame {frames} {'reached' if r.reached else 'NOT reached'}, "
         f"{time.time() - t0:.0f} s")
     ctx.logs[name] = log
@@ -990,7 +991,7 @@ def decrypt(folder, out):
     tool = ROOT / "tools" / "save_interchange.sh"
     if not tool.exists():
         return None, "tools/save_interchange.sh is missing (task 045)"
-    r = subprocess.run([str(tool), "--check", str(folder), DATA_FILE, str(out)], cwd=ROOT, capture_output=True,
+    r = subprocess.run(([shutil.which("bash") or "bash"] if port.WINDOWS else []) + [str(tool), "--check", str(folder), DATA_FILE, str(out)], cwd=ROOT, capture_output=True,
                        text=True, env=port.clean_env())
     lines = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.strip()]
     if r.returncode != 0 or not Path(out).exists():
@@ -1282,7 +1283,7 @@ def run(opts):
             print(f"scorecard: unknown track {t}")
             return 2
     if not port.EXE.exists():
-        print("scorecard: build/arm64/bin/PureNative missing: tools/build.sh profile")
+        print(f"scorecard: {port.EXE} missing: tools/build.sh profile")
         return 1
     out = Path(opts.out)
     if not out.is_absolute():

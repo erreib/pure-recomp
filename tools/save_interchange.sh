@@ -37,7 +37,10 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 OUT=out/045
 VENDOR=vendor/portablekit
-PPSSPP_SAVEDATA="$HOME/.config/ppsspp/PSP/SAVEDATA"
+# PPSSPP's memory stick and the port's binary as the driver and purelib know them (macOS, or Windows: task 055).
+PPSSPP_SAVEDATA=$(python3 -c 'import sys; sys.path.insert(0, "tools/ppsspp"); import ppsspp_ctl as pc; print((pc.MEMSTICK / "PSP" / "SAVEDATA").as_posix())')
+EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE.as_posix())')
+case "$(uname -s)" in MINGW*|MSYS*) CXX_CHECK="/c/Program Files/LLVM/bin/clang++.exe"; EXT=.exe ;; *) CXX_CHECK=/usr/bin/clang++; EXT= ;; esac
 PROFILE=UCUS98612P0000
 DLS=PPCD00001DLS001
 NAME=NAME0000
@@ -45,7 +48,7 @@ REF_PPSSPP=ref/saves/ppsspp
 REF_PLAIN=ref/saves/port-plain
 DIGITS=200,92,115,26     # PSP pixels: SET NAME's 5th to 8th letters, blank for the default "NAME" (save_roundtrip.sh)
 MIN_NAME_VARIANCE=500    # 1545 with NAME0000 loaded in the port, 0 on an empty stick (task 014)
-CHECKER="$OUT/savecheck/savecheck"
+CHECKER="$OUT/savecheck/savecheck$EXT"
 R=tools/ppsspp/routes
 
 # --- the checker: the framework's save-data code and nothing else -------------------------------------------------
@@ -88,7 +91,9 @@ int main(int argc, char **argv) {
     const std::string name = folder.filename().string();
     fs::remove_all(stick);
     fs::create_directories(stick / "PSP" / "SAVEDATA");
-    fs::create_directory_symlink(folder, stick / "PSP" / "SAVEDATA" / name);
+    std::error_code link_error;     // no symlinks on Windows without Developer Mode (task 055): a copy then
+    fs::create_directory_symlink(folder, stick / "PSP" / "SAVEDATA" / name, link_error);
+    if (link_error) fs::copy(folder, stick / "PSP" / "SAVEDATA" / name, fs::copy_options::recursive);
     std::printf("keys %s\n", portablekit::savedata_keys_available() ? "available" : "MISSING");
 
     const auto sfo_bytes = read_all(folder / "PARAM.SFO");
@@ -160,7 +165,7 @@ EOF
     [ "$f" -nt "$CHECKER" ] && stale=1
   done
   [ $stale -eq 0 ] && return 0
-  /usr/bin/clang++ -std=c++20 -O1 -w -I "$VENDOR/host" -I "$VENDOR/include" -I "$VENDOR/third_party" \
+  "$CXX_CHECK" -std=c++20 -O1 -w -I "$VENDOR/host" -I "$VENDOR/include" -I "$VENDOR/third_party" \
     -x c++ "$VENDOR/third_party/tiny_aes/aes.c" -x none "$src" "${sources[@]:1}" -o "$CHECKER" \
     > "$OUT/savecheck/build.log" 2>&1 || { echo "the checker does not build: $OUT/savecheck/build.log"; return 1; }
 }
@@ -182,8 +187,9 @@ fi
 # wait_ppsspp: until no PPSSPPSDL runs (another worker's run is never touched), at most 30 minutes.
 wait_ppsspp() {
   local waited=0
-  while pgrep -x PPSSPPSDL > /dev/null; do
-    [ $waited -eq 0 ] && echo "        PPSSPP is busy (pid $(pgrep -x PPSSPPSDL | paste -sd ' ' -)); waiting"
+  local pids
+  while pids=$(python3 -c 'import sys; sys.path.insert(0, "tools/ppsspp"); import ppsspp_ctl as pc; print(" ".join(map(str, pc.ppsspp_pids())))') && [ -n "$pids" ]; do
+    [ $waited -eq 0 ] && echo "        PPSSPP is busy (pid $pids); waiting"
     [ $waited -ge 1800 ] && return 1
     sleep 5; waited=$((waited + 5))
   done
@@ -229,7 +235,7 @@ fi
 # --- the check ------------------------------------------------------------------------------------------------------
 PORT_ONLY=0
 [ "${1:-}" = --port-only ] && PORT_ONLY=1
-[ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
+[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
 [ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
 for need in "$REF_PPSSPP/$PROFILE/PROFILE.BIN" "$REF_PPSSPP/$DLS/DATA1.BIN" "$REF_PLAIN/$PROFILE/PROFILE.BIN"; do
