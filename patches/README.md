@@ -54,6 +54,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0009-vfpu-rounding | 0020, 0021 | Fidelity (D-013) | the rules; the test mode is ours | VFPU dot products, cross products and horizontal sums round as a PSP does; generated units built with `-ffp-contract=off` |
 | 0010-vulkan-viewport-into-clip-space | (task 056) | Bug | candidate | The GE viewport's x and y folded into the draw's transform and the `VkViewport` the whole target, so an offset GE viewport keeps column 0 and row 0 (the race HUD) |
 | 0011-vulkan-texture-mapping | (task 057) | Missing feature | candidate | Texture map modes 1 (the texture matrix, s and t divided by q per pixel) and 2 (the environment map from the normal and two lights) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_TEXMAP` draws every draw with its UVs |
+| 0012-vulkan-mipmaps | (task 058) | Missing feature | candidate | The mip levels a draw names uploaded by the Vulkan renderer and sampled at the level the GE's rule picks (auto, constant, slope), the mip filter from the minification filter's bits, as the Metal backend does; `<prefix>_NO_MIPMAPS` samples level 0 alone |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -290,3 +291,16 @@ the texture's place in a sampled target (144 to 256 bytes), written for lit and 
 (`src/gpu/shaders/ge.metal`, task 036), and `ge.frag` divides s and t by q (a new varying at location 5) before the
 clamps. Mode 3 and transformed sprites keep their UVs, as on Metal. Frame interpolation keeps a mapped draw's object
 block, so its blended world matrix moves the reflection. `<prefix>_NO_TEXMAP` restores the old path.
+
+### 0012-vulkan-mipmaps
+Task 058. The renderer uploaded and sampled level 0 of every texture; the levels and the level rule, carried in
+`TextureState` since patch 0002-ge-state-commands, went unread here. `mip_levels` takes the GE's level count when the
+minification filter's bit 2 is on and every level halves the one before, lies in guest memory and outside every render
+target (else level 0 alone, said once); the image then has that many mip levels, each decoded with `decode_texture`
+from its own address (in the background as level 0 is), and the cache key covers every level. Such a texture is
+sampled through a sampler of its own (`mip_sampler`, linear between levels). `texture_params.x` gains bits 5 and 6
+(the rule: auto, constant, slope), bit 7 (linear between levels, from the minification filter's bit 1) and, from bit
+8, the part of D that is the same across the draw; `mip_lod` in `ge.frag` adds the rest with the GE's float-bits
+logarithm and samples with `textureLod`, as `sample_texture` in `src/gpu/shaders/ge.metal` (task 037). At an internal
+scale above 1 the auto rule's gradient is taken per PSP pixel. A texture of one level is drawn as before;
+`<prefix>_NO_MIPMAPS` (the name the Metal backend reads) restores the old path.
