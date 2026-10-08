@@ -51,3 +51,34 @@ long (one session)
 ## Escalate when
 The framework's Windows build is broken in a way a patch under 100 lines does not fix; or the Vulkan renderer
 cannot reach the menu on this GPU.
+
+## Result
+Status: PARTIAL (everything proven except the Verify, which waits on `ref/` from the Mac)
+
+Changed: CMakeLists.txt (Metal gated on APPLE), CMakePresets.json (win-x64: clang-cl, lld-link, llvm-rc, llvm-mt),
+tools/env.sh, tools/build.sh, tools/regen.sh (platform branches), tools/setup_game.sh, tools/purelib/port.py
+(hard links, tasklist, a pipe runner in place of the pty), tools/frame_regress.sh (hard-linked game dir),
+tools/docs_check.py (forward-slash paths on Windows), src/tools/ge_replay.cpp (process.h for getpid),
+docs/setup.md (the Windows section), this brief.
+
+Toolchain installed (winget): LLVM 23.1.3, Vulkan SDK 1.4.363.0 (the Mac's version), ccache 4.14.1; SDL3 3.4.18
+VC devel unpacked to deps/; VS 2022 Build Tools (MSVC 14.39, cmake 3.28, ninja) were present. FFmpeg 7.1.5 came
+prebuilt through cmake/FFmpeg.cmake's Windows branch. The disc image in Downloads matched CRC32 4502C588; no
+Developer Mode means no symlinks, so disc.iso and the game dirs use hard links (Downloads and the repo share H:).
+
+Measured: corpus regenerated on this machine (145 units, 149 MB; codegen seconds, the cold compile 14.5 min at 6
+jobs; one compile failure, the unistd.h include above). Frontend route headless to frame 2200 in 3.9 s, exit 0;
+the same with PSPRECOMP_NO_INTERPRETER=1 (no unlowered instruction). The menu+race route headless with
+PSPRECOMP_NO_INTERPRETER=1 to frame 6400: exit 0, 686,967 draws, 573 block transfers, no halts. Windowed on the
+Vulkan shell and backend (RTX 3080, Vulkan 1.4.312): swapchain 960x544 FIFO, frontend route exit 0 with
+lang/notice/profile/title shots, menu+race route exit 0 with menu and race shots; race_hud.png shows the full
+Vineta K first-lap frame (HUD, ship, AI pack, bloom, crowds). python tools/docs_check.py: 33 files, 0 findings.
+
+Verify output (last 20 lines): not run. `tools/frame_regress.sh --shell vulkan --backend vulkan` exits 2 at its
+reference check: the 14 ref/*.png are git-ignored PPSSPP captures that live on the Mac (ref/README.md documents
+them; docs/windows.md says the software-renderer PNGs transfer). Waiting on Erik copying the Mac's ref/.
+
+Open questions: whether the Mac's Vulkan measured column transfers to an RTX 3080 (MoltenVK vs native driver;
+re-measure and re-baseline if a scene moves); the winget ccache path in tools/env.sh is version-pinned
+(ccache-4.14.1) and needs a touch on upgrade; Git Bash pipe runs lose line-grain timing (block-buffered stdout),
+fine for run_boot, to re-examine for campaign_sweep's live steering in step 2.
