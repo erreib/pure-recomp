@@ -78,3 +78,37 @@ tools/run_boot.py --seconds 60 out/boot.log
 The Metal backend and shell are macOS only and are not built (CMakeLists.txt gates them on APPLE); the renderer is
 the framework's Vulkan one (`PURE_GE_BACKEND=vulkan`), the window the Vulkan shell. On Windows the game's stdout
 reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tools/purelib/port.py).
+
+## Windows tools (task 055)
+- **PPSSPP 1.20.4** (the Mac's version), the official portable zip `https://www.ppsspp.org/files/1_20_4/ppsspp_win.zip`
+  (SHA-256 a60f04ebdb0b5f1655422bd7f88349a46999b17ad5115d6ddb290c3934bd5163) unpacked to
+  `H:\errei\Documents\dev-stuff\deps\ppsspp-1.20.4`; no installer, no UAC. The executable is `PPSSPPWindows64.exe`
+  (`tools/ppsspp/ppsspp_ctl.py`'s `APP` on Windows); portable mode puts the memory stick, the ini and the dumps in
+  `memstick/` beside it. The debugger protocol is the Mac's: a scripted run of `routes/frontend.txt` with a
+  screenshot (`memory.read` of VRAM) and a GE dump at frame 600 gave a `.ppdmp` byte-identical to `ref/frontend.ppdmp`
+  and a PNG 269 pixels (0.2%) off `ref/frontend.png` (the software renderer on x64).
+- Process control differs: `tasklist` for the pids, `netstat -ano` for a moved port, `taskkill` (no /F: WM_CLOSE) for a
+  clean quit. A CPU stopped in the debugger keeps the Windows build from closing, so the driver resumes it first.
+  `--savestate` stays macOS-only (it posts the hotkey through CoreGraphics).
+- `tools/worktree_init.sh` runs here: junctions (`mklink /J`) for disc/, generated/ and each directory of the main
+  checkout's ref/, hard links for disc.iso and ref/'s files, the FFmpeg zip copied; a fresh worktree was ready in 52 s
+  (258 ccache hits, 2 misses). Git Bash's `ln -s` copies silently without Developer Mode, so no tool may use it here.
+  A junction into ref/ shares the main checkout's references: a retake in a worktree writes them there.
+- The Vulkan GE backend draws only through the Vulkan shell: headless it draws nothing. Runs that read pictures (the
+  frame suite's default, the sweep, the scorecard's extra scenes) open a Vulkan window on Windows
+  (`purelib.port.DRAWING`) and run paced; runs that read no pictures stay headless.
+- `.sh` tools started from Python go through Git Bash's `bash` by path: `bash` alone resolves to System32's (WSL's).
+
+### The checks of docs/verification.md on Windows
+| Check | Windows |
+|---|---|
+| `tools/imgdiff.py --selftest`, `tools/controls_check.py`, `tools/docs_check.py` | run (task 055) |
+| `tools/frame_regress.sh` | runs, the Vulkan shell and backend by default (task 054: 18/18) |
+| `tools/scorecard.py --quick` | runs (task 055's Verify); timing and coverage read the 46-cell matrix, not run on this machine yet |
+| `tools/save_interchange.sh --check` | runs (the checker builds with LLVM's clang++) |
+| `tools/ppsspp/ppsspp_ctl.py` | runs against the portable PPSSPP 1.20.4 |
+| `tools/worktree_init.sh` | runs |
+| `tools/hud_check.sh` | macOS only: it reads the Metal shell's window |
+| `tools/gerec/metal_check.sh` | macOS only: it compares the Metal backend with Vulkan |
+| `tools/bundle.sh --check` | macOS only: the app bundle |
+| `tools/verify_task.sh 054`, `tools/refactor_check.sh`, `tools/campaign_sweep.py`, `tools/save_roundtrip.sh`, the whole `tools/save_interchange.sh`, `tools/sas_reverb_check.sh`, `tools/ai_seed_check.sh`, `tools/wavstats.py` on a `PURE_AUDIO_WAV` capture, `tools/vfpu_probe.py`, `tools/scorecard.py --refresh-references`, `tools/gerec/replay_check.sh` | not demonstrated yet (task 055 PARTIAL) |
