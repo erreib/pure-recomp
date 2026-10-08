@@ -119,8 +119,8 @@ simplification task, then the enhancements. The session-by-session resume notes 
   cold build sit outside a worker's limits): the game builds with clang-cl on the win-x64 preset, the corpus
   regenerated there (145 units), and the frontend route, the main menu and a Vineta K race run on the framework's
   Vulkan renderer, headless and in a window on the RTX 3080, with `PSPRECOMP_NO_INTERPRETER=1` clean to frame
-  6400. PARTIAL: the Verify (`tools/frame_regress.sh --shell vulkan --backend vulkan`) waits on the 14 git-ignored
-  `ref/*.png` being copied from the Mac. Steps 2 to 4 are worker tasks to brief; `tools/worktree_init.sh` needs
+  6400. DONE 2026-10-08: with ref/ copied from the Mac, the Verify passes 18/18 on the Vulkan path against the Mac's
+  measured Vulkan column unchanged (largest delta +0.0172). Steps 2 to 4 are worker tasks to brief; `tools/worktree_init.sh` needs
   its Windows pass before workers run in parallel here. Still open from before: the simplification task from task
   049's list (the follow-up above), measured by `tools/refactor_check.sh`; then the enhancements (D-009).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
