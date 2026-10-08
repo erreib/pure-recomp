@@ -462,7 +462,8 @@ The GE takes a transformed draw's texture coordinates from one of three sources,
 framework's GE state ignored it and TEXSHADELS (0xC1) until task 036 (patch 0002-ge-state-commands), which carries both
 in `DrawCall::texture_map` (`map_mode`, `proj_source`, `shade_light_u`, `shade_light_v`). `ge_vertex` computes the
 coordinates by the mode, so the reflections the game draws with them (the ships' hulls and canopies, glass buildings,
-shiny roofs: difference 1 of docs/fidelity.md) are drawn. The Vulkan backend still draws every draw with its UVs.
+shiny roofs: difference 1 of docs/fidelity.md) are drawn. The Vulkan renderer draws modes 1 and 2 by the same rules
+since task 057 (patch 0011-vulkan-texture-mapping: `map_texture` in `ge.vert`, from the object block).
 
 The registers: 0xC0 holds the mode in bits 0..1 and the texture matrix's source (TEXPROJMAP) in bits 8..9; 0xC1 the
 light s comes from in bits 0..1 and the light t comes from in bits 8..9, as the PSP SDK's `sceGuTexMapMode(mode, a1,
@@ -525,9 +526,8 @@ PURE_NO_TEXMAP=1 build/arm64/bin/PureNative --replay out/race6016.gerec --backen
 ### Metal against Vulkan
 
 A recording made before task 036 holds no texture map state and replays as mode 0 on both backends. One made since
-carries the modes, which Metal draws and the Vulkan backend does not, so on it the Metal-against-Vulkan comparison is
-like with like only with `PURE_NO_TEXMAP=1` (ge_replay hands the environment to both backends; the Vulkan backend
-draws mode 0 regardless): `tools/gerec/metal_check.sh` sets it for the race. The canopy before and after, the suite
+carries the modes, which Metal draws, and since task 057 the Vulkan backend too; `PURE_NO_TEXMAP=1` turns them off in
+both (ge_replay hands the environment to both backends), which is what `tools/gerec/metal_check.sh` sets for the race. The canopy before and after, the suite
 against PPSSPP and the A/B: [Texture mapping modes](history/metal-backend.md#texture-mapping-modes-task-036-2026-10-07).
 
 ## Mipmaps
@@ -764,9 +764,6 @@ as before and named once; the game never draws one.
 - Points and lines are drawn (the Vulkan backend drops them).
 - Only a draw that reads the target it draws into goes through a copy.
 - An empty scissor draws nothing (the Vulkan backend draws one row or column).
-- The texture map modes are drawn (task 036): the texture matrix (mode 1) and the environment map (mode 2). The
-  Vulkan backend draws every draw with its UVs, so on a recording made since task 036 the race differs between the
-  two by every mapped draw ("Texture mapping modes", the A/B).
 - Mip levels are uploaded and sampled at the level the GE's rule picks (task 037, "Mipmaps"); the Vulkan backend
   samples every texture at level 0.
 - The colour test drops fragments, 16-bit targets keep the format's bits with the GE's dithering, and CLIPENABLE's

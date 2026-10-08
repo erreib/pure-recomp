@@ -71,6 +71,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
 | Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
 | (resolved 2026-10-08) Vulkan viewport column 0 / row 0 | Patch 0010-vulkan-viewport-into-clip-space (task 056, from task 025): the GE viewport's x and y are in the draw's transform and the `VkViewport` is the whole target, as Metal draws; offset viewports (the race HUD) keep column 0 and row 0. The suite's scenes move by under 0.001, the Vulkan column is unchanged |
+| (resolved 2026-10-08) Vulkan texture mapping modes | Patch 0011-vulkan-texture-mapping (task 057): the Vulkan renderer draws texture map modes 1 (the texture matrix, s and t divided by q per pixel) and 2 (the environment map) as the Metal backend does (task 036); `PURE_NO_TEXMAP=1` turns them off in both. On Windows the race scenes moved toward the reference: race_hud 0.059 (column 0.067), tt_hud 0.071, fp_hud 0.072, zone_hud 0.048, zone_change 0.052; the 13 non-race scenes unchanged. The Vulkan column is unchanged until step 3's re-measure |
 
 ## Follow-ups (none blocks a milestone)
 
