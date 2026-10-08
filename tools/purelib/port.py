@@ -5,14 +5,21 @@ The worktree rule: a tool runs the build and the game of the checkout it is in (
 its own build/ and game/), and looks in the main checkout (main_checkout) only for what a worktree never makes
 itself, such as the campaign matrix of task 035.
 """
-import os, pty, select, shutil, subprocess, sys, termios, time
+import os, shutil, subprocess, sys, time
 from collections import namedtuple
 from pathlib import Path
+
+WINDOWS = os.name == "nt"
+if not WINDOWS:
+    import pty, select, termios
+else:
+    import threading
 
 from purelib.logs import FRAME_EXIT, exit_frame
 
 ROOT = Path(os.path.abspath(__file__)).parents[2]
-EXE = ROOT / "build" / "arm64" / "bin" / "PureNative"
+# The build directory is the preset's (CMakePresets.json): arm64 on macOS, win-x64 on Windows (task 054).
+EXE = ROOT / "build" / ("win-x64" if WINDOWS else "arm64") / "bin" / ("PureNative.exe" if WINDOWS else "PureNative")
 GAME = ROOT / "game"
 FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the frame exit before it is killed
 # What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
@@ -94,7 +101,10 @@ def fresh_stick(game_dir):
         link = g / name
         if link.is_symlink() or link.exists():
             link.unlink()
-        link.symlink_to(target)
+        if WINDOWS:     # no symlinks without Developer Mode; a hard link on the same volume does (task 054)
+            os.link(target, link)
+        else:
+            link.symlink_to(target)
     shutil.rmtree(g / "ms0", ignore_errors=True)
     (g / "ms0" / "PSP" / "SAVEDATA").mkdir(parents=True)
     return g
@@ -104,7 +114,20 @@ def fresh_stick(game_dir):
 
 def other_games():
     """The PureNative processes running now (`pgrep -f build/.*/bin/PureNative`, kept when the executable itself is
-    PureNative, not a command line that mentions it), as (pid, command) pairs (task 034: one game at a time)."""
+    PureNative, not a command line that mentions it; on Windows, tasklist by image name), as (pid, command) pairs
+    (task 034: one game at a time)."""
+    if WINDOWS:
+        try:
+            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH", "/FI", "IMAGENAME eq PureNative.exe"],
+                                 capture_output=True, text=True).stdout
+        except OSError:
+            return []
+        games = []
+        for line in out.splitlines():
+            parts = [p.strip('"') for p in line.split('","')]
+            if len(parts) >= 2 and parts[0].strip('"') == "PureNative.exe":
+                games.append((int(parts[1]), "PureNative.exe"))
+        return games
     try:
         pids = subprocess.run(["pgrep", "-f", "build/.*/bin/PureNative"], capture_output=True, text=True).stdout.split()
     except OSError:
@@ -171,15 +194,28 @@ class PtyRun:
     def __init__(self, env, log_path, seconds, max_lines, line_buffered=False):
         """Starts the game with env, writing the folded log to log_path; seconds is the wall-clock deadline."""
         os.makedirs(os.path.dirname(os.path.abspath(log_path)) or ".", exist_ok=True)
-        self.master, self.slave = pty.openpty()
-        attrs = termios.tcgetattr(self.slave)
-        attrs[1] &= ~termios.OPOST          # no "\r\n" translation on output
-        termios.tcsetattr(self.slave, termios.TCSANOW, attrs)
         self.seconds = seconds
         self.start = time.time()
         self.deadline = self.start + seconds
-        self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=self.slave,
-                                  stderr=self.slave)
+        if WINDOWS:
+            # No pty on Windows (task 054): a pipe and a reader thread. The game's stdout is then block-buffered
+            # by its C runtime, so lines arrive in bursts and the last ones only at exit; the deadline and the
+            # frame-exit grace still hold, and drain() reads what the pipe gives up after the kill.
+            self.master = self.slave = None
+            self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+            self._lock = threading.Condition()
+            self._pending = []              # byte chunks the reader thread has taken off the pipe
+            self._eof = False
+            self._reader = threading.Thread(target=self._read_pipe, daemon=True)
+            self._reader.start()
+        else:
+            self.master, self.slave = pty.openpty()
+            attrs = termios.tcgetattr(self.slave)
+            attrs[1] &= ~termios.OPOST          # no "\r\n" translation on output
+            termios.tcsetattr(self.slave, termios.TCSANOW, attrs)
+            self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=self.slave,
+                                      stderr=self.slave)
         self.log = open(log_path, "w", buffering=1 if line_buffered else -1)
         self.buf = b""
         self.last, self.repeat, self.written, self.max_lines = None, 0, 0, max_lines
@@ -216,17 +252,43 @@ class PtyRun:
         self.last, self.repeat = line, 1
         self.emit(line)
 
+    def _read_pipe(self):
+        """Windows only: moves the game's output off the pipe as it comes, so the game never blocks on a full pipe."""
+        while True:
+            try:
+                chunk = self.p.stdout.read(65536)
+            except (OSError, ValueError):
+                chunk = b""
+            with self._lock:
+                if chunk:
+                    self._pending.append(chunk)
+                else:
+                    self._eof = True
+                self._lock.notify_all()
+            if not chunk:
+                return
+
     def _chunk(self, timeout, out):
-        """Reads what the pty holds within timeout into out (whole lines); False when nothing arrived."""
-        ready, _, _ = select.select([self.master], [], [], timeout)
-        if not ready:
-            return False
-        try:
-            chunk = os.read(self.master, 65536)
-        except OSError:
-            return False
-        if not chunk:
-            return False
+        """Reads what the pty (or, on Windows, the reader thread) holds within timeout into out (whole lines);
+        False when nothing arrived."""
+        if WINDOWS:
+            with self._lock:
+                if not self._pending and not self._eof:
+                    self._lock.wait(timeout)
+                if not self._pending:
+                    return False
+                chunk = b"".join(self._pending)
+                self._pending = []
+        else:
+            ready, _, _ = select.select([self.master], [], [], timeout)
+            if not ready:
+                return False
+            try:
+                chunk = os.read(self.master, 65536)
+            except OSError:
+                return False
+            if not chunk:
+                return False
         self.buf += chunk
         *lines, self.buf = self.buf.split(b"\n")
         for raw in lines:
@@ -263,8 +325,13 @@ class PtyRun:
         end = time.time() + 5.0
         while self._chunk(0.05, out) and time.time() < end:
             pass
-        os.close(self.slave)
-        os.close(self.master)
+        if WINDOWS:
+            self._reader.join(timeout=5)
+            self._chunk(0.05, out)
+            self.p.stdout.close()
+        else:
+            os.close(self.slave)
+            os.close(self.master)
         if self.buf:
             self._take(self.buf, out)
             self.buf = b""
