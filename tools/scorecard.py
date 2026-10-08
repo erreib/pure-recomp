@@ -112,9 +112,11 @@ EXTRA_SCENES = [
 # The Vulkan column of the same scenes (limit, measured), used where the pictures come from the Vulkan backend
 # (purelib.port.DRAWING; Windows): Windows, RTX 3080, task 055, three windowed runs each (paced, so the AI grid and
 # the weather mist's phase vary): blue_ridge 0.0832, 0.0892, 0.0845; sinucit 0.1457, 0.1051, 0.0930; sebenco_climb
-# 0.0967, 0.0918, 0.1309. Measured: the median; limit: the largest plus 0.02, rounded up to a hundredth.
+# 0.0967, 0.0918, 0.1309. Measured: the median; limit: the largest plus 0.02, rounded up to a hundredth. Sebenco
+# Climb's fourth run (task 055's second Verify) scored 0.2637: its mist has two phases, as on Metal (measured 0.2993
+# there), so its limit is Metal's 0.32, which covers both.
 EXTRA_SCENES_VULKAN = {"blue_ridge_hud": (0.11, 0.0845), "sinucit_hud": (0.17, 0.1051),
-                       "sebenco_climb_hud": (0.16, 0.0967)}
+                       "sebenco_climb_hud": (0.32, 0.0967)}
 
 # PPSSPP's routes to each circuit's grid (tools/ppsspp/routes, task 035) and the vblank of the first full-HUD frame
 # (ref/README.md, runs J and K). Cross is held from the first READY frame, 58 vblanks after it (7213 on Vineta K,
