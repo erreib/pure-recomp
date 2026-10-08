@@ -118,7 +118,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   harness runs on Windows (the PPSSPP 1.20.4 driver, the ConPTY runner, worktree_init for workers, the references
   retaken with the Mac's kept in ref/mac-2026-10-07/); the Windows scorecard grades Pictures close, Coverage
   close, Timing not measured (no matrix yet), Saves differs (the headless gap: a run without a drawing backend
-  writes no profile save and loads no race — under diagnosis by the planning session, the task to be briefed).
+  wrote no profile save and loaded no race — diagnosed and fixed 2026-10-08: not headless but the blind runs'
+  metal backend falling back to Vulkan, which headless draws into no window; blind runs use the null backend on
+  Windows (purelib.port.BLIND) and Saves grades close. refactor_check.sh alone stays macOS-only, needing headless
+  pictures).
   Step 3 is briefed as tasks 056 to 060 (the Vulkan renderer to the Metal column, exit within 0.005 on every race
   scene); 056 dispatches first and serially (6 threads). Step 1 was task 054 on `task/054-windows-build-boot`,
   run 2026-10-08 on Erik's Windows machine by the planning session itself (the corpus regeneration and the first

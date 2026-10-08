@@ -258,7 +258,7 @@ def port_run(ctx, name, steps, frames, env=None, shots=False):
     game = port.fresh_stick(ctx.stick)
     port.wait_game(say)
     t0 = time.time()
-    shell, backend = port.DRAWING if shots else ("headless", "metal")   # a window on Windows (task 055)
+    shell, backend = port.DRAWING if shots else port.BLIND   # a window on Windows; blind runs on the null backend there (task 055)
     r = port.headless_run(log, route, frames, shell=shell, backend=backend,
                           shots=runs / f"{name}.shots" if shots else None, env=env, game=game, data_dir=DATA_DIR, max_lines=600000, stdout=runs / f"{name}.stdout")
     say(f"run {name}: exit {r.code}, frame {frames} {'reached' if r.reached else 'NOT reached'}, "

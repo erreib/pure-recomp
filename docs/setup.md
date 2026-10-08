@@ -108,7 +108,7 @@ reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tool
 | `tools/save_interchange.sh --check` | runs (the checker builds with LLVM's clang++) |
 | `tools/ppsspp/ppsspp_ctl.py` | runs against the portable PPSSPP 1.20.4 |
 | `tools/worktree_init.sh` | runs |
-| headless runs (`run_boot.py --shell headless`, the scorecard's save and race-load runs) | headless without a drawing backend: saves and race loads differ from the Mac (task 055: main_menu.txt wrote no profile, the Vineta K route opened no track); under diagnosis, task TBD |
+| headless runs (`run_boot.py --shell headless`, the scorecard's save and race-load runs) | diagnosed and fixed 2026-10-08: the gap was not headless but the blind runs' `PURE_GE_BACKEND=metal`, which falls back to the Vulkan GE backend; headless it draws into no window and the guest's GE syncs go astray. Blind runs use the null backend on Windows (`purelib.port.BLIND`): the main_menu route writes both saves, the scorecard's Saves grades close. Headless PICTURES (refactor_check.sh) still need a drawing backend and stay macOS-only |
 | `tools/hud_check.sh` | macOS only: it reads the Metal shell's window |
 | `tools/gerec/metal_check.sh` | macOS only: it compares the Metal backend with Vulkan |
 | `tools/bundle.sh --check` | macOS only: the app bundle |

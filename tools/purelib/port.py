@@ -26,6 +26,12 @@ GAME = ROOT / "game"
 # on macOS; on Windows the Vulkan backend draws only through the Vulkan shell's window (headless, nothing is drawn),
 # so such runs open a window there (task 055). Runs that read no pictures stay headless on both.
 DRAWING = ("vulkan", "vulkan") if WINDOWS else ("headless", "metal")
+# The backend of a headless run that reads no pictures: metal on macOS (the default path, it draws them anyway);
+# null on Windows. PURE_GE_BACKEND=metal there falls back to the Vulkan GE backend, which under the headless shell
+# draws into no window and leaves the guest's GE syncs astray: the main_menu route then writes no profile save and
+# the race never loads, while the same route on the null backend writes both saves (the diagnosis of task 055's
+# headless gap, 2026-10-08). The framework refusing vulkan under the headless shell is a vendor nicety for later.
+BLIND = ("headless", "null") if WINDOWS else ("headless", "metal")
 FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the frame exit before it is killed
 # What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
 # over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings.
@@ -370,7 +376,7 @@ class PtyRun:
 Run = namedtuple("Run", "code frame reached log")   # headless_run: run_boot's exit code, the exit frame, the log
 
 
-def headless_run(log, script, frames, shell="headless", backend="metal", paced_from=None, env=None, shots=None,
+def headless_run(log, script, frames, shell="headless", backend=BLIND[1], paced_from=None, env=None, shots=None,
                  game=None, data_dir=None, seconds=None, max_lines=None, stdout=None):
     """One run through tools/run_boot.py in clean_env(): the input script, to flip frames, with the shell and the GE
     backend, PURE_PACED_FROM, env as --env, shots (--shots), game (PURE_GAME_DIR), data_dir (--data-dir), run_boot's
