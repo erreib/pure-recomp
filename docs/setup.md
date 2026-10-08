@@ -108,6 +108,7 @@ reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tool
 | `tools/save_interchange.sh --check` | runs (the checker builds with LLVM's clang++) |
 | `tools/ppsspp/ppsspp_ctl.py` | runs against the portable PPSSPP 1.20.4 |
 | `tools/worktree_init.sh` | runs |
+| headless runs (`run_boot.py --shell headless`, the scorecard's save and race-load runs) | headless without a drawing backend: saves and race loads differ from the Mac (task 055: main_menu.txt wrote no profile, the Vineta K route opened no track); under diagnosis, task TBD |
 | `tools/hud_check.sh` | macOS only: it reads the Metal shell's window |
 | `tools/gerec/metal_check.sh` | macOS only: it compares the Metal backend with Vulkan |
 | `tools/bundle.sh --check` | macOS only: the app bundle |
