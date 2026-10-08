@@ -26,7 +26,10 @@ cd "$(dirname "$0")/../.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
 ROOT=$PWD
-BIN=build/arm64/bin/PureNative
+# The build directory is the preset's: arm64 on macOS, win-x64 on Windows (task 054; purelib.port knows).
+BIN=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
+# Hard links on Windows: Git Bash's `ln -s` copies (253 MB of disc.iso per run) without Developer Mode (task 054).
+case "$(uname -s)" in MINGW*|MSYS*) LNS="ln" ;; *) LNS="ln -s" ;; esac
 OUT=out/gerec
 
 [ -x "$BIN" ] || { echo "$BIN missing: tools/build.sh profile"; exit 2; }
@@ -50,8 +53,8 @@ record() {
   fi
   rm -rf "$game" "$file.capture.bmp"
   mkdir -p "$game/ms0/PSP/SAVEDATA"
-  ln -s "$ROOT/game/EBOOT.ELF" "$game/EBOOT.ELF"
-  ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$game/disc.iso"
+  $LNS "$ROOT/game/EBOOT.ELF" "$game/EBOOT.ELF"
+  $LNS "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$game/disc.iso"
   : > "$script"
   for part in $(echo "$route" | tr '+' ' '); do
     grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' "config/pad_scripts/$part" >> "$script"
