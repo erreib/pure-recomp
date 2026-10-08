@@ -283,7 +283,7 @@ race recording the fix changes only PSP column 0 (123 pixels at 960x544 in frame
 
 ### 0011-vulkan-texture-mapping
 Task 057. The renderer drew every transformed draw with its UVs through the texture scale and offset (texture map
-mode 0); TEXMAPMODE and TEXSHADELS, carried in `DrawCall::texture_map` since patch 0002, went unread here. The
+mode 0); TEXMAPMODE and TEXSHADELS, carried in `DrawCall::texture_map` since patch 0002-ge-state-commands, went unread here. The
 object block (set 1, binding 1) grows by the mode, the texture matrix, the viewer's direction (w: reversed normals) and
 the texture's place in a sampled target (144 to 256 bytes), written for lit and texture-mapped draws;
 `texture_params.x` gains bit 3 (mapped) and bit 4 (divide by q). `map_texture` in `ge.vert` is the Metal backend's
