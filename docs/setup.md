@@ -34,3 +34,47 @@ psplibdoc, vfpu-docs. `tools/env.sh` puts `/opt/homebrew/bin` and openjdk 21 fir
 - The project lives in `ghidra_project/` (ignored). Scripts are compiled by Ghidra on each run (about 25 s overhead).
 - Ghidra's own string reference analysis finds 1,395 code-to-string references; the relocation walk finds 8,851,
   because many strings are reached through tables and `lui/addiu` pairs the analyser does not follow.
+
+# Windows setup (task 054)
+
+Machine: Erik's Windows 10 Pro x64, 6 threads, 64 GB, NVIDIA RTX 3080. Everything below runs from Git Bash (the
+repo's bash tools run there as on macOS; `python3` resolves to a real Python 3.12 through the WindowsApps alias).
+
+## Toolchain
+- **VS 2022 Build Tools** (already present): MSVC 14.39 headers and libraries, and the `cmake` 3.28 and `ninja`
+  under `Common7/IDE/CommonExtensions/Microsoft/CMake/`. No developer prompt is needed: clang-cl finds the MSVC
+  installation itself.
+- **LLVM 23.1.3** (`winget install LLVM.LLVM`): `clang-cl`, `lld-link`, `llvm-rc`, `llvm-mt` in
+  `C:\Program Files\LLVM\bin`. The preset `win-x64` names them all; `CMAKE_MT` must be set to `llvm-mt` or CMake's
+  link step fails on `CMAKE_MT-NOTFOUND`.
+- **Vulkan SDK 1.4.363.0** (`winget install KhronosGroup.VulkanSDK`, into `C:\VulkanSDK`): headers, loader and
+  `glslangValidator` (the preset points `PORTABLEKIT_GLSLANG` at it). The same 1.4.363 as the Mac's MoltenVK stack.
+- **ccache 4.14.1** (`winget install Ccache.Ccache`): lands under
+  `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ccache.Ccache_...\ccache-4.14.1-windows-x86_64` (the winget `Links`
+  alias did not materialise here); `tools/env.sh` puts that directory on PATH.
+- **SDL3 3.4.18** (the `SDL3-devel-3.4.18-VC.zip` from libsdl-org's releases) unpacked to
+  `H:\errei\Documents\dev-stuff\deps\SDL3-3.4.18`; the preset's `SDL3_ROOT` points there and the framework copies
+  `SDL3.dll` next to the executable.
+- **FFmpeg**: nothing to install; on Windows the framework downloads BtbN's LGPL shared build of 7.1.5 at
+  configure (cmake/FFmpeg.cmake) and stages the three DLLs into `build/win-x64/bin`.
+
+## Traps on this machine
+- No Developer Mode, no admin: `ln -s` fails, so `disc.iso` is a **hard link** to the image in `H:\errei\Downloads`
+  (Downloads is redirected to H:, the repo's volume, so a hard link works); `tools/setup_game.sh` and
+  `tools/purelib/port.py` fall back to hard links when `disc.iso` is not a symlink.
+- `core.autocrlf=true` globally: the working tree is CRLF. Git Bash runs CRLF shell scripts, Python reads them
+  fine, and `git apply` applies the patch series with "trailing whitespace" warnings that mean nothing.
+- The first `clang` on PATH is irrelevant here (no Game Porting Toolkit); the preset names absolute compiler paths.
+- `tools/env.sh` detects Windows by `uname -s` (MINGW*) and sets PATH for cmake, ninja, clang-cl and ccache;
+  `tools/build.sh` and `tools/regen.sh` pick the `win-x64` preset the same way.
+
+## Build and run
+```
+tools/build.sh configure     # preset win-x64; downloads FFmpeg on first run
+tools/regen.sh               # regenerate the corpus from game/EBOOT.ELF (never copy generated/ between machines)
+tools/build.sh profile       # incremental after that
+tools/run_boot.py --seconds 60 out/boot.log
+```
+The Metal backend and shell are macOS only and are not built (CMakeLists.txt gates them on APPLE); the renderer is
+the framework's Vulkan one (`PURE_GE_BACKEND=vulkan`), the window the Vulkan shell. On Windows the game's stdout
+reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tools/purelib/port.py).
