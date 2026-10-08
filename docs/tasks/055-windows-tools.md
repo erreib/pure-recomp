@@ -143,3 +143,33 @@ Open questions:
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+
+## Result addendum (continuation)
+Status: PARTIAL, unchanged. Of the seven items in the review, only the backup (item 1's first step) was done before
+the continuation stopped. Nothing else was run, and nothing after commit ebd95f0 changed tools/ or docs/ apart from
+this addendum.
+
+1. Backup: done. The main checkout's ref/scorecard (135 MB) and ref/vfpu (509 MB, with jit/ and interp/) were
+   copied with `cp -a` to H:/errei/Documents/dev-stuff/pure-recomp/ref/mac-2026-10-07/ (git-ignored).
+   Retakes: not done. Neither `tools/scorecard.py --refresh-references` nor `tools/vfpu_probe.py` was run;
+   ref/scorecard and ref/vfpu still hold the Mac's references. Whether vfpu_probe's port side hits the headless
+   problem is unknown.
+2. Headless difference: not diagnosed further, as decided. Not yet recorded in docs/setup.md's Windows table: the
+   row "headless without a drawing backend: saves and race loads differ from the Mac; under diagnosis, task TBD"
+   still has to be added.
+3. Sweep cell (single_race, Vineta K, windowed Vulkan): not run. Whether pipe buffering holds up for live steering
+   is still open.
+4. Vulkan column for blue_ridge_hud, sinucit_hud, sebenco_climb_hud: not measured, and EXTRA_SCENES in
+   tools/scorecard.py is unchanged. The only Windows values are from the first Verify run, one windowed run
+   each: blue_ridge_hud 0.0832, sinucit_hud 0.1457. sebenco_climb_hud's value is in
+   out/scorecard/scorecard.md, which was not recorded as a column.
+5. 4-hour audit: not run, as decided. The note in docs/scorecard.md (the Windows matrix is a later task) has not
+   been written. Timing and Coverage stay not measured on Windows.
+6. Remaining checks: none run. verify_task.sh 054, refactor_check.sh, wavstats on a PURE_AUDIO_WAV capture,
+   sas_reverb_check.sh, ai_seed_check.sh and save_roundtrip.sh are untested on Windows, and the table in
+   docs/setup.md still says "not demonstrated yet".
+7. Verify rerun: not done. The only Verify output is the first Result's, which exited 0 with Pictures differs,
+   Saves differs, Timing not measured and Coverage close. That run does not show the grades in
+   docs/scorecard.md; the exit 0 with Timing and Coverage unmeasured is what the review accepted for 055.
+
+Open: items 1 (retakes), 2 (the table row), 3, 4, 5 (the docs note), 6 and 7 remain for a further continuation.
