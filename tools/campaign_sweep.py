@@ -1029,7 +1029,9 @@ def run_cell(mode, track, opts):
     geo = tuner or (Tuner(ai_line, 1.0, 0.0) if ai_line else None)     # the line's heading for the trace
 
     def send(text):
-        with open(live, "a") as f:
+        # newline="\n": Windows' text mode would end the step with "\r\n", and the port keeps the "\r" (a live shot
+        # named `f123\r` cannot be written; task 055).
+        with open(live, "a", newline="\n") as f:
             f.write(text + "\n")
 
     def stop(why_outcome, why):

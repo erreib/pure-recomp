@@ -14,6 +14,7 @@ if not WINDOWS:
     import pty, select, termios
 else:
     import threading
+    from purelib.conpty import ConPty, strip_vt
 
 from purelib.logs import FRAME_EXIT, exit_frame
 
@@ -202,12 +203,12 @@ class PtyRun:
         self.start = time.time()
         self.deadline = self.start + seconds
         if WINDOWS:
-            # No pty on Windows (task 054): a pipe and a reader thread. The game's stdout is then block-buffered
-            # by its C runtime, so lines arrive in bursts and the last ones only at exit; the deadline and the
-            # frame-exit grace still hold, and drain() reads what the pipe gives up after the kill.
+            # No pty on Windows: a pseudoconsole (ConPTY, purelib/conpty.py; task 055) and a reader thread. Its C
+            # runtime sees a console, so the game's stdout is not block-buffered: through a plain pipe (task 054)
+            # its `[pure] ship` lines reached the sweep about 1 s (56 flips) late in bursts, and the follower lost
+            # the road. The console's VT sequences are removed line by line in _take.
             self.master = self.slave = None
-            self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
-                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+            self.p = ConPty([str(EXE)], ROOT, env)
             self._lock = threading.Condition()
             self._pending = []              # byte chunks the reader thread has taken off the pipe
             self._eof = False
@@ -244,6 +245,8 @@ class PtyRun:
         self.repeat = 0
 
     def _take(self, raw, out):
+        if WINDOWS:
+            raw = strip_vt(raw).replace(b"\r", b"")
         line = raw.decode("utf-8", "replace").rstrip("\r")
         if not self.frame_exit and line.startswith(FRAME_EXIT):
             self.frame_exit = True
@@ -260,7 +263,7 @@ class PtyRun:
         """Windows only: moves the game's output off the pipe as it comes, so the game never blocks on a full pipe."""
         while True:
             try:
-                chunk = self.p.stdout.read(65536)
+                chunk = self.p.read(65536)
             except (OSError, ValueError):
                 chunk = b""
             with self._lock:
@@ -332,7 +335,6 @@ class PtyRun:
         if WINDOWS:
             self._reader.join(timeout=5)
             self._chunk(0.05, out)
-            self.p.stdout.close()
         else:
             os.close(self.slave)
             os.close(self.master)

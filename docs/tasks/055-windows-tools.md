@@ -173,3 +173,28 @@ this addendum.
    docs/scorecard.md; the exit 0 with Timing and Coverage unmeasured is what the review accepted for 055.
 
 Open: items 1 (retakes), 2 (the table row), 3, 4, 5 (the docs note), 6 and 7 remain for a further continuation.
+
+## Result addendum (second continuation)
+Items as numbered in the second review.
+
+1. Docs: done (commit c1db9be). docs/setup.md's Windows table has the headless row ("headless without a drawing
+   backend: saves and race loads differ from the Mac; under diagnosis, task TBD"). docs/scorecard.md now says
+   Timing and Coverage are not measured on Windows and that the Windows matrix is a later task.
+2. Sweep cell (single_race Vineta K, windowed Vulkan): PASS, but only after two tools-only fixes. The first run is
+   what answers the review's question: the pipe's buffering did break live steering.
+   - Through the plain pipe (task 054's runner), without --no-damage: STALL at flip 19100, "eliminated by
+     damage", 2 laps, 56 contacts (33, 21). With --no-damage: TIMEOUT, 2 laps in 217 s of race clock, 73 contacts
+     (30, 34, 9). The Mac's --no-damage cell passes in 176.9 s. Measured on a race to flip 7200: the 1001
+     `[pure] ship` lines reached the tool in 37 bursts (10 ms grain), about 1 s (56 flips) behind.
+   - Fix 1: tools/purelib/conpty.py, a Windows pseudoconsole (ConPTY) through ctypes, stdlib only. purelib.port's
+     Windows runner now uses it, so the game's C runtime sees a console and writes unbuffered. The same race: 994
+     distinct arrival times for 1001 lines. ConPTY sends painted output, not a copy: spaces arrive as cursor
+     moves, and a line written in pieces is repainted from its start. strip_vt replays each line on one row.
+     After that a headless boot's log has every line of the pipe run apart from the timing figures, no escape
+     bytes are left, and the sweep log has no doubled tags.
+   - Fix 2: the sweep wrote PURE_INPUT_LIVE steps in Windows text mode ("\r\n"), and the port kept the "\r". Every
+     live shot (`f18979\r`) failed with "[render] cannot write" (76 times), so the results panel was never seen.
+     The steps are now written with "\n".
+   - With both fixes: `tools/campaign_sweep.py single_race vineta_k` printed PASS at flip 17070: results screen at
+     17060, 3 laps of 58.6, 60.7 and 59.9 s, 183.0 s at the shot, 45 contacts (16, 15, 14), shield 28.8 at the end,
+     335 s wall, exit 0.
