@@ -52,6 +52,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0007-savedata-list-and-no-key-mode | 0015, 0019 | Missing feature | candidate | List requests answered with a choice (script, PSP-style list, or a safe default); saves without a game key written and checked in mode 1 |
 | 0008-sas-reverb | 0018 | Missing feature | candidate | The SAS reverb (the SPU's reverberator, nine presets) and the voices' effect sends |
 | 0009-vfpu-rounding | 0020, 0021 | Fidelity (D-013) | the rules; the test mode is ours | VFPU dot products, cross products and horizontal sums round as a PSP does; generated units built with `-ffp-contract=off` |
+| 0010-vulkan-viewport-into-clip-space | (task 056) | Bug | candidate | The GE viewport's x and y folded into the draw's transform and the `VkViewport` the whole target, so an offset GE viewport keeps column 0 and row 0 (the race HUD) |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -267,3 +268,14 @@ Old 0020, then old 0021. Changes `include/psprecomp/`, so applying it to a built
   so an infinite s.z or t.z no longer makes it NaN (pspautotests' nine cases); `vfad`/`vavg` sum in lane order
   unfused under the test mode (every sampled result) and by the PSP's rule by default (pspautotests' 15 and 15).
   `vqmul.q`, `vcrs.t`, `vmscl` and `vrot` are unchanged (not in the game's code, one product, or unmeasured).
+
+### 0010-vulkan-viewport-into-clip-space
+Task 056. The renderer made the GE viewport (`screen = ndc * scale + offset - region offset`) its `VkViewport`, and
+Vulkan clips x and y at the viewport, while the GE clips them only at the scissor. A viewport that does not start at
+the target's corner lost its first column and row: the race HUD's (offset 1807/1911 against the world's 1808/1912)
+lost column 0 (task 025, found against the Metal backend). `interpolation::viewport_into_clip` turns the viewport's x
+and y into a matrix applied after the projection, `submit` puts it in the push constants' transform, and the
+`VkViewport` covers the whole target, as the Metal backend draws (docs/metal-backend.md, "How a draw is drawn"); the
+z scale and offset stay in the viewport's depth range. A frame summary's projection carries the same matrix, so frame
+interpolation's blended transforms keep it. Window coordinates, and with them the cull winding, are unchanged. On the
+race recording the fix changes only PSP column 0 (123 pixels at 960x544 in frame 6016).

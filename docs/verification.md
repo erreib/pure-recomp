@@ -121,7 +121,8 @@ build, game or reference, or another PureNative running (below).
 | `zone_change` | the same | 5679 | `ref/zone_change.png` (7528) | 32 | 0.10 | 0.082 | 0.0353 |
 
 The table lives at the top of the script (`SCENES`), with a measured column per backend and the source of each value
-as a comment; the one above is the script's as of 2026-10-07 (task 040's re-baseline of the Metal column). A scene's
+as a comment; the one above is the script's as of 2026-10-07 (task 040's re-baseline of the Metal column; task 056's
+viewport fix, 2026-10-08, moved race_hud, tt_hud and fp_hud by under 0.001 and left the Vulkan column as it was). A scene's
 fraction is the share of pixels that differ by more than Tol in any channel, with both frames at 480x272 (a window's
 960x544 capture is reduced by nearest neighbour; a headless capture is 480x272 already). The scene passes at or below
 Limit, which is shared by both backends. The Metal column serves the Metal window and the headless shell alike: the

@@ -70,12 +70,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
 | (resolved 2026-10-06) Headless pace | Patch 0005-kernel-host-waits-and-pacing (Fable, after task 026): the kernel's host-wait sleep applies only to waits bound to real time (the adhoc network waits), and pacing follows the shell (`Kernel::set_paced`). Headless runs: the null backend to frame 2000 in 0.5 s (was 106 s), the headless frontend route to frame 2200 in 1.1 s (was 115 s), same draws and events |
 | Ghidra in worktrees | Ghidra refuses a project path containing `.claude`, so `tools/ghidra_headless.sh import` fails inside `.claude/worktrees/`; workers import into a scratch directory |
 | `sceKernelSetVTimerHandler` | was a no-op in the first runs; now mirrors the framework's Wide form (profile) |
+| (resolved 2026-10-08) Vulkan viewport column 0 / row 0 | Patch 0010-vulkan-viewport-into-clip-space (task 056, from task 025): the GE viewport's x and y are in the draw's transform and the `VkViewport` is the whole target, as Metal draws; offset viewports (the race HUD) keep column 0 and row 0. The suite's scenes move by under 0.001, the Vulkan column is unchanged |
 
 ## Follow-ups (none blocks a milestone)
 
 | Item | Where it came from | Note |
 |---|---|---|
-| Vulkan backend loses column 0 / row 0 of transformed draws whose GE viewport is offset (the race HUD) | task 025 | a vendor patch: viewport into clip space, `VkViewport` the whole target, as Metal does; moves Vulkan's race_hud slightly; upstream candidate |
 | Block transfers and `read_back_framebuffer` from a rendered target are unexercised by any recording | task 025 | the race copies from main memory only; a scene that copies a rendered target (other tracks, Zone) needs a recording |
 | Point and spot lights, specular, reversed normals ported but unexercised | task 024 | a recording of a night or tunnel track |
 | Menu text "Graphics: Vulkan on ..." and frame-rate rows under the Metal shell | task 027 | cosmetic, `ui/menu.cpp` (vendor) |
