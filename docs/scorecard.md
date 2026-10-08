@@ -25,6 +25,11 @@ rewrites this file). `--only CATEGORY[,...]` runs some. Refresh the PPSSPP side:
 --refresh-references [CATEGORY]` (about an hour for all; docs/verification.md, "The accuracy scorecard").
 On Windows (task 055) Timing and Coverage are not measured: they read the campaign matrix's cells, and a Windows
 matrix (`tools/fidelity_audit.py`, about 4 h) is a later task; Pictures there grades against the Vulkan column.
+Until docs/windows.md step 3 brings the Vulkan renderer to the Metal backend's fidelity, the expected Pictures
+grade on Windows is close, not faithful (tt_hud and zone_hud carry the renderer's known differences), and the
+paced extra scenes spread by up to 0.05 between runs (the AI grid; on Sinucit and Sebenco the weather mist's
+phase), so their rows can move a grade without anything having changed. A --quick run there takes about 30
+minutes, not 1: every picture run is a paced Vulkan window.
 
 ## --full run of 2026-10-07 11:57, commit db10191 (17m 38s)
 

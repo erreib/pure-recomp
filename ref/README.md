@@ -410,3 +410,22 @@ $P tools/vfpu_probe.py port ref/vfpu/jit --modes ppsspp,psp                     
 
 The Vineta K set's `.port.pre0020.csv` and `.port.candidate.<mode>.csv` are made the same way as Karbonis'. PPSSPP's
 memory stick held `PPCD00001DLS001` only, before and after every run; every run's ini was put back (CPU core 1).
+
+## Task 055 (2026-10-08): the Windows retake of the VFPU samples
+
+`ref/vfpu/` was retaken on Erik's Windows machine with PPSSPP 1.20.4 for Windows (x64 JIT on CPU core 1; the
+interpreter run on core 0 used the Mac's 27 sites), because the Apple Silicon JIT's rounding does not transfer
+(docs/windows.md, docs/fidelity.md difference 13). `vfpu_model.py --check` exits 1 on these sets as predicted:
+the x64 JIT does not follow the Apple JIT's dot-product rule (per-instruction agreement 77.7% to 100%). The
+port's test mode still reproduces the Mac's Apple-JIT samples on every row, so the port's x64 rounding is the
+arm64 rounding. The Mac's sets of task 047 (the table above) are preserved in `ref/mac-2026-10-07/`.
+
+| File or set | Size | SHA-256 | Made |
+|---|---|---|---|
+| vfpu/coverage.csv | 33289 | 56bbab359395ccb90100677bdbc5fd470059e1d3890f67c33848858637887858 | 2026-10-08, JIT, 251 of 908 sites executed, 1748277 hits |
+| vfpu/jit/sites.json | 149688 | 241dcd4266ee8df365409f588bc5d9d1f2889a5ed62dad7b621725ce7622f6fa | 2026-10-08, CPU core 1 (x64 JIT), 243 sites |
+| vfpu/jit/*.csv (243, not port) | | digest 0d4202c837954e4f745dc5b381dc3eb78bea12b8da27409e5443d0796f47952a | the same run |
+| vfpu/jit/*.port.csv (243) | | digest 14b68d78404f03860c9577ff544ce9e2bd34fe62df3bd76b0dd77682ea0e107c | `port`, the win-x64 corpus of 2026-10-08 |
+| vfpu/interp/sites.json | 20836 | bbb203b9f912e2b3b32ef52551b1f53f20675f8037edad205d5067bc73f34cc3 | 2026-10-08, CPU core 0 (x64 interpreter), 27 sites |
+| vfpu/interp/*.csv (27, not port) | | digest 290e9fafee12b3b3bda4de415d6a98d438761a02e2f798e455eb0a24f03e30f0 | the same run |
+| vfpu/interp/*.port.csv (27) | | digest 0f5f17f786713d01abcda915e52211320d64b022cf2afc6b76e9ab66f9beb77e | `port`, the win-x64 corpus of 2026-10-08 |
