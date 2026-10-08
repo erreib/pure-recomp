@@ -154,14 +154,14 @@ if [ -s "$OUT/race_1x.gerec" ]; then
   step "3. race_1x.gerec frame 6016 into vulkan and metal, tol 24, max-frac 0.02"
   # The Metal backend maps textures from normals and the texture matrix (task 036) and the Vulkan
   # backend does not: the race A/B compares the two with that feature off on both sides.
-  PURE_NO_TEXMAP=1 replay "$OUT/metal_race.log" "$OUT/race_1x.gerec" --a vulkan --b metal --frames 6016 --tol 24 --max-frac 0.02 \
+  replay "$OUT/metal_race.log" "$OUT/race_1x.gerec" --a vulkan --b metal --frames 6016 --tol 24 --max-frac 0.02 \
     --first-diff --out "$OUT/metal_race"
   if [ $rc -ne 0 ]; then
     fail "race_1x.gerec frame 6016: vulkan against metal exit $rc (log $OUT/metal_race.log)"
     cut=$(sed -n 's/^\[replay\] first difference in frame [0-9]*: draw \([0-9]*\) of.*/\1/p' "$OUT/metal_race.log")
     if [ -n "$cut" ]; then
       rm -rf "$OUT/metal_race_cut"
-      PURE_NO_TEXMAP=1 replay "$OUT/metal_race_cut.log" "$OUT/race_1x.gerec" --a vulkan --b metal --frames 6016 --cut "$cut" \
+      replay "$OUT/metal_race_cut.log" "$OUT/race_1x.gerec" --a vulkan --b metal --frames 6016 --cut "$cut" \
         --tol 24 --out "$OUT/metal_race_cut"
       echo "both pictures after draw $cut: $OUT/metal_race_cut/a/frame_6016.bmp (vulkan), $OUT/metal_race_cut/b/frame_6016.bmp (metal)"
     fi
