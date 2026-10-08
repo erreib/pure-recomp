@@ -212,3 +212,45 @@ Items as numbered in the second review.
    The limit is the largest run plus 0.02, rounded up to a hundredth, as docs/verification.md re-baselines. The
    paced runs spread by up to 0.05 (the AI grid, and on sinucit and sebenco the weather mist's phase), more than
    the 0.005 faithful band. So these rows can grade close from run to run without anything having changed.
+4. Retakes: done on PPSSPP 1.20.4 for Windows (x64 JIT). The Mac's references are kept in the main checkout's
+   ref/mac-2026-10-07/.
+   - ref/scorecard: `tools/scorecard.py --refresh-references` printed "references: 38 files made, 38 listed;
+     4258 s" (exit 0). That covers 12 trajectories (Mandrashee's first attempt failed with "cpu.evaluate: CPU not
+     started" and the retry worked), the audio dumps, the save and the timing race. ref/README.md's
+     generated table now lists the Windows files.
+     - A first saves-only retake found a bug: through the ref/ junction, rel() wrote absolute keys into the
+       shared manifest. Fixed in commit ab1f5f8 and the six bad keys removed.
+     - The retaken files differ from the Mac's (vineta_k.csv, karbonis.csv, main_menu.wav compared).
+     - PPSSPP's follower race on Vineta K (the timing reference) ended "STALL at 3898 m after 208.2 s"
+       (laps 67.05, 60.75 s; 36 contacts; 8 stretches). The Mac's passed. Timing is not graded on Windows, so
+       no row depends on it yet.
+   - ref/vfpu: cover found 251 of 908 sites executed, 1,748,277 hits, 149 s. `sample --out ref/vfpu/jit --sites
+     all --cap 5000 --seconds 12` took 415 s, and the player ended 0.0005 m from the reference. `sample --out
+     ref/vfpu/interp --cpu-core 0 --cap 1500 --seconds 12` on the Mac's 27 sites took 2199 s, ending 0.034 m off.
+     `port` ran on both sets. `vfpu_model.py --check ref/vfpu` exits 1, as docs/windows.md predicted
+     (difference 13): PPSSPP's x64 JIT does not follow the Apple JIT's dot-product rule. These rows match it:
+
+     | Instruction | Rows matching |
+     |---|---|
+     | vdot.t | 77.7% |
+     | vtfm3.t | 78.6% |
+     | vtfm4.q | 91.6% |
+     | vdot.q | 86.2% |
+     | vmmul.q | 100% |
+     | vfad.q | 93.5% |
+     | vfad.t, vcrsp.t, vmscl.q | 100% |
+
+     The x64 interpreter (core 0) matches its rule on 83.6% to 99.98% of rows. vrcp.s on the interpreter
+     differs from 1/x on 1348 of 3112 results.
+   - The port agrees with the model:
+     - The Windows-built corpus code in the test mode (PURE_VFPU_DOT=ppsspp) reproduces PPSSPP's Apple JIT
+       samples (the Mac's ref/vfpu/jit) on every row: 1,172,943 dot products, 100%.
+     - On the Windows samples, the test mode matches PPSSPP exactly as often as the model does, row for row.
+     - The default (PSP) mode differs from PPSSPP by design.
+     - So the port's x64 rounding is the arm64 rounding. What differs is PPSSPP's x64 JIT. On Windows, the
+       trajectories' AI rows will compare against a PPSSPP that rounds otherwise.
+   - Not done: ref/README.md's hand-kept VFPU hash rows still describe the Mac's sets.
+   - Tool fixes, all in commit e38f5cd:
+     - vfpu_probe `port` builds with clang-cl and the corpus's Windows flags.
+     - vfpu_model loads the UCRT for its libm.
+     - An f-string in vfpu_model that Python 3.12 does not parse is fixed.
