@@ -53,6 +53,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0008-sas-reverb | 0018 | Missing feature | candidate | The SAS reverb (the SPU's reverberator, nine presets) and the voices' effect sends |
 | 0009-vfpu-rounding | 0020, 0021 | Fidelity (D-013) | the rules; the test mode is ours | VFPU dot products, cross products and horizontal sums round as a PSP does; generated units built with `-ffp-contract=off` |
 | 0010-vulkan-viewport-into-clip-space | (task 056) | Bug | candidate | The GE viewport's x and y folded into the draw's transform and the `VkViewport` the whole target, so an offset GE viewport keeps column 0 and row 0 (the race HUD) |
+| 0011-vulkan-texture-mapping | (task 057) | Missing feature | candidate | Texture map modes 1 (the texture matrix, s and t divided by q per pixel) and 2 (the environment map from the normal and two lights) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_TEXMAP` draws every draw with its UVs |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -279,3 +280,13 @@ and y into a matrix applied after the projection, `submit` puts it in the push c
 z scale and offset stay in the viewport's depth range. A frame summary's projection carries the same matrix, so frame
 interpolation's blended transforms keep it. Window coordinates, and with them the cull winding, are unchanged. On the
 race recording the fix changes only PSP column 0 (123 pixels at 960x544 in frame 6016).
+
+### 0011-vulkan-texture-mapping
+Task 057. The renderer drew every transformed draw with its UVs through the texture scale and offset (texture map
+mode 0); TEXMAPMODE and TEXSHADELS, carried in `DrawCall::texture_map` since patch 0002, went unread here. The
+object block (set 1, binding 1) grows by the mode, the texture matrix, the viewer's direction (w: reversed normals) and
+the texture's place in a sampled target (144 to 256 bytes), written for lit and texture-mapped draws;
+`texture_params.x` gains bit 3 (mapped) and bit 4 (divide by q). `map_texture` in `ge.vert` is the Metal backend's
+(`src/gpu/shaders/ge.metal`, task 036), and `ge.frag` divides s and t by q (a new varying at location 5) before the
+clamps. Mode 3 and transformed sprites keep their UVs, as on Metal. Frame interpolation keeps a mapped draw's object
+block, so its blended world matrix moves the reflection. `<prefix>_NO_TEXMAP` restores the old path.

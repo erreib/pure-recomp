@@ -1,0 +1,342 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index 2de9e7a..58518b7 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -5,6 +5,7 @@ layout(location = 1) in vec4 frag_color;
+ layout(location = 2) in vec3 frag_specular;
+ layout(location = 3) in float frag_fog;
+ layout(location = 4) flat in vec4 frag_uv_rect;
++layout(location = 5) in float frag_q;
+ layout(location = 0) out vec4 out_color;
+ // The fragment's own alpha, for dual-source blending: when the target's alpha
+ // receives the stencil value instead, a colour blend that reads the source
+@@ -23,7 +24,7 @@ layout(constant_id = 0) const bool kAlphaTest = true;
+ layout(push_constant) uniform Push {
+     mat4 transform;
+     vec4 viewport;
+-    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v), y: texture function, z: alpha ref, w: alpha func
++    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q), y: texture function, z: alpha ref, w: alpha func
+     vec4 uv_transform;
+     vec4 view_z;
+ } push;
+@@ -47,11 +48,13 @@ vec4 stored(vec4 color) {
+ void main() {
+     vec4 color = frag_color;
+     if (push.texture_params.x > 0.5) {
+-        vec2 uv = clamp(frag_texcoord, frag_uv_rect.xy, frag_uv_rect.zw);
++        // Texture map mode 1 (texture_params.x bit 4): s and t divided by q.
++        int flags = int(push.texture_params.x + 0.5);
++        vec2 uv = (flags & 16) != 0 ? frag_texcoord / frag_q : frag_texcoord;
++        uv = clamp(uv, frag_uv_rect.xy, frag_uv_rect.zw);
+         // The GE's clamp wrap mode, per axis (texture_params.x bits 1 and 2):
+         // the sampler repeats, so the coordinate stays between the centres of
+         // the edge texels, which is what clamping to the edge samples.
+-        int flags = int(push.texture_params.x + 0.5);
+         if ((flags & 6) != 0) {
+             vec2 half_texel = 0.5 / vec2(textureSize(guest_texture, 0));
+             if ((flags & 2) != 0) uv.x = clamp(uv.x, half_texel.x, 1.0 - half_texel.x);
+diff --git a/host/gpu/shaders/ge.vert b/host/gpu/shaders/ge.vert
+index 476ebf6..c47877b 100644
+--- a/host/gpu/shaders/ge.vert
++++ b/host/gpu/shaders/ge.vert
+@@ -164,11 +164,14 @@ layout(location = 3) out float frag_fog;
+ // (in_normal.z, in_position.w), which through-mode vertices do not use
+ // otherwise; see clamp_through_quads() in vulkan_renderer.cpp.
+ layout(location = 4) flat out vec4 frag_uv_rect;
++// Texture map mode 1: q, which the fragment shader divides s and t by
++// (texture_params.x bit 4); 1 otherwise.
++layout(location = 5) out float frag_q;
+ 
+ layout(push_constant) uniform Push {
+     mat4 transform;      // WVP, or identity for through vertices
+     vec4 viewport;       // xy: target size in PSP pixels, z: through, w: 1 fog + 2 lighting
+-    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v), y: texture function, z: alpha ref, w: alpha func
++    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q), y: texture function, z: alpha ref, w: alpha func
+     vec4 uv_transform;   // xy: scale, zw: offset
+     vec4 view_z;         // row of view * world that gives view-space z
+ } push;
+@@ -197,6 +200,11 @@ layout(set = 1, binding = 1) uniform Object {
+     vec4 material_ambient;  // rgba
+     vec4 material_diffuse;  // rgb; w: 1 keeps specular apart
+     vec4 material_specular; // rgb; w: reverse normals
++    // Texture map modes 1 and 2 (texture_params.x bit 3), unset otherwise:
++    vec4 texture_map;       // x: mode, y: the texture matrix's source, z, w: the shade lights of s and t
++    mat4 texture_matrix;    // the GE's 4x3 texture matrix
++    vec4 viewer;            // xyz: the viewer's direction in world space; w: reverse normals
++    vec4 uv_remap;          // the texture's coordinates into the image sampled: uv * xy + zw
+ } object;
+ 
+ // The GE's per-vertex lighting, evaluated in world space: emissive, plus the
+@@ -264,6 +272,54 @@ void light_vertex(out vec4 color, out vec3 separate_specular) {
+     color = clamp(vec4(sum, alpha), 0.0, 1.0);
+ }
+ 
++vec3 unit_or_zero(vec3 v) {
++    float length_squared = dot(v, v);
++    return length_squared > 0.0 ? v * inversesqrt(length_squared) : vec3(0.0);
++}
++
++// The texture coordinates of the texture matrix (mode 1) and the environment
++// map (mode 2), by the GE's rules as PPSSPP's hardware notes give them (the
++// UV modes; lighting, "Shade mapping"). Neither takes the texture scale and
++// offset; uv_remap only places the texture in the image sampled.
++void map_texture() {
++    vec4 remap = object.uv_remap;
++    if (int(object.texture_map.x + 0.5) == 1) {
++        // The source with the matrix's translation added, times the matrix:
++        // s, t and q, interpolated and divided per pixel.
++        int which = int(object.texture_map.y + 0.5);
++        vec3 source;
++        if (which == 0) source = in_position.xyz;
++        else if (which == 1) source = vec3(in_texcoord, 0.0);
++        else if (which == 2) source = unit_or_zero(in_normal);
++        else source = in_normal;
++        vec3 stq = (object.texture_matrix * vec4(source, 1.0)).xyz;
++        frag_texcoord = vec2(stq.x * remap.x + stq.z * remap.z, stq.y * remap.y + stq.z * remap.w);
++        frag_q = stq.z;
++        return;
++    }
++    // The environment map: s and t are (N.L' + 1) / 2 for the two shade
++    // lights, in world space. N is the normal through the world matrix, the
++    // dot product divided by its length; L' the light's position for a
++    // directional light, else the direction from the vertex to it,
++    // normalized, and for a diffuse-and-specular light normalized again after
++    // the viewer's direction is added. Lighting, the lights' enables and
++    // colours, attenuation and the spot cone play no part.
++    vec3 normal = mat3(object.world) * in_normal;
++    if (object.viewer.w > 0.5) normal = -normal;
++    float length_squared = dot(normal, normal);
++    float inverse_length = length_squared > 0.0 ? inversesqrt(length_squared) : 0.0;
++    vec3 world_position = (object.world * vec4(in_position.xyz, 1.0)).xyz;
++    vec2 st;
++    for (int i = 0; i < 2; ++i) {
++        int light = int((i == 0 ? object.texture_map.z : object.texture_map.w) + 0.5);
++        vec3 to_light = lighting.light_position[light].xyz;
++        if (int(lighting.light_direction[light].w + 0.5) != 0) to_light -= world_position;
++        to_light = unit_or_zero(to_light);
++        if (int(lighting.light_attenuation[light].w + 0.5) == 1) to_light = unit_or_zero(to_light + object.viewer.xyz);
++        st[i] = (dot(normal, to_light) * inverse_length + 1.0) * 0.5;
++    }
++    frag_texcoord = st * remap.xy + remap.zw;
++}
+ 
+ void main() {
+ #ifdef GE_RAW_VERTICES
+@@ -273,6 +329,7 @@ void main() {
+     frag_color = in_color;
+     frag_specular = vec3(0.0);
+     frag_fog = 1.0;
++    frag_q = 1.0;
+     frag_uv_rect = vec4(-1e30, -1e30, 1e30, 1e30);
+     if (push.viewport.z > 0.5) {
+         vec4 rect = vec4(in_normal.xy, in_normal.z, in_position.w);
+@@ -288,6 +345,7 @@ void main() {
+         // which is negative in front of the camera: (z + end) * scale.
+         if ((enables & 1) != 0)
+             frag_fog = (dot(push.view_z, vec4(in_position.xyz, 1.0)) + lighting.fog.x) * lighting.fog.y;
++        if ((int(push.texture_params.x + 0.5) & 8) != 0) map_texture();
+         vec4 clip = push.transform * vec4(in_position.xyz, 1.0);
+         // PSP clip space follows OpenGL with z in [-w, w]; Vulkan clips against
+         // [0, w], so without this remap the near half of every frustum is lost.
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 262b60a..0101e80 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -126,7 +126,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
+ struct PushConstants {
+     std::array<float, 16> transform{};
+     std::array<float, 4> viewport{};        // x,y: target size; z: through flag; w: 1 fog + 2 lighting + 4 stencil
+-    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v, y: function, z: alpha ref, w: alpha func
++    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v + 8 mapped + 16 q, y: function, z: alpha ref, w: alpha func
+     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
+     std::array<float, 4> view_z{};          // row of view * world that gives view-space z, for fog
+ };
+@@ -235,9 +235,17 @@ struct ObjectBlock {
+     std::array<float, 4> material_ambient{};
+     std::array<float, 4> material_diffuse{};  // w: separate specular
+     std::array<float, 4> material_specular{}; // w: reverse normals
++    // A texture-mapped draw's (texture map mode 1 or 2): the mode, the
++    // matrix's source, the two shade lights; the texture matrix; the viewer's
++    // direction in world space (w: reverse normals); the texture's place in
++    // the image sampled, uv * xy + zw.
++    std::array<float, 4> texture_map{};
++    std::array<float, 16> texture_matrix{};
++    std::array<float, 4> viewer{};
++    std::array<float, 4> uv_remap{1.0f, 1.0f, 0.0f, 0.0f};
+ };
+ 
+-static_assert(sizeof(ObjectBlock) == 144u, "ObjectBlock must match the std140 layout in ge.vert");
++static_assert(sizeof(ObjectBlock) == 256u, "ObjectBlock must match the std140 layout in ge.vert");
+ 
+ // GPU vertex decode (<prefix>_GPU_DECODE): what the raw vertex shader needs to
+ // decode and skin a draw's own bytes; the layout matches the Raw block in
+@@ -5856,12 +5864,35 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         }
+     }
+ 
+-    // Lighting and fog read the environment block; lit draws also read an
+-    // object block. Each is written into the vertex buffer only when it
+-    // changed, and the vertices follow whatever was written.
++    // A texture in a framebuffer the renderer drew is read from that render
++    // target: the pixels never reach guest memory, which holds whatever was
++    // there before. <prefix>_NO_FB_TEXTURES decodes guest memory as before.
++    static const bool no_fb_textures = portablekit::env("NO_FB_TEXTURES") != nullptr;
++    const Impl::FramebufferTexture framebuffer_source =
++        call.texture.enabled && !call.clear_mode && !no_fb_textures
++            ? impl.find_framebuffer_texture(memory, call.texture)
++            : Impl::FramebufferTexture{};
++
++    // The texture mapping mode of a textured, transformed draw (TEXMAPMODE,
++    // DrawCall::texture_map): the texture matrix (1) or the environment map
++    // (2) computed in ge.vert from the object block, or the UVs through the
++    // scale and offset (0). Mode 3 and transformed sprites (expanded on the
++    // CPU) keep their UVs. <prefix>_NO_TEXMAP draws every draw with its UVs.
++    static const bool no_texture_map = portablekit::env("NO_TEXMAP") != nullptr;
++    const std::uint32_t map_mode =
++        call.texture.enabled && !call.clear_mode && !call.through && !no_texture_map &&
++                call.primitive != PrimitiveType::Sprites && (call.texture_map.map_mode == 1u ||
++                                                             call.texture_map.map_mode == 2u)
++            ? call.texture_map.map_mode
++            : 0u;
++    const bool mapped = map_mode != 0u;
++
++    // Lighting and fog read the environment block; lit and texture-mapped
++    // draws also read an object block. Each is written into the vertex buffer
++    // only when it changed, and the vertices follow whatever was written.
+     const bool fogged = call.fog.enabled && !no_fog && !call.through && !call.clear_mode;
+     const auto view_world = multiply(call.view, call.world);
+-    if ((lit || fogged) && impl.environment_version != call.environment_version) {
++    if ((lit || fogged || map_mode == 2u) && impl.environment_version != call.environment_version) {
+         const LightingState &state = call.lighting;
+         EnvironmentBlock environment{};
+         environment.ambient = unpack_color(state.ambient_color, static_cast<float>(state.ambient_alpha) / 255.0f);
+@@ -5883,23 +5914,48 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         if (!impl.write_uniform(&environment, sizeof(environment), impl.environment_offset)) return;
+         impl.environment_version = call.environment_version;
+     }
+-    if (lit) {
++    if (lit || mapped) {
+         const LightingState &state = call.lighting;
+-        if (impl.material_version != call.material_version) {
+-            impl.material[0] = unpack_color(state.material_emissive, state.specular_power);
+-            impl.material[1] =
+-                unpack_color(call.material_color, static_cast<float>(call.material_color >> 24u) / 255.0f);
+-            impl.material[2] = unpack_color(state.material_diffuse, static_cast<float>(state.mode));
+-            impl.material[3] = unpack_color(state.material_specular, state.reverse_normals ? 1.0f : 0.0f);
+-            impl.material_version = call.material_version;
+-        }
+         ObjectBlock object{};
+         object.world = call.world;
+-        object.flags = {1.0f, call.has_vertex_color ? 1.0f : 0.0f, 0.0f, static_cast<float>(state.material_update)};
+-        object.emissive = impl.material[0];
+-        object.material_ambient = impl.material[1];
+-        object.material_diffuse = impl.material[2];
+-        object.material_specular = impl.material[3];
++        if (lit) {
++            if (impl.material_version != call.material_version) {
++                impl.material[0] = unpack_color(state.material_emissive, state.specular_power);
++                impl.material[1] =
++                    unpack_color(call.material_color, static_cast<float>(call.material_color >> 24u) / 255.0f);
++                impl.material[2] = unpack_color(state.material_diffuse, static_cast<float>(state.mode));
++                impl.material[3] = unpack_color(state.material_specular, state.reverse_normals ? 1.0f : 0.0f);
++                impl.material_version = call.material_version;
++            }
++            object.flags = {1.0f, call.has_vertex_color ? 1.0f : 0.0f, 0.0f,
++                            static_cast<float>(state.material_update)};
++            object.emissive = impl.material[0];
++            object.material_ambient = impl.material[1];
++            object.material_diffuse = impl.material[2];
++            object.material_specular = impl.material[3];
++        }
++        if (mapped) {
++            const TextureMapState &map = call.texture_map;
++            object.texture_map = {static_cast<float>(map_mode), static_cast<float>(map.proj_source),
++                                  static_cast<float>(map.shade_light_u), static_cast<float>(map.shade_light_v)};
++            object.texture_matrix = call.texture_matrix;
++            // The viewer at infinity along view-space +z, in world space: the
++            // view matrix's third row (stored as a column); w: reversed normals.
++            std::array<float, 3> viewer{call.view[2], call.view[6], call.view[10]};
++            const float length = std::sqrt(viewer[0] * viewer[0] + viewer[1] * viewer[1] + viewer[2] * viewer[2]);
++            if (length > 0.0f)
++                for (float &value : viewer) value /= length;
++            object.viewer = {viewer[0], viewer[1], viewer[2], state.reverse_normals ? 1.0f : 0.0f};
++            // A target sampled as the texture: the mapped coordinates are
++            // placed in it as uv_transform places the UVs below.
++            if (framebuffer_source.target != nullptr) {
++                const float width = static_cast<float>(call.texture.width);
++                const float height = static_cast<float>(call.texture.height);
++                object.uv_remap = {width / static_cast<float>(kPspWidth), height / static_cast<float>(kPspHeight),
++                                   static_cast<float>(framebuffer_source.x) / static_cast<float>(kPspWidth),
++                                   static_cast<float>(framebuffer_source.y) / static_cast<float>(kPspHeight)};
++            }
++        }
+         if (!impl.object_valid || std::memcmp(&object, &impl.last_object, sizeof(object)) != 0) {
+             if (!impl.write_uniform(&object, sizeof(object), impl.object_offset)) return;
+             impl.last_object = object;
+@@ -5962,15 +6018,6 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 if (first + index < frame.check_drawn.size()) frame.check_drawn[first + index] = 1u;
+         }
+     }
+-    // A texture in a framebuffer the renderer drew is read from that render
+-    // target: the pixels never reach guest memory, which holds whatever was
+-    // there before. <prefix>_NO_FB_TEXTURES decodes guest memory as before.
+-    static const bool no_fb_textures = portablekit::env("NO_FB_TEXTURES") != nullptr;
+-    const Impl::FramebufferTexture framebuffer_source =
+-        call.texture.enabled && !call.clear_mode && !no_fb_textures
+-            ? impl.find_framebuffer_texture(memory, call.texture)
+-            : Impl::FramebufferTexture{};
+-
+     // Under Fill the game's 480x272 screen is spread over a target of the
+     // window's shape, which suits the 3D view the game now draws at that
+     // shape, but would stretch the 2D interface. Its draws into the shown
+@@ -6213,9 +6260,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
+     // Through-mode texture coordinates are in texels, transformed ones in [0,1].
+-    // Every draw takes its vertex UVs here (texture map mode 0): the texture
+-    // matrix and environment map modes (DrawCall::texture_map) are not drawn
+-    // by this renderer.
++    // Texture map mode 0 takes its vertex UVs here; modes 1 and 2 (mapped
++    // above) do not take the scale and offset, but ge.vert computes them in
++    // place of this for those draws.
+     push.uv_transform = call.through && call.texture.width != 0u
+                             ? std::array<float, 4>{1.0f / static_cast<float>(call.texture.width),
+                                                    1.0f / static_cast<float>(call.texture.height), 0.0f, 0.0f}
+@@ -6253,6 +6300,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             texture_descriptor = impl.texture_descriptor(memory, call);
+         }
+     }
++    // Texture map modes 1 and 2 (texture_params.x bit 3): the vertex shader
++    // takes the coordinates from the object block; in mode 1 (bit 4) the
++    // fragment shader divides s and t by q.
++    if (mapped) push.texture_params[0] += map_mode == 1u ? 24.0f : 8.0f;
+ 
+     if (!impl.pass_active || impl.current_target != call.target.color_address) {
+         impl.end_pass();
+@@ -6371,7 +6422,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 vkCmdDraw(impl.command_buffer, draw_count, 1u, 0u, 0u);
+             }
+             perf::count_recorded_draws(1u);
+-            impl.record_draw_for_replay(call, lit, skinned_first, state, vertex_start, VK_NULL_HANDLE, 0u,
++            impl.record_draw_for_replay(call, lit || mapped, skinned_first, state, vertex_start, VK_NULL_HANDLE, 0u,
+                                         draw_count, drawn_vertices, false);
+         } else {
+             Impl::DrawGroup &group = impl.group;
+@@ -6398,7 +6449,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 rebase = 0u;
+                 impl.group_skinned = skinned;
+             }
+-            impl.record_draw_for_replay(call, lit, skinned_first, state, vertex_start, impl.index_buffer,
++            impl.record_draw_for_replay(call, lit || mapped, skinned_first, state, vertex_start, impl.index_buffer,
+                                         group.index_base, draw_count, vertex_count, join, raw);
+             auto *indices = reinterpret_cast<std::uint8_t *>(impl.index_mapped) + impl.index_offset;
+             if (rebase == 0u) {
+@@ -6449,7 +6500,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     if (impl.interpolating) {
+         const Impl::DrawState state{pipeline, texture_descriptor, lighting_offsets, vk_viewport, vk_scissor,
+                                     blend_constants, push};
+-        impl.record_draw_for_replay(call, lit, skinned_first, state, vertex_start,
++        impl.record_draw_for_replay(call, lit || mapped, skinned_first, state, vertex_start,
+                                     direct ? impl.vertex_buffer : VK_NULL_HANDLE, index_start, draw_count,
+                                     drawn_vertices, false, raw);
+     }
