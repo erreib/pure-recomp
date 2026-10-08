@@ -197,12 +197,16 @@ def sha256(path):
 
 
 def rel(p):
-    try:
-        return str(Path(p).resolve().relative_to(ROOT))
-    except ValueError:
-        s = str(p)
-        home = str(Path.home())
-        return "~" + s[len(home):] if s.startswith(home + "/") else s
+    # The path as given first: on Windows ref/'s directories are junctions into the main checkout (task 055), which
+    # resolve() would follow out of ROOT. Forward slashes on every system: the manifest's keys are shared.
+    for q in (Path(p).absolute(), Path(p).resolve()):
+        try:
+            return q.relative_to(ROOT).as_posix()
+        except ValueError:
+            pass
+    s = str(p)
+    home = str(Path.home())
+    return "~" + s[len(home):] if s.startswith(home + "/") else s
 
 
 def commit_label():
