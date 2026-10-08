@@ -628,7 +628,10 @@ Three GE states the framework's GE state ignored until task 040 (patch 0002-ge-s
 `DrawCall::color_test` (`ColorTestState`), `DrawCall::dither` (`DitherState`) and `DrawCall::clip_enabled`: differences
 10 and 11 of docs/fidelity.md. The Vulkan backend draws the colour test and the depth clamp too since task 059 (patch
 0013-vulkan-colortest-depthclamp: the same rules, the test as specialisation constants, the clamp with
-`depthClampEnable` and three `gl_ClipDistance`s); it does not dither.
+`depthClampEnable` and three `gl_ClipDistance`s), and the 16-bit writes with the dither since task 060 (patch
+0014-vulkan-16bit-dither: the same blend, offset and bits in `ge.frag`, the target's colour read as the render pass's
+own input attachment, which is the nearest Vulkan has to `[[color(0)]]`; fragments of one draw that overlap are not
+ordered against each other there, which no 16-bit draw of the race does).
 
 ### The registers and how the game uses them
 
@@ -732,8 +735,8 @@ escalation (the rule against the reference) did not arise.
 A Draw record ends with the colour test, dithering and CLIPENABLE (`kPixelBytes`, 31 bytes); a Draw that ends before
 them reads as no colour test, no dithering and CLIPENABLE off, so older recordings replay as before. `gerec_dump.py`
 lists `ctest FUNCTION REFERENCE/MASK`, `dither ROWS` and `noclip`. On a recording made since task 040, Metal against
-Vulkan differs by the billboard target's bits (since tasks 057 to 059 the Vulkan backend draws the texture map modes,
-the mip levels, the colour test and the depth clamp as well);
+Vulkan no longer differs by the billboard target's bits (since tasks 057 to 060 the Vulkan backend draws the texture
+map modes, the mip levels, the colour test, the depth clamp and the 16-bit writes as well);
 `PURE_NO_TEXMAP=1 PURE_NO_MIPMAPS=1 PURE_NO_COLOR_TEST=1 PURE_NO_DITHER=1 PURE_NO_DEPTH_CLAMP=1` makes the Metal side
 draw as before the three tasks, and race frame 6016 then differs from Vulkan's by 2 pixels over tol 24, task 025's
 figure. The dither check against PPSSPP's billboard target, the scenes and regions before and after, and the recordings'
@@ -773,10 +776,11 @@ as before and named once; the game never draws one.
 - Mip levels: both backends upload them and pick the level by the GE's rule (task 037 here, task 058 and patch
   0012-vulkan-mipmaps there). Drawing at 2x, the Vulkan backend adds 16 x log2 of its internal scale to the auto
   rule's D, so that g, the screen gradient, stays per PSP pixel; Metal, at 1x, needs no such term.
-- 16-bit targets keep the format's bits with the GE's dithering (task 040); the Vulkan backend draws them at 8 bits
-  a channel. The colour test and CLIPENABLE's depth clamp with MINZ/MAXZ are in both (task 040 here, task 059 and
-  patch 0013-vulkan-colortest-depthclamp there). On a recording made since task 040 the race differs between the two
-  by the billboard target's bits (`PURE_NO_DITHER=1` makes the Metal side draw as before).
+- 16-bit targets keep the format's bits with the GE's dithering, the colour test and CLIPENABLE's depth clamp with
+  MINZ/MAXZ are in both (task 040 here; tasks 059 and 060, patches 0013-vulkan-colortest-depthclamp and
+  0014-vulkan-16bit-dither there). The Vulkan backend reads a 16-bit target's colour as an input attachment with a
+  barrier between draws, so overlapping fragments of one draw are not ordered as Metal's programmable blending orders
+  them (`PURE_NO_DITHER=1` draws as before on either side).
 - Transformed draws are clipped only at the target's edges and the scissor, as the GE clips them: the GE viewport is
   folded into clip space and the Metal viewport is the whole target. The Vulkan backend makes the GE viewport its
   `VkViewport`, which clips at the viewport's edges: the race's HUD is drawn with a viewport shifted one pixel right
