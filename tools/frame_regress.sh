@@ -90,7 +90,9 @@ done
 case $BACKEND in vulkan|metal) ;; *) echo "frame_regress: --backend is vulkan or metal, not $BACKEND"; exit 2 ;; esac
 case $SHELL_NAME in vulkan|metal|headless) ;; *) echo "frame_regress: --shell is vulkan, metal or headless, not $SHELL_NAME"; exit 2 ;; esac
 
-[ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
+# The build directory is the preset's: arm64 on macOS, win-x64 on Windows (task 054; purelib.port knows).
+EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
+[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
 [ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
 

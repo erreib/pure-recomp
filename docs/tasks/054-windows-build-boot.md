@@ -82,3 +82,29 @@ Open questions: whether the Mac's Vulkan measured column transfers to an RTX 308
 re-measure and re-baseline if a scene moves); the winget ccache path in tools/env.sh is version-pinned
 (ccache-4.14.1) and needs a touch on upgrade; Git Bash pipe runs lose line-grain timing (block-buffered stdout),
 fine for run_boot, to re-examine for campaign_sweep's live steering in step 2.
+
+## Result addendum (Verify run)
+Status: DONE. Erik copied the Mac's ref/ (2026-10-08); the suite needed one more fix first (frame_regress.sh and
+hud_check.sh checked for build/arm64/bin/PureNative; they now ask purelib.port for the preset's binary). All 18
+scenes pass against the Mac's measured Vulkan column unchanged; the largest delta is +0.0172 (zone_change),
+under the 0.03 moved line, so the column transfers from MoltenVK to the native NVIDIA driver and nothing was
+re-baselined.
+
+Verify output (last 20 lines):
+```
+single_player   4765    0.0251   0.05   24     0.025 +0.0001  PASS
+class_select   4990    0.0452   0.07   24     0.045 +0.0002  PASS
+league_select   5185    0.0614   0.08   24     0.062 -0.0006  PASS
+track_select   5390    0.0411   0.06   24     0.041 +0.0001  PASS
+team_select   5600    0.0416   0.06   24     0.042 -0.0004  PASS
+tt_track_select   5375    0.0400   0.06   24     0.040 +0.0000  PASS
+tt_hud       5890    0.1070   0.12   32     0.096 +0.0110  PASS
+fp_track_select   5375    0.0409   0.06   24     0.041 -0.0001  PASS
+fp_hud       5890    0.1080   0.11   32     0.095 +0.0130  PASS
+tournament_select   5185    0.0622   0.08   24     0.063 -0.0008  PASS
+zone_track_select   4975    0.0333   0.05   24     0.033 +0.0003  PASS
+zone_hud     5260    0.0782   0.09   32     0.065 +0.0132  PASS
+zone_change   5679    0.0992   0.10   32     0.082 +0.0172  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell vulkan, backend vulkan (20m 6s)
+```
