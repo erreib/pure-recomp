@@ -50,7 +50,7 @@ def tracked_docs():
     """The files the check reads by default."""
     files = ["README.md", "ref/README.md", "patches/README.md"]
     for path in sorted(glob.glob(os.path.join(ROOT, "docs", "**", "*.md"), recursive=True)):
-        rel = os.path.relpath(path, ROOT)
+        rel = os.path.relpath(path, ROOT).replace(os.sep, "/")   # forward slashes on Windows too (task 054)
         if not rel.startswith("docs/tasks/"):
             files.append(rel)
     return files

@@ -18,6 +18,29 @@
       }
     },
     {
+      "name": "win-x64",
+      "displayName": "Windows x64, clang-cl (LLVM) with lld-link, VS Build Tools' Ninja, ccache",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/win-x64",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "environment": {
+        "VULKAN_SDK": "C:/VulkanSDK/1.4.363.0"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "C:/Program Files/LLVM/bin/clang-cl.exe",
+        "CMAKE_CXX_COMPILER": "C:/Program Files/LLVM/bin/clang-cl.exe",
+        "CMAKE_LINKER": "C:/Program Files/LLVM/bin/lld-link.exe",
+        "CMAKE_RC_COMPILER": "C:/Program Files/LLVM/bin/llvm-rc.exe",
+        "CMAKE_MT": "C:/Program Files/LLVM/bin/llvm-mt.exe",
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+        "SDL3_ROOT": "H:/errei/Documents/dev-stuff/deps/SDL3-3.4.18",
+        "PORTABLEKIT_GLSLANG": "C:/VulkanSDK/1.4.363.0/Bin/glslangValidator.exe",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
       "name": "arm64-release",
       "inherits": "arm64",
       "displayName": "macOS arm64 release for the app bundle (tools/build.sh release, tools/bundle.sh)",
@@ -31,6 +54,7 @@
   ],
   "buildPresets": [
     { "name": "arm64", "configurePreset": "arm64" },
+    { "name": "win-x64", "configurePreset": "win-x64" },
     { "name": "arm64-release", "configurePreset": "arm64-release" }
   ]
 }

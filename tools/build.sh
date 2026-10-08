@@ -9,10 +9,22 @@
 #              (10 to 20 minutes cold, run it in the background), incremental after that
 set -e
 cd "$(dirname "$0")/.." && . tools/env.sh
-B=build/arm64
-JOBS="${JOBS:-$(( $(sysctl -n hw.memsize) / 4294967296 ))}"   # one generated unit per 4 GiB, as the framework recommends
+# The preset by platform: arm64 on macOS, win-x64 on Windows under Git Bash (task 054). Jobs: one generated unit
+# per 4 GiB, as the framework recommends, capped at the hardware threads.
+case "$(uname -s)" in
+MINGW*|MSYS*)
+  PRESET=win-x64
+  JOBS="${JOBS:-$(( $(wmic computersystem get TotalPhysicalMemory 2>/dev/null | grep -o '[0-9]*' || echo 17179869184) / 4294967296 ))}"
+  [ "$JOBS" -gt "${NUMBER_OF_PROCESSORS:-4}" ] && JOBS="${NUMBER_OF_PROCESSORS:-4}"
+  ;;
+*)
+  PRESET=arm64
+  JOBS="${JOBS:-$(( $(sysctl -n hw.memsize) / 4294967296 ))}"
+  ;;
+esac
+B=build/$PRESET
 [ "$JOBS" -lt 2 ] && JOBS=2
-configure() { cmake --preset arm64 "$@"; }
+configure() { cmake --preset $PRESET "$@"; }
 release() {
   local R=build/release archive=_deps/downloads/ffmpeg-7.1.5.tar.xz
   if [ ! -f $R/build.ninja ]; then

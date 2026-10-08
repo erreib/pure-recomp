@@ -90,7 +90,9 @@ done
 case $BACKEND in vulkan|metal) ;; *) echo "frame_regress: --backend is vulkan or metal, not $BACKEND"; exit 2 ;; esac
 case $SHELL_NAME in vulkan|metal|headless) ;; *) echo "frame_regress: --shell is vulkan, metal or headless, not $SHELL_NAME"; exit 2 ;; esac
 
-[ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
+# The build directory is the preset's: arm64 on macOS, win-x64 on Windows (task 054; purelib.port knows).
+EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
+[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
 [ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
 
@@ -125,8 +127,10 @@ OUT=$(cd "$OUT" && pwd)
 rm -rf "$OUT/shots" "$OUT/game"
 rm -f "$OUT"/*.log "$OUT"/*.stdout "$OUT"/*.route.txt "$OUT"/*.diff.png "$OUT/summary.txt"
 mkdir -p "$OUT/shots" "$OUT/game"
-ln -s "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
-ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
+# Hard links on Windows: Git Bash's `ln -s` copies (253 MB of disc.iso per run) without Developer Mode (task 054).
+case "$(uname -s)" in MINGW*|MSYS*) LNS="ln" ;; *) LNS="ln -s" ;; esac
+$LNS "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
+$LNS "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
 
 START=$SECONDS
 SUMMARY=()
