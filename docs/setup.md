@@ -112,4 +112,13 @@ reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tool
 | `tools/hud_check.sh` | macOS only: it reads the Metal shell's window |
 | `tools/gerec/metal_check.sh` | macOS only: it compares the Metal backend with Vulkan |
 | `tools/bundle.sh --check` | macOS only: the app bundle |
-| `tools/verify_task.sh 054`, `tools/refactor_check.sh`, `tools/campaign_sweep.py`, `tools/save_roundtrip.sh`, the whole `tools/save_interchange.sh`, `tools/sas_reverb_check.sh`, `tools/ai_seed_check.sh`, `tools/wavstats.py` on a `PURE_AUDIO_WAV` capture, `tools/vfpu_probe.py`, `tools/scorecard.py --refresh-references`, `tools/gerec/replay_check.sh` | not demonstrated yet (task 055 PARTIAL) |
+| `tools/verify_task.sh 054` | demonstrated (task 055: 18/18 PASS, 20m 14s) |
+| `tools/campaign_sweep.py` | demonstrated, windowed Vulkan (task 055: single_race Vineta K PASS, 3 laps, 45 contacts). The game runs under a pseudoconsole (`tools/purelib/conpty.py`): through a pipe its stdout was block-buffered, the follower steered about 1 s late and the cell stalled |
+| `tools/save_roundtrip.sh` | demonstrated (task 055: all five runs PASS, windowed) |
+| `tools/wavstats.py` on a `PURE_AUDIO_WAV` capture | demonstrated (task 055: a windowed main_menu.txt run to frame 2200, 74 s of mix) |
+| `tools/scorecard.py --refresh-references` | demonstrated (task 055: 38 references from PPSSPP's x64 JIT, 71 min) |
+| `tools/vfpu_probe.py` cover, sample, port; `tools/vfpu_model.py --check` | demonstrated (task 055). `--check` exits 1 because PPSSPP's x64 JIT rounds dot products otherwise than the Apple JIT's rule (difference 13); the port's test mode still equals the model row for row |
+| `tools/refactor_check.sh` | blocked-on-headless: it needs pixel-identical captures from two runs, which only the deterministic headless path gives, and headless draws nothing here; paced windowed runs vary (the AI grid) |
+| `tools/sas_reverb_check.sh` | blocked-on-headless: its port run is headless (the Free Play pause route) |
+| `tools/ai_seed_check.sh` | blocked-on-headless: its port side is the scorecard's headless trajectory runs |
+| the whole `tools/save_interchange.sh`, `tools/gerec/replay_check.sh` | not run in task 055 |

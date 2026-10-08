@@ -221,7 +221,8 @@ class PtyRun:
             termios.tcsetattr(self.slave, termios.TCSANOW, attrs)
             self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=self.slave,
                                       stderr=self.slave)
-        self.log = open(log_path, "w", buffering=1 if line_buffered else -1)
+        # newline="\n": the bash tools grep the logs with `$` anchors, which a Windows "\r\n" would defeat (task 055).
+        self.log = open(log_path, "w", buffering=1 if line_buffered else -1, newline="\n")
         self.buf = b""
         self.last, self.repeat, self.written, self.max_lines = None, 0, 0, max_lines
         self.tail = []                      # the last 25 lines given to the log, folded and closing lines too

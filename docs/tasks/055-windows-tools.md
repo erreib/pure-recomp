@@ -254,3 +254,18 @@ Items as numbered in the second review.
      - vfpu_probe `port` builds with clang-cl and the corpus's Windows flags.
      - vfpu_model loads the UCRT for its libm.
      - An f-string in vfpu_model that Python 3.12 does not parse is fixed.
+5. Remaining checks (recorded in docs/setup.md's Windows table):
+   - `tools/verify_task.sh 054`: PASS, 18/18 scenes, 20m 14s.
+   - wavstats on a PURE_AUDIO_WAV capture: a windowed main_menu.txt run to frame 2200 wrote 74.3 s of mix, and
+     wavstats read it: active fraction 0.27, no clipping.
+   - `tools/save_roundtrip.sh`: PASS, all five runs, after two fixes:
+     - It is ported to Windows: purelib's binary, hard links, GNU stat.
+     - Its log checks now accept the Windows path separator. On the first run, all 8 failures were grep misses
+       (`...game\ms0\PSP\SAVEDATA\UCUS98612P0000`) while the saves themselves verified.
+     - Also, purelib's runner now writes logs with "\n". With "\r\n", every `$`-anchored grep in the bash tools
+       would miss.
+   - Blocked-on-headless, not run:
+     - refactor_check.sh needs pixel-identical captures from two runs; only the headless path is deterministic.
+     - sas_reverb_check.sh's port run is headless.
+     - ai_seed_check.sh uses the scorecard's headless trajectory runs.
+   - Not run: the whole save_interchange.sh, gerec/replay_check.sh.
