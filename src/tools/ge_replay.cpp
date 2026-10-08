@@ -20,7 +20,12 @@
 #include "gpu/vulkan_renderer.hpp"
 #endif
 
+#if defined(_WIN32)
+#include <process.h>        // _getpid; only getpid is used from unistd.h (task 054)
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <array>
