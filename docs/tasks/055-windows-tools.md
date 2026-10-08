@@ -61,7 +61,85 @@ report, do not adapt blind); a fix would need a vendor patch or a src/ change; t
 campaign_sweep's steering and a tools-only fix does not restore it; any build exceeds 5 minutes.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: PARTIAL. The Verify command runs to the end and exits 0, but it does not print the grades in
+docs/scorecard.md: Pictures differs, Saves differs, Timing not measured, Coverage close. The reference retakes, the
+sweep cell and most of the bash-tool demonstrations were not attempted.
+
+Changed: tools/worktree_init.sh, tools/ppsspp/ppsspp_ctl.py, tools/purelib/ppsspp.py, tools/purelib/port.py,
+tools/campaign_sweep.py, tools/scorecard.py, tools/frame_regress.sh, tools/save_interchange.sh, docs/setup.md
+(the "Windows tools" section and a table of which checks run on Windows), this brief. Outside the repo: PPSSPP 1.20.4
+portable unpacked to H:/errei/Documents/dev-stuff/deps/ppsspp-1.20.4. Its memstick/ holds the driver's
+ppsspp.ini.orig and two GE dumps.
+
+Proven on this machine:
+- worktree_init.sh bootstrapped this worktree. It cloned the vendor tree and applied the 9 patches, made junctions
+  for disc/ and generated/ (144 units), hard-linked disc.iso, and linked the 45 git-ignored ref/ entries of the main
+  checkout (junctions for directories, hard links for files). It copied the FFmpeg zip and built PureNative.exe from
+  the shared cache: 32 s build, 258 hits and 2 misses, ready in 52 s. A second run is idempotent (ready in 13 s).
+- ppsspp_ctl.py against PPSSPPWindows64 1.20.4. The debugger protocol matches what the driver expects, with no
+  differences (version reply v1.20.4, breakpoints, replay.execute, memory.read, gpu.record.dump). A scripted run
+  of routes/frontend.txt with a shot and a GE dump at frame 600 gave a .ppdmp byte-identical to the Mac's
+  ref/frontend.ppdmp. Its PNG is 269 px (0.2%) off ref/frontend.png. Quitting needed a Windows path: taskkill's
+  WM_CLOSE, after resuming a CPU that the debugger stopped, because a stepping core blocks the close.
+- python tools/docs_check.py: 33 files, 0 findings. tools/imgdiff.py --selftest: PASS. tools/controls_check.py:
+  OK. tools/scorecard.py --selftest: ok. tools/save_interchange.sh --check on ref/saves/ppsspp: verdict PASS
+  (both hashes verified), after it was changed to build with LLVM clang++ and to copy where it cannot symlink.
+- Inside the Verify run, frame_regress.sh (now Vulkan shell and backend by default on Windows): 18/18 PASS, 20m 5s.
+
+Not done or not proven:
+- ref/scorecard/ and ref/vfpu/ were not retaken (`--refresh-references`, vfpu_probe). The Mac's references are
+  still in place, so trajectories and audio were not compared.
+- These were not run: the campaign_sweep cell (single_race Vineta K), so whether pipe buffering breaks live
+  steering is still unknown; verify_task.sh 054; refactor_check.sh; save_roundtrip.sh; the whole
+  save_interchange.sh; wavstats on a PURE_AUDIO_WAV capture; sas_reverb_check; ai_seed_check;
+  gerec/replay_check.
+- The sweep cell cannot end headless on Windows. Its end screen is found from screenshots, and the Vulkan GE
+  backend draws only inside the Vulkan shell's window ("the headless shell has none; nothing is drawn"). The
+  sweep now defaults to --shell vulkan on Windows (purelib.port.DRAWING). Meeting "headless" as written would
+  need a src/vendor change (a headless Vulkan target).
+
+Verify output (last 20 lines):
+```
+[scorecard] pictures ...
+[scorecard] frame_regress.sh: exit 0, 1206 s
+[scorecard] run picture-blue_ridge_hud: exit 0, frame 6046 reached, 199 s
+[scorecard] run picture-sinucit_hud: exit 0, frame 6046 reached, 199 s
+[scorecard] run picture-sebenco_climb_hud: exit 0, frame 6048 reached, 200 s
+[scorecard] pictures: differs (21 rows, 1807 s)
+[scorecard] timing ...
+[scorecard] run load-vineta_k: exit 0, frame 6400 reached, 14 s
+[scorecard] timing: not measured (7 rows, 14 s)
+[scorecard] saves ...
+[scorecard] run save: exit 0, frame 4800 reached, 10 s
+[scorecard] saves: differs (1 rows, 11 s)
+[scorecard] coverage ...
+[scorecard] coverage: close (6 rows, 0 s)
+pictures      differs
+timing        not measured
+saves         differs
+coverage      close
+[scorecard] wrote out\scorecard\scorecard.json and scorecard.md (30m 31s)
+verify 055: PASS
+```
+
+Open questions:
+1. Headless runs on Windows with no renderer leave the menu route. The scorecard's headless save run (main_menu.txt
+   to frame 4800, about 10 s) wrote no UCUS98612P0000. The headless load-vineta_k run to 6400 opened no
+   TrackStartup.xml and printed no `[pure] ship` lines. On Windows, PURE_GE_BACKEND=metal falls back to vulkan, and
+   PURE_NO_RENDER then disables drawing. The same routes pass in a Vulkan window (the suite's 18 scenes). So
+   something in the guest's timing depends on the GE drawing. This is the cause of "Saves differs" and of the
+   race-load row. It needs a diagnosis that may reach src/ or the framework: compare the null backend, and
+   PURE_NO_BUSY_CLOCK off.
+2. Pictures differs because of the three extra scenes. Their measured column is Metal headless (blue_ridge 0.0832
+   against 0.0247, sinucit 0.1457 against 0.0877). They have no Vulkan column. tt_hud, fp_hud and zone_change grade
+   close (+0.008 to +0.013 against the Mac's Vulkan column). These are Vulkan renderer differences, which is step
+   3's work. Should the extra scenes get a Vulkan column measured here, or should Pictures on Windows be graded
+   against Metal?
+3. Timing and Coverage have no 46-cell matrix on this machine (out/035-wip/fidelity is on the Mac). Running
+   fidelity_audit.py here takes about 4 h, and its cells would hit open question 1 unless they run windowed.
+4. A junction into ref/ means a retake in any worktree overwrites the main checkout's Mac references. Before
+   `--refresh-references`, back up the Mac's ref/scorecard and ref/vfpu, for example to ref/mac-2026-10-07/.
+5. A --quick run on Windows takes about 30 minutes, not 1, because every picture run is a paced Vulkan window.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
