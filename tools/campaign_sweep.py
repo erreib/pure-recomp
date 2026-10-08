@@ -118,7 +118,11 @@ out/sweep/summary.txt, a table with one row per cell ever run (the latest outcom
 every N flips from the race start (named t<frame>), for tuning. --out DIR writes everything (the game directory and
 the summary too) under DIR instead of out/sweep, so two tuning runs can go side by side.
 """
-import argparse, datetime, fcntl, math, os, re, shutil, subprocess, sys, time
+import argparse, datetime, math, os, re, shutil, subprocess, sys, time
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -936,12 +940,13 @@ class Leg:
 
 
 def cell_environment(opts, paced_from):
-    """The environment every cell starts from (task 034): the shell (--shell, else PURE_SHELL, else headless) and
+    """The environment every cell starts from (task 034): the shell (--shell, else PURE_SHELL, else headless; on
+    Windows vulkan, purelib.port.DRAWING: the Vulkan backend draws only in its shell's window, task 055) and
     its backend (--backend, else PURE_GE_BACKEND, else metal; vulkan under the vulkan shell), PURE_PACED_FROM
     (paced_from unless the environment sets it), silent unless --sound, and the scratch data directory; a headless
     cell without --sound also gets PURE_NO_BUSY_CLOCK=1 unless the environment names it (task 050)."""
     env = dict(os.environ)
-    shell = opts.shell or env.get("PURE_SHELL") or "headless"
+    shell = opts.shell or env.get("PURE_SHELL") or port.DRAWING[0]
     env["PURE_SHELL"] = shell
     if opts.backend:
         env["PURE_GE_BACKEND"] = opts.backend
@@ -1024,7 +1029,9 @@ def run_cell(mode, track, opts):
     geo = tuner or (Tuner(ai_line, 1.0, 0.0) if ai_line else None)     # the line's heading for the trace
 
     def send(text):
-        with open(live, "a") as f:
+        # newline="\n": Windows' text mode would end the step with "\r\n", and the port keeps the "\r" (a live shot
+        # named `f123\r` cannot be written; task 055).
+        with open(live, "a", newline="\n") as f:
             f.write(text + "\n")
 
     def stop(why_outcome, why):
@@ -1467,7 +1474,10 @@ def track_label(track, cls):
 def write_summary(rows):
     """Merges this invocation's rows into the summary, under a lock (sweeps of other cells may run alongside)."""
     with open(os.path.join(ROOT, OUT, "summary.lock"), "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if os.name == "nt":     # Windows (task 055): msvcrt's byte-range lock, retried for 10 s, stands in for flock
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(lock, fcntl.LOCK_EX)
         return _write_summary(rows)
 
 

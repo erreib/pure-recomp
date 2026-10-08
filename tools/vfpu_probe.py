@@ -722,6 +722,13 @@ def cmd_port(a):
     include = Path(a.include) if a.include else ROOT / "vendor" / "portablekit" / "include"
     cmd = ["/usr/bin/clang++", "-O2", "-std=gnu++20", "-arch", "arm64", f"-ffp-contract={a.fp_contract}",
            f"-I{include}", str(cpp), "-o", str(exe)]
+    if sys.platform == "win32":
+        # Windows (task 055): the corpus's flags there (build/win-x64/compile_commands.json): clang-cl /O2 /Ob0
+        # -std:c++20 /EHsc -MD, x64 without FMA, so no contraction can happen whatever -ffp-contract says.
+        exe = exe.with_suffix(".exe")
+        cmd = ["C:/Program Files/LLVM/bin/clang-cl.exe", "/nologo", "-TP", "/O2", "/Ob0", "-std:c++20", "/EHsc", "-MD",
+               f"/clang:-ffp-contract={a.fp_contract}", f"-I{include}", str(cpp), f"/Fe{exe}",
+               f"/Fo{exe.with_suffix('.obj')}"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         sys.exit("vfpu_probe: the harness did not compile:\n" + r.stderr[-3000:])

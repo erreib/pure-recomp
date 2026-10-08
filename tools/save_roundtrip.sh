@@ -36,13 +36,20 @@ DIGITS=200,92,115,26   # PSP pixels: the 5th to 8th letters of the SET NAME fiel
 MIN_NAME_VARIANCE=500  # measured: 1545 with NAME0000 loaded, 0 on the empty stick
 MIN_ONES_VARIANCE=200  # measured: 449 with NAME1111 loaded (thin digits), 0 on the empty stick (task 039)
 
-[ -x build/arm64/bin/PureNative ] || { echo "build/arm64/bin/PureNative missing: tools/build.sh profile"; exit 2; }
+# The binary purelib.port names (build/arm64 on macOS, build/win-x64 on Windows); on Windows hard links stand in
+# for the symlinks (Git Bash's ln -s copies) and GNU stat for BSD stat (task 055).
+EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE.as_posix())')
+[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
+case "$(uname -s)" in
+MINGW*|MSYS*) LNS="ln -f"; mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; } ;;
+*) LNS="ln -sfn"; mtime() { stat -f %m "$1" 2>/dev/null || echo 0; } ;;
+esac
 [ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
 [ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
 
 mkdir -p "$GAME"
-ln -sfn "$ROOT/game/EBOOT.ELF" "$GAME/EBOOT.ELF"
-ln -sfn "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$GAME/disc.iso"
+$LNS "$ROOT/game/EBOOT.ELF" "$GAME/EBOOT.ELF"
+$LNS "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$GAME/disc.iso"
 rm -rf "$GAME/ms0" "$OUT"/run1 "$OUT"/run2 "$OUT"/run3 "$OUT"/run4 "$OUT"/run5
 mkdir -p "$SAVE"
 
@@ -142,8 +149,8 @@ cat config/pad_scripts/main_menu.txt > "$OUT/run1-route.txt"
 echo "2250:shot fresh-name" >> "$OUT/run1-route.txt"
 run run1 "$OUT/run1-route.txt" 4800
 if grep -q "^\[savedata\] LISTSAVE (5) game=\"UCUS98612\"" "$OUT/run1.log" &&
-   grep -q "^\[savedata\] saved [0-9]* bytes to .*/$FOLDER\$" "$OUT/run1.log"; then
-  ok "$(grep -m1 "^\[savedata\] saved [0-9]* bytes to .*/$FOLDER\$" "$OUT/run1.log" | sed "s|$ROOT/||")"
+   grep -q "^\[savedata\] saved [0-9]* bytes to .*[/\]$FOLDER\$" "$OUT/run1.log"; then
+  ok "$(grep -m1 "^\[savedata\] saved [0-9]* bytes to .*[/\]$FOLDER\$" "$OUT/run1.log" | sed "s|$ROOT/||")"
 else
   bad "no LISTSAVE into $FOLDER in $OUT/run1.log"
 fi
@@ -152,7 +159,7 @@ v_fresh=$(variance "$OUT/run1/fresh-name.png" "$DIGITS")
 if [ "$v_fresh" -ge 0 ] && [ "$v_fresh" -lt 50 ]; then ok "control: SET NAME on the empty stick is blank past NAME (variance $v_fresh)"
 else bad "control capture $OUT/run1/fresh-name.png: variance $v_fresh (want 0 to 49; did the route timing move?)"; fi
 [ -f "$OUT/run1/menu.png" ] && ok "MAIN MENU captured ($OUT/run1/menu.png)" || bad "no MAIN MENU capture"
-mtime1=$(stat -f %m "$SAVE/$FOLDER/PROFILE.BIN" 2>/dev/null || echo 0)
+mtime1=$(mtime "$SAVE/$FOLDER/PROFILE.BIN")
 verdict() { [ $FAILS -eq 0 ] && echo "PASS: $1" || echo "FAIL ($FAILS checks, see above)"; }
 OUTCOME[1]="run 1 NEW (main_menu.txt, empty stick): $(verdict "LISTSAVE wrote $FOLDER with PARAM.SFO, PROFILE.BIN (pilot $NAME) and ICON0.PNG; MAIN MENU reached")"
 TOTAL=$FAILS
@@ -161,15 +168,15 @@ TOTAL=$FAILS
 load_checks() {
   local name=$1
   if grep -q "^\[savedata\] LISTLOAD (4) game=\"UCUS98612\"" "$OUT/$name.log" &&
-     grep -q "^\[savedata\] loaded [0-9]* bytes from .*/$FOLDER\$" "$OUT/$name.log"; then
-    ok "$(grep -m1 "^\[savedata\] loaded [0-9]* bytes from .*/$FOLDER\$" "$OUT/$name.log" | sed "s|$ROOT/||")"
+     grep -q "^\[savedata\] loaded [0-9]* bytes from .*[/\]$FOLDER\$" "$OUT/$name.log"; then
+    ok "$(grep -m1 "^\[savedata\] loaded [0-9]* bytes from .*[/\]$FOLDER\$" "$OUT/$name.log" | sed "s|$ROOT/||")"
   else
     bad "no LISTLOAD of $FOLDER in $OUT/$name.log"
     grep "^\[savedata\]" "$OUT/$name.log" | head -20
   fi
   local l_load l_save
   l_load=$(grep -n -m1 "^\[savedata\] loaded" "$OUT/$name.log" | cut -d: -f1)
-  l_save=$(grep -n "^\[savedata\] saved [0-9]* bytes to .*/$FOLDER\$" "$OUT/$name.log" | tail -1 | cut -d: -f1)
+  l_save=$(grep -n "^\[savedata\] saved [0-9]* bytes to .*[/\]$FOLDER\$" "$OUT/$name.log" | tail -1 | cut -d: -f1)
   if [ -n "$l_load" ] && [ -n "$l_save" ] && [ "$l_save" -gt "$l_load" ]; then
     ok "the game's own PROFILE > SAVE wrote the loaded profile back (LISTSAVE into $FOLDER)"
   else
@@ -189,7 +196,7 @@ load_checks() {
 FAILS=0
 run run2 config/pad_scripts/profile_load.txt 3900
 load_checks run2
-mtime2=$(stat -f %m "$SAVE/$FOLDER/PROFILE.BIN" 2>/dev/null || echo 0)
+mtime2=$(mtime "$SAVE/$FOLDER/PROFILE.BIN")
 [ "$mtime2" -gt "$mtime1" ] && ok "PROFILE.BIN rewritten during run 2" || bad "PROFILE.BIN not rewritten during run 2"
 OUTCOME[2]="run 2 LOAD (profile_load.txt): $(verdict "LISTLOAD loaded $FOLDER, MAIN MENU as in run 1, PROFILE > SAVE rewrote it, SET NAME shows $NAME (variance $v; empty stick $v_fresh)")"
 TOTAL=$((TOTAL + FAILS))
@@ -215,7 +222,7 @@ TOTAL=$((TOTAL + FAILS))
 
 # 4. A second profile, through the save list (task 039).
 FAILS=0
-mtime_first=$(stat -f %m "$SAVE/$FOLDER/PROFILE.BIN" 2>/dev/null || echo 0)
+mtime_first=$(mtime "$SAVE/$FOLDER/PROFILE.BIN")
 run run4 config/pad_scripts/two_profiles.txt 6450
 if grep -q "^\[savedata\] LISTSAVE: the save list is open (5 entries)" "$OUT/run4.log" &&
    grep -q "^\[ui\] save list open: Save, 5 entries, on P0001" "$OUT/run4.log"; then
@@ -224,19 +231,19 @@ else
   bad "no save list for the second profile's LISTSAVE in $OUT/run4.log"
   grep "^\[savedata\]\|^\[ui\]" "$OUT/run4.log" | grep -v "status [0-4]$" | tail -12
 fi
-if grep -q "^\[savedata\] saved [0-9]* bytes to .*/$SECOND\$" "$OUT/run4.log"; then
+if grep -q "^\[savedata\] saved [0-9]* bytes to .*[/\]$SECOND\$" "$OUT/run4.log"; then
   ok "Cross on the free slot saved $SECOND"
 else
   bad "no save into $SECOND in $OUT/run4.log"
 fi
-if grep -q "^\[savedata\] saved [0-9]* bytes to .*/$FOLDER\$" "$OUT/run4.log" ||
-   [ "$(stat -f %m "$SAVE/$FOLDER/PROFILE.BIN" 2>/dev/null || echo 0)" != "$mtime_first" ]; then
+if grep -q "^\[savedata\] saved [0-9]* bytes to .*[/\]$FOLDER\$" "$OUT/run4.log" ||
+   [ "$(mtime "$SAVE/$FOLDER/PROFILE.BIN")" != "$mtime_first" ]; then
   bad "$FOLDER was written during run 4 (the second profile overwrote the first)"
 else
   ok "$FOLDER not written by the second profile"
 fi
 if grep -q "^\[savedata\] LISTLOAD: the save list is open (2 entries)" "$OUT/run4.log" &&
-   grep -q "^\[savedata\] loaded [0-9]* bytes from .*/$FOLDER\$" "$OUT/run4.log"; then
+   grep -q "^\[savedata\] loaded [0-9]* bytes from .*[/\]$FOLDER\$" "$OUT/run4.log"; then
   ok "PROFILE > LOAD listed both saves and Up + Cross loaded $FOLDER"
 else
   bad "no LISTLOAD list or no load of $FOLDER in $OUT/run4.log"
@@ -259,7 +266,7 @@ TOTAL=$((TOTAL + FAILS))
 FAILS=0
 run run5 config/pad_scripts/profile_list_load.txt 3400
 if grep -q "^\[ui\] save list open: Load, 2 entries, on P0001" "$OUT/run5.log" &&
-   grep -q "^\[savedata\] loaded [0-9]* bytes from .*/$SECOND\$" "$OUT/run5.log"; then
+   grep -q "^\[savedata\] loaded [0-9]* bytes from .*[/\]$SECOND\$" "$OUT/run5.log"; then
   ok "the boot LOAD listed both profiles on the newest, P0001, and Cross loaded $SECOND"
 else
   bad "no LISTLOAD list on P0001 or no load of $SECOND in $OUT/run5.log"

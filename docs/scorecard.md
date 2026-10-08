@@ -23,6 +23,8 @@ Run it: `python3 tools/scorecard.py --quick` (pictures, timing from the matrix's
 minute) or `--full` (all six, with fresh sweep cells for timing; about 18 minutes; a full run of every category
 rewrites this file). `--only CATEGORY[,...]` runs some. Refresh the PPSSPP side: `python3 tools/scorecard.py
 --refresh-references [CATEGORY]` (about an hour for all; docs/verification.md, "The accuracy scorecard").
+On Windows (task 055) Timing and Coverage are not measured: they read the campaign matrix's cells, and a Windows
+matrix (`tools/fidelity_audit.py`, about 4 h) is a later task; Pictures there grades against the Vulkan column.
 
 ## --full run of 2026-10-07 11:57, commit db10191 (17m 38s)
 

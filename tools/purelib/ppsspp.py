@@ -26,9 +26,9 @@ def profiles():
 def wait_free(say):
     """Waits until no PPSSPPSDL runs and its stick holds no profile save (then checks PPSSPP again), saying so
     through say; False when one of the waits gave up (purelib.port.wait_until's limit)."""
-    return (wait_until(pc.ppsspp_pids, "PPSSPPSDL is running", say) and
+    return (wait_until(pc.ppsspp_pids, f"{pc.APP_NAME} is running", say) and
             wait_until(profiles, "PPSSPP's memory stick holds a profile save", say) and
-            wait_until(pc.ppsspp_pids, "PPSSPPSDL is running", say))
+            wait_until(pc.ppsspp_pids, f"{pc.APP_NAME} is running", say))
 
 
 def stick_snapshot(d=None):

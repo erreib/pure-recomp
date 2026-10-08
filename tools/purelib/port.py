@@ -14,6 +14,7 @@ if not WINDOWS:
     import pty, select, termios
 else:
     import threading
+    from purelib.conpty import ConPty, strip_vt
 
 from purelib.logs import FRAME_EXIT, exit_frame
 
@@ -21,6 +22,10 @@ ROOT = Path(os.path.abspath(__file__)).parents[2]
 # The build directory is the preset's (CMakePresets.json): arm64 on macOS, win-x64 on Windows (task 054).
 EXE = ROOT / "build" / ("win-x64" if WINDOWS else "arm64") / "bin" / ("PureNative.exe" if WINDOWS else "PureNative")
 GAME = ROOT / "game"
+# The shell and GE backend of a run whose pictures are read (screenshots, the sweep's end screens): headless on Metal
+# on macOS; on Windows the Vulkan backend draws only through the Vulkan shell's window (headless, nothing is drawn),
+# so such runs open a window there (task 055). Runs that read no pictures stay headless on both.
+DRAWING = ("vulkan", "vulkan") if WINDOWS else ("headless", "metal")
 FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the frame exit before it is killed
 # What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
 # over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings.
@@ -198,12 +203,12 @@ class PtyRun:
         self.start = time.time()
         self.deadline = self.start + seconds
         if WINDOWS:
-            # No pty on Windows (task 054): a pipe and a reader thread. The game's stdout is then block-buffered
-            # by its C runtime, so lines arrive in bursts and the last ones only at exit; the deadline and the
-            # frame-exit grace still hold, and drain() reads what the pipe gives up after the kill.
+            # No pty on Windows: a pseudoconsole (ConPTY, purelib/conpty.py; task 055) and a reader thread. Its C
+            # runtime sees a console, so the game's stdout is not block-buffered: through a plain pipe (task 054)
+            # its `[pure] ship` lines reached the sweep about 1 s (56 flips) late in bursts, and the follower lost
+            # the road. The console's VT sequences are removed line by line in _take.
             self.master = self.slave = None
-            self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
-                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+            self.p = ConPty([str(EXE)], ROOT, env)
             self._lock = threading.Condition()
             self._pending = []              # byte chunks the reader thread has taken off the pipe
             self._eof = False
@@ -216,7 +221,8 @@ class PtyRun:
             termios.tcsetattr(self.slave, termios.TCSANOW, attrs)
             self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=self.slave,
                                       stderr=self.slave)
-        self.log = open(log_path, "w", buffering=1 if line_buffered else -1)
+        # newline="\n": the bash tools grep the logs with `$` anchors, which a Windows "\r\n" would defeat (task 055).
+        self.log = open(log_path, "w", buffering=1 if line_buffered else -1, newline="\n")
         self.buf = b""
         self.last, self.repeat, self.written, self.max_lines = None, 0, 0, max_lines
         self.tail = []                      # the last 25 lines given to the log, folded and closing lines too
@@ -240,6 +246,8 @@ class PtyRun:
         self.repeat = 0
 
     def _take(self, raw, out):
+        if WINDOWS:
+            raw = strip_vt(raw).replace(b"\r", b"")
         line = raw.decode("utf-8", "replace").rstrip("\r")
         if not self.frame_exit and line.startswith(FRAME_EXIT):
             self.frame_exit = True
@@ -256,7 +264,7 @@ class PtyRun:
         """Windows only: moves the game's output off the pipe as it comes, so the game never blocks on a full pipe."""
         while True:
             try:
-                chunk = self.p.stdout.read(65536)
+                chunk = self.p.read(65536)
             except (OSError, ValueError):
                 chunk = b""
             with self._lock:
@@ -328,7 +336,6 @@ class PtyRun:
         if WINDOWS:
             self._reader.join(timeout=5)
             self._chunk(0.05, out)
-            self.p.stdout.close()
         else:
             os.close(self.slave)
             os.close(self.master)
@@ -392,6 +399,10 @@ def headless_run(log, script, frames, shell="headless", backend="metal", paced_f
 def run_tool(cmd, out=None, env=None):
     """Runs a command (another tool) from the checkout's root, its stdout and stderr to the file out (else this
     process's), with env (else this process's); returns its exit code."""
+    if WINDOWS and str(cmd[0]).endswith(".sh"):
+        # No shebangs on Windows: the bash tools go through Git Bash's bash, found on PATH (CreateProcess would find
+        # System32's bash.exe, WSL's, first).
+        cmd = [shutil.which("bash") or "bash", str(cmd[0])] + list(cmd[1:])
     if out is None:
         return subprocess.run(cmd, cwd=ROOT, env=env).returncode
     with open(out, "w") as f:

@@ -59,6 +59,9 @@ from fractions import Fraction
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# The port's label in the reports (a constant: an apostrophe inside the f-strings below is a syntax error before
+# Python 3.12's f-string grammar; task 055 met it on Windows' 3.12).
+SINCE_0009 = " since patch 0009-vfpu-rounding (task 047's 0020)"
 DEFAULT_DIR = ROOT / "ref" / "vfpu"
 AUTOTESTS = Path.home() / "dev" / "scratch" / "pspautotests" / "tests" / "cpu" / "vfpu"
 
@@ -508,7 +511,8 @@ def fmt_row(p, got=None):
 
 def libm():
     import ctypes
-    lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    # The C library the port links: macOS's libSystem; on Windows the UCRT (task 055).
+    lib = ctypes.CDLL("ucrtbase" if sys.platform == "win32" else "/usr/lib/libSystem.B.dylib")
     fns = {}
     for name in ("sinf", "cosf", "sqrtf", "exp2f", "log2f", "asinf"):
         f = getattr(lib, name)
@@ -1102,7 +1106,7 @@ def cmd_check(d, tag=None):
                      if have else ""))
             ml = mode_line(sites, g, tag)
             if ml:
-                print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0009-vfpu-rounding (task 047's 0020)'}: {ml}")
+                print(f"  {'':40} the port{f' ({tag})' if tag else SINCE_0009}: {ml}")
             for p, got in bad[:20]:
                 print("    FAIL " + fmt_row(p, got))
             fails += len(bad)
@@ -1115,7 +1119,7 @@ def cmd_check(d, tag=None):
                   + (f"; the port (.port.csv) {port_ok}/{port_n} ({100.0 * port_ok / port_n:.3f}%)" if port_n else ""))
             ml = mode_line(sites, g, tag)
             if ml:
-                print(f"  {'':40} the port{f' ({tag})' if tag else ' since patch 0009-vfpu-rounding (task 047's 0020)'}: {ml}")
+                print(f"  {'':40} the port{f' ({tag})' if tag else SINCE_0009}: {ml}")
             for p, got in bad[:20]:
                 print("    FAIL " + other_fmt(p, got))
             fails += len(bad)
