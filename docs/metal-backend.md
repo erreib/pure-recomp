@@ -536,8 +536,9 @@ The GE samples a texture from up to eight levels, each half the size of the one 
 rule the draw chooses. The framework's GE state ignored the levels until task 037, so every backend sampled level 0 and
 distant textures (Blue Ridge's grandstand crowds, the track's far surface, windows) were sharper than on the PSP and
 shimmered as the camera moved: difference 2 of docs/fidelity.md. Patch 0002-ge-state-commands (task 037) carries the
-levels in `TextureState`; this backend uploads them and picks the level as the GE does. The Vulkan backend still samples
-level 0.
+levels in `TextureState`; this backend uploads them and picks the level as the GE does. The Vulkan renderer does the
+same since task 058 (patch 0012-vulkan-mipmaps: the levels in one image's mip levels, the rule in `mip_lod` in
+`ge.frag`), with the auto rule's gradient taken per PSP pixel at its internal scale.
 
 ### The registers and the rule
 
@@ -613,9 +614,11 @@ minification filter without bit 2 (0 to 3) on a texture with levels samples leve
 
 Since task 040 the record backend writes the texels of every mip level a draw samples (docs/ge-backend.md, section 6),
 so a recording replays its mipmapped draws exactly. One made between tasks 037 and 040 holds level 0's texels alone:
-replay it with `PURE_NO_MIPMAPS=1`. Older recordings read as one level and replay as before. On a recording made since
-task 037, Metal against Vulkan is like with like only with `PURE_NO_MIPMAPS=1` as well (the Vulkan backend samples
-level 0), which `tools/gerec/metal_check.sh` does not set yet: its recordings of 2026-10-06 predate the levels. The
+replay it with `PURE_NO_MIPMAPS=1`. Older recordings read as one level and replay as before. Until task 058 the Vulkan
+backend sampled level 0, so on a recording made since task 037 Metal against Vulkan was like with like only with
+`PURE_NO_MIPMAPS=1` beside `PURE_NO_TEXMAP=1` (task 040's note for `tools/gerec/metal_check.sh`). Since tasks 057 and
+058 both backends draw the modes and the levels, so the two switches are no longer needed for that A/B; each still
+turns its feature off in both (ge_replay hands the environment to both backends). The
 Blue Ridge frame, the slope rule against the reference, the shimmer and the decode counts:
 [Mipmaps](history/metal-backend.md#mipmaps-task-037-2026-10-07).
 
@@ -764,8 +767,9 @@ as before and named once; the game never draws one.
 - Points and lines are drawn (the Vulkan backend drops them).
 - Only a draw that reads the target it draws into goes through a copy.
 - An empty scissor draws nothing (the Vulkan backend draws one row or column).
-- Mip levels are uploaded and sampled at the level the GE's rule picks (task 037, "Mipmaps"); the Vulkan backend
-  samples every texture at level 0.
+- Mip levels: both backends upload them and pick the level by the GE's rule (task 037 here, task 058 and patch
+  0012-vulkan-mipmaps there). Drawing at 2x, the Vulkan backend adds 16 x log2 of its internal scale to the auto
+  rule's D, so that g, the screen gradient, stays per PSP pixel; Metal, at 1x, needs no such term.
 - The colour test drops fragments, 16-bit targets keep the format's bits with the GE's dithering, and CLIPENABLE's
   depth clamp and MINZ/MAXZ are applied (task 040); the Vulkan backend keeps every fragment, draws 16-bit targets at
   8 bits a channel and clips at both depth planes. On a recording made since task 040 the race differs between the
