@@ -1,0 +1,107 @@
+diff --git a/host/gpu/frame_interpolation.cpp b/host/gpu/frame_interpolation.cpp
+index e927840..6c74b2e 100644
+--- a/host/gpu/frame_interpolation.cpp
++++ b/host/gpu/frame_interpolation.cpp
+@@ -28,7 +28,7 @@ DrawSummary summarize(const DrawCall &call) {
+     draw.skinned = ((call.vertex_type >> 9u) & 3u) != 0u && !call.through;
+     draw.world = call.world;
+     draw.view = call.view;
+-    draw.projection = call.projection;
++    draw.projection = multiply(viewport_into_clip(call), call.projection);
+     draw.key_hash = Matcher::hash_of(draw);
+     draw.eye_translation = Matcher::eye_translation_of(draw);
+     draw.prepared = true;
+@@ -45,6 +45,24 @@ bool is_orthographic(const Matrix &projection) noexcept {
+     return std::fabs(projection[11]) < 1e-6f;
+ }
+ 
++Matrix viewport_into_clip(const DrawCall &call) noexcept {
++    Matrix out{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
++    const ViewportState &vp = call.viewport;
++    if (call.through || vp.x_scale == 0.0f || vp.y_scale == 0.0f) return out;
++    // screen = (x / w) * scale + offset - region, and the target's clip space
++    // wants 2 * screen / size - 1: x' = x * 2 scale / size + w * (2 (offset -
++    // region) / size - 1). The y scale is negative (device y up, the screen
++    // down), which flips y here instead of in the Vulkan viewport; window
++    // coordinates, and with them the cull winding, stay the same.
++    constexpr float kWidth = 480.0f;
++    constexpr float kHeight = 272.0f;
++    out[0] = 2.0f * vp.x_scale / kWidth;
++    out[5] = 2.0f * vp.y_scale / kHeight;
++    out[12] = 2.0f * (vp.x_offset - vp.offset_x) / kWidth - 1.0f;
++    out[13] = 2.0f * (vp.y_offset - vp.offset_y) / kHeight - 1.0f;
++    return out;
++}
++
+ std::size_t Matcher::KeyHash::operator()(const Key &key) const noexcept {
+     std::uint64_t hash = 1469598103934665603ull;
+     const auto mix = [&](std::uint32_t value) {
+diff --git a/host/gpu/frame_interpolation.hpp b/host/gpu/frame_interpolation.hpp
+index cddc85a..141111f 100644
+--- a/host/gpu/frame_interpolation.hpp
++++ b/host/gpu/frame_interpolation.hpp
+@@ -62,6 +62,16 @@ void mark_eligible(std::vector<DrawSummary> &draws, std::uint32_t displayed, boo
+ // True for a projection without perspective division.
+ [[nodiscard]] bool is_orthographic(const Matrix &projection) noexcept;
+ 
++// The GE viewport of a transformed draw (screen = ndc * scale + offset -
++// region offset) as a matrix applied after the projection: it takes the PSP's
++// clip x and y to the clip space of a target holding the 480x272 screen, so
++// the Vulkan viewport can cover the whole target and only the scissor clips
++// x and y, as on the GE. A viewport offset from the target's corner otherwise
++// loses its first column and row to Vulkan's viewport clip. The identity for
++// through draws and for a viewport without scale. A summary's projection
++// carries it (summarize), so a blended draw lands where its frame drew it.
++[[nodiscard]] Matrix viewport_into_clip(const DrawCall &call) noexcept;
++
+ // How two consecutive frames' draws correspond.
+ struct Matching {
+     // For each draw of the older frame, the index of the same draw in the
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 523a8ba..262b60a 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -6190,7 +6190,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     if (pipeline == VK_NULL_HANDLE) return;
+ 
+     PushConstants push{};
+-    push.transform = multiply(call.projection, view_world);
++    // The GE viewport's x and y are folded into clip space (viewport_into_clip),
++    // so the Vulkan viewport below covers the whole target.
++    push.transform = multiply(interpolation::viewport_into_clip(call), multiply(call.projection, view_world));
+     push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
+                      (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f)};
+     if (stored_alpha >= 0) push.viewport[3] += kPushStencilAlpha + 8.0f * static_cast<float>(stored_alpha);
+@@ -6293,10 +6295,14 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // The GE viewport maps normalised device coordinates onto the screen as
+     //   screen = ndc * scale + offset - region_offset
+     // with a negative y scale (PSP device y points up, the screen down) and a z
+-    // scale/offset that drives the 16-bit depth buffer. Folding all of that into
+-    // the Vulkan viewport reproduces the PSP's screen space exactly, including a
+-    // reversed depth range, and keeps triangle winding as the GE sees it. Through
+-    // draws bypass the transform, so they keep the plain full-target viewport.
++    // scale/offset that drives the 16-bit depth buffer. Its x and y are in the
++    // draw's transform (viewport_into_clip), so the Vulkan viewport is always
++    // the whole target: the GE clips x and y only at the scissor, and a
++    // Vulkan viewport set to the GE's would clip away the first column and row
++    // of a viewport offset from the target's corner (the race HUD's). Window
++    // coordinates, and so the cull winding, are the PSP's screen space either
++    // way. The z scale/offset stays in the viewport's depth range, including a
++    // reversed one.
+     // A target holds the game's 480x272 screen whatever its size, so a PSP
+     // pixel is scale_x by scale_y of its pixels: equal at a multiple of
+     // 480x272, different under Fill.
+@@ -6306,13 +6312,6 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                            static_cast<float>(impl.target_extent.height), 0.0f, 1.0f};
+     if (!call.through && call.viewport.x_scale != 0.0f && call.viewport.y_scale != 0.0f) {
+         const ViewportState &vp = call.viewport;
+-        vk_viewport.x = (vp.x_offset - vp.offset_x - vp.x_scale) * scale_x;
+-        vk_viewport.y = (vp.y_offset - vp.offset_y - vp.y_scale) * scale_y;
+-        vk_viewport.width = 2.0f * vp.x_scale * scale_x;
+-        // The GE's y scale is negative (device y points up, the screen down), so
+-        // this is a flipping viewport. That keeps framebuffer space identical to
+-        // the PSP's screen space, which is what the cull winding is defined in.
+-        vk_viewport.height = 2.0f * vp.y_scale * scale_y;
+         if (vp.z_scale != 0.0f) {
+             // The shader hands over device z in [0, 1]; this undoes that halving
+             // and applies the GE's z scale/offset, reproducing a reversed range
