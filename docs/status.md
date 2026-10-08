@@ -114,7 +114,13 @@ simplification task, then the enhancements. The session-by-session resume notes 
   shell change (docs/verification.md, "Which path for which change"); `python3 tools/docs_check.py` after a change
   that moves or renames a file, a tool or a patch. Merge: rerun the Verify, spot-read, `git merge --no-ff` into
   `batch/m2`, remove the worktree.
-- **Running.** The Windows bring-up (docs/windows.md). Step 1 is task 054 on `task/054-windows-build-boot`,
+- **Running.** The Windows bring-up (docs/windows.md). Step 2 is task 055, merged 522e3fb (2026-10-08): the
+  harness runs on Windows (the PPSSPP 1.20.4 driver, the ConPTY runner, worktree_init for workers, the references
+  retaken with the Mac's kept in ref/mac-2026-10-07/); the Windows scorecard grades Pictures close, Coverage
+  close, Timing not measured (no matrix yet), Saves differs (the headless gap: a run without a drawing backend
+  writes no profile save and loads no race — under diagnosis by the planning session, the task to be briefed).
+  Step 3 is briefed as tasks 056 to 060 (the Vulkan renderer to the Metal column, exit within 0.005 on every race
+  scene); 056 dispatches first and serially (6 threads). Step 1 was task 054 on `task/054-windows-build-boot`,
   run 2026-10-08 on Erik's Windows machine by the planning session itself (the corpus regeneration and the first
   cold build sit outside a worker's limits): the game builds with clang-cl on the win-x64 preset, the corpus
   regenerated there (145 units), and the frontend route, the main menu and a Vineta K race run on the framework's

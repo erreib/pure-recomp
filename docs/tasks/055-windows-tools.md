@@ -142,7 +142,16 @@ Open questions:
 5. A --quick run on Windows takes about 30 minutes, not 1, because every picture run is a paced Vulkan window.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge, 2026-10-08: exit 0, 31m 0s — Pictures close (the raised
+sebenco_climb_hud limit covering both mist phases held), Timing not measured, Saves differs (the headless gap),
+Coverage close. The grades match the recorded Windows expectation (docs/scorecard.md).
+Spot-read: the platform branches, the ConPTY runner and the junction/hard-link worktree_init; clean, house style.
+Merged: 522e3fb into batch/m2.
+Notes: open questions answered in commit 569f724 — Pictures on Windows is expected close, not faithful, until
+step 3 (docs/scorecard.md); the extra scenes' limits follow the re-baseline rule, the faithful band stays 0.005;
+ref/README.md carries the Windows VFPU retake's digests, the Mac's sets preserved in ref/mac-2026-10-07/. The
+headless gap gets its own diagnosis (the planning session) before or beside step 3; sas_reverb_check,
+ai_seed_check, refactor_check, save_interchange and replay_check wait on it or on step-3 recordings.
 
 ## Result addendum (continuation)
 Status: PARTIAL, unchanged. Of the seven items in the review, only the backup (item 1's first step) was done before
