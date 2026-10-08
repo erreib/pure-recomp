@@ -155,4 +155,12 @@ Open questions:
    no draw of the game.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge (12 patches reproduce the pin), 2026-10-08: PASS, 18/18 in
+20m 14s; the moved flags are downward, as the Result predicts.
+Spot-read: patch 0012 (604 lines) ports Metal's mip_levels and sample_texture faithfully; the per-pixel slope
+check over the grandstand draw is the series' strongest evidence; the internal-scale term (+16 at 2x) is a
+reasoned, documented choice and accepted.
+Merged: the merge commit after 8fc535a into batch/m2.
+Notes: the two out-of-scope follow-ups (README's stale level-0 rows, metal_check.sh's NO_TEXMAP) were done at
+the merge (commit 626531e) and the task-040 follow-up row is resolved. The auto rule stays unverified pixel by
+pixel (its draws are blended), as on Metal. The column re-measure stays parked at step 3's exit.
