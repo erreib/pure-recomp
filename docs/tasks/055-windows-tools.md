@@ -198,3 +198,17 @@ Items as numbered in the second review.
    - With both fixes: `tools/campaign_sweep.py single_race vineta_k` printed PASS at flip 17070: results screen at
      17060, 3 laps of 58.6, 60.7 and 59.9 s, 183.0 s at the shot, 45 contacts (16, 15, 14), shield 28.8 at the end,
      335 s wall, exit 0.
+3. Vulkan column for the three extra scenes: measured and recorded. tools/scorecard.py has a new table,
+   EXTRA_SCENES_VULKAN, with provenance "Windows, RTX 3080, task 055". cat_pictures uses it wherever
+   purelib.port.DRAWING draws with Vulkan. Each scene was run three times windowed, the way cat_pictures runs it
+   (the first Verify's run plus two more):
+
+   | Scene | Runs | Measured (median) | Limit |
+   |---|---|---|---|
+   | blue_ridge_hud | 0.0832, 0.0892, 0.0845 | 0.0845 | 0.11 |
+   | sinucit_hud | 0.1457, 0.1051, 0.0930 | 0.1051 | 0.17 |
+   | sebenco_climb_hud | 0.0967, 0.0918, 0.1309 | 0.0967 | 0.16 |
+
+   The limit is the largest run plus 0.02, rounded up to a hundredth, as docs/verification.md re-baselines. The
+   paced runs spread by up to 0.05 (the AI grid, and on sinucit and sebenco the weather mist's phase), more than
+   the 0.005 faithful band. So these rows can grade close from run to run without anything having changed.

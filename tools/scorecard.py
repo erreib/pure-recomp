@@ -109,6 +109,12 @@ EXTRA_SCENES = [
     ("sinucit_hud",       "sinucit",       6016, "ref/sinucit_hud.png",       32, 0.11,  0.0877,  True),
     ("sebenco_climb_hud", "sebenco_climb", 6018, "ref/sebenco_climb_hud.png", 32, 0.32,  0.2993,  True),
 ]
+# The Vulkan column of the same scenes (limit, measured), used where the pictures come from the Vulkan backend
+# (purelib.port.DRAWING; Windows): Windows, RTX 3080, task 055, three windowed runs each (paced, so the AI grid and
+# the weather mist's phase vary): blue_ridge 0.0832, 0.0892, 0.0845; sinucit 0.1457, 0.1051, 0.0930; sebenco_climb
+# 0.0967, 0.0918, 0.1309. Measured: the median; limit: the largest plus 0.02, rounded up to a hundredth.
+EXTRA_SCENES_VULKAN = {"blue_ridge_hud": (0.11, 0.0845), "sinucit_hud": (0.17, 0.1051),
+                       "sebenco_climb_hud": (0.16, 0.0967)}
 
 # PPSSPP's routes to each circuit's grid (tools/ppsspp/routes, task 035) and the vblank of the first full-HUD frame
 # (ref/README.md, runs J and K). Cross is held from the first READY frame, 58 vblanks after it (7213 on Vineta K,
@@ -356,6 +362,8 @@ def cat_pictures(ctx):
                         "" if frac is not None else s["result"],
                         {"scene": scene, "fraction": frac, "measured": s["measured"], "limit": s["limit"]}))
     for scene, track, frame, ref, tol, limit, measured, unlock in EXTRA_SCENES:
+        if port.DRAWING[1] == "vulkan":     # grade against the backend that drew the picture (task 055)
+            limit, measured = EXTRA_SCENES_VULKAN[scene]
         refp = ROOT / ref
         steps = race_steps(track, 3000) + [(frame, f"shot {scene}")]
         log, rc, reached = port_run(ctx, f"picture-{scene}", steps, frame + 30,
