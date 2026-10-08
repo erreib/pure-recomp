@@ -226,4 +226,14 @@ Open questions:
    out/dbg*/.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge (13 patches reproduce the pin), 2026-10-08: PASS, 18/18 in
+20m 15s; the moved flags downward. race_hud's +0.0025 in the worker's run is run wobble, as the Result argues
+(the patch moves 0 px of the fixed recording at tol 32) — the gate run bears that reading out.
+Spot-read: patch 0013 (343 lines); the colour test as specialisation constants is the right call for a game
+whose values never change; the depth-clamp design argument (Metal's design, core 1.0 features) is sound; the
+per-pixel rule checks and the .5-boundary forensics are the series' standard.
+Merged: into batch/m2 after ceb7e56's branch.
+Notes: README's switch rows fixed at the merge (dither stays Metal-only until task 060). Open question 3
+(a module without gl_ClipDistance for devices lacking shaderClipDistance) is recorded as an upstream-facing
+follow-up — both targets this project ships to have the feature. The billboard target's colour-tested draw
+cut-check waits on task 060's dither work, which owns that target.
