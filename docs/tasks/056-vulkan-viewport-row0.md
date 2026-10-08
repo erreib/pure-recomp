@@ -138,4 +138,12 @@ Open questions:
    them again or copy them.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge and vendor re-setup (10 patches reproduce the pin),
+2026-10-08: PASS, 18/18 in 20m 14s (fp_hud 0.0921 this run — the bimodality the Result documents).
+Spot-read: patch 0010 is 43 added lines, the viewport maths derived in comments, identity for through draws,
+summarize() carries it for frame interpolation; replay_check's Windows port matches the other tools' pattern.
+Merged: b65b6a8 into batch/m2.
+Notes on the open questions: the measured column stays the Mac's — the fix moves scenes by under 0.001 and the
+whole Vulkan column is re-measured once at step 3's exit, not per task; the missing off switch is accepted (the
+replay against the pre-fix recordings is the A/B) and revisited when the patch is offered upstream; recordings
+stay per machine in out/, as all of out/ does.
