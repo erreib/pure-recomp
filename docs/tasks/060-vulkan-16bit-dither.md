@@ -53,6 +53,20 @@ implementation carried over where the chosen path allows (mark what stays unexer
 Neither path reproduces the GE's write rule on this driver; the subpass restructuring would touch the renderer's
 public interface in include/psprecomp/; a vendor host rebuild exceeds 5 minutes.
 
+## Working notes
+Design (decided before the code): RGBA8 targets, with the blend done in ge.frag on the colour read through the
+render pass's own colour attachment as a self-dependent subpass input (the colour attachment is also input attachment
+0, GENERAL layout inside the pass, a BY_REGION self-dependency, and a by-region barrier before each draw into a 16-bit
+target, which also stops such draws from merging). This is Metal's `ge_fragment_16` on Vulkan. It is one render pass
+for every target, so every pipeline, framebuffer and descriptor set stays compatible and ge.frag can declare the input
+legally for all pipelines (a second shader module would need cmake/PortableKit.cmake, outside May touch). Rejected:
+true 16-bit `VkFormat`s (the hardware rounds where the GE truncates after the blend, the dither offset sits after the
+blend, and every reader of a target expects RGBA8); `VK_EXT_fragment_shader_interlock` (supported on this RTX 3080, but
+it needs storage-image writes, which bypass the depth/stencil test unless the tests run early, and early tests break
+discard-with-depth-write). The subpass path leaves overlapping fragments of one draw unordered (no
+`VK_EXT_rasterization_order_attachment_access` on this driver); measured on race_warm frames 6008, 6012 and 6016 with
+culling applied, the blended draws into 0x04154000 have 0 such pixels.
+
 ## Result
 (worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
 
