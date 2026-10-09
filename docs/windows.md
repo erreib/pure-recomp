@@ -53,8 +53,12 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
      to true 16-bit formats (the hardware quantises; the dither offset needs a pass of its own or a subpass with an
      input attachment) or keep RGBA8 targets and dither in a second subpass. Measure as task 040 did (the billboard
      target against PPSSPP's dump).
-   Exit: the suite's Vulkan column within 0.005 of the Metal column on every race scene; `tools/gerec/metal_check.sh`'s
-   A/B then compares two complete backends.
+   Exit: `tools/gerec/metal_check.sh`'s A/B compares the two complete backends on one recording, on the Mac.
+   (Task 060 found the suite cannot judge this bar: its Vulkan column is a windowed 960x544 capture sampled down,
+   its Metal column the headless backend's own 480x272 pictures, and the no-3D menu scenes carry the same 0.03 to
+   0.05 gap as the race scenes — the capture path, not the renderer. The Windows measure is the re-baselined
+   Vulkan column against the PPSSPP references, which tasks 056 to 060 moved from 0.067-0.096 to 0.045-0.056 on
+   the race scenes.)
 4. **Packaging (one task).** The Windows zip through the framework's release script, the game-data check, a
    first-run setup that takes the disc image, the pre-warm list shipped, a bundle check equivalent to the macOS one.
 

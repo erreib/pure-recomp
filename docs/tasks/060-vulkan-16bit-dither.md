@@ -237,4 +237,15 @@ Open questions:
    ppdmp.py (this machine has no `zstd`). Their outputs are in out/ab/ (measure.txt, cut_on_*/cut_off_*, pp/).
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge (14 patches reproduce the pin), 2026-10-08: PASS, 18/18;
+race_hud 0.0535, tt_hud 0.0471, fp_hud 0.0565, zone_change 0.0453 — the wobble bands as the Result reads them.
+Spot-read: patch 0014 (547 lines); the subpass-input design is argued against the driver's real features and the
+rejected paths' real defects; the unblended draw's 16384/16384 against the PSP's rule and the per-round block
+counts against PPSSPP's dump are the right evidence; the single-draw-overlap limit is measured at 0 pixels, not
+assumed.
+Merged: into batch/m2 after 4765079's branch.
+Notes: the capture-path finding is accepted as a wrong premise in the brief, reported exactly as the protocol
+asks: the step-3 exit's 0.005 bar compares columns measured differently (the no-3D menu scenes carry the same
+0.03-0.05 gap), so the bar is judged by tools/gerec/metal_check.sh's A/B on a Mac — docs/windows.md amended, the
+Vulkan column re-baselined from three post-060 runs instead. README and setup follow-ups done at the merge.
+GENERAL-layout cost on tiled/AMD GPUs (open question 4) recorded as an upstream-facing follow-up.
