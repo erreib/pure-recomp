@@ -1,6 +1,6 @@
 # 062: Simplify the Metal backend (the simplification task from 049's list)
 
-Milestone: M9 organisation (follow-up) | Branch: task/062-metal-backend-simplify | Status: OPEN
+Milestone: M9 organisation (follow-up) | Branch: task/062-metal-backend-simplify | Status: MERGED (1589688, 2026-10-09)
 
 ## Goal
 Task 049 split the Metal backend into files by concern and noted four simplifications it saw and did not do,
@@ -214,4 +214,20 @@ Open questions:
    `prewarm_path_` was before.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge, 2026-10-09: PASS. The refactor check there compared against the
+main checkout's before captures, taken 2026-10-07 at d55e70a (task 049's time): 0 differing pixels on 18 scenes and
+the same 86 `[metal]` count lines, so the backend's pictures are unchanged across tasks 050 to 062 too. Frame suite
+18/18 headless, `--shell metal --backend metal` 18/18 (20 min), `--shell vulkan --backend vulkan` 18/18 (20 min),
+`tools/hud_check.sh` 61/61 in the Metal shell and headless.
+Spot-read: `copy_to_buffer(texture, buffer, options)` carries the same nine blit arguments the three copies had,
+with `MTLBlitOptionNone` where no option was given; `Target::bytes()`/`contains()` reproduce the extent arithmetic
+and the three scans keep their selection rules and comments; draw()'s sixteen `[encoder_ set...]` calls are in the
+same order before and after the cut (bind_state nine, bind_inputs seven). Lines: the nine files 3204 to 3252 (+48:
+the structs and helpers in metal_types.hpp +73, the class -34); draw() 300 to 133; 90 to 50 direct members.
+Merged: `git merge --no-ff` into batch/m2, 1589688.
+Notes: the `copyFromTexture:` count of 1 in the acceptance line was the brief's slip: the second occurrence is
+sample_target's texture-to-texture copy, not one of the three. The race A/B's 2 px predate the task (the same
+figure on the starting build and in the Mac A/B of the same morning). Follow-ups, none behavioural:
+snapshot_guest_words still computes a target's extent itself (could use `Target::bytes()`); `prewarm_.path` is
+written and never read; `trace_.stencil_copy` and `trace_.depth` are read by metal_effects.mm and
+metal_targets.mm rather than the trace, so they belong in `switches_`.
