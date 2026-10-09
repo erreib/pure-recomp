@@ -28,6 +28,14 @@ portablekit_add_game(PureNative
             src/host/pure_main.cpp src/tools/ge_replay.cpp
             ${platform_sources})
 
+# The Windows release (task 061, docs/release.md "Windows"): the windows subsystem, so a player who starts the program
+# from Explorer gets no console window; the entry stays the C runtime's main(). The developer build keeps the console
+# subsystem, whose stdout every tool reads.
+if(WIN32 AND PORTABLEKIT_RELEASE)
+    set_target_properties(PureNative PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_link_options(PureNative PRIVATE /ENTRY:mainCRTStartup)
+endif()
+
 if(APPLE)
     # The Metal GE backend (PURE_GE_BACKEND=metal, docs/metal-backend.md), the Metal shell (PURE_SHELL=metal) and Dear
     # ImGui's Metal renderer backend (1.92.9b, the vendored ImGui's release, MIT): Objective-C++ with ARC, compiled by the
