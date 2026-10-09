@@ -65,6 +65,9 @@ repo's bash tools run there as on macOS; `python3` resolves to a real Python 3.1
 - `core.autocrlf=true` globally: the working tree is CRLF. Git Bash runs CRLF shell scripts, Python reads them
   fine, and `git apply` applies the patch series with "trailing whitespace" warnings that mean nothing.
 - The first `clang` on PATH is irrelevant here (no Game Porting Toolkit); the preset names absolute compiler paths.
+- The vendor tree's files are CRLF in this checkout (`core.autocrlf=true`): a `sed -i` or any tool that
+  rewrites a vendor file as LF makes `tools/patches.sh check` fail although the diff is right (task 060 hit
+  it). Keep vendor edits CRLF, or restore the ending before exporting.
 - `tools/env.sh` detects Windows by `uname -s` (MINGW*) and sets PATH for cmake, ninja, clang-cl and ccache;
   `tools/build.sh` and `tools/regen.sh` pick the `win-x64` preset the same way.
 
