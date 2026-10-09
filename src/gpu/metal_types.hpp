@@ -15,9 +15,13 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace pure::gpu::metal_backend {
@@ -324,6 +328,67 @@ struct Prewarm {
     std::uint32_t failed{};
     std::chrono::steady_clock::time_point started{};
     double done_ms{};  // from the start to the last completion
+};
+
+// The switches initialize() reads once from the environment and the backend's config (metal_backend.mm); the file
+// that draws each concern reads its own. The class's switches_.
+struct Switches {
+    bool to_shell{};   // hand each picture to the Vulkan shell's window (PURE_METAL_SHELL=0 leaves it black)
+    bool sharp{};      // the config's sharp textures: nearest filtering
+    bool log_draws{};  // PURE_METAL_LOG
+    bool no_framebuffer_textures{};
+    bool no_lighting{};
+    bool no_fog{};
+    bool no_cull{};
+    bool no_texture_map{};
+    bool no_mipmaps{};
+    bool no_color_test{};
+    bool no_dither{};
+    bool no_depth_clamp{};
+    std::uint32_t show_target{};  // PURE_METAL_SHOW_TARGET: the target each flip presents instead of the display
+};
+
+// The frame trace and the counts' lines (metal_trace.mm), and the framework's traces. The class's trace_.
+struct TraceState {
+    // PURE_TRACE_STENCIL_COPY and PURE_TRACE_DEPTH_READBACK: a line per copy of the stencil into the alpha and per
+    // depth write-back; and whether the first write-back's line was said.
+    bool stencil_copy{};
+    bool depth{};
+    bool depth_announced{};
+    // PURE_METAL_TRACE (task 033): the interval's times, the counts at the last flip, the rows not written yet.
+    FrameTimes times;
+    Stats stats;
+    std::FILE *file{};
+    std::string path;
+    std::deque<TraceRow> pending_rows;
+    std::uint64_t rows{};
+    std::uint64_t shown{};      // rows whose picture reached the screen
+    std::uint64_t not_shown{};  // rows whose picture the shell says never did
+    std::chrono::steady_clock::time_point last_flip{};
+    bool has_flip{};
+    bool shell_seen{};          // a Metal shell reports its presents
+    double last_presented_s{};  // when the last picture shown reached the screen
+    // When the backend started (the rows' times, the exit line's seconds); the line every 600 frames.
+    std::chrono::steady_clock::time_point started{};
+    std::chrono::steady_clock::time_point report_start{};
+    std::uint64_t report_frames{};
+    std::uint64_t report_draws{};
+};
+
+// The keys the draws used (PURE_METAL_PIPELINES_OUT) and the pre-warm on the backend's side (metal_pipelines.mm).
+// The class's prewarm_.
+struct PrewarmState {
+    std::string pipelines_out;
+    std::set<RenderKey> render_seen;
+    std::set<DepthStencilKey> depth_seen;
+    std::shared_ptr<Prewarm> shared;  // what the completion handlers fill; null without a list
+    std::string path;
+    std::size_t depth_states{};
+    double start_ms{};
+    bool reported{};
+    std::uint64_t used{};
+    std::uint64_t waits{};
+    std::uint64_t missed{};
 };
 
 } // namespace pure::gpu::metal_backend

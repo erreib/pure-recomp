@@ -233,56 +233,13 @@ private:
     portablekit::gpu::VulkanRenderer *shell_{};
     std::vector<std::uint8_t> shell_scratch_;
     std::set<std::uint32_t> bad_levels_;  // textures drawn at level 0 alone for a level mip_levels() refused
-    bool to_shell_{};
-    bool sharp_{};
-    bool log_draws_{};
-    bool no_framebuffer_textures_{};
-    bool no_lighting_{};
-    bool no_fog_{};
-    bool no_cull_{};
-    bool no_texture_map_{};
-    bool no_mipmaps_{};
-    bool no_color_test_{};
-    bool no_dither_{};
-    bool no_depth_clamp_{};
-    std::uint32_t show_target_{};  // PURE_METAL_SHOW_TARGET: the target each flip presents instead of the display
-    bool trace_stencil_copy_{};
-    bool trace_depth_{};
-    bool depth_announced_{};
-
-    // PURE_METAL_TRACE (task 033): the interval's times, the counts at the last flip, the rows not written yet.
-    FrameTimes times_;
-    Stats trace_stats_;
-    std::FILE *trace_file_{};
-    std::string trace_path_;
-    std::deque<TraceRow> pending_rows_;
-    std::uint64_t trace_rows_{};
-    std::uint64_t trace_shown_{};      // rows whose picture reached the screen
-    std::uint64_t trace_not_shown_{};  // rows whose picture the shell says never did
-    std::chrono::steady_clock::time_point trace_last_flip_{};
-    bool trace_has_flip_{};
-    bool shell_seen_{};           // a Metal shell reports its presents
-    double last_presented_s_{};   // when the last picture shown reached the screen
-    // The keys the draws used (PURE_METAL_PIPELINES_OUT) and the pre-warm.
-    std::string pipelines_out_;
-    std::set<RenderKey> render_seen_;
-    std::set<DepthStencilKey> depth_seen_;
-    std::shared_ptr<Prewarm> prewarm_;
-    std::string prewarm_path_;
-    std::size_t prewarm_depth_states_{};
-    double prewarm_start_ms_{};
-    bool prewarm_reported_{};
-    std::uint64_t prewarm_used_{};
-    std::uint64_t prewarm_waits_{};
-    std::uint64_t prewarm_missed_{};
+    Switches switches_;     // read once by initialize() (metal_backend.mm)
+    TraceState trace_;      // PURE_METAL_TRACE, the framework's traces and the counts' lines (metal_trace.mm)
+    PrewarmState prewarm_;  // the pre-warm and the keys the draws used (metal_pipelines.mm)
 
     std::uint64_t frames_{};
     std::uint64_t frame_draws_{};
     Stats stats_;
-    std::chrono::steady_clock::time_point started_{};
-    std::chrono::steady_clock::time_point report_start_{};
-    std::uint64_t report_frames_{};
-    std::uint64_t report_draws_{};
 };
 
 } // namespace pure::gpu::metal_backend

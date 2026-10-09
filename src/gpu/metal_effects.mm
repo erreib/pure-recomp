@@ -61,7 +61,7 @@ void MetalGeBackend::resolve_stencil_alpha(const char *reason) {
     alpha_stale_ = false;
     if (encoder_ == nil || current_target_ == nullptr) return;
     ++stats_.stencil_copies;
-    if (trace_stencil_copy_)
+    if (trace_.stencil_copy)
         std::cout << "[metal] stencil copied into the alpha of 0x" << std::hex << current_target_->key.address
                   << std::dec << " in frame " << frames_ + 1u << " (" << reason << ")\n";
     std::array<GpuVertex, 6> quad{};

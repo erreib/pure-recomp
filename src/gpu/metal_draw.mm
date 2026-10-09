@@ -324,7 +324,7 @@ void MetalGeBackend::fill_lighting(const DrawCall &call, bool lit, bool fogged, 
 void MetalGeBackend::set_texture_map(const DrawCall &call, const Target *source, std::uint32_t source_x,
                                      std::uint32_t source_y, VertexUniforms &vertex, FragmentUniforms &fragment) {
     const pk::TextureMapState &map = call.texture_map;
-    if (call.through || no_texture_map_ || map.map_mode == 0u) return;
+    if (call.through || switches_.no_texture_map || map.map_mode == 0u) return;
     if (map.map_mode == 3u) {
         not_emulated("texture map mode 3 (drawn with its UVs)", map.map_mode);
         return;
@@ -380,7 +380,7 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     const bool textured = call.texture.enabled && !call.clear_mode;
     // A 5650, 5551 or 4444 target keeps the format's bits of every write, dithered when the GE says (task 040):
     // ge_fragment_16 blends and quantises; clears keep the bits undithered.
-    const bool sixteen = !no_dither_ && call.target.color_format < 3u;
+    const bool sixteen = !switches_.no_dither && call.target.color_format < 3u;
     if (sixteen) {
         key.render.sixteen = true;
         const bool dithered = call.dither.enabled && !call.clear_mode;
@@ -401,8 +401,8 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
                                                      1.0f / static_cast<float>(state.height), 0.0f, 0.0f}
                               : std::array<float, 4>{state.scale_u, state.scale_v, state.offset_u, state.offset_v};
     if (textured) {
-        const bool linear_mag = !sharp_ && (state.mag_filter & 1u) != 0u;
-        const bool linear_min = !sharp_ && (state.min_filter & 1u) != 0u;
+        const bool linear_mag = !switches_.sharp && (state.mag_filter & 1u) != 0u;
+        const bool linear_min = !switches_.sharp && (state.min_filter & 1u) != 0u;
         source = find_framebuffer_texture(memory, state, source_x, source_y);
         if (source != nullptr) {
             // The texture's first texel is pixel (x, y) of a 480x272 target; the sampler clamps at
@@ -447,8 +447,8 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     id<MTLDepthStencilState> depth = depth_state(key.depth);
 
     // Lighting and fog, as ge.vert and ge.frag: transformed draws only, never a clear.
-    const bool lit = call.lighting_enabled && !no_lighting_ && !call.through && !call.clear_mode;
-    const bool fogged = call.fog.enabled && !no_fog_ && !call.through && !call.clear_mode;
+    const bool lit = call.lighting_enabled && !switches_.no_lighting && !call.through && !call.clear_mode;
+    const bool fogged = call.fog.enabled && !switches_.no_fog && !call.through && !call.clear_mode;
     const bool shade_mapped = vertex.texture_map[0] == 2u;
     if (lit || fogged || shade_mapped) fill_lighting(call, lit, fogged, shade_mapped);
     if (fogged) {
@@ -459,11 +459,11 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     // Positions: screen pixels in through mode; the GE viewport folded into clip space otherwise.
     MTLViewport viewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0};
     // CLIPENABLE's depth clamp (task 040) for transformed draws; without it, Metal clips at both planes.
-    const bool clamp_depth = !call.through && call.clip_enabled && !no_depth_clamp_;
+    const bool clamp_depth = !call.through && call.clip_enabled && !switches_.no_depth_clamp;
     vertex.mode = {call.through ? 1u : 0u, sprite_corners_ != 0u ? kClipPositions : 0u,
                    (fogged ? kFog : 0u) | (lit ? kLighting : 0u), 0u};
     if (!call.through) fold_viewport(call, transform, clamp_depth, vertex, viewport);
-    const bool cull = call.culling_enabled && !no_cull_ && !call.through && type == MTLPrimitiveTypeTriangle &&
+    const bool cull = call.culling_enabled && !switches_.no_cull && !call.through && type == MTLPrimitiveTypeTriangle &&
                       call.primitive != PrimitiveType::Sprites && !call.clear_mode;
 
     // Into the target's pass (after the texture, whose copy may have ended it).
@@ -486,7 +486,7 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     bind_inputs(buffer, offset, vertex, lit || fogged || shade_mapped, fragment, texture, sampler);
     [encoder_ drawPrimitives:type vertexStart:0 vertexCount:drawn];
 
-    if (log_draws_) log_draw(call, target, source, source_x, source_y, scissor);
+    if (switches_.log_draws) log_draw(call, target, source, source_x, source_y, scissor);
     ++stats_.draws;
     ++frame_draws_;
 }
@@ -542,7 +542,8 @@ void MetalGeBackend::set_pipeline_key(const DrawCall &call, bool sixteen, Pipeli
         fragment.alpha_test = {call.alpha_test.function, call.alpha_test.reference & 0xFFu,
                                call.alpha_test.mask & 0xFFu, 0u};
         // The colour test (task 040), ALWAYS compiled out as the alpha test's.
-        key.render.color_test = !no_color_test_ && call.color_test.enabled && (call.color_test.function & 3u) != 1u;
+        key.render.color_test =
+            !switches_.no_color_test && call.color_test.enabled && (call.color_test.function & 3u) != 1u;
         fragment.color_test = {call.color_test.function & 3u, call.color_test.reference & 0x00FFFFFFu,
                                call.color_test.mask & 0x00FFFFFFu, 0u};
         if (key.render.color_test) ++stats_.color_tested;
@@ -588,7 +589,7 @@ void MetalGeBackend::fold_viewport(const DrawCall &call, const std::array<float,
                         static_cast<float>(call.depth.range_far)};
         ++stats_.depth_clamped;
     } else {
-        if (!call.clip_enabled && !no_depth_clamp_)
+        if (!call.clip_enabled && !switches_.no_depth_clamp)
             not_emulated("CLIPENABLE off on a transformed draw (drawn clipped at both depth planes)", 0u);
         if (vp.z_scale != 0.0f) {
             // The shader hands over z in [0, w] for the PSP's [-w, w]; this applies the GE's z scale
