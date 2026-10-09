@@ -138,10 +138,7 @@ const Target *MetalGeBackend::target_holding(std::uint32_t address, std::size_t 
     const std::uint64_t end = first + bytes;
     for (const auto &[key, target] : targets_) {
         if (!target->color_defined) continue;
-        const std::uint64_t base = key.address;
-        const std::uint64_t target_end =
-            base + static_cast<std::uint64_t>(key.stride) * kHeight * target->bytes_per_pixel();
-        if (first < target_end && base < end) return target.get();
+        if (first < key.address + target->bytes() && key.address < end) return target.get();
     }
     return nullptr;
 }

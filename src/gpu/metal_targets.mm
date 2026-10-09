@@ -71,11 +71,9 @@ Target *MetalGeBackend::find_framebuffer_texture(const GuestMemory &memory, cons
         if (!target->color_defined || target->guest_words.empty()) continue;
         const std::uint32_t bytes_per_pixel = target->bytes_per_pixel();
         if (texture_bits(texture.format) != bytes_per_pixel * 8u) continue;
-        const std::uint32_t base = key.address;
-        const std::uint32_t bytes = key.stride * kHeight * bytes_per_pixel;
-        if (texture_address < base || texture_address - base >= bytes) continue;
-        if (texture.buffer_width != key.stride || (texture_address - base) % bytes_per_pixel != 0u) continue;
-        const bool exact = texture_address == base;
+        if (!target->contains(texture_address)) continue;
+        if (texture.buffer_width != key.stride || (texture_address - key.address) % bytes_per_pixel != 0u) continue;
+        const bool exact = texture_address == key.address;
         if (best == nullptr || (exact && !best_exact) ||
             (exact == best_exact && target->draw_serial > best->draw_serial)) {
             best = target.get();
@@ -220,8 +218,7 @@ Target *MetalGeBackend::drawn_target_containing(std::uint32_t start, std::uint64
     for (auto &[key, target] : targets_) {
         if (!target->color_defined || target->guest_words.empty()) continue;
         if ((key.address & 0x1F000000u) != 0x04000000u) continue;
-        const std::uint64_t bytes = static_cast<std::uint64_t>(key.stride) * kHeight * target->bytes_per_pixel();
-        if (address < key.address || address - key.address >= bytes) continue;
+        if (!target->contains(address)) continue;
         const bool exact = key.address == start;
         if (best == nullptr || (exact && !best_exact) ||
             (exact == best_exact && target->draw_serial > best->draw_serial)) {

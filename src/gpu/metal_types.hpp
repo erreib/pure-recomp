@@ -151,6 +151,14 @@ struct Target {
     std::vector<std::uint32_t> guest_words;
 
     [[nodiscard]] std::uint32_t bytes_per_pixel() const { return key.format == 3u ? 4u : 2u; }
+    // The guest memory the target covers from its address: kHeight rows of `stride` pixels.
+    [[nodiscard]] std::uint64_t bytes() const {
+        return static_cast<std::uint64_t>(key.stride) * kHeight * bytes_per_pixel();
+    }
+    // Whether byte `address` lies in that memory.
+    [[nodiscard]] bool contains(std::uint64_t address) const {
+        return address >= key.address && address - key.address < bytes();
+    }
 };
 
 // The render pipeline state's part of a draw's state.
