@@ -28,15 +28,15 @@ void MetalGeBackend::open_trace(const char *path) {
     std::error_code ignored;
     const std::filesystem::path file(path);
     if (file.has_parent_path()) std::filesystem::create_directories(file.parent_path(), ignored);
-    trace_file_ = std::fopen(path, "w");
-    if (trace_file_ == nullptr) {
+    trace_.file = std::fopen(path, "w");
+    if (trace_.file == nullptr) {
         std::cout << "[metal] cannot write the frame trace to " << path << "\n";
         return;
     }
-    trace_path_ = path;
-    std::fprintf(trace_file_, "%s\n", kTraceHeader);
-    trace_stats_ = stats_;
-    times_ = FrameTimes{};
+    trace_.path = path;
+    std::fprintf(trace_.file, "%s\n", kTraceHeader);
+    trace_.stats = stats_;
+    trace_.times = FrameTimes{};
     std::cout << "[metal] frame trace: a row per flip -> " << path << "\n";
 }
 
@@ -46,20 +46,21 @@ void MetalGeBackend::end_trace_interval() {
     const auto now = std::chrono::steady_clock::now();
     TraceRow row;
     row.flip = frames_ + 1u;
-    row.t_ms = std::chrono::duration<double, std::milli>(now - started_).count();
-    row.frame_ms = std::chrono::duration<double, std::milli>(now - (trace_has_flip_ ? trace_last_flip_ : started_)).count();
-    trace_last_flip_ = now;
-    trace_has_flip_ = true;
-    row.times = std::exchange(times_, FrameTimes{});
-    row.counts = since(trace_stats_);
-    trace_stats_ = stats_;
+    row.t_ms = std::chrono::duration<double, std::milli>(now - trace_.started).count();
+    row.frame_ms =
+        std::chrono::duration<double, std::milli>(now - (trace_.has_flip ? trace_.last_flip : trace_.started)).count();
+    trace_.last_flip = now;
+    trace_.has_flip = true;
+    row.times = std::exchange(trace_.times, FrameTimes{});
+    row.counts = since(trace_.stats);
+    trace_.stats = stats_;
     const pure::metal::ShellPresents shell = pure::metal::take_shell_presents();
     row.shell_ms = shell.cpu_ms;
     row.drawable_ms = shell.drawable_ms;
     row.shell_presents = shell.count;
     row.occluded = shell.occluded;
-    if (shell.count != 0u) shell_seen_ = true;
-    pending_rows_.push_back(row);
+    if (shell.count != 0u) trace_.shell_seen = true;
+    trace_.pending_rows.push_back(row);
     flush_trace(false);
 }
 
@@ -80,13 +81,13 @@ Stats MetalGeBackend::since(const Stats &before) const {
 // Writes the rows in order, each once the shell has reported when its picture reached the screen (under the
 // Metal shell; at once under any other), or kTraceDelay flips later, or with `all` at the end.
 void MetalGeBackend::flush_trace(bool all) {
-    while (!pending_rows_.empty()) {
-        const TraceRow &row = pending_rows_.front();
+    while (!trace_.pending_rows.empty()) {
+        const TraceRow &row = trace_.pending_rows.front();
         double presented_s = 0.0, latency_ms = 0.0;
         const bool known = pure::metal::take_presented(row.flip, presented_s, latency_ms);
-        if (!known && shell_seen_ && !all && frames_ + 1u - row.flip < kTraceDelay) break;
+        if (!known && trace_.shell_seen && !all && frames_ + 1u - row.flip < kTraceDelay) break;
         write_trace_row(row, known, presented_s, latency_ms);
-        pending_rows_.pop_front();
+        trace_.pending_rows.pop_front();
     }
 }
 
@@ -96,7 +97,7 @@ void MetalGeBackend::write_trace_row(const TraceRow &row, bool known, double pre
     const Stats &c = row.counts;
     const double waits = t.wait_depth + t.wait_frame + t.wait_guest + t.wait_capture + t.wait_ring;
     const double other = row.frame_ms - t.submit - t.present - t.memory - row.shell_ms;
-    std::fprintf(trace_file_,
+    std::fprintf(trace_.file,
                  "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%llu,%llu,%llu,%.1f,%llu,"
                  "%llu,%llu,%llu,",
                  static_cast<unsigned long long>(row.flip), row.t_ms, row.frame_ms, t.submit, t.pipeline, t.texture,
@@ -106,50 +107,50 @@ void MetalGeBackend::write_trace_row(const TraceRow &row, bool known, double pre
                  static_cast<unsigned long long>(c.stencil_copies), static_cast<unsigned long long>(c.draws),
                  static_cast<unsigned long long>(c.passes), static_cast<unsigned long long>(c.copies));
     // The shell's columns are empty where no Metal shell presents.
-    if (shell_seen_) std::fprintf(trace_file_, "%.3f,%.3f,%u,", row.shell_ms, row.drawable_ms, row.occluded);
-    else std::fprintf(trace_file_, ",,,");
+    if (trace_.shell_seen) std::fprintf(trace_.file, "%.3f,%.3f,%u,", row.shell_ms, row.drawable_ms, row.occluded);
+    else std::fprintf(trace_.file, ",,,");
     // shown_ms: since the last picture that reached the screen, 0 for one that never did, empty when unknown.
     const bool presented = known && presented_s > 0.0;
-    if (presented && last_presented_s_ > 0.0)
-        std::fprintf(trace_file_, "%.3f,", (presented_s - last_presented_s_) * 1000.0);
+    if (presented && trace_.last_presented_s > 0.0)
+        std::fprintf(trace_.file, "%.3f,", (presented_s - trace_.last_presented_s) * 1000.0);
     else if (known && !presented)
-        std::fprintf(trace_file_, "0,");
-    else std::fprintf(trace_file_, ",");
+        std::fprintf(trace_.file, "0,");
+    else std::fprintf(trace_.file, ",");
     if (presented) {
-        std::fprintf(trace_file_, "%.3f,", latency_ms);
-        last_presented_s_ = presented_s;
-        ++trace_shown_;
+        std::fprintf(trace_.file, "%.3f,", latency_ms);
+        trace_.last_presented_s = presented_s;
+        ++trace_.shown;
     } else {
-        std::fprintf(trace_file_, ",");
-        if (known) ++trace_not_shown_;
+        std::fprintf(trace_.file, ",");
+        if (known) ++trace_.not_shown;
     }
-    std::fprintf(trace_file_, "%.3f\n", other);
-    if (++trace_rows_ % 60u == 0u) std::fflush(trace_file_);
+    std::fprintf(trace_.file, "%.3f\n", other);
+    if (++trace_.rows % 60u == 0u) std::fflush(trace_.file);
 }
 
 void MetalGeBackend::close_trace() {
-    if (trace_file_ == nullptr) return;
+    if (trace_.file == nullptr) return;
     flush_trace(true);
-    std::fclose(trace_file_);
-    trace_file_ = nullptr;
-    std::cout << "[metal] frame trace: " << trace_rows_ << " rows -> " << trace_path_;
-    if (shell_seen_)
-        std::cout << "; the shell's pictures: " << trace_shown_ << " reached the screen, " << trace_not_shown_
-                  << " never did, " << trace_rows_ - trace_shown_ - trace_not_shown_ << " not reported";
+    std::fclose(trace_.file);
+    trace_.file = nullptr;
+    std::cout << "[metal] frame trace: " << trace_.rows << " rows -> " << trace_.path;
+    if (trace_.shell_seen)
+        std::cout << "; the shell's pictures: " << trace_.shown << " reached the screen, " << trace_.not_shown
+                  << " never did, " << trace_.rows - trace_.shown - trace_.not_shown << " not reported";
     std::cout << "\n";
 }
 
 void MetalGeBackend::report() {
     const auto now = std::chrono::steady_clock::now();
-    const double seconds = std::chrono::duration<double>(now - report_start_).count();
-    const std::uint64_t frames = frames_ - report_frames_;
+    const double seconds = std::chrono::duration<double>(now - trace_.report_start).count();
+    const std::uint64_t frames = frames_ - trace_.report_frames;
     std::cout << "[metal] frame " << frames_ << ", " << stats_.draws << " draws ("
-              << (stats_.draws - report_draws_) << " in the last " << frames << " frames, "
+              << (stats_.draws - trace_.report_draws) << " in the last " << frames << " frames, "
               << (seconds > 0.0 ? static_cast<double>(frames) / seconds : 0.0) << " fps), " << targets_.size()
               << " targets, " << textures_.size() << " textures cached, " << stats_.decoded << " decoded\n";
-    report_start_ = now;
-    report_frames_ = frames_;
-    report_draws_ = stats_.draws;
+    trace_.report_start = now;
+    trace_.report_frames = frames_;
+    trace_.report_draws = stats_.draws;
 }
 
 void MetalGeBackend::report_guest_writes() {

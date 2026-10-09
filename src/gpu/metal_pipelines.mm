@@ -185,25 +185,25 @@ MTLRenderPipelineDescriptor *MetalGeBackend::pipeline_descriptor(const RenderKey
 
 id<MTLRenderPipelineState> MetalGeBackend::render_pipeline(const RenderKey &key) {
     if (const auto found = render_pipelines_.find(key); found != render_pipelines_.end()) return found->second;
-    const TraceClock clock(trace_file_ != nullptr, times_.pipeline);
-    render_seen_.insert(key);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.pipeline);
+    prewarm_.render_seen.insert(key);
     bool waited = false;
-    if (prewarm_) {
+    if (prewarm_.shared) {
         // Made at start, or still being made: then this draw waits for it, which is still quicker than
         // compiling it a second time.
-        std::unique_lock<std::mutex> lock(prewarm_->lock);
-        if (prewarm_->pending.count(key) != 0u) {
+        std::unique_lock<std::mutex> lock(prewarm_.shared->lock);
+        if (prewarm_.shared->pending.count(key) != 0u) {
             waited = true;
-            ++prewarm_waits_;
-            prewarm_->changed.wait(lock, [&] { return prewarm_->pending.count(key) == 0u; });
+            ++prewarm_.waits;
+            prewarm_.shared->changed.wait(lock, [&] { return prewarm_.shared->pending.count(key) == 0u; });
         }
-        if (const auto ready = prewarm_->ready.find(key); ready != prewarm_->ready.end()) {
+        if (const auto ready = prewarm_.shared->ready.find(key); ready != prewarm_.shared->ready.end()) {
             id<MTLRenderPipelineState> state = ready->second;
-            prewarm_->ready.erase(ready);
+            prewarm_.shared->ready.erase(ready);
             lock.unlock();
             // A draw that had to wait for the pre-warm counts as one that made its pipeline.
             if (waited) ++stats_.pipelines_made;
-            ++prewarm_used_;
+            ++prewarm_.used;
             render_pipelines_.emplace(key, state);
             return state;
         }
@@ -215,8 +215,8 @@ id<MTLRenderPipelineState> MetalGeBackend::render_pipeline(const RenderKey &key)
         std::cout << "[metal] cannot make a pipeline: "
                   << (failure != nil ? failure.localizedDescription.UTF8String : "no message") << "\n";
     ++stats_.pipelines_made;
-    if (prewarm_) ++prewarm_missed_;
-    if (log_draws_) std::cout << "[metal] frame " << frames_ + 1u << " new pipeline " << to_text(key) << "\n";
+    if (prewarm_.shared) ++prewarm_.missed;
+    if (switches_.log_draws) std::cout << "[metal] frame " << frames_ + 1u << " new pipeline " << to_text(key) << "\n";
     render_pipelines_.emplace(key, state);
     return state;
 }
@@ -224,13 +224,14 @@ id<MTLRenderPipelineState> MetalGeBackend::render_pipeline(const RenderKey &key)
 // A depth-stencil state, made on first use unless the pre-warm made it at start.
 id<MTLDepthStencilState> MetalGeBackend::depth_state(const DepthStencilKey &key) {
     if (const auto found = depth_states_.find(key); found != depth_states_.end()) {
-        if (!pipelines_out_.empty()) depth_seen_.insert(key);
+        if (!prewarm_.pipelines_out.empty()) prewarm_.depth_seen.insert(key);
         return found->second;
     }
-    const TraceClock clock(trace_file_ != nullptr, times_.pipeline);
-    depth_seen_.insert(key);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.pipeline);
+    prewarm_.depth_seen.insert(key);
     ++stats_.depth_states_made;
-    if (log_draws_) std::cout << "[metal] frame " << frames_ + 1u << " new depth state " << to_text(key) << "\n";
+    if (switches_.log_draws)
+        std::cout << "[metal] frame " << frames_ + 1u << " new depth state " << to_text(key) << "\n";
     id<MTLDepthStencilState> state = make_depth_state(key);
     depth_states_.emplace(key, state);
     return state;
@@ -278,7 +279,7 @@ std::string MetalGeBackend::find_pipeline_list() {
 
 // The depth-stencil states of the list made now (each a few microseconds), and its render pipelines asked of
 // Metal asynchronously: they compile on Metal's threads while the game boots, and a draw takes each from
-// prewarm_ on first use (render_pipeline()), waiting only for one not done yet.
+// prewarm_.shared on first use (render_pipeline()), waiting only for one not done yet.
 void MetalGeBackend::start_prewarm() {
     const std::string path = find_pipeline_list();
     if (path.empty()) return;
@@ -303,15 +304,15 @@ void MetalGeBackend::start_prewarm() {
     }
     for (const DepthStencilKey &key : depths)
         if (depth_states_.find(key) == depth_states_.end()) depth_states_.emplace(key, make_depth_state(key));
-    prewarm_ = std::make_shared<Prewarm>();
-    prewarm_->started = start;
+    prewarm_.shared = std::make_shared<Prewarm>();
+    prewarm_.shared->started = start;
     {
-        std::lock_guard<std::mutex> guard(prewarm_->lock);
-        prewarm_->pending.insert(renders.begin(), renders.end());
-        prewarm_->asked = static_cast<std::uint32_t>(prewarm_->pending.size());
+        std::lock_guard<std::mutex> guard(prewarm_.shared->lock);
+        prewarm_.shared->pending.insert(renders.begin(), renders.end());
+        prewarm_.shared->asked = static_cast<std::uint32_t>(prewarm_.shared->pending.size());
     }
     for (const RenderKey &key : std::set<RenderKey>(renders.begin(), renders.end())) {
-        const std::shared_ptr<Prewarm> shared = prewarm_;
+        const std::shared_ptr<Prewarm> shared = prewarm_.shared;
         const RenderKey made = key;
         [device_ newRenderPipelineStateWithDescriptor:pipeline_descriptor(key)
                                     completionHandler:^(id<MTLRenderPipelineState> state, NSError *) {
@@ -326,55 +327,56 @@ void MetalGeBackend::start_prewarm() {
                                         shared->changed.notify_all();
                                     }];
     }
-    prewarm_path_ = path;
-    prewarm_depth_states_ = depths.size();
-    prewarm_start_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-    std::cout << "[metal] pre-warm: " << prewarm_->asked << " render pipelines (made asynchronously) and "
-              << depths.size() << " depth-stencil states from " << path << ", " << prewarm_start_ms_
+    prewarm_.path = path;
+    prewarm_.depth_states = depths.size();
+    prewarm_.start_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::cout << "[metal] pre-warm: " << prewarm_.shared->asked << " render pipelines (made asynchronously) and "
+              << depths.size() << " depth-stencil states from " << path << ", " << prewarm_.start_ms
               << " ms at start" << (unread != 0u ? " (" + std::to_string(unread) + " lines not read)" : "")
               << "\n";
 }
 
 // Once every pipeline the pre-warm asked for is made: how long that took.
 void MetalGeBackend::report_prewarm_done() {
-    std::lock_guard<std::mutex> guard(prewarm_->lock);
-    if (!prewarm_->pending.empty()) return;
-    prewarm_reported_ = true;
-    std::cout << "[metal] pre-warm done: " << prewarm_->asked - prewarm_->failed << " render pipelines made in "
-              << prewarm_->done_ms << " ms" << (prewarm_->failed != 0u ? ", " + std::to_string(prewarm_->failed) + " failed" : "")
+    std::lock_guard<std::mutex> guard(prewarm_.shared->lock);
+    if (!prewarm_.shared->pending.empty()) return;
+    prewarm_.reported = true;
+    std::cout << "[metal] pre-warm done: " << prewarm_.shared->asked - prewarm_.shared->failed
+              << " render pipelines made in " << prewarm_.shared->done_ms << " ms"
+              << (prewarm_.shared->failed != 0u ? ", " + std::to_string(prewarm_.shared->failed) + " failed" : "")
               << " (frame " << frames_ << ")\n";
 }
 
 void MetalGeBackend::report_pipelines() {
     std::cout << "[metal] pipelines: " << render_pipelines_.size() << " render pipelines used, "
               << stats_.pipelines_made << " made by a draw";
-    if (prewarm_) {
-        std::cout << " (" << prewarm_waits_ << " of them waited for the pre-warm, " << prewarm_missed_
-                  << " not in the list), " << prewarm_used_ << " taken from the pre-warm of " << prewarm_->asked;
+    if (prewarm_.shared) {
+        std::cout << " (" << prewarm_.waits << " of them waited for the pre-warm, " << prewarm_.missed
+                  << " not in the list), " << prewarm_.used << " taken from the pre-warm of " << prewarm_.shared->asked;
     }
     std::cout << "; " << depth_states_.size() << " depth-stencil states, " << stats_.depth_states_made
-              << " made by a draw" << (prewarm_ ? ", " + std::to_string(prewarm_depth_states_) + " pre-warmed" : "")
-              << "\n";
+              << " made by a draw"
+              << (prewarm_.shared ? ", " + std::to_string(prewarm_.depth_states) + " pre-warmed" : "") << "\n";
 }
 
 // PURE_METAL_PIPELINES_OUT: every key the run's draws used, as config/metal_pipelines.txt holds them.
 void MetalGeBackend::write_pipeline_list() {
-    if (pipelines_out_.empty()) return;
+    if (prewarm_.pipelines_out.empty()) return;
     std::error_code ignored;
-    const std::filesystem::path file(pipelines_out_);
+    const std::filesystem::path file(prewarm_.pipelines_out);
     if (file.has_parent_path()) std::filesystem::create_directories(file.parent_path(), ignored);
-    std::ofstream out(pipelines_out_);
+    std::ofstream out(prewarm_.pipelines_out);
     if (!out) {
-        std::cout << "[metal] cannot write the pipeline list to " << pipelines_out_ << "\n";
+        std::cout << "[metal] cannot write the pipeline list to " << prewarm_.pipelines_out << "\n";
         return;
     }
     out << "# The Metal backend's render pipelines and depth-stencil states made at start (task 033,\n"
            "# docs/metal-backend.md \"Frame times\"): written by PURE_METAL_PIPELINES_OUT=FILE, every key a run's\n"
            "# draws used. A key not listed is still made on first use.\n";
-    for (const RenderKey &key : render_seen_) out << to_text(key) << "\n";
-    for (const DepthStencilKey &key : depth_seen_) out << to_text(key) << "\n";
-    std::cout << "[metal] " << render_seen_.size() << " render pipeline keys and " << depth_seen_.size()
-              << " depth-stencil keys -> " << pipelines_out_ << "\n";
+    for (const RenderKey &key : prewarm_.render_seen) out << to_text(key) << "\n";
+    for (const DepthStencilKey &key : prewarm_.depth_seen) out << to_text(key) << "\n";
+    std::cout << "[metal] " << prewarm_.render_seen.size() << " render pipeline keys and " << prewarm_.depth_seen.size()
+              << " depth-stencil keys -> " << prewarm_.pipelines_out << "\n";
 }
 
 } // namespace pure::gpu::metal_backend

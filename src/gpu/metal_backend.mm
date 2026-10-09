@@ -143,50 +143,50 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         // The hand-over (a read-back a frame) only for the Vulkan shell; any other shell has
         // vulkan_shell null and shows the texture present_image() names, or no window at all.
         shell_ = config.vulkan_shell;
-        sharp_ = config.sharp_textures;
+        switches_.sharp = config.sharp_textures;
         const char *shell_switch = portablekit::env("METAL_SHELL");
-        to_shell_ = shell_ != nullptr && !(shell_switch != nullptr && std::strcmp(shell_switch, "0") == 0);
+        switches_.to_shell = shell_ != nullptr && !(shell_switch != nullptr && std::strcmp(shell_switch, "0") == 0);
         const char *log = portablekit::env("METAL_LOG");
-        log_draws_ = log != nullptr && *log != '\0' && std::strcmp(log, "0") != 0;
-        no_framebuffer_textures_ = portablekit::env("NO_FB_TEXTURES") != nullptr;
+        switches_.log_draws = log != nullptr && *log != '\0' && std::strcmp(log, "0") != 0;
+        switches_.no_framebuffer_textures = portablekit::env("NO_FB_TEXTURES") != nullptr;
         // The framework's switches for bisecting 3D draws, as the Vulkan backend reads them: NO_LIGHTING
         // draws lit geometry with its vertex colour (white without one) and turns fog off too, NO_FOG turns
         // fog off alone, NO_CULL culls nothing.
-        no_lighting_ = portablekit::env("NO_LIGHTING") != nullptr;
-        no_fog_ = no_lighting_ || portablekit::env("NO_FOG") != nullptr;
-        no_cull_ = portablekit::env("NO_CULL") != nullptr;
+        switches_.no_lighting = portablekit::env("NO_LIGHTING") != nullptr;
+        switches_.no_fog = switches_.no_lighting || portablekit::env("NO_FOG") != nullptr;
+        switches_.no_cull = portablekit::env("NO_CULL") != nullptr;
         // Ours (task 036): every draw takes its UVs (texture map mode 0), as before the mapping modes.
-        no_texture_map_ = portablekit::env("NO_TEXMAP") != nullptr;
+        switches_.no_texture_map = portablekit::env("NO_TEXMAP") != nullptr;
         // Ours (task 037): every texture uploaded and sampled at level 0 alone, as before the mip levels.
-        no_mipmaps_ = portablekit::env("NO_MIPMAPS") != nullptr;
+        switches_.no_mipmaps = portablekit::env("NO_MIPMAPS") != nullptr;
         // Ours (task 040), each restoring what the backend drew before: every fragment kept (no colour test);
         // 5650, 5551 and 4444 targets written at 8 bits a channel by the pipeline's blend, never dithered; every
         // transformed draw clipped at both depth planes, MINZ and MAXZ unread.
-        no_color_test_ = portablekit::env("NO_COLOR_TEST") != nullptr;
-        no_dither_ = portablekit::env("NO_DITHER") != nullptr;
-        no_depth_clamp_ = portablekit::env("NO_DEPTH_CLAMP") != nullptr;
+        switches_.no_color_test = portablekit::env("NO_COLOR_TEST") != nullptr;
+        switches_.no_dither = portablekit::env("NO_DITHER") != nullptr;
+        switches_.no_depth_clamp = portablekit::env("NO_DEPTH_CLAMP") != nullptr;
         // Ours (task 040), for looking at a target the game draws but does not show (the 565 billboard target):
         // each flip presents the target drawn last at this address instead of the display.
         if (const char *show = portablekit::env("METAL_SHOW_TARGET"); show != nullptr && *show != '\0')
-            show_target_ = static_cast<std::uint32_t>(std::strtoul(show, nullptr, 0));
+            switches_.show_target = static_cast<std::uint32_t>(std::strtoul(show, nullptr, 0));
         // The framework's traces, as the Vulkan backend reads them: a line per copy of the stencil into the
         // alpha, and per depth write-back.
-        trace_stencil_copy_ = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
-        trace_depth_ = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
-        started_ = std::chrono::steady_clock::now();
-        report_start_ = started_;
+        trace_.stencil_copy = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
+        trace_.depth = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
+        trace_.started = std::chrono::steady_clock::now();
+        trace_.report_start = trace_.started;
         ready_ = true;
-        const double ms = std::chrono::duration<double, std::milli>(started_ - start).count();
+        const double ms = std::chrono::duration<double, std::milli>(trace_.started - start).count();
         std::cout << "[metal] drawing with " << device_.name.UTF8String << " at 480x272, shaders compiled in "
                   << ms << " ms; "
-                  << (to_shell_ ? "pictures shown in the window"
+                  << (switches_.to_shell ? "pictures shown in the window"
                                 : (shell_ != nullptr ? "window left black (PURE_METAL_SHELL=0)"
                                                      : "pictures shown by the shell, not read back"))
                   << "\n";
         // Task 033: the frame trace, the list of keys a run used, and the pre-warm.
         if (pure::metal::trace_on()) open_trace(portablekit::env("METAL_TRACE"));
         if (const char *out = portablekit::env("METAL_PIPELINES_OUT"); out != nullptr && *out != '\0')
-            pipelines_out_ = out;
+            prewarm_.pipelines_out = out;
         start_prewarm();
         return true;
     }
@@ -199,7 +199,7 @@ void MetalGeBackend::shutdown() {
         commit(true);
         for (id<MTLCommandBuffer> commands : in_flight_) [commands waitUntilCompleted];
         in_flight_.clear();
-        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - trace_.started).count();
         std::cout << "[metal] " << frames_ << " frames, " << stats_.draws << " draws, " << stats_.passes
                   << " passes, " << stats_.decoded << " textures decoded, " << stats_.framebuffer_textures
                   << " framebuffer textures, " << stats_.texture_mapped << " texture-mapped draws, "
@@ -222,12 +222,12 @@ void MetalGeBackend::shutdown() {
         list_keys_.clear();
         render_pipelines_.clear();
         depth_states_.clear();
-        if (prewarm_) {
+        if (prewarm_.shared) {
             // Pipelines still compiling finish into the shared state their handlers hold, not into this.
-            std::lock_guard<std::mutex> guard(prewarm_->lock);
-            prewarm_->ready.clear();
+            std::lock_guard<std::mutex> guard(prewarm_.shared->lock);
+            prewarm_.shared->ready.clear();
         }
-        prewarm_.reset();
+        prewarm_.shared.reset();
         samplers_.fill(nil);
         if (pool_) {
             std::lock_guard<std::mutex> guard(pool_->lock);
@@ -249,7 +249,7 @@ void MetalGeBackend::shutdown() {
 
 void MetalGeBackend::submit(const DrawCall &call, const GuestMemory &memory) {
     if (!ready_) return;
-    const TraceClock clock(trace_file_ != nullptr, times_.submit);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.submit);
     @autoreleasepool {
         draw(call, memory);
     }
@@ -259,15 +259,16 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
     pk::PresentedImage image;
     if (!ready_) return image;
     // The trace's row of the interval this flip ends, before this call's own time, which starts the next one.
-    if (trace_file_ != nullptr) end_trace_interval();
-    const TraceClock clock(trace_file_ != nullptr, times_.present);
+    if (trace_.file != nullptr) end_trace_interval();
+    const TraceClock clock(trace_.file != nullptr, trace_.times.present);
     @autoreleasepool {
         ++frames_;
-        if (trace_file_ != nullptr) pure::metal::trace_flip(frames_);
+        if (trace_.file != nullptr) pure::metal::trace_flip(frames_);
         frame_draws_ = 0u;
         Target *shown = latest_target_at(GuestMemory::canonical(display_address));
-        if (show_target_ != 0u)
-            if (Target *named = latest_target_at(GuestMemory::canonical(show_target_)); named != nullptr) shown = named;
+        if (switches_.show_target != 0u)
+            if (Target *named = latest_target_at(GuestMemory::canonical(switches_.show_target)); named != nullptr)
+                shown = named;
         if (shown == nullptr) shown = last_drawn_;
         presented_ = shown;
         // The next write_back_frame() stores this picture (as the Vulkan backend stores at each flip the
@@ -275,17 +276,17 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         // buffer by this frame's commands.
         const bool written_back = shown != nullptr && frame_written_back(*shown);
         pending_frame_ = PendingFrame{};
-        if (shown != nullptr && to_shell_) {
+        if (shown != nullptr && switches_.to_shell) {
             read_back(*shown);
             show_in_shell(shell_, display_address, picture_.data(), kWidth, kHeight, shell_scratch_);
             if (written_back) pending_frame_ = PendingFrame{shown, nil, true};
         } else {
-            if (written_back) copy_to_buffer(*shown, frame_writeback_);
+            if (written_back) copy_to_buffer(shown->color, frame_writeback_, MTLBlitOptionNone);
             id<MTLCommandBuffer> committed = commit(false);
             if (written_back) pending_frame_ = PendingFrame{shown, committed, false};
         }
         if (frames_ % kReportEvery == 0u) report();
-        if (prewarm_ && !prewarm_reported_) report_prewarm_done();
+        if (prewarm_.shared && !prewarm_.reported) report_prewarm_done();
         if (shown != nullptr) {
             image.api = pk::ImageApi::Metal;
             image.address = shown->key.address;
@@ -299,7 +300,7 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
 
 bool MetalGeBackend::capture_frame(const std::string &path) {
     if (!ready_ || presented_ == nullptr) return false;
-    const TraceClock clock(trace_file_ != nullptr, times_.memory);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
     @autoreleasepool {
         if (picture_frame_ != frames_) read_back(*presented_);
         return pk::write_bmp_file(path, picture_.data(), kWidth, kHeight);
@@ -360,7 +361,7 @@ id<MTLCommandBuffer> MetalGeBackend::commit(bool wait) {
         [in_flight_.front() waitUntilCompleted];
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         stats_.wait_ms += ms;
-        times_.wait_ring += ms;
+        trace_.times.wait_ring += ms;
         ++stats_.waits;
         check(in_flight_.front());
         in_flight_.pop_front();
@@ -434,32 +435,22 @@ void MetalGeBackend::begin_pass(Target &target) {
 
 // The target's pixels into picture_, waiting for the GPU.
 void MetalGeBackend::read_back(Target &target) {
-    ensure_commands();
-    end_encoder();
-    id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
-    [blit copyFromTexture:target.color
-                     sourceSlice:0
-                     sourceLevel:0
-                    sourceOrigin:MTLOriginMake(0, 0, 0)
-                      sourceSize:MTLSizeMake(kWidth, kHeight, 1)
-                        toBuffer:readback_
-               destinationOffset:0
-          destinationBytesPerRow:kWidth * 4u
-        destinationBytesPerImage:kPictureBytes];
-    [blit endEncoding];
+    copy_to_buffer(target.color, readback_, MTLBlitOptionNone);
     commit(true);
-    times_.wait_capture += last_wait_ms_;
+    trace_.times.wait_capture += last_wait_ms_;
     picture_.assign(static_cast<const std::uint8_t *>(readback_.contents),
                     static_cast<const std::uint8_t *>(readback_.contents) + kPictureBytes);
     picture_frame_ = frames_;
 }
 
-// A blit of the target's colour into `buffer` (480x272 RGBA), recorded in the frame's commands.
-void MetalGeBackend::copy_to_buffer(Target &target, id<MTLBuffer> buffer) {
+// A blit of a target's 480x272 `texture` into `buffer` at 4 bytes a pixel, recorded in the frame's commands: its
+// colour (RGBA) with MTLBlitOptionNone, its depth (floats) with MTLBlitOptionDepthFromDepthStencil. Each caller
+// commits, waits and counts as it needs.
+void MetalGeBackend::copy_to_buffer(id<MTLTexture> texture, id<MTLBuffer> buffer, MTLBlitOption options) {
     ensure_commands();
     end_encoder();
     id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
-    [blit copyFromTexture:target.color
+    [blit copyFromTexture:texture
                      sourceSlice:0
                      sourceLevel:0
                     sourceOrigin:MTLOriginMake(0, 0, 0)
@@ -467,7 +458,8 @@ void MetalGeBackend::copy_to_buffer(Target &target, id<MTLBuffer> buffer) {
                         toBuffer:buffer
                destinationOffset:0
           destinationBytesPerRow:kWidth * 4u
-        destinationBytesPerImage:kPictureBytes];
+        destinationBytesPerImage:kPictureBytes
+                         options:options];
     [blit endEncoding];
 }
 

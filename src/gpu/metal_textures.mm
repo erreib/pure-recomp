@@ -107,7 +107,7 @@ std::uint32_t texture_bits(TextureFormat format) {
 // guest memory and outside every render target; 1 otherwise. A texture with a level that fails is drawn at
 // level 0 alone, said once per texture.
 std::uint32_t MetalGeBackend::mip_levels(const GuestMemory &memory, const TextureState &state) {
-    if (no_mipmaps_ || state.level_count <= 1u || (state.min_filter & 4u) == 0u) return 1u;
+    if (switches_.no_mipmaps || state.level_count <= 1u || (state.min_filter & 4u) == 0u) return 1u;
     const std::uint32_t count =
         std::min<std::uint32_t>(state.level_count, 1u + static_cast<std::uint32_t>(state.levels.size()));
     for (std::uint32_t n = 1u; n < count; ++n) {
@@ -138,10 +138,7 @@ const Target *MetalGeBackend::target_holding(std::uint32_t address, std::size_t 
     const std::uint64_t end = first + bytes;
     for (const auto &[key, target] : targets_) {
         if (!target->color_defined) continue;
-        const std::uint64_t base = key.address;
-        const std::uint64_t target_end =
-            base + static_cast<std::uint64_t>(key.stride) * kHeight * target->bytes_per_pixel();
-        if (first < target_end && base < end) return target.get();
+        if (first < key.address + target->bytes() && key.address < end) return target.get();
     }
     return nullptr;
 }
@@ -181,7 +178,7 @@ std::uint64_t MetalGeBackend::content_key(const GuestMemory &memory, const Textu
 // framework's decoder; with more than one it is a mipmapped texture.
 id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const TextureState &state,
                                                std::uint32_t levels) {
-    const TraceClock clock(trace_file_ != nullptr, times_.texture);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.texture);
     std::uint64_t places = 0u;
     for (std::uint32_t n = 1u; n < levels; ++n) {
         const pk::TextureLevel &level = state.levels[n - 1u];

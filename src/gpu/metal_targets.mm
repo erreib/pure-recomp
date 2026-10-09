@@ -30,7 +30,7 @@ Target &MetalGeBackend::target_for(const TargetKey &key) {
     descriptor.pixelFormat = MTLPixelFormatDepth32Float_Stencil8;
     descriptor.usage = MTLTextureUsageRenderTarget;
     target->depth = [device_ newTextureWithDescriptor:descriptor];
-    if (log_draws_)
+    if (switches_.log_draws)
         std::cout << "[metal] frame " << frames_ + 1u << " new target 0x" << std::hex << key.address << std::dec
                   << " stride " << key.stride << " format " << key.format << "\n";
     return *targets_.emplace(key, std::move(target)).first->second;
@@ -61,7 +61,7 @@ void MetalGeBackend::snapshot_guest_words(const GuestMemory &memory, Target &tar
 // that only contains it (patch 0003). (x, y) is the texture's first texel in the target.
 Target *MetalGeBackend::find_framebuffer_texture(const GuestMemory &memory, const TextureState &texture,
                                                  std::uint32_t &x, std::uint32_t &y) {
-    if (no_framebuffer_textures_ || texture.swizzled || static_cast<std::uint32_t>(texture.format) > 3u ||
+    if (switches_.no_framebuffer_textures || texture.swizzled || static_cast<std::uint32_t>(texture.format) > 3u ||
         texture.width == 0u || texture.height == 0u)
         return nullptr;
     const std::uint32_t texture_address = GuestMemory::canonical(texture.address);
@@ -71,11 +71,9 @@ Target *MetalGeBackend::find_framebuffer_texture(const GuestMemory &memory, cons
         if (!target->color_defined || target->guest_words.empty()) continue;
         const std::uint32_t bytes_per_pixel = target->bytes_per_pixel();
         if (texture_bits(texture.format) != bytes_per_pixel * 8u) continue;
-        const std::uint32_t base = key.address;
-        const std::uint32_t bytes = key.stride * kHeight * bytes_per_pixel;
-        if (texture_address < base || texture_address - base >= bytes) continue;
-        if (texture.buffer_width != key.stride || (texture_address - base) % bytes_per_pixel != 0u) continue;
-        const bool exact = texture_address == base;
+        if (!target->contains(texture_address)) continue;
+        if (texture.buffer_width != key.stride || (texture_address - key.address) % bytes_per_pixel != 0u) continue;
+        const bool exact = texture_address == key.address;
         if (best == nullptr || (exact && !best_exact) ||
             (exact == best_exact && target->draw_serial > best->draw_serial)) {
             best = target.get();
@@ -130,8 +128,8 @@ id<MTLTexture> MetalGeBackend::sample_target(Target &source, const Target &drawn
 // target's rows the copy reads are stored in guest memory first, in the target's format.
 void MetalGeBackend::block_transfer(const pk::BlockTransfer &transfer, GuestMemory &memory) {
     ++stats_.transfers.calls;
-    const TraceClock clock(trace_file_ != nullptr, times_.memory);
-    if (!ready_ || no_framebuffer_textures_ || transfer.width == 0u || transfer.height == 0u ||
+    const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
+    if (!ready_ || switches_.no_framebuffer_textures || transfer.width == 0u || transfer.height == 0u ||
         transfer.bytes_per_pixel == 0u)
         return;
     @autoreleasepool {
@@ -159,7 +157,7 @@ void MetalGeBackend::block_transfer(const pk::BlockTransfer &transfer, GuestMemo
 // buffer, or read them back for the Vulkan shell; this waits for that copy and stores them.
 void MetalGeBackend::write_back_frame(GuestMemory &memory) {
     ++stats_.frames.calls;
-    const TraceClock clock(trace_file_ != nullptr, times_.memory);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
     if (!ready_ || pending_frame_.target == nullptr) return;
     PendingFrame pending = pending_frame_;
     pending_frame_ = PendingFrame{};
@@ -173,7 +171,7 @@ void MetalGeBackend::write_back_frame(GuestMemory &memory) {
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
                 stats_.wait_ms += ms;
                 stats_.frames.wait_ms += ms;
-                times_.wait_frame += ms;
+                trace_.times.wait_frame += ms;
                 ++stats_.waits;
             }
             pixels = static_cast<const std::uint8_t *>(frame_writeback_.contents);
@@ -188,8 +186,8 @@ void MetalGeBackend::write_back_frame(GuestMemory &memory) {
 // drew, at least as wide as the screen).
 void MetalGeBackend::read_back_framebuffer(std::uint32_t address, GuestMemory &memory) {
     ++stats_.read_backs.calls;
-    const TraceClock clock(trace_file_ != nullptr, times_.memory);
-    if (!ready_ || no_framebuffer_textures_) return;
+    const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
+    if (!ready_ || switches_.no_framebuffer_textures) return;
     @autoreleasepool {
         const std::uint32_t wanted = GuestMemory::canonical(address);
         Target *target = drawn_target_containing(wanted, wanted);
@@ -204,7 +202,7 @@ void MetalGeBackend::read_back_framebuffer(std::uint32_t address, GuestMemory &m
 bool MetalGeBackend::write_back_depth(std::uint32_t color_address, std::uint32_t depth_address,
                                       std::uint32_t depth_stride, GuestMemory &memory, const char *why) {
     ++stats_.depths.calls;
-    const TraceClock clock(trace_file_ != nullptr, times_.memory);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
     if (!ready_) return false;
     @autoreleasepool {
         return store_depth(color_address, depth_address, depth_stride, memory, why);
@@ -220,8 +218,7 @@ Target *MetalGeBackend::drawn_target_containing(std::uint32_t start, std::uint64
     for (auto &[key, target] : targets_) {
         if (!target->color_defined || target->guest_words.empty()) continue;
         if ((key.address & 0x1F000000u) != 0x04000000u) continue;
-        const std::uint64_t bytes = static_cast<std::uint64_t>(key.stride) * kHeight * target->bytes_per_pixel();
-        if (address < key.address || address - key.address >= bytes) continue;
+        if (!target->contains(address)) continue;
         const bool exact = key.address == start;
         if (best == nullptr || (exact && !best_exact) ||
             (exact == best_exact && target->draw_serial > best->draw_serial)) {
@@ -243,10 +240,10 @@ bool MetalGeBackend::frame_written_back(const Target &target) {
 // shared buffer and a wait), counted in `writes`.
 void MetalGeBackend::store_target(GuestMemory &memory, Target &target, std::uint32_t first_row, std::uint32_t rows,
                                   GuestWrites &writes) {
-    copy_to_buffer(target, guest_readback_);
+    copy_to_buffer(target.color, guest_readback_, MTLBlitOptionNone);
     commit(true);
     writes.wait_ms += last_wait_ms_;
-    times_.wait_guest += last_wait_ms_;
+    trace_.times.wait_guest += last_wait_ms_;
     if (store_pixels(memory, target, static_cast<const std::uint8_t *>(guest_readback_.contents), first_row, rows))
         ++writes.written;
 }
@@ -306,23 +303,10 @@ bool MetalGeBackend::store_depth(std::uint32_t color_address, std::uint32_t dept
     std::uint8_t *out = memory.raw_pointer(depth_address, static_cast<std::size_t>(depth_stride) * kHeight * 2u);
     if (out == nullptr) return false;
     const auto start = std::chrono::steady_clock::now();
-    ensure_commands();
-    end_encoder();
-    id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
-    [blit copyFromTexture:target->depth
-                     sourceSlice:0
-                     sourceLevel:0
-                    sourceOrigin:MTLOriginMake(0, 0, 0)
-                      sourceSize:MTLSizeMake(kWidth, kHeight, 1)
-                        toBuffer:guest_readback_
-               destinationOffset:0
-          destinationBytesPerRow:kWidth * 4u
-        destinationBytesPerImage:kPictureBytes
-                         options:MTLBlitOptionDepthFromDepthStencil];
-    [blit endEncoding];
+    copy_to_buffer(target->depth, guest_readback_, MTLBlitOptionDepthFromDepthStencil);
     commit(true);
     stats_.depths.wait_ms += last_wait_ms_;
-    times_.wait_depth += last_wait_ms_;
+    trace_.times.wait_depth += last_wait_ms_;
     const auto *depths = static_cast<const float *>(guest_readback_.contents);
     std::uint32_t lowest = 0xFFFFu, highest = 0u;
     std::array<std::uint16_t, kWidth> row{};
@@ -337,10 +321,10 @@ bool MetalGeBackend::store_depth(std::uint32_t color_address, std::uint32_t dept
         std::memcpy(out + static_cast<std::size_t>(y) * depth_stride * 2u, row.data(), sizeof(row));
     }
     ++stats_.depths.written;
-    if (!std::exchange(depth_announced_, true))
+    if (!std::exchange(trace_.depth_announced, true))
         std::cout << "[metal] depth written back to guest memory at 0x" << std::hex << depth_address << std::dec
                   << " for " << why << " (PURE_NO_DEPTH_READBACK turns it off)\n";
-    if (trace_depth_) {
+    if (trace_.depth) {
         const double total =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         std::cout << "[metal] frame " << frames_ + 1u << " " << why << ": depth of 0x" << std::hex
@@ -354,7 +338,7 @@ bool MetalGeBackend::store_depth(std::uint32_t color_address, std::uint32_t dept
 void MetalGeBackend::upload_frame(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width,
                                   std::uint32_t height, std::uint32_t stride) {
     if (!ready_ || pixels == nullptr || width == 0u || height == 0u || stride < width) return;
-    const TraceClock clock(trace_file_ != nullptr, times_.memory);
+    const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
     @autoreleasepool {
         upload(display_address, pixels, width, height, stride);
     }
