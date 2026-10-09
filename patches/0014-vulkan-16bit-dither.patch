@@ -1,0 +1,547 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index 2bb509c..4de7478 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -30,6 +30,31 @@ layout(constant_id = 2) const uint kColorFunction = 1u;
+ layout(constant_id = 3) const uint kColorReference = 0u;
+ layout(constant_id = 4) const uint kColorMask = 0x00FFFFFFu;
+ 
++// A draw into a 16-bit target (patch 0014; the Metal backend's
++// ge_fragment_16): kSixteen is 0 for an 8888 target, else 1 + the format (1
++// 5650, 2 5551, 3 4444). The PSP blends, dithers and keeps the format's bits
++// in that order, so with kShaderBlend the shader blends with the GE's factors
++// and equation on the target's colour (the pass's input attachment) and the
++// pipeline does not blend. kDither adds the matrix's offset: DITH0 and DITH1
++// in kDitherRows01, DITH2 and DITH3 in kDitherRows23, 16 bits each. A PSP
++// pixel is kPixelScaleX by kPixelScaleY of the target's pixels.
++layout(constant_id = 5) const uint kSixteen = 0u;
++layout(constant_id = 6) const bool kDither = false;
++layout(constant_id = 7) const uint kDitherRows01 = 0u;
++layout(constant_id = 8) const uint kDitherRows23 = 0u;
++layout(constant_id = 9) const bool kShaderBlend = false;
++layout(constant_id = 10) const uint kSourceFactor = 0u;
++layout(constant_id = 11) const uint kDestinationFactor = 0u;
++layout(constant_id = 12) const uint kEquation = 0u;
++layout(constant_id = 13) const uint kFixSource = 0u;
++layout(constant_id = 14) const uint kFixDestination = 0u;
++layout(constant_id = 15) const float kPixelScaleX = 1.0;
++layout(constant_id = 16) const float kPixelScaleY = 1.0;
++
++// The target's colour: the render pass's colour attachment is also its input
++// attachment (vulkan_renderer.cpp), bound for every pass.
++layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput target_color;
++
+ layout(push_constant) uniform Push {
+     mat4 transform;
+     vec4 viewport;
+@@ -54,6 +79,83 @@ vec4 stored(vec4 color) {
+     return color;
+ }
+ 
++vec3 fix_color(uint c) {
++    return vec3(float(c & 0xFFu), float((c >> 8u) & 0xFFu), float((c >> 16u) & 0xFFu)) / 255.0;
++}
++
++// The GE's blend factors for the shader's own blend: the source side's 0 and
++// 1 are the destination colour and one minus it, the destination side's the
++// source colour and one minus it; then SA, 1-SA, DA, 1-DA, the doubled 2SA,
++// 1-2SA, 2DA, 1-2DA (not clamped) and 10 FIX. Others are ONE on the source
++// side and ZERO on the destination side. ge.metal's ge_factor.
++vec3 ge_factor(uint factor, bool source_side, vec4 s, vec4 d) {
++    if (factor == 0u) return source_side ? d.rgb : s.rgb;
++    if (factor == 1u) return 1.0 - (source_side ? d.rgb : s.rgb);
++    if (factor == 2u) return vec3(s.a);
++    if (factor == 3u) return vec3(1.0 - s.a);
++    if (factor == 4u) return vec3(d.a);
++    if (factor == 5u) return vec3(1.0 - d.a);
++    if (factor == 6u) return vec3(2.0 * s.a);
++    if (factor == 7u) return vec3(1.0 - 2.0 * s.a);
++    if (factor == 8u) return vec3(2.0 * d.a);
++    if (factor == 9u) return vec3(1.0 - 2.0 * d.a);
++    if (factor == 10u) return fix_color(source_side ? kFixSource : kFixDestination);
++    return vec3(source_side ? 1.0 : 0.0);
++}
++
++// The GE's blend, unclamped: ADD, SUBTRACT (source minus destination),
++// REVERSE SUBTRACT, MIN, MAX and ABSDIFF (the last three without factors);
++// 6 and 7 as ADD. ge.metal's ge_blend.
++vec3 ge_blend(vec4 s, vec4 d) {
++    if (kEquation == 3u) return min(s.rgb, d.rgb);
++    if (kEquation == 4u) return max(s.rgb, d.rgb);
++    if (kEquation == 5u) return abs(s.rgb - d.rgb);
++    vec3 a = s.rgb * ge_factor(kSourceFactor, true, s, d);
++    vec3 b = d.rgb * ge_factor(kDestinationFactor, false, s, d);
++    if (kEquation == 1u) return a - b;
++    if (kEquation == 2u) return b - a;
++    return a + b;
++}
++
++// What a 16-bit target keeps of a colour: the colour in 8-bit steps, plus,
++// when the draw dithers, the matrix's offset for the PSP pixel (row y & 3,
++// column x & 3, a signed 4-bit value), clamped once to 0..255; then the top
++// bits of each channel the format has (5650: 5, 6 and 5; 5551: 5; 4444: 4),
++// as the 8-bit value they expand to by repeating their bits, which the RGBA8
++// target holds and the 16-bit store packs back exactly. ge.metal's
++// sixteen_bit.
++vec3 sixteen_bit(vec3 rgb) {
++    vec3 value = roundEven(rgb * 255.0);
++    if (kDither) {
++        uvec2 at = uvec2(floor(gl_FragCoord.xy / vec2(kPixelScaleX, kPixelScaleY))) & 3u;
++        uint row = ((at.y < 2u ? kDitherRows01 : kDitherRows23) >> (16u * (at.y & 1u))) & 0xFFFFu;
++        uint nibble = (row >> (4u * at.x)) & 15u;
++        value += float(int(nibble ^ 8u) - 8);
++    }
++    uvec3 c = uvec3(clamp(value, 0.0, 255.0));
++    uvec3 kept;
++    if (kSixteen == 1u) {
++        uvec3 top = c >> uvec3(3u, 2u, 3u);
++        kept = uvec3((top.r << 3u) | (top.r >> 2u), (top.g << 2u) | (top.g >> 4u), (top.b << 3u) | (top.b >> 2u));
++    } else if (kSixteen == 2u) {
++        uvec3 top = c >> 3u;
++        kept = (top << 3u) | (top >> 2u);
++    } else {
++        kept = (c >> 4u) * 17u;
++    }
++    return vec3(kept) / 255.0;
++}
++
++// The colour the target receives: an 8888 target's as it is, a 16-bit
++// target's blended, dithered and cut to its bits; the alpha as stored().
++vec4 written(vec4 color) {
++    if (kSixteen != 0u) {
++        vec3 rgb = kShaderBlend ? ge_blend(color, subpassLoad(target_color)) : color.rgb;
++        color.rgb = sixteen_bit(rgb);
++    }
++    return stored(color);
++}
++
+ // The GE's logarithm for the mip level, in 1/16 levels: the float's exponent
+ // and the top four bits of its mantissa (a piecewise linear log2, floored to
+ // 1/16), of |x|. ge_log16 in vulkan_renderer.cpp.
+@@ -143,7 +245,7 @@ void main() {
+     // its world.
+     if (!kAlphaTest) {
+         out_source_alpha = vec4(color.a);
+-        out_color = stored(color);
++        out_color = written(color);
+         return;
+     }
+     int alpha_function = int(push.texture_params.w + 0.5);
+@@ -160,5 +262,5 @@ void main() {
+     if (!passed) discard;
+ 
+     out_source_alpha = vec4(color.a);
+-    out_color = stored(color);
++    out_color = written(color);
+ }
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 6ba6c7c..fe33c67 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -115,6 +115,9 @@ constexpr std::size_t kMaxCachedTextures = 1024u;
+ // Descriptor sets for sampling render targets as textures: two per target
+ // (with its alpha, and with alpha forced to one for 5650 textures).
+ constexpr std::size_t kMaxFramebufferTextureSets = 64u;
++// Input attachment sets (patch 0014): one per render target, frame
++// interpolation's pictures and blend targets included.
++constexpr std::uint32_t kMaxInputSets = 128u;
+ // GPU timestamps: a pair around each command buffer a frame submits. A frame
+ // normally submits one; each GE block transfer that reads a framebuffer back
+ // splits it once more.
+@@ -313,6 +316,20 @@ struct PipelineKey {
+     std::uint32_t color_test_mask{};
+     // CLIPENABLE's depth clamp (kDepthClamp in ge.vert, depthClampEnable).
+     bool depth_clamp{};
++    // A draw into a 5650, 5551 or 4444 target (patch 0014; kSixteen and the
++    // constants after it in ge.frag): 0 for an 8888 target, else 1 + the
++    // target's format. The shader blends on the target's colour, read as the
++    // subpass's input attachment, and the pipeline does not blend: the GE's
++    // factors and equation are the raw ones above, with the FIX colours here
++    // (0 unless a factor is FIX). dither_rows hold DITH0 and DITH1, DITH2 and
++    // DITH3 (16 bits each), used when dither is set; pixel_scale is the
++    // target's pixels per PSP pixel across and down, as float bits.
++    std::uint32_t sixteen{};
++    bool dither{};
++    std::array<std::uint32_t, 2> dither_rows{};
++    std::uint32_t fix_source{};
++    std::uint32_t fix_destination{};
++    std::array<std::uint32_t, 2> pixel_scale{};
+ 
+     auto operator<=>(const PipelineKey &) const = default;
+ };
+@@ -1113,6 +1130,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+         VkDeviceMemory depth_memory{};
+         VkImageView depth_view{};
+         VkFramebuffer framebuffer{};
++        // The colour image as the render pass's input attachment (set 2 of
++        // pipeline_layout, patch 0014), bound at the start of every pass into
++        // the target: a draw into a 16-bit target reads its colour there.
++        VkDescriptorSet input_descriptor{};
+         bool initialized{};
+         // The guest's view of the buffer when it was last drawn to: row length
+         // in pixels and pixel format (0:5650 1:5551 2:4444 3:8888).
+@@ -1307,6 +1328,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     VkDescriptorPool descriptor_pool{};
+     VkDescriptorSetLayout lighting_layout{};
+     VkDescriptorSet lighting_descriptor{};  // binding 0: environment, binding 1: object
++    // Set 2: the target's colour as an input attachment (Target::input_descriptor,
++    // patch 0014), from a pool of its own.
++    VkDescriptorSetLayout input_layout{};
++    VkDescriptorPool input_pool{};
+     VkDeviceSize uniform_alignment{256u};
+     VkSampler sampler{};        // linear
+     VkSampler sharp_sampler{};  // nearest, for the sharp texture setting
+@@ -1954,6 +1979,17 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     // `overwritten`: bit 0, the pass's first draw writes every pixel's colour
+     // and alpha; bit 1, every pixel's depth.
+     void begin_pass(std::uint32_t address, std::uint32_t overwritten = 0u);
++    // Before a draw into a 16-bit target (patch 0014): the pass's
++    // self-dependency, recorded as a by-region memory barrier.
++    void sixteen_barrier() {
++        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
++        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
++        barrier.dstAccessMask = VK_ACCESS_INPUT_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
++        constexpr VkPipelineStageFlags stages =
++            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
++        vkCmdPipelineBarrier(command_buffer, stages, stages, VK_DEPENDENCY_BY_REGION_BIT, 1u, &barrier, 0u, nullptr,
++                             0u, nullptr);
++    }
+     void end_pass();
+     VkPipeline pipeline_for(const PipelineKey &key);
+     Texture &texture_for(const GuestMemory &memory, const DrawCall &call, std::uint32_t levels);
+@@ -2362,18 +2398,57 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     }
+     attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+     attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+-    VkAttachmentReference color_reference{0u, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
++    // The colour attachment is also the subpass's input attachment (patch
++    // 0014): a draw into a 5650, 5551 or 4444 target blends in ge.frag on
++    // the colour it reads there, as the PSP blends, dithers and keeps the
++    // format's bits in that order (the Metal backend's ge_fragment_16 reads
++    // the same colour through programmable blending). An attachment that is
++    // both must be in the GENERAL layout inside the pass; outside it stays in
++    // COLOR_ATTACHMENT_OPTIMAL. The self-dependency allows the by-region
++    // barrier recorded between two such draws (sixteen_barrier), which makes
++    // the first one's writes visible to the second one's reads. Every target
++    // goes through this one pass, so every pipeline, framebuffer and
++    // descriptor set stays compatible with it; a draw into an 8888 target
++    // never reads the input.
++    VkAttachmentReference color_reference{0u, VK_IMAGE_LAYOUT_GENERAL};
++    VkAttachmentReference input_reference{0u, VK_IMAGE_LAYOUT_GENERAL};
+     VkAttachmentReference depth_reference{1u, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+     VkSubpassDescription subpass{};
+     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
++    subpass.inputAttachmentCount = 1u;
++    subpass.pInputAttachments = &input_reference;
+     subpass.colorAttachmentCount = 1u;
+     subpass.pColorAttachments = &color_reference;
+     subpass.pDepthStencilAttachment = &depth_reference;
++    constexpr VkPipelineStageFlags kPassStages =
++        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
++        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
++    constexpr VkAccessFlags kPassAccess =
++        VK_ACCESS_INPUT_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
++        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
++        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
++    constexpr VkAccessFlags kPassWrites =
++        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
++    // The layout changes at the pass's start and end wait for the attachment
++    // writes before them and come before the attachment and shader accesses
++    // after them; the transfers and samples after a pass have barriers of
++    // their own (transition).
++    const std::array<VkSubpassDependency, 3> dependencies{
++        VkSubpassDependency{VK_SUBPASS_EXTERNAL, 0u, kPassStages, kPassStages, kPassWrites, kPassAccess, 0u},
++        VkSubpassDependency{0u, 0u, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
++                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
++                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
++                            VK_ACCESS_INPUT_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
++                            VK_DEPENDENCY_BY_REGION_BIT},
++        VkSubpassDependency{0u, VK_SUBPASS_EXTERNAL, kPassStages, kPassStages, kPassWrites, kPassAccess, 0u},
++    };
+     VkRenderPassCreateInfo render_pass_info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+     render_pass_info.attachmentCount = static_cast<std::uint32_t>(attachments.size());
+     render_pass_info.pAttachments = attachments.data();
+     render_pass_info.subpassCount = 1u;
+     render_pass_info.pSubpasses = &subpass;
++    render_pass_info.dependencyCount = static_cast<std::uint32_t>(dependencies.size());
++    render_pass_info.pDependencies = dependencies.data();
+     if (!check(vkCreateRenderPass(impl.device, &render_pass_info, nullptr, &impl.render_pass), "vkCreateRenderPass",
+                error))
+         return false;
+@@ -2465,10 +2540,34 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+                "vkCreateDescriptorPool", error))
+         return false;
+ 
++    // Set 2 (patch 0014): the target's colour as the input attachment, one
++    // set per target (create_target), bound when a pass begins.
++    VkDescriptorSetLayoutBinding input_binding{};
++    input_binding.binding = 0u;
++    input_binding.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
++    input_binding.descriptorCount = 1u;
++    input_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
++    VkDescriptorSetLayoutCreateInfo input_layout_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
++    input_layout_info.bindingCount = 1u;
++    input_layout_info.pBindings = &input_binding;
++    if (!check(vkCreateDescriptorSetLayout(impl.device, &input_layout_info, nullptr, &impl.input_layout),
++               "vkCreateDescriptorSetLayout", error))
++        return false;
++    const VkDescriptorPoolSize input_pool_size{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, kMaxInputSets};
++    VkDescriptorPoolCreateInfo input_pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
++    input_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
++    input_pool_info.maxSets = kMaxInputSets;
++    input_pool_info.poolSizeCount = 1u;
++    input_pool_info.pPoolSizes = &input_pool_size;
++    if (!check(vkCreateDescriptorPool(impl.device, &input_pool_info, nullptr, &impl.input_pool),
++               "vkCreateDescriptorPool", error))
++        return false;
++
+     VkPushConstantRange push_range{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0u,
+                                    sizeof(PushConstants)};
+     VkPipelineLayoutCreateInfo pipeline_layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+-    const std::array<VkDescriptorSetLayout, 2> set_layouts{impl.descriptor_layout, impl.lighting_layout};
++    const std::array<VkDescriptorSetLayout, 3> set_layouts{impl.descriptor_layout, impl.lighting_layout,
++                                                           impl.input_layout};
+     pipeline_layout_info.setLayoutCount = static_cast<std::uint32_t>(set_layouts.size());
+     pipeline_layout_info.pSetLayouts = set_layouts.data();
+     pipeline_layout_info.pushConstantRangeCount = 1u;
+@@ -3446,6 +3545,8 @@ void VulkanRenderer::Impl::write_capture(VkFence fence) {
+ void VulkanRenderer::Impl::destroy_target(Target &target) {
+     for (VkDescriptorSet &descriptor : target.copy_descriptors)
+         if (descriptor != VK_NULL_HANDLE) vkFreeDescriptorSets(device, descriptor_pool, 1u, &descriptor);
++    if (target.input_descriptor != VK_NULL_HANDLE)
++        vkFreeDescriptorSets(device, input_pool, 1u, &target.input_descriptor);
+     vkDestroyImageView(device, target.copy_opaque_view, nullptr);
+     vkDestroyImageView(device, target.copy_view, nullptr);
+     vkDestroyImage(device, target.copy, nullptr);
+@@ -3496,9 +3597,10 @@ VulkanRenderer::Impl::Target *VulkanRenderer::Impl::target_for(std::uint32_t add
+ }
+ 
+ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
++    // Also the pass's input attachment (patch 0014).
+     if (!create_image(target_extent.width, target_extent.height, VK_FORMAT_R8G8B8A8_UNORM,
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+-                          VK_IMAGE_USAGE_TRANSFER_DST_BIT,
++                          VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
+                       target.color,
+                       target.color_memory, target.color_view, VK_IMAGE_ASPECT_COLOR_BIT, error))
+         return false;
+@@ -3515,7 +3617,26 @@ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
+     info.width = target_extent.width;
+     info.height = target_extent.height;
+     info.layers = 1u;
+-    return check(vkCreateFramebuffer(device, &info, nullptr, &target.framebuffer), "vkCreateFramebuffer", error);
++    if (!check(vkCreateFramebuffer(device, &info, nullptr, &target.framebuffer), "vkCreateFramebuffer", error))
++        return false;
++    // The colour image as the pass's input attachment (patch 0014).
++    VkDescriptorSetAllocateInfo descriptor_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
++    descriptor_info.descriptorPool = input_pool;
++    descriptor_info.descriptorSetCount = 1u;
++    descriptor_info.pSetLayouts = &input_layout;
++    if (!check(vkAllocateDescriptorSets(device, &descriptor_info, &target.input_descriptor),
++               "vkAllocateDescriptorSets (input attachment)", error)) {
++        target.input_descriptor = VK_NULL_HANDLE;
++        return false;
++    }
++    const VkDescriptorImageInfo image_info{VK_NULL_HANDLE, target.color_view, VK_IMAGE_LAYOUT_GENERAL};
++    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
++    write.dstSet = target.input_descriptor;
++    write.descriptorCount = 1u;
++    write.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
++    write.pImageInfo = &image_info;
++    vkUpdateDescriptorSets(device, 1u, &write, 0u, nullptr);
++    return true;
+ }
+ 
+ // Attachments are loaded, not cleared, so a new target starts undefined:
+@@ -3603,6 +3724,11 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
+     perf::count_render_pass();
+     if ((overwritten & 3u) != 0u) perf::count_cleared_pass();
+     forget_bindings();
++    // Every pipeline's fragment shader declares the input attachment (patch
++    // 0014), so its set is bound for the whole pass; sets 0 and 1 bound later
++    // with the same layout leave it in place.
++    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 2u, 1u,
++                            &target->input_descriptor, 0u, nullptr);
+     current_target = address;
+     last_drawn_target = address;
+     pass_active = true;
+@@ -4682,8 +4808,8 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+ namespace {
+ 
+ constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
+-constexpr std::uint32_t kPipelineKeysVersion = 4u;
+-constexpr std::uint32_t kPipelineKeyWords = 18u;
++constexpr std::uint32_t kPipelineKeysVersion = 5u;
++constexpr std::uint32_t kPipelineKeyWords = 25u;
+ constexpr std::uint32_t kMaxPipelineKeys = 4096u;
+ 
+ std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
+@@ -4691,7 +4817,9 @@ std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
+             key.depth_test ? 1u : 0u, key.depth_write ? 1u : 0u, key.depth_function, key.cull ? 1u : 0u,
+             key.cull_clockwise ? 1u : 0u, key.color_mask, key.alpha_test ? 1u : 0u, key.raw ? 1u : 0u,
+             key.alpha_blend, key.stencil, key.stencil_values,
+-            key.color_test | (key.depth_clamp ? 1u << 3u : 0u), key.color_reference, key.color_test_mask};
++            key.color_test | (key.depth_clamp ? 1u << 3u : 0u), key.color_reference, key.color_test_mask,
++            key.sixteen | (key.dither ? 1u << 2u : 0u), key.dither_rows[0], key.dither_rows[1], key.fix_source,
++            key.fix_destination, key.pixel_scale[0], key.pixel_scale[1]};
+ }
+ 
+ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
+@@ -4715,6 +4843,12 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+     key.depth_clamp = (words[15] & 8u) != 0u;
+     key.color_reference = words[16] & 0xFFFFFFu;
+     key.color_test_mask = words[17] & 0xFFFFFFu;
++    key.sixteen = words[18] & 3u;
++    key.dither = (words[18] & 4u) != 0u;
++    key.dither_rows = {words[19], words[20]};
++    key.fix_source = words[21] & 0xFFFFFFu;
++    key.fix_destination = words[22] & 0xFFFFFFu;
++    key.pixel_scale = {words[23], words[24]};
+     return key;
+ }
+ 
+@@ -4949,7 +5083,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+         return vk;
+     };
+     VkPipelineColorBlendAttachmentState blend_attachment{};
+-    blend_attachment.blendEnable = key.blend ? VK_TRUE : VK_FALSE;
++    // A draw into a 16-bit target blends in the shader (patch 0014), whose
++    // alpha output is the value the target's alpha stores.
++    blend_attachment.blendEnable = key.blend && key.sixteen == 0u ? VK_TRUE : VK_FALSE;
+     blend_attachment.srcColorBlendFactor = colour_factor(key.source_factor, true);
+     blend_attachment.dstColorBlendFactor = colour_factor(key.destination_factor, false);
+     blend_attachment.colorBlendOp = to_blend_op(key.equation);
+@@ -4966,11 +5102,16 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     blend.pAttachments = &blend_attachment;
+ 
+     // kAlphaTest, kColorTest and the colour test's function, reference and
+-    // mask in ge.frag.
+-    const std::array<std::uint32_t, 5> fragment_constants{
++    // mask in ge.frag; then a 16-bit target's (patch 0014): kSixteen,
++    // kDither, the dither rows, kShaderBlend, the GE's factors and equation,
++    // the FIX colours and the pixel scale (float bits).
++    const std::array<std::uint32_t, 17> fragment_constants{
+         key.alpha_test ? VK_TRUE : VK_FALSE, key.color_test != 0u ? VK_TRUE : VK_FALSE, key.color_test >> 1u,
+-        key.color_reference, key.color_test_mask};
+-    std::array<VkSpecializationMapEntry, 5> fragment_entries{};
++        key.color_reference, key.color_test_mask, key.sixteen, key.dither ? VK_TRUE : VK_FALSE,
++        key.dither_rows[0], key.dither_rows[1], key.sixteen != 0u && key.blend ? VK_TRUE : VK_FALSE,
++        key.source_factor, key.destination_factor, key.equation, key.fix_source, key.fix_destination,
++        key.pixel_scale[0], key.pixel_scale[1]};
++    std::array<VkSpecializationMapEntry, 17> fragment_entries{};
+     for (std::uint32_t i = 0; i < fragment_entries.size(); ++i)
+         fragment_entries[i] = {i, i * 4u, sizeof(std::uint32_t)};
+     VkSpecializationInfo specialization{};
+@@ -6414,6 +6555,34 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // the alpha is copied from the stencil before it is read
+     // (resolve_stencil_alpha, below and in end_pass).
+     static const bool no_stencil_alpha = portablekit::env("NO_STENCIL_ALPHA") != nullptr;
++    // A draw into a 5650, 5551 or 4444 target (patch 0014) writes what the
++    // PSP writes: ge.frag blends with the GE's own factors and equation on
++    // the target's colour (the pass's input attachment), adds the dither
++    // matrix's offset when DITHERENABLE is on (never for a clear), clamps
++    // once and keeps the format's top bits, as the Metal backend's
++    // ge_fragment_16. The pipeline does not blend, so the shader's alpha is
++    // the value the target's alpha stores. <prefix>_NO_DITHER (the Metal
++    // backend's name) draws these targets at 8 bits a channel, blended by the
++    // pipeline and never dithered, as before.
++    static const bool no_dither = portablekit::env("NO_DITHER") != nullptr;
++    const bool sixteen = call.target.color_format <= 2u && !no_dither;
++    if (sixteen) {
++        key.sixteen = 1u + call.target.color_format;
++        if (key.blend) {
++            key.source_factor = call.blend.source_factor;
++            key.destination_factor = call.blend.destination_factor;
++            if (key.source_factor == kFactorFixed) key.fix_source = call.blend.fixed_source & 0xFFFFFFu;
++            if (key.destination_factor == kFactorFixed) key.fix_destination = call.blend.fixed_destination & 0xFFFFFFu;
++        }
++        if (call.dither.enabled && !call.clear_mode) {
++            key.dither = true;
++            key.dither_rows = {(call.dither.rows[0] & 0xFFFFu) | (call.dither.rows[1] & 0xFFFFu) << 16u,
++                               (call.dither.rows[2] & 0xFFFFu) | (call.dither.rows[3] & 0xFFFFu) << 16u};
++        }
++        const float across = static_cast<float>(impl.target_extent.width) / static_cast<float>(kPspWidth);
++        const float down = static_cast<float>(impl.target_extent.height) / static_cast<float>(kPspHeight);
++        key.pixel_scale = {std::bit_cast<std::uint32_t>(across), std::bit_cast<std::uint32_t>(down)};
++    }
+     int stored_alpha = -1;
+     float blend_alpha = 1.0f;
+     bool follows = true;
+@@ -6444,7 +6613,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             key.stencil_values = stored_reference(call) | (call.stencil.mask & 0xFFu) << 8u |
+                                  (~call.alpha_write_mask & 0xFFu) << 16u;
+         }
+-        if (stencil > 0 && impl.dual_source && blend_reads_source_alpha(key)) {
++        if (sixteen) {
++            stored_alpha = stencil;  // the shader blends with the fragment's own alpha
++        } else if (stencil > 0 && impl.dual_source && blend_reads_source_alpha(key)) {
+             key.alpha_blend = kAlphaDual;
+             stored_alpha = stencil;
+         } else if (stencil >= 0 && blend_reads_source_alpha(key)) {
+@@ -6498,9 +6669,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     const float wrap_flags = no_texture_clamp ? 0.0f
+                                               : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
+                                                     (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
+-    // The alpha test; the colour test is in the pipeline (key.color_test).
+-    // Dithering (DrawCall::dither) is not drawn by this renderer: 16-bit
+-    // targets are drawn at 8 bits a channel.
++    // The alpha test; the colour test (key.color_test) and a 16-bit target's
++    // blend, dither and bits (key.sixteen) are in the pipeline.
+     push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
+@@ -6695,6 +6865,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     vk_scissor.offset = {left, top};
+     vk_scissor.extent = {static_cast<std::uint32_t>(right - left), static_cast<std::uint32_t>(bottom - top)};
+     const std::array<std::uint32_t, 3> lighting_offsets{impl.environment_offset, impl.object_offset, impl.raw_offset};
++    // A draw into a 16-bit target reads the colour the draws before it wrote
++    // (patch 0014): those are recorded first, and a by-region barrier makes
++    // their writes visible to its reads (and its writes wait for their
++    // reads). Closing the group keeps it out of any merge. Fragments of one
++    // draw that overlap are not ordered against each other's reads.
++    if (sixteen) {
++        impl.flush_group();
++        impl.sixteen_barrier();
++    }
+     if (merge) {
+         const Impl::DrawState state{pipeline, texture_descriptor, lighting_offsets, vk_viewport, vk_scissor,
+                                     blend_constants, push};
+@@ -7560,6 +7739,11 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+     pass.renderArea = {{0, 0}, target_extent};
+     vkCmdBeginRenderPass(commands, &pass, VK_SUBPASS_CONTENTS_INLINE);
+     perf::count_render_pass();
++    // The input attachment every pipeline's shader declares (patch 0014). The
++    // game's displayed target is replayed; a 16-bit one would be replayed
++    // without the barriers between its draws (sixteen_barrier).
++    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 2u, 1u,
++                            &target.input_descriptor, 0u, nullptr);
+     // The game clears its framebuffer itself; start from a known state for
+     // any part it does not.
+     std::array<VkClearAttachment, 2> clears{};
+@@ -8041,6 +8225,15 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+     // Show the target the guest flipped to; fall back to whatever was drawn last.
+     auto displayed = impl.targets.find(display_address);
+     if (displayed == impl.targets.end()) displayed = impl.targets.find(impl.last_drawn_target);
++    // <prefix>_SHOW_TARGET=ADDR presents that render target instead, when it
++    // exists (an offscreen target in a replay; the Metal backend's
++    // <prefix>_METAL_SHOW_TARGET). Patch 0014.
++    static const std::uint32_t show_target = [] {
++        const char *text = portablekit::env("SHOW_TARGET");
++        return text != nullptr ? static_cast<std::uint32_t>(std::strtoul(text, nullptr, 0)) : 0u;
++    }();
++    if (show_target != 0u)
++        if (const auto shown = impl.targets.find(show_target); shown != impl.targets.end()) displayed = shown;
+     VkImage source = displayed != impl.targets.end() ? displayed->second.color : VK_NULL_HANDLE;
+     impl.presented_target = displayed != impl.targets.end() ? displayed->first : 0u;
+     if (impl.holding) source = impl.held.color;
+@@ -8398,8 +8591,10 @@ void VulkanRenderer::shutdown() {
+     impl.holding = false;
+     impl.destroy_interpolation_targets();
+     vkDestroyDescriptorPool(impl.device, impl.descriptor_pool, nullptr);
++    vkDestroyDescriptorPool(impl.device, impl.input_pool, nullptr);
+     vkDestroyDescriptorSetLayout(impl.device, impl.descriptor_layout, nullptr);
+     vkDestroyDescriptorSetLayout(impl.device, impl.lighting_layout, nullptr);
++    vkDestroyDescriptorSetLayout(impl.device, impl.input_layout, nullptr);
+     vkDestroyPipelineLayout(impl.device, impl.pipeline_layout, nullptr);
+     vkDestroyShaderModule(impl.device, impl.vertex_shader, nullptr);
+     vkDestroyShaderModule(impl.device, impl.raw_vertex_shader, nullptr);

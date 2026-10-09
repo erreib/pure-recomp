@@ -56,6 +56,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0011-vulkan-texture-mapping | (task 057) | Missing feature | candidate | Texture map modes 1 (the texture matrix, s and t divided by q per pixel) and 2 (the environment map from the normal and two lights) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_TEXMAP` draws every draw with its UVs |
 | 0012-vulkan-mipmaps | (task 058) | Missing feature | candidate | The mip levels a draw names uploaded by the Vulkan renderer and sampled at the level the GE's rule picks (auto, constant, slope), the mip filter from the minification filter's bits, as the Metal backend does; `<prefix>_NO_MIPMAPS` samples level 0 alone |
 | 0013-vulkan-colortest-depthclamp | (task 059) | Missing feature | candidate | The GE's colour test (NEVER, ALWAYS, EQUAL, NOTEQUAL under COLORTESTMASK against COLORREF, a discard after fog) and CLIPENABLE's depth clamp (near plane only, screen z clamped per vertex, MINZ/MAXZ as clip distances, `depthClampEnable`) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_COLOR_TEST` and `<prefix>_NO_DEPTH_CLAMP` restore the old paths |
+| 0014-vulkan-16bit-dither | (task 060) | Fidelity | candidate | Draws into 5650, 5551 and 4444 targets blended in `ge.frag` on the colour read as the render pass's own input attachment, then dithered by the GE's matrix and cut to the format's bits, as the Metal backend's `ge_fragment_16`; `<prefix>_NO_DITHER` draws them at 8 bits a channel as before; `<prefix>_SHOW_TARGET` presents an offscreen target |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -321,3 +322,21 @@ depth range's ends. The z scale, offset, MINZ and MAXZ go in the environment blo
 when a clamped draw needs other values. It needs the depthClamp and shaderClipDistance features (said once when the
 device lacks them). The pipeline key list's version goes from 3 to 4 (18 words), so an older list is not prewarmed
 once. `<prefix>_NO_COLOR_TEST` and `<prefix>_NO_DEPTH_CLAMP` (the Metal backend's names) restore the old paths.
+
+### 0014-vulkan-16bit-dither
+Task 060. The renderer drew 5650, 5551 and 4444 targets at 8 bits a channel, blended by the pipeline, and never
+dithered (`DrawCall::dither` went unread). Every target stays an RGBA8 image; what changes is how a draw into a 16-bit
+one writes it. The render pass's colour attachment is also its input attachment 0 (GENERAL inside the pass, a
+by-region self-dependency, explicit external dependencies for the layout changes), with one pass for every target so
+pipelines, framebuffers and descriptor sets stay compatible; each target has an input-attachment set (set 2 of the
+pipeline layout, its own pool), bound when a pass begins (and in frame interpolation's replay). `PipelineKey` gains
+`sixteen` (1 + the format), the dither switch and rows, the FIX colours and the pixel scale, which become `ge.frag`'s
+specialisation constants: the shader blends with the GE's raw factors and equation on `subpassLoad` (FIX exact, the
+doubled factors and ABSDIFF as `ge.metal`'s `ge_factor`/`ge_blend`), adds the matrix's offset for the PSP pixel
+(DITHn the row for y & 3) when DITHERENABLE is on and the draw is not a clear, clamps once, keeps the top 5/6/5,
+5/5/5 or 4/4/4 bits and writes what they expand to; the pipeline does not blend, and the shader's alpha is the
+stencil value the target stores. Before each such draw the open merge group is drawn and a by-region barrier
+recorded, so a draw reads what the ones before it wrote; fragments of one draw that overlap are not ordered (no
+`VK_EXT_rasterization_order_attachment_access` on the measured driver). The pipeline key list goes from version 4 to 5
+(25 words). `<prefix>_NO_DITHER` (the Metal backend's name) restores the old drawing; `<prefix>_SHOW_TARGET=ADDR`
+presents that render target in place of the display (the Metal backend's `<prefix>_METAL_SHOW_TARGET`).
