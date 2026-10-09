@@ -126,8 +126,13 @@ simplification task, then the enhancements. The session-by-session resume notes 
   metal backend falling back to Vulkan, which headless draws into no window; blind runs use the null backend on
   Windows (purelib.port.BLIND) and Saves grades close. refactor_check.sh alone stays macOS-only, needing headless
   pictures).
-  Step 3 is briefed as tasks 056 to 060 (the Vulkan renderer to the Metal column, exit within 0.005 on every race
-  scene); 056 dispatches first and serially (6 threads). Step 1 was task 054 on `task/054-windows-build-boot`,
+  Step 3's code is COMPLETE (2026-10-08, tasks 056 to 060 merged, patches 0010 to 0014): the Vulkan renderer
+  draws the viewport into clip space, texture map modes 1 and 2, mip levels at the GE's rule, the colour test,
+  the depth clamp, and 16-bit targets with the GE's dither — each verified per pixel on replay cuts with a
+  byte-identical off path. The suite's Vulkan column is re-baselined on this machine (race scenes 0.067-0.096
+  down to 0.048-0.056); the 0.005-to-Metal exit bar is judged by tools/gerec/metal_check.sh's A/B on the Mac
+  (task 060 found the suite's two columns are not measured alike: docs/windows.md). Remaining for step 3: that
+  Mac A/B. Step 4 (packaging) is unbriefed. Step 1 was task 054 on `task/054-windows-build-boot`,
   run 2026-10-08 on Erik's Windows machine by the planning session itself (the corpus regeneration and the first
   cold build sit outside a worker's limits): the game builds with clang-cl on the win-x64 preset, the corpus
   regenerated there (145 units), and the frontend route, the main menu and a Vineta K race run on the framework's
