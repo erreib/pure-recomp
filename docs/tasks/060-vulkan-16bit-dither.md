@@ -249,3 +249,6 @@ asks: the step-3 exit's 0.005 bar compares columns measured differently (the no-
 0.03-0.05 gap), so the bar is judged by tools/gerec/metal_check.sh's A/B on a Mac — docs/windows.md amended, the
 Vulkan column re-baselined from three post-060 runs instead. README and setup follow-ups done at the merge.
 GENERAL-layout cost on tiled/AMD GPUs (open question 4) recorded as an upstream-facing follow-up.
+Mac A/B (2026-10-09, after the Mac checkout took patches 0010-0014): `tools/gerec/metal_check.sh` PASS in 7 s on
+the kept recordings — team.gerec 0.000000 on both frames, race_1x.gerec frame 6016 0.000015 (2 px); race_warm at
+2x against 1x 0.080 as before (the reduction, reported not judged). Step 3's exit is met.

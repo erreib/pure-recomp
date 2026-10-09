@@ -131,11 +131,13 @@ simplification task, then the enhancements. The session-by-session resume notes 
   the depth clamp, and 16-bit targets with the GE's dither — each verified per pixel on replay cuts with a
   byte-identical off path. The suite's Vulkan column is re-baselined on this machine (race scenes 0.067-0.096
   down to 0.048-0.056); the 0.005-to-Metal exit bar is judged by tools/gerec/metal_check.sh's A/B on the Mac
-  (task 060 found the suite's two columns are not measured alike: docs/windows.md). Remaining for step 3: that
-  Mac A/B. Step 4 (packaging) is task 061, merged 18c5df4 (2026-10-09): the `win-x64-release` preset,
+  (task 060 found the suite's two columns are not measured alike: docs/windows.md). That A/B ran on the Mac
+  2026-10-09 with the fourteen-patch vendor and PASSED: team frames 5650-5651 diff 0.000000, race_1x frame 6016
+  diff 0.000015 (2 px of 130560 at tol 24; the first differing draw is the stencilled, alpha-tested CLUT4 ship
+  decal at draw 508 of 864), so the two complete backends agree on one recording and step 3 is DONE. Step 4 (packaging) is task 061, merged 18c5df4 (2026-10-09): the `win-x64-release` preset,
   `tools/bundle_windows.sh` (the folder, `--zip`, `--check`: all seven checks PASS, docs/release.md "Windows");
   the follow-ups are an icon (.ico through llvm-rc) and code signing. With it the Windows bring-up's four steps
-  are done on this machine; what remains is the Mac A/B above. Step 1 was task 054 on `task/054-windows-build-boot`,
+  are done, the Mac A/B included (2026-10-09). Step 1 was task 054 on `task/054-windows-build-boot`,
   run 2026-10-08 on Erik's Windows machine by the planning session itself (the corpus regeneration and the first
   cold build sit outside a worker's limits): the game builds with clang-cl on the win-x64 preset, the corpus
   regenerated there (145 units), and the frontend route, the main menu and a Vineta K race run on the framework's

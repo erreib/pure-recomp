@@ -59,6 +59,8 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
    0.05 gap as the race scenes — the capture path, not the renderer. The Windows measure is the re-baselined
    Vulkan column against the PPSSPP references, which tasks 056 to 060 moved from 0.067-0.096 to 0.045-0.056 on
    the race scenes.)
+   Exit met 2026-10-09 on the Mac: `tools/gerec/metal_check.sh` PASS — the TEAM SELECTION frames pixel-identical
+   between the backends, race frame 6016 at 0.000015 (2 pixels over tol 24 of 130560).
 4. **Packaging (one task).** The Windows zip through the framework's release script, the game-data check, a
    first-run setup that takes the disc image, the pre-warm list shipped, a bundle check equivalent to the macOS one.
    Exit (task 061, 2026-10-09): `tools/bundle_windows.sh --check out/061` passes files, dlls, machine, names,
