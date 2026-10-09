@@ -138,6 +138,12 @@ docs/verification.md (one row each).
   PURE_EXIT_AT_FRAME. The check does not require 0; it requires the exit line, the installed game, the Vulkan
   renderer and the title shot.
 
+- **Machine check fix (commit after the Result).** Git Bash's `grep -i` aborts on every file here: it left a
+  grep.exe.stackdump. `|| true` had read that crash as "no leak", so the first PASS proved nothing. The check now
+  builds case-blind patterns by hand (`[Hh]:[/\\][Ee]...`) and fails when grep exits above 1. A test against
+  planted strings (`h:\ERREI`, `c:/users/ERREIB`, `DEV-Stuff`) found all three. The Verify below is the rerun with
+  the fix.
+
 **Verify output (last 20 lines)** of `tools/bundle_windows.sh --check out/061`:
 ```
 files of out/release-windows/stage/Wipeout Pure (bytes, path; /h/errei/Documents/dev-stuff/pure-recomp/.claude/worktrees/agent-a44437a90b09bb0cf/out/061/bundle_files.txt), 146M in all:

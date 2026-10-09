@@ -213,6 +213,10 @@ inside_words() {   # inside_words STRING FILE: yes when every occurrence of STRI
   [ "$all" -gt 0 ] && [ "$all" = "$inside" ] && echo yes || echo no
 }
 
+ci() {   # ci TEXT: an extended regex matching TEXT in any case, with / matching either slash
+  printf '%s' "$1" | sed -e 's/\./\\./g' -e 's#/#[/\\\\]#g' -e 's/[A-Za-z]/[\U&\L&]/g'
+}
+
 norm() { tr '\\' '/' | tr '[:upper:]' '[:lower:]'; }   # a Windows path as the log prints it, for comparing
 
 route_check() {   # route_check DIR DATA SCRIPT
@@ -285,10 +289,14 @@ check() {
   else result dlls PASS "the program and $(printf '%s\n' $DLLS | wc -l | tr -d ' ') DLLs import only each other, API sets and System32's:$system_used"; fi
 
   # machine: no path of this machine.
-  local leaks user=${USERNAME:-$(id -un)}
-  leaks=$(LC_ALL=C grep -rlaiF -e 'H:/errei' -e 'H:\errei' -e '/h/errei' -e "C:/Users/$user" -e "C:\\Users\\$user" \
-            -e "$user" -e 'dev-stuff' "$FOLDER" || true)
-  if [ -n "$leaks" ]; then result machine FAIL "$(printf '%s' "$leaks" | tr '\n' ' ')"
+  # Git Bash's grep aborts on -i (any file, 2026-10-09), which `|| true` would read as "no leak": the patterns are
+  # made case-blind by hand ([Hh]...), a slash matches either slash, and grep's own failure fails the check.
+  local leaks user=${USERNAME:-$(id -un)} grc
+  leaks=$(LC_ALL=C grep -rlaE -e "$(ci 'H:/errei')" -e "$(ci '/h/errei')" -e "$(ci "C:/Users/$user")" \
+            -e "$(ci "$user")" -e "$(ci 'dev-stuff')" "$FOLDER")
+  grc=$?
+  if [ $grc -gt 1 ]; then result machine FAIL "grep failed (exit $grc)"
+  elif [ -n "$leaks" ]; then result machine FAIL "$(printf '%s' "$leaks" | tr '\n' ' ')"
   else result machine PASS "no H:/errei, H:\\errei, C:/Users/$user (either slash), $user or dev-stuff in any file, any case"; fi
 
   # names: no file named like game data.
