@@ -115,6 +115,7 @@ reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tool
 | `tools/hud_check.sh` | macOS only: it reads the Metal shell's window |
 | `tools/gerec/metal_check.sh` | macOS only: it compares the Metal backend with Vulkan |
 | `tools/bundle.sh --check` | macOS only: the app bundle |
+| `tools/bundle_windows.sh --check` | runs (task 061): the Windows release folder, docs/release.md "Windows" |
 | `tools/verify_task.sh 054` | demonstrated (task 055: 18/18 PASS, 20m 14s) |
 | `tools/campaign_sweep.py` | demonstrated, windowed Vulkan (task 055: single_race Vineta K PASS, 3 laps, 45 contacts). The game runs under a pseudoconsole (`tools/purelib/conpty.py`): through a pipe its stdout was block-buffered, the follower steered about 1 s late and the cell stalled |
 | `tools/save_roundtrip.sh` | demonstrated (task 055: all five runs PASS, windowed) |

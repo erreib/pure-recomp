@@ -4,6 +4,9 @@ Wipeout Pure.app is pure-recomp, a native macOS build of the PSP game Wipeout Pu
 program is a combination of pure-recomp's own code, the PortableKit framework and the third-party software listed
 here, each under its own licence. The combination is distributed under the GNU General Public License, version 2 or
 later. The licence texts are in the same directory as this file: `Wipeout Pure.app/Contents/Resources/licenses/`.
+The Windows build (the folder `Wipeout Pure` with `Wipeout Pure.exe`) is the same program drawn with Vulkan; what it
+ships differs and is listed in [The Windows build](#the-windows-build) at the end. Its licence texts are in the
+folder's `licenses/`, and pure-recomp's own licence is `LICENSE.txt` at the top of the folder.
 
 The app contains no game, no game assets and no keys. You provide the disc image of the game you own; what the
 first-run setup makes from it (the prepared executable, and the copy of the image unless you chose to use it where it
@@ -127,3 +130,42 @@ Vulkan on Apple's Metal, for the Vulkan path only. Copyright (c) 2015-2026 The B
 A fallback for Japanese text in the menu: `Wipeout Pure.app/Contents/Resources/fonts/NotoSansCJKjp-Regular.otf`.
 Copyright 2014-2021 Adobe (<http://www.adobe.com/>), with Reserved Font Name 'Source'. SIL Open Font License, version
 1.1: `NotoSansCJK-OFL.txt`. <https://github.com/notofonts/noto-cjk>
+
+## The Windows build
+
+`Wipeout Pure.exe` holds the same program with PortableKit's Vulkan renderer and window instead of the Metal ones
+(the Metal backend and window, Dear ImGui's Metal renderer backend and the font above are not in it: Windows supplies
+the Japanese fallback font). PortableKit, Dear ImGui, tiny-AES-c, stb and xxHash are compiled in as above, and so is
+Microsoft's C and C++ runtime (the static runtime of Visual Studio 2022's MSVC 14.39), so no runtime has to be
+installed. The licence texts are in the folder's `licenses/`: `PortableKit-LICENSE.txt`, `DearImGui-LICENSE.txt`,
+`tiny-AES-c-UNLICENSE.txt`, `xxHash-LICENSE.txt`, `SDL3-LICENSE.txt`, `FFmpeg-LICENSE.txt` and `FFmpeg-SOURCE.txt`.
+pure-recomp's own licence is `LICENSE.txt`; the commit the build was made from is in `BUILDINFO.txt`.
+
+The DLLs beside the program are unmodified prebuilt releases, dynamically linked; you may replace them with your own
+builds of the same or a compatible version.
+
+### SDL3 3.4.18
+
+Window, input and audio output. Copyright (C) 1997-2026 Sam Lantinga. zlib License: `SDL3-LICENSE.txt`.
+
+- Library: `SDL3.dll`, from libsdl-org's prebuilt `SDL3-devel-3.4.18-VC.zip`
+- Source: <https://github.com/libsdl-org/SDL/releases/tag/release-3.4.18>
+
+### FFmpeg 7.1.5 (BtbN LGPL shared build)
+
+Decodes the game's ATRAC3 and ATRAC3plus audio and its H.264 movies. This build of FFmpeg is licensed under the GNU
+Lesser General Public License, version 3 or later: `FFmpeg-LICENSE.txt`; `FFmpeg-SOURCE.txt` names the build and its
+source. It contains only FFmpeg's LGPL parts. pure-recomp's licence, GPL version 2 or later, lets the combination be
+distributed under version 3 of the GPL, with which the LGPL version 3 is compatible.
+
+- Libraries: `avcodec-61.dll`, `avutil-59.dll` and `swresample-5.dll`
+- Build: `ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip` from
+  <https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip>
+  (SHA-256 `03a8003e245c08df4277d7b0adc50b93a97ddd4a3aaafea21943c4384df59895`), pinned by PortableKit's
+  `cmake/FFmpeg.cmake`
+- Source: FFmpeg's `release/7.1` branch at the commit the name gives (`n7.1.5-1-g7d0e842004`),
+  <https://github.com/FFmpeg/FFmpeg/tree/release/7.1>; the build scripts: <https://github.com/BtbN/FFmpeg-Builds>
+
+### The Vulkan loader
+
+Not shipped: `vulkan-1.dll` comes with the graphics driver and is loaded from Windows' system folder.
