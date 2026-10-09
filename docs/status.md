@@ -126,7 +126,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   metal backend falling back to Vulkan, which headless draws into no window; blind runs use the null backend on
   Windows (purelib.port.BLIND) and Saves grades close. refactor_check.sh alone stays macOS-only, needing headless
   pictures).
-  Step 3's code is COMPLETE (2026-10-08, tasks 056 to 060 merged, patches 0010 to 0014): the Vulkan renderer
+  Step 3's code is COMPLETE (2026-10-08, tasks 056 to 060 merged, the patch series 0010-vulkan-viewport-into-clip-space to 0014-vulkan-16bit-dither): the Vulkan renderer
   draws the viewport into clip space, texture map modes 1 and 2, mip levels at the GE's rule, the colour test,
   the depth clamp, and 16-bit targets with the GE's dither — each verified per pixel on replay cuts with a
   byte-identical off path. The suite's Vulkan column is re-baselined on this machine (race scenes 0.067-0.096
