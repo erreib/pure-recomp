@@ -139,6 +139,15 @@ private:
     void set_texture_map(const DrawCall &call, const Target *source, std::uint32_t source_x, std::uint32_t source_y,
                          VertexUniforms &vertex, FragmentUniforms &fragment);
     void draw(const DrawCall &call, const GuestMemory &memory);
+    void set_pipeline_key(const DrawCall &call, bool sixteen, PipelineKey &key, FragmentUniforms &fragment,
+                          std::uint32_t &blend_color, std::uint32_t &stencil_reference, bool &follows);
+    void fold_viewport(const DrawCall &call, const std::array<float, 16> &transform, bool clamp_depth,
+                       VertexUniforms &vertex, MTLViewport &viewport);
+    void bind_state(const DrawCall &call, const PipelineKey &key, id<MTLRenderPipelineState> pipeline,
+                    id<MTLDepthStencilState> depth, std::uint32_t stencil_reference, const MTLViewport &viewport,
+                    bool clamp_depth, const ViewportScissor &scissor, bool cull, std::uint32_t blend_color);
+    void bind_inputs(id<MTLBuffer> buffer, NSUInteger offset, const VertexUniforms &vertex, bool lighting_read,
+                     const FragmentUniforms &fragment, id<MTLTexture> texture, std::uint32_t sampler);
     static ViewportScissor scissor_of(const DrawCall &call);
     void log_draw(const DrawCall &call, const Target &target, const Target *source, std::uint32_t x, std::uint32_t y,
                   const ViewportScissor &scissor);

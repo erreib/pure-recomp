@@ -441,6 +441,61 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     key.render.textured = textured;
     std::uint32_t stencil_reference = 0u;
     bool follows = true;
+    set_pipeline_key(call, sixteen, key, fragment, blend_color, stencil_reference, follows);
+    id<MTLRenderPipelineState> pipeline = render_pipeline(key.render);
+    if (pipeline == nil) return;
+    id<MTLDepthStencilState> depth = depth_state(key.depth);
+
+    // Lighting and fog, as ge.vert and ge.frag: transformed draws only, never a clear.
+    const bool lit = call.lighting_enabled && !no_lighting_ && !call.through && !call.clear_mode;
+    const bool fogged = call.fog.enabled && !no_fog_ && !call.through && !call.clear_mode;
+    const bool shade_mapped = vertex.texture_map[0] == 2u;
+    if (lit || fogged || shade_mapped) fill_lighting(call, lit, fogged, shade_mapped);
+    if (fogged) {
+        fragment.fog = unpack_color(call.fog.color, 1.0f);
+        vertex.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
+    }
+
+    // Positions: screen pixels in through mode; the GE viewport folded into clip space otherwise.
+    MTLViewport viewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0};
+    // CLIPENABLE's depth clamp (task 040) for transformed draws; without it, Metal clips at both planes.
+    const bool clamp_depth = !call.through && call.clip_enabled && !no_depth_clamp_;
+    vertex.mode = {call.through ? 1u : 0u, sprite_corners_ != 0u ? kClipPositions : 0u,
+                   (fogged ? kFog : 0u) | (lit ? kLighting : 0u), 0u};
+    if (!call.through) fold_viewport(call, transform, clamp_depth, vertex, viewport);
+    const bool cull = call.culling_enabled && !no_cull_ && !call.through && type == MTLPrimitiveTypeTriangle &&
+                      call.primitive != PrimitiveType::Sprites && !call.clear_mode;
+
+    // Into the target's pass (after the texture, whose copy may have ended it).
+    begin_pass(target);
+    // A blend that reads the destination's alpha reads the PSP's stencil.
+    const bool reads_destination_alpha = sixteen ? shader_blend_reads_destination_alpha(fragment, key.render.write_mask)
+                                                 : blend_reads_destination_alpha(key.render);
+    if (alpha_stale_ && reads_destination_alpha) resolve_stencil_alpha("destination alpha read");
+    if (!follows) alpha_stale_ = true;
+    if (key.depth.stencil) ++stats_.stencil_draws;
+    if (target.guest_words.empty() || target.last_drawn_frame != frames_) snapshot_guest_words(memory, target);
+    target.last_drawn_frame = frames_;
+    target.draw_serial = ++draw_counter_;
+
+    const std::size_t bytes = vertices_.size() * sizeof(GpuVertex);
+    const auto [buffer, offset] = allocate(bytes);
+    std::memcpy(static_cast<std::uint8_t *>(buffer.contents) + offset, vertices_.data(), bytes);
+
+    bind_state(call, key, pipeline, depth, stencil_reference, viewport, clamp_depth, scissor, cull, blend_color);
+    bind_inputs(buffer, offset, vertex, lit || fogged || shade_mapped, fragment, texture, sampler);
+    [encoder_ drawPrimitives:type vertexStart:0 vertexCount:drawn];
+
+    if (log_draws_) log_draw(call, target, source, source_x, source_y, scissor);
+    ++stats_.draws;
+    ++frame_draws_;
+}
+
+// The pipeline key's blend, write masks, alpha and colour tests, depth test and stencil, with the fragment uniforms,
+// the blend colour and the stencil reference they go with: a clear's (CLEARMODE) or a draw's. `follows` is set false
+// when the draw leaves the target's alpha different from its stencil.
+void MetalGeBackend::set_pipeline_key(const DrawCall &call, bool sixteen, PipelineKey &key, FragmentUniforms &fragment,
+                                      std::uint32_t &blend_color, std::uint32_t &stencil_reference, bool &follows) {
     if (call.clear_mode) {
         // CLEARMODE: no blend, texture or tests; bits 8..10 say what it writes. A clear of the alpha writes
         // the stencil too: ALWAYS, REPLACE with the clear colour's alpha.
@@ -507,76 +562,50 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
             follows = alpha_follows_stencil(call, key.depth.compare != MTLCompareFunctionAlways);
         }
     }
-    id<MTLRenderPipelineState> pipeline = render_pipeline(key.render);
-    if (pipeline == nil) return;
-    id<MTLDepthStencilState> depth = depth_state(key.depth);
+}
 
-    // Lighting and fog, as ge.vert and ge.frag: transformed draws only, never a clear.
-    const bool lit = call.lighting_enabled && !no_lighting_ && !call.through && !call.clear_mode;
-    const bool fogged = call.fog.enabled && !no_fog_ && !call.through && !call.clear_mode;
-    const bool shade_mapped = vertex.texture_map[0] == 2u;
-    if (lit || fogged || shade_mapped) fill_lighting(call, lit, fogged, shade_mapped);
-    if (fogged) {
-        fragment.fog = unpack_color(call.fog.color, 1.0f);
-        vertex.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
+// A transformed draw's positions: the GE viewport folded into clip space, and its depth clamped as CLIPENABLE
+// clamps it (`clamp_depth`) or mapped by the viewport's depth range.
+void MetalGeBackend::fold_viewport(const DrawCall &call, const std::array<float, 16> &transform, bool clamp_depth,
+                                   VertexUniforms &vertex, MTLViewport &viewport) {
+    vertex.transform = transform;
+    const pk::ViewportState &vp = call.viewport;
+    if (vp.x_scale != 0.0f && vp.y_scale != 0.0f) {
+        // screen = ndc * scale + offset - region offset, then to Metal's y-up device space.
+        vertex.screen = {2.0f * vp.x_scale / static_cast<float>(kWidth),
+                         2.0f * (vp.x_offset - vp.offset_x) / static_cast<float>(kWidth) - 1.0f,
+                         -2.0f * vp.y_scale / static_cast<float>(kHeight),
+                         1.0f - 2.0f * (vp.y_offset - vp.offset_y) / static_cast<float>(kHeight)};
+    } else {
+        vertex.screen = {1.0f, 0.0f, -1.0f, 0.0f};
     }
-
-    // Positions: screen pixels in through mode; the GE viewport folded into clip space otherwise.
-    MTLViewport viewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0};
-    // CLIPENABLE's depth clamp (task 040) for transformed draws; without it, Metal clips at both planes.
-    const bool clamp_depth = !call.through && call.clip_enabled && !no_depth_clamp_;
-    vertex.mode = {call.through ? 1u : 0u, sprite_corners_ != 0u ? kClipPositions : 0u,
-                   (fogged ? kFog : 0u) | (lit ? kLighting : 0u), 0u};
-    if (!call.through) {
-        vertex.transform = transform;
-        const pk::ViewportState &vp = call.viewport;
-        if (vp.x_scale != 0.0f && vp.y_scale != 0.0f) {
-            // screen = ndc * scale + offset - region offset, then to Metal's y-up device space.
-            vertex.screen = {2.0f * vp.x_scale / static_cast<float>(kWidth),
-                             2.0f * (vp.x_offset - vp.offset_x) / static_cast<float>(kWidth) - 1.0f,
-                             -2.0f * vp.y_scale / static_cast<float>(kHeight),
-                             1.0f - 2.0f * (vp.y_offset - vp.offset_y) / static_cast<float>(kHeight)};
-        } else {
-            vertex.screen = {1.0f, 0.0f, -1.0f, 0.0f};
-        }
-        if (clamp_depth) {
-            // CLIPENABLE on (task 040): the shader computes the GE's screen z, clamps it per vertex and hands
-            // it over as depth z / 65535 in a viewport of 0..1; the near plane and MINZ/MAXZ are clip
-            // distances, and Metal does not clip at the depth range's ends (depthClipMode clamp).
-            vertex.mode[3] = 1u;
-            vertex.depth = {vp.z_scale, vp.z_offset, static_cast<float>(call.depth.range_near),
-                            static_cast<float>(call.depth.range_far)};
-            ++stats_.depth_clamped;
-        } else {
-            if (!call.clip_enabled && !no_depth_clamp_)
-                not_emulated("CLIPENABLE off on a transformed draw (drawn clipped at both depth planes)", 0u);
-            if (vp.z_scale != 0.0f) {
-                // The shader hands over z in [0, w] for the PSP's [-w, w]; this applies the GE's z scale
-                // and offset, reversed when the game set a reversed range.
-                viewport.znear = std::clamp((vp.z_offset - vp.z_scale) / 65535.0, 0.0, 1.0);
-                viewport.zfar = std::clamp((vp.z_offset + vp.z_scale) / 65535.0, 0.0, 1.0);
-            }
+    if (clamp_depth) {
+        // CLIPENABLE on (task 040): the shader computes the GE's screen z, clamps it per vertex and hands
+        // it over as depth z / 65535 in a viewport of 0..1; the near plane and MINZ/MAXZ are clip
+        // distances, and Metal does not clip at the depth range's ends (depthClipMode clamp).
+        vertex.mode[3] = 1u;
+        vertex.depth = {vp.z_scale, vp.z_offset, static_cast<float>(call.depth.range_near),
+                        static_cast<float>(call.depth.range_far)};
+        ++stats_.depth_clamped;
+    } else {
+        if (!call.clip_enabled && !no_depth_clamp_)
+            not_emulated("CLIPENABLE off on a transformed draw (drawn clipped at both depth planes)", 0u);
+        if (vp.z_scale != 0.0f) {
+            // The shader hands over z in [0, w] for the PSP's [-w, w]; this applies the GE's z scale
+            // and offset, reversed when the game set a reversed range.
+            viewport.znear = std::clamp((vp.z_offset - vp.z_scale) / 65535.0, 0.0, 1.0);
+            viewport.zfar = std::clamp((vp.z_offset + vp.z_scale) / 65535.0, 0.0, 1.0);
         }
     }
-    const bool cull = call.culling_enabled && !no_cull_ && !call.through && type == MTLPrimitiveTypeTriangle &&
-                      call.primitive != PrimitiveType::Sprites && !call.clear_mode;
+}
 
-    // Into the target's pass (after the texture, whose copy may have ended it).
-    begin_pass(target);
-    // A blend that reads the destination's alpha reads the PSP's stencil.
-    const bool reads_destination_alpha = sixteen ? shader_blend_reads_destination_alpha(fragment, key.render.write_mask)
-                                                 : blend_reads_destination_alpha(key.render);
-    if (alpha_stale_ && reads_destination_alpha) resolve_stencil_alpha("destination alpha read");
-    if (!follows) alpha_stale_ = true;
-    if (key.depth.stencil) ++stats_.stencil_draws;
-    if (target.guest_words.empty() || target.last_drawn_frame != frames_) snapshot_guest_words(memory, target);
-    target.last_drawn_frame = frames_;
-    target.draw_serial = ++draw_counter_;
-
-    const std::size_t bytes = vertices_.size() * sizeof(GpuVertex);
-    const auto [buffer, offset] = allocate(bytes);
-    std::memcpy(static_cast<std::uint8_t *>(buffer.contents) + offset, vertices_.data(), bytes);
-
+// The encoder's state for a draw, each part set only when it differs from what the pass has bound (bound_): the
+// pipeline, the depth-stencil state, the stencil reference, the viewport, the depth clip mode, the scissor, cull and
+// winding, the blend colour.
+void MetalGeBackend::bind_state(const DrawCall &call, const PipelineKey &key, id<MTLRenderPipelineState> pipeline,
+                                id<MTLDepthStencilState> depth, std::uint32_t stencil_reference,
+                                const MTLViewport &viewport, bool clamp_depth, const ViewportScissor &scissor,
+                                bool cull, std::uint32_t blend_color) {
     if (bound_.pipeline != pipeline) {
         [encoder_ setRenderPipelineState:pipeline];
         bound_.pipeline = pipeline;
@@ -627,6 +656,14 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
         bound_.blend_color = blend_color;
         bound_.blend_color_set = true;
     }
+}
+
+// What the shaders read, after bind_state(): the vertices at `offset` in `buffer`, the vertex uniforms, the lighting
+// block (`lighting_read`: the draw is lit, fogged or environment-mapped), the fragment uniforms, the texture and its
+// sampler.
+void MetalGeBackend::bind_inputs(id<MTLBuffer> buffer, NSUInteger offset, const VertexUniforms &vertex,
+                                 bool lighting_read, const FragmentUniforms &fragment, id<MTLTexture> texture,
+                                 std::uint32_t sampler) {
     if (bound_.buffer != buffer) {
         [encoder_ setVertexBuffer:buffer offset:offset atIndex:0];
         bound_.buffer = buffer;
@@ -636,7 +673,7 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     [encoder_ setVertexBytes:&vertex length:sizeof(vertex) atIndex:1];
     // The lighting block: a lit, fogged or environment-mapped draw's whenever it changed, and something
     // always, since the vertex function names it.
-    if (!lighting_bound_ || ((lit || fogged || shade_mapped) && lighting_changed_)) {
+    if (!lighting_bound_ || (lighting_read && lighting_changed_)) {
         [encoder_ setVertexBytes:&lighting_ length:sizeof(lighting_) atIndex:2];
         lighting_bound_ = true;
         lighting_changed_ = false;
@@ -651,11 +688,6 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
         bound_.sampler = sampler;
         bound_.sampler_set = true;
     }
-    [encoder_ drawPrimitives:type vertexStart:0 vertexCount:drawn];
-
-    if (log_draws_) log_draw(call, target, source, source_x, source_y, scissor);
-    ++stats_.draws;
-    ++frame_draws_;
 }
 
 MetalGeBackend::ViewportScissor MetalGeBackend::scissor_of(const DrawCall &call) {
