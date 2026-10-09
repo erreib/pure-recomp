@@ -20,6 +20,7 @@ the runs and before-and-after tables: [docs/history/verification.md](history/ver
 | VFPU rounding | `tools/vfpu_probe.py`, `tools/vfpu_model.py` | the port's VFPU results against PPSSPP's and the PSP's rule | "The VFPU dot-product check" |
 | controls | `tools/controls_check.py` | docs/controls.md's tables against the framework's sources | docs/controls.md |
 | the app | `tools/bundle.sh --check DIR` | the app bundle: signature, libraries, no game data, setup and a run | docs/release.md |
+| the Windows zip | `tools/bundle_windows.sh --check DIR` | the release folder: its files, its DLLs, no game data, setup and a run | docs/release.md, "Windows" |
 | the docs | `tools/docs_check.py` | every path, link, patch and task file the docs name exists | "The docs check" |
 | a task | `tools/verify_task.sh NNN` | the Verify line of `docs/tasks/NNN-*.md`, PASS or FAIL | CLAUDE.md |
 

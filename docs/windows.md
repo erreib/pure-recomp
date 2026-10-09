@@ -61,6 +61,12 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
    the race scenes.)
 4. **Packaging (one task).** The Windows zip through the framework's release script, the game-data check, a
    first-run setup that takes the disc image, the pre-warm list shipped, a bundle check equivalent to the macOS one.
+   Exit (task 061, 2026-10-09): `tools/bundle_windows.sh --check out/061` passes files, dlls, machine, names,
+   content, setup and route (title 0.030 of 0.05) on the staged `Wipeout Pure.exe`; `--zip` makes
+   `pure-recomp-<version>-windows-x64.zip` (49 MB) with `SHA256SUMS`. As built, not as first planned: the packer is
+   ours (the framework's Windows script packs its desktop app, not a game), the Release build links the static C
+   runtime and the windows subsystem, and no pre-warm list ships (it is the Metal backend's; Vulkan keeps a pipeline
+   cache in the data directory). docs/release.md, "Windows".
 
 ## What to decide before starting
 

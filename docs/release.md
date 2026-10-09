@@ -157,6 +157,70 @@ closed; with Mute the app opens it as a player's app does. The setup run opens n
 - The setup's welcome screen says the disc image "the PlayStation 3 release carries it", a sentence the framework
   wrote for another game (`host/ui/setup_screens.cpp`); a vendor patch would make it a profile field.
 
+## Windows
+
+The Windows release (task 061, docs/windows.md step 4) is a zip holding a folder, `Wipeout Pure`, that a player
+unpacks anywhere and starts with a double click; the first start runs the same setup as the app (choose the disc image,
+the check of its disc id and executable, the copy into the data directory). The framework's Windows packer
+(`vendor/portablekit/scripts/package_desktop_windows.ps1`) packs its desktop app and toolchain, not a game, so the
+packer is ours, `tools/bundle_windows.sh`, run from the Bash of Git for Windows, shaped after `tools/bundle.sh` and
+that script's checks.
+
+```
+tools/build.sh release                     # build/release-win/bin/PureNative.exe: the win-x64-release preset
+tools/bundle_windows.sh                    # the release build if missing or stale, then the folder in out/release-windows/stage
+tools/bundle_windows.sh --zip              # also out/release-windows/dist: the zip, SHA256SUMS, BUILDINFO.txt
+tools/bundle_windows.sh --check out/061    # the checks below, with a scratch data directory in out/061/data
+```
+
+The `win-x64-release` preset inherits `win-x64` (clang-cl, lld-link, ccache) with `CMAKE_BUILD_TYPE=Release`,
+`PORTABLEKIT_RELEASE=ON` (no path of the checkout, no fallback to its `game/`), `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`
+(the static C and C++ runtime: a player's Windows need not have the Visual C++ redistributable, which the developer
+build's `VCRUNTIME140.dll` and `MSVCP140.dll` imports need) and its own directory, `build/release-win`. CMakeLists.txt
+links that build alone with the windows subsystem (`WIN32_EXECUTABLE`, entry `mainCRTStartup`, so `main` stays the
+entry): started from Explorer it opens no console window. The developer build keeps the console subsystem every tool
+reads. The corpus compiled again in Release in 10.5 minutes cold on the 6-thread machine (2026-10-09). FFmpeg is
+BtbN's prebuilt LGPL shared build that the framework's `cmake/FFmpeg.cmake` pins; `tools/build.sh release` copies the
+developer build's downloaded zip into the release directory first.
+
+| Path in the folder | What |
+|---|---|
+| `Wipeout Pure.exe` | the program (PureNative, Release, 80 MB): our profile, PortableKit with its Vulkan renderer and shell, Dear ImGui, the recompiled code |
+| `SDL3.dll` | SDL3 3.4.18, libsdl-org's prebuilt DLL (the developer build's `SDL3_ROOT`) |
+| `avcodec-61.dll`, `avutil-59.dll`, `swresample-5.dll` | FFmpeg 7.1.5, BtbN's LGPL shared build, dynamically linked |
+| `LICENSE.txt`, `README.txt` | ours (GPL-2.0-or-later) and `packaging/windows/README.txt` |
+| `BUILDINFO.txt` | the version `0.1.0-<commit>[-dirty]`, the commit, PortableKit's pin and patches, the toolchain, the shipped DLLs |
+| `licenses/` | FFmpeg's licence and source note (the build's), PortableKit's, SDL3's, Dear ImGui's, tiny-AES-c's and xxHash's licences, and `THIRD_PARTY_NOTICES.md` |
+
+The folder is 146 MB, the zip 49 MB. `vulkan-1.dll` is not shipped: the graphics driver installs it in System32.
+The data directory is `%APPDATA%\pure-recomp\PureNative\` (SDL's preference folder), or `PURE_DATA_DIR`, with the
+files of [The data directory](#the-data-directory).
+
+`tools/bundle_windows.sh --check DIR` prints PASS or FAIL per check and exits 0 when all pass:
+
+| Check | Passes when |
+|---|---|
+| files | the folder holds exactly the names above (with their sizes in `DIR/bundle_files.txt`) |
+| dlls | every DLL the program and each bundled DLL imports (`llvm-objdump -p`) is in the folder, an API set (`api-ms-win-*`, `ext-ms-*`) or in System32 and not a C/C++ runtime redistributable (`vcruntime*`, `msvcp*`, ...) |
+| machine | no file holds `H:/errei`, `H:\errei`, `C:/Users/<user>` (either slash), the user name or `dev-stuff`, in any case |
+| names | no file is named like game data (bundle.sh's names and `RELEASE_GAME_NAMES`) |
+| content | bundle.sh's byte checks; `UCUS98612`, `.iso`, `.wad`, `EBOOT`, `BOOT.BIN` only in the executable's own strings, in the two texts this repository writes for the player (`README.txt` and `THIRD_PARTY_NOTICES.md`, which name the disc image and the data directory's files), or in a bundled DLL only inside longer words (BtbN's `avcodec-61.dll` holds libvmaf's `RESIDUEBOOTSTRAP_LIBSVMNUSVR`); each such hit is listed; the disc image's SHA-256 prefix in no file |
+| setup | the staged program with `PURE_DATA_DIR=DIR/data` and `--install` of the image `disc.iso` is (a hard link on Windows), no other `PURE_` variable: exit 0, `EBOOT.ELF`, `settings.ini` and the copied `disc.iso` there |
+| route | the staged program with only `PURE_DATA_DIR` and the route's variables, the default shell and backend (Vulkan, windowed): the log names `DIR/data`'s game and the Vulkan renderer, the frontend route reaches frame 2200 (exit status 4: the runtime stopped by `PURE_EXIT_AT_FRAME`), and `DIR/shots/title.png` is within tol 24, max-frac 0.05 of `ref/title.png` (0.030 on 2026-10-09) |
+
+What differs from the Mac, and why:
+
+- No bundle, finder or prewarm check: there is no signature (the zip is not signed; SmartScreen asks once, as
+  `README.txt` says), no LaunchServices, and the pre-warm list is the Metal backend's (`config/metal_pipelines.txt`);
+  the Vulkan path keeps its pipeline cache in the data directory instead.
+- No font: Windows supplies the Japanese fallback (MS Gothic or Meiryo).
+- The read-me is inside the folder, so the content check lists its hits instead of finding none.
+- Under the windows subsystem the program has no console of its own: redirected output (a file or a pipe, as the
+  check's `setup.log` and `route.log`) is written, but an interactive command prompt shows none of `--install`'s
+  messages; its exit status still tells. The developer build is unchanged.
+- Started from Explorer (2026-10-09): its parent is `explorer.exe`, no `conhost.exe` child, one window titled
+  PureNative; it closed on a plain `taskkill /PID` (WM_CLOSE).
+
 ## History
 
 [docs/history/release.md](history/release.md): the setup before 16718e6 and the hand-made
