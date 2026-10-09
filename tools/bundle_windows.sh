@@ -31,7 +31,8 @@
 #            strings UCUS98612, .iso, .wad, EBOOT, BOOT.BIN and the disc image's SHA-256 prefix are in no file but the
 #            executable, and there only inside its own text strings (listed), and the two read-me texts this
 #            repository writes (README.txt, licenses/THIRD_PARTY_NOTICES.md: they name the disc image and the data
-#            folder's files to the player; their lines are listed); the SHA-256 prefix is in no file at all
+#            folder's files to the player; their lines are listed), or in a bundled DLL only inside longer words
+#            (avcodec-61.dll's RESIDUEBOOTSTRAP_...: listed); the SHA-256 prefix is in no file at all
 #   setup    the staged executable with PURE_DATA_DIR=DIR/data and --install <the image disc.iso is> (no other PURE_
 #            variable): exit 0, DIR/data holds EBOOT.ELF, settings.ini and the copied disc.iso (as big as the image)
 #   route    the staged executable again with only PURE_DATA_DIR and the route's variables (PURE_INPUT_SCRIPT from
@@ -204,6 +205,14 @@ for name in sorted(os.listdir(d)):
 PY
 }
 
+inside_words() {   # inside_words STRING FILE: yes when every occurrence of STRING in FILE has a word character on both sides
+  local re all inside
+  re=$(printf '%s' "$1" | sed 's/\./\\./g')
+  all=$(LC_ALL=C grep -aoF -- "$1" "$2" | wc -l)
+  inside=$(LC_ALL=C grep -aoE -- "[A-Za-z0-9_]${re}[A-Za-z0-9_]" "$2" | wc -l)
+  [ "$all" -gt 0 ] && [ "$all" = "$inside" ] && echo yes || echo no
+}
+
 norm() { tr '\\' '/' | tr '[:upper:]' '[:lower:]'; }   # a Windows path as the log prints it, for comparing
 
 route_check() {   # route_check DIR DATA SCRIPT
@@ -228,7 +237,7 @@ route_check() {   # route_check DIR DATA SCRIPT
     result route FAIL "no title shot in $dir/shots"
   else
     line=$(python3 tools/imgdiff.py "$(cygpath -m "$dir/shots/title.png")" ref/title.png --tol $TITLE_TOL --max-frac $TITLE_MAX_FRAC 2>&1)
-    if [ $? -eq 0 ]; then result route PASS "exit $rc at frame $ROUTE_FRAMES from DIR/data, $render_line; title: $line"
+    if [ $? -eq 0 ]; then result route PASS "exit $rc (4: the runtime stopped, by PURE_EXIT_AT_FRAME) at frame $ROUTE_FRAMES from DIR/data, $render_line; title: $line"
     else result route FAIL "title: $line"; fi
   fi
 }
@@ -333,6 +342,10 @@ check() {
         else
           listed+="  $p: $(printf '%s\n' "$found" | wc -l | tr -d ' ') string(s) of the executable, e.g. $(printf '%s\n' "$found" | head -3 | cut -c1-90 | sed 's/.*/"&"/' | paste -sd' ' -)"$'\n'
         fi
+      elif [[ "$rel" == *.dll ]] && [ "$(inside_words "$p" "$hit")" = yes ]; then
+        # A third-party DLL's own identifier that happens to contain the string (BtbN's avcodec carries libvmaf's
+        # RESIDUEBOOTSTRAP_LIBSVMNUSVR): every occurrence has a letter, digit or _ on both sides, so it is no name.
+        listed+="  $p: $rel, only inside longer words, e.g. \"$(LC_ALL=C grep -aoE "[A-Za-z0-9_]+$(printf '%s' "$p" | sed 's/\./\\./g')[A-Za-z0-9_]+" "$hit" | head -1)\""$'\n'
       elif [ $doc = yes ]; then
         listed+="  $p: $rel, $(LC_ALL=C grep -cF -- "$p" "$hit") line(s), e.g. \"$(LC_ALL=C grep -m1 -F -- "$p" "$hit" | tr -d '\r' | sed 's/^ *//' | cut -c1-80)\""$'\n'
       else
