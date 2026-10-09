@@ -68,7 +68,7 @@ private:
     std::pair<id<MTLBuffer>, NSUInteger> allocate(std::size_t bytes);
     void begin_pass(Target &target);
     void read_back(Target &target);
-    void copy_to_buffer(Target &target, id<MTLBuffer> buffer);
+    void copy_to_buffer(id<MTLTexture> texture, id<MTLBuffer> buffer, MTLBlitOption options);
 
     // Targets and guest memory: the target cache, transfers, read-backs, write-backs, CPU pictures (metal_targets.mm)
     Target &target_for(const TargetKey &key);

@@ -243,7 +243,7 @@ bool MetalGeBackend::frame_written_back(const Target &target) {
 // shared buffer and a wait), counted in `writes`.
 void MetalGeBackend::store_target(GuestMemory &memory, Target &target, std::uint32_t first_row, std::uint32_t rows,
                                   GuestWrites &writes) {
-    copy_to_buffer(target, guest_readback_);
+    copy_to_buffer(target.color, guest_readback_, MTLBlitOptionNone);
     commit(true);
     writes.wait_ms += last_wait_ms_;
     times_.wait_guest += last_wait_ms_;
@@ -306,20 +306,7 @@ bool MetalGeBackend::store_depth(std::uint32_t color_address, std::uint32_t dept
     std::uint8_t *out = memory.raw_pointer(depth_address, static_cast<std::size_t>(depth_stride) * kHeight * 2u);
     if (out == nullptr) return false;
     const auto start = std::chrono::steady_clock::now();
-    ensure_commands();
-    end_encoder();
-    id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
-    [blit copyFromTexture:target->depth
-                     sourceSlice:0
-                     sourceLevel:0
-                    sourceOrigin:MTLOriginMake(0, 0, 0)
-                      sourceSize:MTLSizeMake(kWidth, kHeight, 1)
-                        toBuffer:guest_readback_
-               destinationOffset:0
-          destinationBytesPerRow:kWidth * 4u
-        destinationBytesPerImage:kPictureBytes
-                         options:MTLBlitOptionDepthFromDepthStencil];
-    [blit endEncoding];
+    copy_to_buffer(target->depth, guest_readback_, MTLBlitOptionDepthFromDepthStencil);
     commit(true);
     stats_.depths.wait_ms += last_wait_ms_;
     times_.wait_depth += last_wait_ms_;

@@ -280,7 +280,7 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
             show_in_shell(shell_, display_address, picture_.data(), kWidth, kHeight, shell_scratch_);
             if (written_back) pending_frame_ = PendingFrame{shown, nil, true};
         } else {
-            if (written_back) copy_to_buffer(*shown, frame_writeback_);
+            if (written_back) copy_to_buffer(shown->color, frame_writeback_, MTLBlitOptionNone);
             id<MTLCommandBuffer> committed = commit(false);
             if (written_back) pending_frame_ = PendingFrame{shown, committed, false};
         }
@@ -434,19 +434,7 @@ void MetalGeBackend::begin_pass(Target &target) {
 
 // The target's pixels into picture_, waiting for the GPU.
 void MetalGeBackend::read_back(Target &target) {
-    ensure_commands();
-    end_encoder();
-    id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
-    [blit copyFromTexture:target.color
-                     sourceSlice:0
-                     sourceLevel:0
-                    sourceOrigin:MTLOriginMake(0, 0, 0)
-                      sourceSize:MTLSizeMake(kWidth, kHeight, 1)
-                        toBuffer:readback_
-               destinationOffset:0
-          destinationBytesPerRow:kWidth * 4u
-        destinationBytesPerImage:kPictureBytes];
-    [blit endEncoding];
+    copy_to_buffer(target.color, readback_, MTLBlitOptionNone);
     commit(true);
     times_.wait_capture += last_wait_ms_;
     picture_.assign(static_cast<const std::uint8_t *>(readback_.contents),
@@ -454,12 +442,14 @@ void MetalGeBackend::read_back(Target &target) {
     picture_frame_ = frames_;
 }
 
-// A blit of the target's colour into `buffer` (480x272 RGBA), recorded in the frame's commands.
-void MetalGeBackend::copy_to_buffer(Target &target, id<MTLBuffer> buffer) {
+// A blit of a target's 480x272 `texture` into `buffer` at 4 bytes a pixel, recorded in the frame's commands: its
+// colour (RGBA) with MTLBlitOptionNone, its depth (floats) with MTLBlitOptionDepthFromDepthStencil. Each caller
+// commits, waits and counts as it needs.
+void MetalGeBackend::copy_to_buffer(id<MTLTexture> texture, id<MTLBuffer> buffer, MTLBlitOption options) {
     ensure_commands();
     end_encoder();
     id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
-    [blit copyFromTexture:target.color
+    [blit copyFromTexture:texture
                      sourceSlice:0
                      sourceLevel:0
                     sourceOrigin:MTLOriginMake(0, 0, 0)
@@ -467,7 +457,8 @@ void MetalGeBackend::copy_to_buffer(Target &target, id<MTLBuffer> buffer) {
                         toBuffer:buffer
                destinationOffset:0
           destinationBytesPerRow:kWidth * 4u
-        destinationBytesPerImage:kPictureBytes];
+        destinationBytesPerImage:kPictureBytes
+                         options:options];
     [blit endEncoding];
 }
 
