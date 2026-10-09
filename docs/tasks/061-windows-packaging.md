@@ -193,4 +193,19 @@ route    PASS  exit 4 (4: the runtime stopped, by PURE_EXIT_AT_FRAME) at frame 2
   closed.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge, 2026-10-09: PASS, all seven checks, on a stage packed from
+the merge commit itself (version 0.1.0-18c5df4; the Release build was ccache-warm). Route title 0.030170 against
+the 0.05 limit; out/061-verify-main.log.
+Spot-read: tools/bundle_windows.sh (408 lines) mirrors bundle.sh faithfully and the checks are real — the machine
+check fails on grep's own crash (the worker found its first version was vacuous and proved the fix on planted
+strings), the content exemptions are narrow (our two read-me texts; a DLL string only inside longer words) and
+every exempted hit is listed, the ELF/ISO/PBP/SFO byte checks match bundle.sh's. The release-only
+WIN32_EXECUTABLE guard cannot touch the developer build. The static C runtime (/MT) is the right call for a
+player's machine, and the dlls check refusing vcruntime*/msvcp* enforces it. Accepting route exit 4 (the
+runtime's "stopped for a reason") with the exit line required is correct per host/main.cpp.
+Merged: 18c5df4 into batch/m2.
+Notes: the worker's `taskkill /F /IM ninja.exe` while stopping its first Release build would have killed any
+other session's build (none was running; reported to Erik). The Explorer double-click test touched the real
+%APPDATA% data directory for ~8 s. Follow-ups recorded in the Result: the .ico through llvm-rc, code signing
+(SmartScreen), and swresample-5.dll shipping unimported (0.7 MB; keep while FFmpeg's pins may change). Step 4 of
+docs/windows.md is DONE; the Windows bring-up's remaining item is the Mac metal_check.sh A/B (step 3's exit).
