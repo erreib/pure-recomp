@@ -159,6 +159,11 @@ simplification task, then the enhancements. The session-by-session resume notes 
   wraps it, so the screens showed the advert's first row stretched. Fixed by task 063 (merged 08b57e2, 2026-10-10) in both
   backends (the Metal shader; patch 0015-vulkan-fb-texture-wrap), checked by the new `tools/billboard_check.sh`
   (docs/verification.md); docs/fidelity.md difference 15. The app is not repacked with it yet.
+- **The Esc menu** (D-014, task 064, merged b92537a 2026-10-10): rows gated by the game's features and the
+  shell's (patch 0016-menu-rows-by-capability); four tabs, no camera, mouse-camera, touch (Metal) or network rows;
+  `tools/menu_check.sh` keeps the lists. Follow-ups: the bindings list's framework labels ("Move forward", four
+  "Camera" bindings this game never reads); the Vulkan shell's Touch section on a desktop; Restore control defaults
+  resets hidden rows. The enhancements are open.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

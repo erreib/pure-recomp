@@ -1,6 +1,6 @@
 # 064: The Esc menu shows only what this game and this shell can do
 
-Milestone: enhancements (D-014) | Branch: task/064-menu-rows-by-capability | Status: OPEN
+Milestone: enhancements (D-014) | Branch: task/064-menu-rows-by-capability | Status: MERGED (b92537a, 2026-10-10)
 
 ## Goal
 The framework's Esc menu (vendor/portablekit/host/ui/menu.cpp) draws rows for Monster Hunter's features and for
@@ -215,4 +215,19 @@ Open questions:
   listener, as opening that tab does. This happens only under `PURE_MENU_DUMP`.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge and patch 0016 applied to the vendor tree (16 patches
+reproduce the pin), 2026-10-10: PASS (frame suite 18/18; menu_check Metal: tabs 4, Video 9, Audio 4, Controls 31,
+System 12, Graphics "Metal on Apple M4 Pro"). The gate: `tools/menu_check.sh --shell vulkan` PASS; `--shell metal
+--backend metal` 18/18 (19m 52s); `tools/hud_check.sh` 61/61.
+Spot-read: the patch's gates (profile `features`, shell `supports_*`, `api_name()`) all default to today's
+behaviour in shell.hpp and profile.hpp, so the framework's games are untouched; the menu's hidden rows keep their
+keys; `s.adhoc` forced off at menu open for a game without the feature. The dump is confined to `PURE_MENU_DUMP`.
+Merged: `git merge --no-ff` into batch/m2, b92537a.
+Notes: Fill is hidden under both shells (the framework's own `supports_fill()` gate, which needs a game that
+widens its view: E2), so the brief's Vulkan expectation was wrong and the worker's list is right. The two camera
+invert rows were drawn before (the audit's "already hidden" was wrong) and are gated now. Follow-ups: the
+bindings list's labels are the framework's ("Move forward" for the stick, four "Camera" bindings that press a
+second stick this game never reads): a profile-provided label table, or hiding the camera bindings without the
+feature, is the next menu change; the Vulkan shell still shows the Touch screen section on a desktop (a
+`supports_touch()` answer from SDL's touch devices would hide it without changing the framework's default);
+"Restore control defaults" still resets hidden rows' settings.
