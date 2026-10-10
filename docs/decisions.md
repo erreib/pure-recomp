@@ -15,6 +15,7 @@
 | D-011 | 2026-10-07 | Load times stay the port's own (no UMD read timing): fidelity difference 6 closed as accepted | accepted (Erik) |
 | D-012 | 2026-10-07 | The expanded version gets its own save format (the game's profile blob in our container, with an extensions area); the PSP format stays as the import/export bridge; designed when the DLC loader and the first sequel feature are concrete | accepted (Erik), scheduled |
 | D-013 | 2026-10-07 | VFPU dot products round as the real PSP does (pspautotests' truncating rule); PPSSPP's fused chain is a test-only mode for the scorecard's comparisons | accepted (Fable; Erik informed) |
+| D-014 | 2026-10-10 | The Esc menu shows only what this game and this shell can do; enhancements are open (D-009's condition met) | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -190,4 +191,22 @@ corners (subnormals, cancelling sums' sign, prefix constants past the encoded le
 sample says otherwise. The transcendentals stay as they are: the port's vrcp, vrsq and vsqrt match PPSSPP's JIT on
 every sample; the PSP's own vrcp is known to be inaccurate in its lowest bits and no hardware sample of it exists here.
 Status: accepted (Fable); Erik informed, may overrule.
+
+## D-014  2026-10-10  The Esc menu shows only what this game and this shell can do
+Context: D-009 kept the framework's Esc menu untouched until fidelity was done. Fidelity is done (M8, the Windows
+bring-up, difference 15 fixed by task 063), and Erik's playtests on the packed app brought the menu up: it still
+offers the framework's Monster Hunter rows (a right-stick camera, analog camera speeds, aim speed, mouse camera
+sensitivity and inversion, "Play together" halls, "Pause during multiplayer"), rows the Metal shell does not act
+on (Frame rate, Lower when behind, Performance, the Fill aspect) and a System line that reads "Vulkan on" an
+Apple GPU.
+Decision (Erik): audit the menu and remove what is not valid for this port. Done as capability gates, not deletions:
+the game profile says which game features exist (ad hoc play, a right-stick camera, a mouse camera, a trigger
+profile), the shell says which host features it implements (frame interpolation, the performance overlay, the Fill
+aspect, touch controls), and the menu draws a row only when its feature exists. The framework's own games keep
+every row; upstream gets the gates (docs/upstream.md). With this the enhancements E1 to E5 are open; a menu design
+of our own (D-009's unification with the game's pause screen) stays unscheduled.
+Consequences: task 064 (docs/tasks/064-menu-rows-by-capability.md: a vendor patch with the gates, the profile's
+flags, the Metal shell's answers, a menu-rows dump and a menu check). The Network tab is hidden until ad hoc play
+is a feature of this port.
+Status: accepted (Erik).
 
