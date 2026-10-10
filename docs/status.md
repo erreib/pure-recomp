@@ -152,8 +152,8 @@ simplification task, then the enhancements. The session-by-session resume notes 
   PSP-format saves, the VFPU rounding and tasks 049 to 062. The build Erik played on 2026-10-09 was the 2026-10-07
   pack (task 042's). His two observations from it: frame dips at the race start and at a bomb (the game's own
   two-vblank flash rule, docs/fidelity.md; a traced play would tell a pre-warm miss or the depth wait from it), and
-  billboard adverts not animating or showing the right content (unconfirmed, no specifics yet; the adverts' order
-  is shuffled from the game's clock and the screens are dithered 128x128 16-bit, both as on the PSP).
+  the pillar screens showing flat colour with bars instead of an advert (checked 2026-10-10 against PPSSPP at the
+  same wall: PPSSPP draws the same bars; docs/fidelity.md difference 15, not a difference).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
