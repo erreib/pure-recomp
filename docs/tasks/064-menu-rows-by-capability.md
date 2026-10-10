@@ -108,7 +108,111 @@ for the framework's games (a default that is not today's); the menu's `key Escap
 open the menu in a scripted window run (report what the Layer saw).
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+Changed (branch task/064-menu-rows-by-capability from batch/m2 f0bc2ba, four commits in the brief's order, then this
+Result):
+- e8e5931 patches/0016-menu-rows-by-capability.patch (new; vendor host/profile.hpp, host/shell/shell.hpp,
+  host/ui/menu.cpp), with its row and section in patches/README.md.
+  - `GameProfile::features` is a `MenuFeatures` with `adhoc`, `right_stick_camera` and `mouse_camera`, all true by
+    default.
+  - `Shell` gains `supports_frame_interpolation()`, `supports_perf_overlay()`, `supports_aspect(Aspect)` and
+    `supports_touch()` (all true by default). It also gains `api_name()`, which by default is the shell's
+    registered name with a capital: "Vulkan" for the Vulkan shell. The defaults are in shell.hpp, so
+    vulkan_shell.cpp is untouched.
+  - menu.cpp hides the rows the audit table names. The tab bar is built from the tabs shown. A hidden Network tab
+    turns `s.adhoc` off at menu open (`note_menu_opened`: save, then `adhoc_apply_settings`). The Graphics line is
+    `api_name() + " on " + device_name()`. "Restore video defaults" restores only the rows shown.
+  - `<prefix>_MENU_DUMP`: when the menu opens, it prints the tabs, then draws one tab a frame and prints its rows.
+    Then the menu goes back to Video with the focus reset.
+- 290dbd2 src/profile/pure_profile.cpp (`.features = {.adhoc = false, .right_stick_camera = false,
+  .mouse_camera = false}`) and src/host/metal_shell.mm (false for interpolation, the overlay, Fill and touch;
+  `api_name()` "Metal").
+- 11d62d6 tools/menu_check.sh (new) and config/pad_scripts/menu_check.txt (new).
+  - The route: frontend.txt's steps to the title, `2100:key Escape`, a menu shot, then `2170:key Escape`. The run
+    ends at flip 2250, with `PURE_PACED_FROM=2050`, and takes about 25 s.
+  - The tool waits up to 600 s for another game, compares each dump line with the shell's expected list (`*`
+    matches the device name) and prints any difference.
+  - The Escape key reached the menu from the script in both shells, so no test hook was needed and test_hooks is
+    untouched.
+- c02cef1 docs:
+  - docs/controls.md: a new "Rows the menu leaves out" paragraph. It also corrects the tab list, the Controls tab's
+    rows (now 7 Downs to Move forward and 13 to × (back)), the mouse section, the tuning table's Mouse cell and the E1
+    bullet. `tools/controls_check.py` is OK.
+  - docs/metal-backend.md ("The Metal shell"), docs/upstream.md (a Dependencies row, a section and its place in the
+    offer order), README.md (`PURE_MENU_DUMP`) and docs/verification.md (menu_check's row). `tools/docs_check.py`:
+    0 findings.
+
+Acceptance:
+- `tools/menu_check.sh`: PASS in the Metal shell. In the Verify run the counts were tabs 4, Video 9, Audio 4,
+  Controls 31 and System 12, and Graphics read "Metal on Apple M4 Pro". `--shell vulkan`: PASS, with Video 16 and
+  Controls 37.
+- `tools/frame_regress.sh` headless: 18/18. `--shell metal --backend metal`: 18/18 (19m 53s), every delta within
+  ±0.0124. `tools/hud_check.sh`: 61 of 61 shots.
+- `tools/patches.sh check`: ok, 16 patches reproduce the pin.
+- Framework defaults unchanged. With patch 0016 applied but before the profile commit (flags at their defaults),
+  the Vulkan shell's dump showed every row the old code draws (out/064/vk_defaults.log):
+  - tabs: Video, Audio, Controls, Network, System.
+  - Video: Resolution, Texture filter, Texture pack and its rows, Frame rate, Lower when behind and Performance.
+  - Controls: Right stick (Camera / D-pad / Off), both camera invert rows, Mouse, Mouse sensitivity, both mouse
+    invert rows, F3 and the five Touch screen rows.
+  - Network: the whole tab.
+  - System: Pause during multiplayer and "Graphics (Vulkan on Apple M4 Pro)".
+- Fill gate, checked with a temporary no-op `view_aspect_frame` in the profile (not committed): the Vulkan shell
+  offered Original / Stretch / Fill and the Metal shell Original / Stretch.
+- settings.ini keys unchanged. I copied the main checkout's out/data/hud_check/settings.ini, written by a pre-task
+  build, and set `network.adhoc=1`. After the Metal menu route the key list was identical, and the only changed line
+  was `network.adhoc=1` to `0` (the forced off). `input.right_stick=camera` stayed as it was.
+
+Verify output (last 20 lines, `tools/verify_task.sh 064`):
+```
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 21s)
+menu_check: shell metal, out out/menu_check/metal
+menu_check: run_boot exit 0, 26 s, log out/menu_check/metal/run.log
+tabs: ok (4)
+Video: ok (9)
+Audio: ok (4)
+Controls: ok (31)
+System: ok (12)
+menu_check: PASS
+verify 064: PASS
+```
+
+Open questions:
+- Fill under `--shell vulkan`. The brief expects Fill to be present, but our profile has no `view_aspect_frame`.
+  The framework's existing game gate (`VulkanRenderer::supports_fill()`) therefore keeps Fill out of every shell,
+  as it already did before this task. The Vulkan list expects "Aspect ratio (Original / Stretch)". The shell gate
+  itself was checked with the temporary experiment above.
+- The camera invert rows. The audit says they are "already hidden (no camera driver)", but the code drew them
+  outside the driver block, and enabled, because the default right stick is Camera. They act only on the stick's
+  Camera mode (gamepad.cpp), so they are now gated on `features.right_stick_camera`. This is a gate the table did
+  not name.
+- The Right stick value. When Camera is not offered, the default `camera` value shows as Off: the game never reads
+  the second stick's bytes, so the two behave the same. The value stays `camera` in settings.ini until the player
+  changes the row.
+- Touch rows on the Vulkan shell. The audit wanted them hidden on a desktop without a touch device too. The
+  `supports_touch()` default stays true, since anything else would change the Vulkan shell for the framework's games
+  (an escalation condition). The Vulkan shell still shows the Touch screen section, and a later change could answer
+  from SDL's touch devices.
+- How the dump is wired. widgets.cpp is outside "May touch", so the dump records rows through function objects in
+  menu.cpp that shadow widgets.hpp's row functions (objects, so that argument-dependent lookup cannot make the calls
+  ambiguous). Rows that font_menu.cpp, texture_pack_screen.cpp and save_screen.cpp draw appear as one entry each:
+  `[font rows]`, `[texture pack rows]`, `[save rows]`. docs/upstream.md suggests a hook in widgets.cpp for upstream.
+- The two Restore buttons behave differently. "Restore video defaults" now skips hidden rows, including the renderer
+  rows under the Metal shell. "Restore control defaults" is unchanged (the table says keep): it still restores the
+  hidden camera, mouse and touch settings, as it did for the rows hidden by a missing camera driver.
+- Side effect of the dump. On a game with ad hoc play, drawing the Network tab for the dump starts the discovery
+  listener, as opening that tab does. This happens only under `PURE_MENU_DUMP`.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
