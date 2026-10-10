@@ -21,7 +21,7 @@ the runs and before-and-after tables: [docs/history/verification.md](history/ver
 | trajectories, race clock pinned | `tools/ai_seed_check.sh` | the scorecard's trajectories on PPSSPP's race clock | docs/fidelity.md, difference 13 |
 | VFPU rounding | `tools/vfpu_probe.py`, `tools/vfpu_model.py` | the port's VFPU results against PPSSPP's and the PSP's rule | "The VFPU dot-product check" |
 | controls | `tools/controls_check.py` | docs/controls.md's tables against the framework's sources | docs/controls.md |
-| the Esc menu | `tools/menu_check.sh [--shell vulkan]` | the menu's rows (`PURE_MENU_DUMP`) against what this game and the shell have (task 064): no Network tab, no camera or mouse rows, and in the Metal shell no frame-rate, performance, touch or renderer rows and "Metal on"; about 25 s in the window | docs/controls.md, "Rows the menu leaves out" |
+| the Esc menu | `tools/menu_check.sh [--shell vulkan]` | the menu's rows (`PURE_MENU_DUMP`) against what this game and the shell have (task 064): no Network tab, no camera or mouse rows, Resolution first in both shells (task 067: the GE backend's scale), and in the Metal shell no frame-rate, performance, touch or texture rows and "Metal on"; about 25 s in the window | docs/controls.md, "Rows the menu leaves out" |
 | the app | `tools/bundle.sh --check DIR` | the app bundle: signature, libraries, no game data, setup and a run | docs/release.md |
 | the Windows zip | `tools/bundle_windows.sh --check DIR` | the release folder: its files, its DLLs, no game data, setup and a run | docs/release.md, "Windows" |
 | the docs | `tools/docs_check.py` | every path, link, patch and task file the docs name exists | "The docs check" |

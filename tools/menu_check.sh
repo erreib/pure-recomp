@@ -11,9 +11,10 @@
 # menu frames while the paused menu is open), which closes it; the run ends at flip 2250. Unpaced until flip 2050
 # (PURE_PACED_FROM), paced from there; about 25 s. Silent, on the data directory out/data/menu_check.
 # The lists (Wipeout Pure's profile: no ad hoc play, no right-stick or mouse camera): four tabs, no Network; no Camera
-# choice, camera inversion or mouse rows. Metal: no Resolution, Texture filter or texture pack rows (the Vulkan
-# renderer's), no Frame rate, Lower when behind or Performance, no F3 row, no Touch screen rows, "Metal on". Vulkan:
-# all of those, "Vulkan on". Aspect ratio offers Original and Stretch in both: Fill needs a game that widens its view
+# choice, camera inversion or mouse rows. Both shells: Resolution first (the GE backend's internal scale, patch
+# 0017-internal-scale-by-backend, task 067; locked by the run's PURE_INTERNAL_SCALE=1). Metal: no Texture filter or
+# texture pack rows (the Vulkan renderer's), no Frame rate, Lower when behind or Performance, no F3 row, no Touch
+# screen rows, "Metal on". Vulkan: all of those, "Vulkan on". Aspect ratio offers Original and Stretch in both: Fill needs a game that widens its view
 # (GameProfile::view_aspect_frame), which this one does not. A `*` in a list matches any text (the device's name).
 # Waits up to 600 s while another PureNative runs (one game at a time). Prints `menu_check: PASS` or each tab's
 # differences and `menu_check: FAIL`; exit 0 only on PASS.
@@ -78,8 +79,7 @@ bindings = ["Move forward", "Move left", "Move back", "Move right", "△", "○ 
             "Camera down", "Camera right"]
 expected = {
     "tabs": ["Video", "Audio", "Controls", "System"],
-    "Video": ([] if metal else ["Resolution"]) + ["Display", "Window size", "Aspect ratio (Original / Stretch)",
-              "Scaling filter"]
+    "Video": ["Resolution", "Display", "Window size", "Aspect ratio (Original / Stretch)", "Scaling filter"]
              + ([] if metal else ["Texture filter", "Texture pack", "[texture pack rows]"]) + ["Vsync"]
              + ([] if metal else ["Frame rate", "Lower when behind"]) + ["Game speed", "Fast loading"]
              + ([] if metal else ["Performance"]) + ["[font rows]", "Restore video defaults"],
