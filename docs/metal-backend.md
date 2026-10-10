@@ -321,15 +321,17 @@ target the same way ("Internal scale").
 ## Internal scale
 
 Task 066 (E3, D-015, 2026-10-10): the backend draws at an internal scale S of 1 to 6, the framework's
-`video.internal_scale` (`PURE_INTERNAL_SCALE`), read once at start (a change in the menu takes effect at the next
-start; the menu's row is task 067's). Until then it drew at 1 alone (D-002). The start-up line names it: `[metal]
-drawing with Apple M4 Pro, internal scale 4: targets 1920x1088, effects 480x272; ...` (`scale_report` in
+`video.internal_scale` (`PURE_INTERNAL_SCALE`), read at start; since task 067 the menu's Resolution row changes it
+while the game runs ("A change while the game runs" below), and this game's default is Auto (our profile's
+`default_internal_scale`, patch 0017-internal-scale-by-backend; the framework's default is 2), so the packed app draws
+at the display's resolution out of the box. Until task 066 it drew at 1 alone (D-002). The start-up line names it:
+`[metal] drawing with Apple M4 Pro, internal scale 4: targets 1920x1088, effects 480x272; ...` (`scale_report` in
 metal_trace.mm), the screen-wide targets' size and the narrower ones'.
 
 | Setting | S |
 |---|---|
 | 1 to 6 | that; 7 and 8, which the settings allow (the Vulkan renderer's limit), are drawn at 6 (`kMaxScale`) |
-| 0, Auto | the smallest S whose 272 S covers the Metal shell's drawable height, at most 6: 2 for the drawable of a 960x544-point window at 1 pixel a point, 4 at 2 (a Retina panel, task 065); the shell hands its drawable's size to `pure::metal::set_drawable_size` (`metal_device.hpp`) when it makes its layer, before the backend starts. 1 under the Vulkan shell, which has no such drawable |
+| 0, Auto | the smallest S whose 272 S covers the Metal shell's drawable height, at most 6: 2 for the drawable of a 960x544-point window at 1 pixel a point, 4 at 2 (a Retina panel, task 065), 6 in full screen here (3024x1890); the shell hands its drawable's size to `pure::metal::set_drawable_size` (`metal_device.hpp`) when it makes its layer, before the backend starts, and again at every change of it, and Auto follows it from the flip after a change that crosses a multiple of 272 lines (task 067). 1 under the Vulkan shell, which has no such drawable |
 | any, with no window (the headless shell, ge_replay) | 1, unless `PURE_INTERNAL_SCALE` decides the setting (`settings::overridden_by`): the suite, the refactor check, the sweeps and every headless tool stay at 1 whatever their settings.ini holds (the framework's default is 2), and ge_replay replays Metal at 1 as before. With the switch set, a headless run and ge_replay's Metal lane draw at its value (ge_replay's Vulkan lane stays at the recording's scale) |
 
 What each path does at S (D-015's rules; at S = 1 every one of them is what the backend did before, which the refactor
@@ -349,6 +351,48 @@ check proves: 0 differing pixels on the 18 scenes and the same counts after each
 | CPU pictures | `upload_frame` writes each pixel of the picture as an S x S block |
 | Frames | `present_image` reports the display target's own size (480S x 272S, as `PresentedImage` asks); `capture_frame` writes the BMP at that size; the read-back for the Vulkan shell's hand-over is at that size too |
 | Buffers | the three shared buffers (`readback_`, `frame_writeback_`, `guest_readback_`) hold the largest target: 8.4 MB each at 4, 18.8 MB at 6 |
+
+### A change while the game runs
+
+Task 067 (patch 0017-internal-scale-by-backend): the Video tab's Resolution row (Auto, x1 to x6), which was the Vulkan
+renderer's alone, asks the GE backend now (`GeBackend::supports_internal_scale()`, `set_internal_scale(setting)`,
+`target_size()` for its value, "Auto   1920×1088"), and the backend answers yes. A change takes effect at the next
+frame, with nothing read back mid-frame:
+
+- When. `set_internal_scale` keeps the setting. With nothing drawn since the last flip (`frame_drawn_`, set by a pass
+  and an upload, cleared at the flip), which is where the paused menu runs, the scale changes there and then;
+  otherwise (the menu over the running game draws before the flip) at `begin_frame()`, right after the flip. So no
+  frame is drawn at two scales. `begin_frame()` also lets Auto follow the drawable: when its height crosses a multiple
+  of 272 lines (a resize, full screen and back), S changes at that flip.
+- What changes (`change_scale` in metal_targets.mm). The screen-wide targets (stride at least 480) leave the target
+  map for `retired_`, and the next frame makes each anew at 480S x 272S when it draws into it; the narrower ones, at
+  1x whatever the scale, stay with what they hold (the billboards' adverts, the bloom buffers). The three shared
+  buffers are made for 480S x 272S. The start line's clause is printed again, once per change: `[metal] internal
+  scale now 1: targets 480x272, effects 480x272`. A setting that gives the same S (Auto at 4 and x4 here) changes
+  nothing and prints nothing.
+- What survives it. The frame write-back pending since the flip keeps its target and the buffer its copy went into
+  (`PendingFrame::buffer`), so the next flip stores that picture in guest memory by its own scale's block centres. The
+  picture the shell holds (the paused menu's background) is the shell's own reference to the old texture. Until the game
+  draws its display again, a flip that finds no target of the new scale at the display address shows the retired one;
+  the retired targets go at the first flip that shows a target of the new scale. A copy into a shared buffer from a
+  target larger than the buffer (a retired one, at a capture) makes the buffer anew at the target's size first.
+- What does not. A retired target's contents: a frame that draws over the previous frame's picture rather than
+  clearing it would start from black once after a change, and a texture bind of a retired target's memory decodes
+  guest memory (the frame write-back's picture) until the target is drawn again. Neither showed in the runs below.
+
+Checked in the Metal window (task 067), on a fresh data directory, so at the new default, Auto, with the row unlocked
+(`tools/run_boot.py` sets `PURE_INTERNAL_SCALE=1` and so locks it; the runs went without that default) and input
+scripts on frontend.txt's steps to the title, each window shot reduced to 480x272 by its blocks' centre pixels and
+compared at tol 24, limit 5% (scale_check's rule):
+- The row. Esc, Right on Resolution (Auto to x1), Esc; then Esc, Left (x1 to Auto), Esc. The log has `[metal] internal
+  scale now 1: ...` and `... now 4: ...` at the presses, and the menu shows "×1   480×272" and "Auto   1920×1088". The
+  title 80 frames after the change to x1 differs from a run at `PURE_INTERNAL_SCALE=1` in 0 pixels, the title after
+  the change back from the title at Auto before both in 0 pixels (and Auto from 1x in 0.35%, as scale_check's title).
+- Auto following the window. Window size x2 to x3 (2880x1632 pixels) and back: `now 6`, then `now 4`, each at the
+  first flip after the menu closed; the title at 6 differs from the 1x one in 0.03%, the title back at 4 from the one
+  before in 0 pixels.
+- A data directory whose settings.ini holds `video.internal_scale=2` (an earlier build's) draws at 2 and keeps the
+  value.
 
 ### The checks
 
@@ -416,6 +460,28 @@ picture reached the screen and the rows say nothing of the drawable's timing; th
 scale, the GPU waits and the write-backs, is all in them. The three shared buffers and the targets at 6 were made
 without a failure.
 
+On the screen (task 067, 2026-10-10): the same race with the window visible, after task 065, so the drawable is
+1920x1088 and Auto is 4. The route as above (on an empty memory stick of its own, as the suite gives each route,
+`PURE_PACED_FROM=6000` to cross the menus unpaced), `PURE_INTERNAL_SCALE=0`, `6` and `1`, the same reading of the
+trace. "Shown" is the share of the race's rows whose drawable reached the screen (the trace's `shown_ms`), with no row
+occluded in any of the three; "on screen" is the interval between two pictures shown (`shown_ms`):
+
+| S | Targets | Frames | Mean | 99th pct | Longest | Over 25 ms | Shown | On screen: mean, 99th pct, longest | GPU waits a frame | Depth write-back wait (median) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Auto (4) | 1920x1088 | 3601 | 16.68 ms | 18.35 ms | 19.39 ms | 0 | 3600 of 3601 | 16.68, 16.67, 25.00 ms | 0.94 ms | 0.96 ms |
+| 6 | 2880x1632 | 3601 | 16.68 ms | 18.43 ms | 21.23 ms | 0 | 3601 of 3601 | 16.68, 16.67, 25.00 ms | 1.24 ms | 1.03 ms |
+| 1 | 480x272 | 3601 | 16.68 ms | 18.55 ms | 20.59 ms | 0 | 3601 of 3601 | 16.68, 16.67, 25.00 ms | 0.77 ms | 0.86 ms |
+
+The race holds 60 fps on the screen at every scale, Auto included: no frame and no on-screen interval over 25 ms. The
+longest frames are `outside` (the game, the HLE, the kernel's pacing) at all three. The on-screen intervals are two
+refreshes of the 120 Hz panel each, but for a picture held three refreshes (25 ms) followed by a short one, 13 to 16
+times in the minute at every scale alike, so not the scale's (the shell presents at the vblank after the frame's,
+"Frame times"; the game's two-vblank stretches did not occur). What the scale costs is the GPU's: the waits a frame go
+from 0.77 ms at 1 to 0.94 ms at 4 and 1.24 ms at 6. Runs with the window off the screen (on a desktop behind another
+app's full-screen Space, or the screen locked: two at Auto, one each at 6 and 1) are not in the table; their backend
+figures were alike (means 16.68 to 17.22 ms), and their only frames over 25 ms waited for a drawable macOS held back
+while the window was hidden (up to 1.1 s), not a player's case.
+
 ## The Metal shell
 
 `PURE_SHELL=metal` puts the game in a window shell of our own, `src/host/metal_shell.mm` (`MetalShell :
@@ -438,8 +504,9 @@ What it leaves out: frame interpolation (`present_due`, `present_until` and `pau
 `set_frame_rate` is ignored: every flip is presented as it comes), the Fill aspect (taken as Original: the shell keeps
 the PSP's shape, as `usable_aspect` does for a game that cannot draw another), the touch controls
 (`touch_controls_visible` is false), the performance overlay (`set_perf_overlay` does nothing; `PURE_PERF=log` still
-prints), and the menu's resolution, texture filter and texture-pack rows, which need the Vulkan renderer
-(`active_renderer()` is null under this shell, and the menu leaves them out). Since task 064 (patch
+prints), and the menu's texture filter and texture-pack rows, which need the Vulkan renderer (`active_renderer()` is
+null under this shell, and the menu leaves them out). The Resolution row is the GE backend's since task 067 (patch
+0017-internal-scale-by-backend), and the Metal backend answers it ("Internal scale"). Since task 064 (patch
 0016-menu-rows-by-capability) the shell says so to the menu, which hides the rows: `supports_frame_interpolation()`,
 `supports_perf_overlay()` and `supports_touch()` answer false and `supports_aspect` false for Fill, so the Video tab
 has no Frame rate, Lower when behind or Performance row and Aspect ratio no Fill, and the Controls tab no F3 line and
@@ -891,9 +958,9 @@ clamp](history/metal-backend.md#the-colour-test-16-bit-writes-and-the-depth-clam
 ## What is not done yet
 
 - What the Metal shell leaves out ("The Metal shell"): frame interpolation, the Fill aspect, the touch controls, the
-  performance overlay, and the menu's resolution, texture filter and texture-pack rows.
+  performance overlay, and the menu's texture filter and texture-pack rows.
 - Texture packs, the Vulkan renderer's today: an enhancement, after fidelity (D-009). Drawing above 480x272 came
-  with task 066 ("Internal scale"); the menu's Resolution row for it is task 067's.
+  with task 066 ("Internal scale"), the menu's Resolution row for it and the Auto default with task 067.
 
 The race exercises neither `read_back_framebuffer` nor a block transfer from a target (its transfers come from
 main memory), and the frontend calls only `write_back_frame`: the 16-bit store formats and the transfer's row range
