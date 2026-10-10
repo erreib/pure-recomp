@@ -135,9 +135,11 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         white_ = [device_ newTextureWithDescriptor:white];
         const std::uint32_t opaque_white = 0xFFFFFFFFu;
         [white_ replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&opaque_white bytesPerRow:4];
-        readback_ = [device_ newBufferWithLength:kPictureBytes options:MTLResourceStorageModeShared];
-        frame_writeback_ = [device_ newBufferWithLength:kPictureBytes options:MTLResourceStorageModeShared];
-        guest_readback_ = [device_ newBufferWithLength:kPictureBytes options:MTLResourceStorageModeShared];
+        // The largest target's colour (or depth, 4 bytes a pixel too): 480S x 272S.
+        const std::size_t largest = kPictureBytes * scale_ * scale_;
+        readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
+        frame_writeback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
+        guest_readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
         pool_ = std::make_shared<ChunkPool>();
 
         // The hand-over (a read-back a frame) only for the Vulkan shell; any other shell has
@@ -278,7 +280,7 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         pending_frame_ = PendingFrame{};
         if (shown != nullptr && switches_.to_shell) {
             read_back(*shown);
-            show_in_shell(shell_, display_address, picture_.data(), kWidth, kHeight, shell_scratch_);
+            show_in_shell(shell_, display_address, picture_.data(), picture_width_, picture_height_, shell_scratch_);
             if (written_back) pending_frame_ = PendingFrame{shown, nil, true};
         } else {
             if (written_back) copy_to_buffer(shown->color, frame_writeback_, MTLBlitOptionNone);
@@ -290,8 +292,9 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         if (shown != nullptr) {
             image.api = pk::ImageApi::Metal;
             image.address = shown->key.address;
-            image.width = kWidth;
-            image.height = kHeight;
+            // The target's own size: 480S x 272S for a display target at internal scale S (D-015).
+            image.width = shown->width();
+            image.height = shown->height();
             image.image = reinterpret_cast<std::uint64_t>((__bridge void *)shown->color);
         }
     }
@@ -302,8 +305,9 @@ bool MetalGeBackend::capture_frame(const std::string &path) {
     if (!ready_ || presented_ == nullptr) return false;
     const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
     @autoreleasepool {
+        // At the target's own size (480S x 272S at internal scale S): the suite's comparisons resize.
         if (picture_frame_ != frames_) read_back(*presented_);
-        return pk::write_bmp_file(path, picture_.data(), kWidth, kHeight);
+        return pk::write_bmp_file(path, picture_.data(), picture_width_, picture_height_);
     }
 }
 
@@ -433,32 +437,36 @@ void MetalGeBackend::begin_pass(Target &target) {
     ++stats_.passes;
 }
 
-// The target's pixels into picture_, waiting for the GPU.
+// The target's pixels into picture_, at its own size, waiting for the GPU.
 void MetalGeBackend::read_back(Target &target) {
     copy_to_buffer(target.color, readback_, MTLBlitOptionNone);
     commit(true);
     trace_.times.wait_capture += last_wait_ms_;
     picture_.assign(static_cast<const std::uint8_t *>(readback_.contents),
-                    static_cast<const std::uint8_t *>(readback_.contents) + kPictureBytes);
+                    static_cast<const std::uint8_t *>(readback_.contents) + target.picture_bytes());
+    picture_width_ = target.width();
+    picture_height_ = target.height();
     picture_frame_ = frames_;
 }
 
-// A blit of a target's 480x272 `texture` into `buffer` at 4 bytes a pixel, recorded in the frame's commands: its
-// colour (RGBA) with MTLBlitOptionNone, its depth (floats) with MTLBlitOptionDepthFromDepthStencil. Each caller
-// commits, waits and counts as it needs.
+// A blit of a target's `texture`, whole (480S x 272S at its internal scale), into `buffer` at 4 bytes a pixel,
+// recorded in the frame's commands: its colour (RGBA) with MTLBlitOptionNone, its depth (floats) with
+// MTLBlitOptionDepthFromDepthStencil. Each caller commits, waits and counts as it needs.
 void MetalGeBackend::copy_to_buffer(id<MTLTexture> texture, id<MTLBuffer> buffer, MTLBlitOption options) {
     ensure_commands();
     end_encoder();
+    const NSUInteger width = texture.width;
+    const NSUInteger height = texture.height;
     id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
     [blit copyFromTexture:texture
                      sourceSlice:0
                      sourceLevel:0
                     sourceOrigin:MTLOriginMake(0, 0, 0)
-                      sourceSize:MTLSizeMake(kWidth, kHeight, 1)
+                      sourceSize:MTLSizeMake(width, height, 1)
                         toBuffer:buffer
                destinationOffset:0
-          destinationBytesPerRow:kWidth * 4u
-        destinationBytesPerImage:kPictureBytes
+          destinationBytesPerRow:width * 4u
+        destinationBytesPerImage:width * height * 4u
                          options:options];
     [blit endEncoding];
 }

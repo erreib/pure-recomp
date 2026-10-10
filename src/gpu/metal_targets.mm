@@ -175,10 +175,11 @@ void MetalGeBackend::write_back_frame(GuestMemory &memory) {
                 ++stats_.waits;
             }
             pixels = static_cast<const std::uint8_t *>(frame_writeback_.contents);
-        } else if (picture_.size() != kPictureBytes) {
+        } else if (picture_.size() != pending.target->picture_bytes()) {
             return;
         }
-        if (store_pixels(memory, *pending.target, pixels, 0u, kHeight)) ++stats_.frames.written;
+        if (store_pixels(memory, *pending.target, guest_pixels(*pending.target, pixels), 0u, kHeight))
+            ++stats_.frames.written;
     }
 }
 
@@ -244,8 +245,28 @@ void MetalGeBackend::store_target(GuestMemory &memory, Target &target, std::uint
     commit(true);
     writes.wait_ms += last_wait_ms_;
     trace_.times.wait_guest += last_wait_ms_;
-    if (store_pixels(memory, target, static_cast<const std::uint8_t *>(guest_readback_.contents), first_row, rows))
+    if (store_pixels(memory, target,
+                     guest_pixels(target, static_cast<const std::uint8_t *>(guest_readback_.contents)), first_row,
+                     rows))
         ++writes.written;
+}
+
+// The guest's 480x272 picture of `target` from `pixels`, its colour read back at its own size (rows of width() RGBA
+// pixels): `pixels` itself at internal scale 1; at S, the centre pixel of each S x S block, (x S + S/2, y S + S/2),
+// gathered into guest_picture_ (D-015: the game sees a 480x272 picture as before).
+const std::uint8_t *MetalGeBackend::guest_pixels(const Target &target, const std::uint8_t *pixels) {
+    const std::uint32_t scale = target.scale;
+    if (scale == 1u) return pixels;
+    guest_picture_.resize(kPictureBytes);
+    const std::size_t row_pixels = target.width();
+    const std::uint32_t half = scale / 2u;
+    for (std::uint32_t y = 0; y < kHeight; ++y) {
+        const std::uint8_t *row = pixels + ((static_cast<std::size_t>(y) * scale + half) * row_pixels + half) * 4u;
+        std::uint8_t *out = guest_picture_.data() + static_cast<std::size_t>(y) * kWidth * 4u;
+        for (std::uint32_t x = 0; x < kWidth; ++x)
+            std::memcpy(out + static_cast<std::size_t>(x) * 4u, row + static_cast<std::size_t>(x) * scale * 4u, 4u);
+    }
+    return guest_picture_.data();
 }
 
 // 480x272 RGBA pixels (red in the low byte) of `target` into its guest memory, rows `first_row` onward, in
@@ -308,11 +329,16 @@ bool MetalGeBackend::store_depth(std::uint32_t color_address, std::uint32_t dept
     stats_.depths.wait_ms += last_wait_ms_;
     trace_.times.wait_depth += last_wait_ms_;
     const auto *depths = static_cast<const float *>(guest_readback_.contents);
+    // At internal scale S each guest pixel's depth is the centre of its S x S block (D-015).
+    const std::uint32_t scale = target->scale;
+    const std::uint32_t half = scale / 2u;
+    const std::size_t row_pixels = target->width();
     std::uint32_t lowest = 0xFFFFu, highest = 0u;
     std::array<std::uint16_t, kWidth> row{};
     for (std::uint32_t y = 0; y < kHeight; ++y) {
+        const float *line = depths + (static_cast<std::size_t>(y) * scale + half) * row_pixels + half;
         for (std::uint32_t x = 0; x < kWidth; ++x) {
-            const float depth = depths[static_cast<std::size_t>(y) * kWidth + x];
+            const float depth = line[static_cast<std::size_t>(x) * scale];
             const auto z = static_cast<std::uint32_t>(std::clamp(depth, 0.0f, 1.0f) * 65535.0f + 0.5f);
             lowest = std::min(lowest, z);
             highest = std::max(highest, z);
@@ -355,20 +381,33 @@ void MetalGeBackend::upload(std::uint32_t display_address, const std::uint8_t *p
         not_emulated("CPU picture not 480x272 (copied to the top left, unscaled), width", width);
     // A target never drawn starts cleared where the picture does not cover it.
     if (!target->color_defined) begin_pass(*target);
-    const std::size_t bytes = static_cast<std::size_t>(copied_width) * copied_height * 4u;
+    // At the target's internal scale S each pixel of the picture is an S x S block (D-015).
+    const std::uint32_t scale = target->scale;
+    const std::uint32_t scaled_width = copied_width * scale;
+    const std::uint32_t scaled_height = copied_height * scale;
+    const std::size_t row_bytes = static_cast<std::size_t>(scaled_width) * 4u;
+    const std::size_t bytes = row_bytes * scaled_height;
     const auto [buffer, offset] = allocate(bytes);
     auto *staging = static_cast<std::uint8_t *>(buffer.contents) + offset;
-    for (std::uint32_t row = 0; row < copied_height; ++row)
-        std::memcpy(staging + static_cast<std::size_t>(row) * copied_width * 4u,
-                    pixels + static_cast<std::size_t>(row) * stride * 4u,
-                    static_cast<std::size_t>(copied_width) * 4u);
+    for (std::uint32_t row = 0; row < copied_height; ++row) {
+        const std::uint8_t *source = pixels + static_cast<std::size_t>(row) * stride * 4u;
+        std::uint8_t *line = staging + static_cast<std::size_t>(row) * scale * row_bytes;
+        if (scale == 1u) {
+            std::memcpy(line, source, row_bytes);
+            continue;
+        }
+        for (std::uint32_t x = 0; x < copied_width; ++x)
+            for (std::uint32_t copy = 0; copy < scale; ++copy)
+                std::memcpy(line + (static_cast<std::size_t>(x) * scale + copy) * 4u, source + x * 4u, 4u);
+        for (std::uint32_t copy = 1; copy < scale; ++copy) std::memcpy(line + copy * row_bytes, line, row_bytes);
+    }
     end_encoder();
     id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
     [blit copyFromBuffer:buffer
                sourceOffset:offset
-          sourceBytesPerRow:copied_width * 4u
+          sourceBytesPerRow:scaled_width * 4u
         sourceBytesPerImage:bytes
-                 sourceSize:MTLSizeMake(copied_width, copied_height, 1)
+                 sourceSize:MTLSizeMake(scaled_width, scaled_height, 1)
                   toTexture:target->color
            destinationSlice:0
            destinationLevel:0
