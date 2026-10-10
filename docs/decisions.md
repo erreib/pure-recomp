@@ -230,9 +230,10 @@ Decision (Erik): do both, in this order, as the enhancement E3.
      sampled as a texture) scale by S; a draw's state is otherwise unchanged, dithering included (per drawn pixel);
    - what goes back to guest memory (the frame write-back, read-backs, the lens flare's depth read) is the centre
      pixel of each S x S block, so the game sees a 480x272 picture as before;
-   - headless runs and every check stay at S = 1 unless they say otherwise (`tools/run_boot.py` sets
-     `PURE_INTERNAL_SCALE=1` by default; the bundle check's data directory says so): at S = 1 the output is
-     pixel-identical to today's (the refactor check proves it);
+   - headless runs and every check on the Metal backend stay at S = 1 unless they say otherwise (`tools/run_boot.py`
+     sets `PURE_INTERNAL_SCALE=1` by default for it; the bundle check's data directory says so; the Vulkan
+     backend's checks keep its 2x, on which its columns were measured): at S = 1 the output is pixel-identical to
+     today's (the refactor check proves it);
    - a scaled capture is reduced to 480x272 for a comparison by the centre pixel of each S x S block, the same rule
      as guest memory's (task 066: nearest neighbour's top-left pick sits 3/8 of a pixel off centre at S = 4 and
      moves every filtered edge, scoring up to 11% where the centre pick scores 3%);
