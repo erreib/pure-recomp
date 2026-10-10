@@ -74,13 +74,13 @@ not draw); neither can be bound.
 
 The mouse's buttons are bindable like keys (Mouse Left, Mouse Middle, Mouse Right, Mouse 4, Mouse 5); by default
 Mouse Left is Triangle and Mouse Right is Circle. They reach the game only while the window holds the pointer:
-`input.mouse=1` (the menu's Keyboard and mouse > Mouse; on by default on the desktop), the window focused, and no menu
-or setup screen open. Esc opens the menu and frees the pointer; closing it captures the pointer again. So with the
-mouse off, or the pointer free, the default layout has no Triangle at all.
+`input.mouse=1` (on by default on the desktop; settings.ini only since task 064, the menu's Mouse row is hidden), the
+window focused, and no menu or setup screen open. Esc opens the menu and frees the pointer; closing it captures the
+pointer again. So with the mouse off, or the pointer free, the default layout has no Triangle at all.
 
 Mouse motion does nothing in Wipeout Pure. The framework turns it into a camera turn only through a game's camera
-driver (`GameProfile::camera`), and our profile has none; the sensitivity and invert rows in the menu are for such
-games.
+driver (`GameProfile::camera`), and our profile has none; the sensitivity and invert rows are for such games, and
+the menu leaves them out here ("Rows the menu leaves out" below).
 
 ## The gamepad
 
@@ -137,7 +137,7 @@ default tuning (task 030): left stick x 0.1 stays 128 (inside the dead zone), 0.
 | `input.right_stick` | camera | camera, dpad, off | Right stick | `PURE_PAD_RSTICK_DPAD=1` (any value but 0, no, off, false: dpad) |
 | `input.right_stick_zone` | 0.50 | 0.1 to 1 | Right stick D-pad point | `PURE_PAD_RSTICK_ZONE=0.6` |
 | `input.confirm` | east | east, south | Confirm button | `PURE_PAD_FACE=south` (`south` or `xbox`: south, anything else east) |
-| `input.mouse` | 1 | 0, 1 | Mouse | `PURE_MOUSE=0` |
+| `input.mouse` | 1 | 0, 1 | none here (Mouse, for a game with a mouse camera: "Rows the menu leaves out") | `PURE_MOUSE=0` |
 
 `pad_tuning()` reads these from the settings on every poll, so a change in the menu applies at once. An environment
 override wins for the run only: it is not written back, and the menu shows the row it decides disabled, with "Set by
@@ -149,15 +149,15 @@ PURE_..." beside it.
 
 1. Esc (or L3+R3 on a gamepad) opens the menu over the game. The game pauses while it is open (`ui.menu_pause=1`,
    the System tab's "Pause the game when the menu opens").
-2. Q and W (L1 and R1) switch sections: Video, Audio, Controls, Network, System. W twice from Video is Controls.
+2. Q and W (L1 and R1) switch sections: Video, Audio, Controls, System (no Network since task 064). W twice from
+   Video is Controls.
 3. Up and Down move between rows, Enter selects, Left and Right change a value, Esc goes back and, with nothing being
    edited, closes the menu. The Controls tab holds, in order: the Gamepad section (Connected, Confirm button, Stick
-   dead zone, Trigger point, Right stick, the two camera invert rows, Right stick D-pad point), the Pilot name
-   section (when the game asks for a name, the name), Keyboard and mouse (Mouse, Mouse sensitivity, the two invert
-   rows), then one row per action in the order of the table above, the Esc and F3 lines, "Restore control defaults",
-   the Touch screen section (no effect under the Metal shell, which has no touch controls) and "Use the classic
-   keyboard layout". Disabled rows still take the focus: from Confirm button, the first row focused, it is 13 Downs
-   to Move forward and 19 to × (back).
+   dead zone, Trigger point, Right stick with D-pad and Off, Right stick D-pad point), the Pilot name section (when
+   the game asks for a name, the name), Keyboard and mouse (one row per action in the order of the table above, the
+   Esc line, and under the Vulkan shell the F3 line), "Restore control defaults", under the Vulkan shell the Touch
+   screen section, and "Use the classic keyboard layout". Disabled rows still take the focus: from Confirm button,
+   the first row focused, it is 7 Downs to Move forward and 13 to × (back).
 4. Enter on an action's row: its value reads "Press a key or a mouse button". The next key or mouse button pressed
    is added to the action; if the action has it already, it is removed instead. An action holds two; a third
    replaces the second. A key another action had is taken from it. Esc cancels, and so does any gamepad button.
@@ -167,6 +167,19 @@ PURE_..." beside it.
 Checked under the Metal shell on 2026-10-06 (task 030): Cross rebound to Space / X from the menu, X then confirmed
 the game's language screen (`[pad] buttons 0x4000`), and settings.ini held `input.bind.cross=Space / X` until the
 second edit removed X again.
+
+### Rows the menu leaves out
+
+Since task 064 (D-014, patch 0016-menu-rows-by-capability) the menu draws a row only when its feature exists, as the
+game's profile (`GameProfile::features`) and the shell (`Shell::supports_*`) say. Our profile has no right-stick
+camera, so the Right stick row offers D-pad and Off only (the default `input.right_stick=camera` shows as Off: it
+sends the stick to the two bytes after the PSP's own, which the game never reads) and the two camera invert rows are
+gone; no mouse camera, so Mouse, Mouse sensitivity and the two mouse invert rows are gone (the pointer is still
+captured by `input.mouse`, and the mouse's buttons bind as before); no ad hoc play, so the Network tab and the System
+tab's "Pause during multiplayer" are gone and opening the menu turns `network.adhoc` off. The Metal shell has no
+touch controls and no performance overlay, so the Touch screen section and the F3 line are gone there (the Vulkan
+shell keeps them). A hidden row keeps its settings.ini key and value; "Restore control defaults" still puts the hidden
+rows' settings back too. `tools/menu_check.sh` checks the lists (docs/verification.md).
 
 ### In settings.ini
 
@@ -231,7 +244,8 @@ patch) or a profile field.
   the mouse captured; with `input.mouse=0` the keyboard cannot go back. A Pure default layout (a profile field the
   framework does not have yet) could put Triangle, and the whole race set, on keys.
 - The camera rows (Right stick camera mode, both invert rows, the camera keys I J K L) act on a second stick the PSP
-  does not have, and the mouse rows on a camera driver our profile does not set; for this game they could be hidden.
+  does not have, and the mouse rows on a camera driver our profile does not set. Task 064 hid the rows ("Rows the
+  menu leaves out"); the camera keys' bindings remain, and press the D-pad with `input.right_stick=dpad`.
 - Gamepad buttons are fixed (positional); the game's own controls screen covers remapping the PSP buttons.
 - The dead zone is radial on both sticks with one value; there is no outer dead zone, response curve or per-axis
   dead zone, and the triggers are a single threshold. The sweep's steering through `axis leftx` passes through this

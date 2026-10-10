@@ -23,6 +23,7 @@ it uses.
 | 0007-savedata-list-and-no-key-mode | no | 0004 (the shells' script readers) | 0004 |
 | 0008-sas-reverb | yes | nothing | nothing |
 | 0009-vfpu-rounding | yes | nothing | nothing |
+| 0016-menu-rows-by-capability | no | 0004 (`host/shell/shell.hpp` is new there; tried in task 064 with `patch` on the pin plus 0003 and 0004) | 0004 (`host::Shell`, the menu's `shell()`) |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -108,6 +109,17 @@ branches of `vfpu_cross_dot` and `execute_vfpu_horizontal`), which exist for our
 `include/psprecomp/` and the code generator: every game's corpus recompiles and its results move by an ulp wherever
 clang had fused, so the request carries the measurements (task 047, pspautotests' cases).
 
+### 0016-menu-rows-by-capability: candidate
+The Esc menu draws a row only when its feature exists (D-014): `GameProfile::features` (`MenuFeatures`: ad hoc play,
+the right-stick camera, the mouse camera) and five `Shell` virtuals (`supports_frame_interpolation`,
+`supports_perf_overlay`, `supports_aspect`, `supports_touch`, `api_name`). Every default is today's, so the
+framework's games and its Vulkan shell draw every row they drew before (task 064 checked it with the Vulkan shell's
+dump and every flag true); a port with a game that lacks a feature, or a shell of its own, sets the answers. Needs
+the shell seam (0004), so it follows that request. `<prefix>_MENU_DUMP` (the rows of each tab printed when the menu
+opens) is test tooling any port's checks could use; it routes the menu's rows through function objects in
+`menu.cpp`, which upstream may prefer as a hook in `widgets.cpp`'s shared row code, where it would also list the
+rows the font, texture-pack and save screens draw.
+
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
 readers for early recordings (0004); comments that cite this repo's tasks, fidelity differences and old patch
@@ -117,5 +129,5 @@ that this list stays true.
 ## An order to offer them in
 0001; 0006; the kernel part of 0005; 0002; the standalone renderer fixes of 0003 (exact target, alpha test numbers,
 shutdown order); 0008; the rules of 0009; the stencil, shadow volume and dual-source part of 0003; 0007's no-key
-mode; the seams of 0004, after the issue; the pacing part of 0005 and 0007's save list after them; the depth
+mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list and 0016 after them; the depth
 write-back of 0003 behind a profile switch.
