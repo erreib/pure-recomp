@@ -446,6 +446,16 @@ public:
     void set_sharp_screen(bool sharp) override { sharp_ = sharp; }
     void set_perf_overlay(bool) override {}
     std::string device_name() const override { return device_ != nil ? std::string(device_.name.UTF8String) : std::string{}; }
+    // What the menu offers of this shell (patch 0016-menu-rows-by-capability): it leaves out the Frame rate and Lower
+    // when behind rows (no interpolation), Performance and F3 (no overlay; PURE_PERF=log still prints), the Fill
+    // choice (drawn as Original) and the Touch screen rows (no touch controls), and says "Metal on <device>".
+    bool supports_frame_interpolation() const noexcept override { return false; }
+    bool supports_perf_overlay() const noexcept override { return false; }
+    bool supports_aspect(pk::settings::Aspect aspect) const noexcept override {
+        return aspect != pk::settings::Aspect::Fill;
+    }
+    bool supports_touch() const noexcept override { return false; }
+    std::string api_name() const override { return "Metal"; }
 
     // ---------------------------------------------------------------------------------------------------------------
     // Interface

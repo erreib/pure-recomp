@@ -331,12 +331,16 @@ black); the Vulkan backend needs the Vulkan shell and draws nothing here, as in 
 | Other | `hold_frame` keeps a copy of the picture on screen while the hold lasts; `frame_rate_now` counts the presents of the last second; `display_refresh` is the refresh rate SDL gives for the window's display; `game_aspect` is 480/272; `device_name` the Metal device's name |
 
 What it leaves out: frame interpolation (`present_due`, `present_until` and `pause_interpolation` do nothing and
-`set_frame_rate` is ignored: every flip is presented as it comes, so the menu's frame rate row changes nothing here),
-the Fill aspect (taken as Original: the shell keeps the PSP's shape, as `usable_aspect` does for a game that cannot
-draw another), the touch controls (`touch_controls_visible` is false), the performance overlay (`set_perf_overlay` does
-nothing; `PURE_PERF=log` still prints), and the menu's resolution, texture filter and texture-pack rows, which need the
-Vulkan renderer (`active_renderer()` is null under this shell, and the menu leaves them out). The System tab's
-graphics line still reads "Vulkan on" the device's name: that text is the framework's (`ui/menu.cpp`).
+`set_frame_rate` is ignored: every flip is presented as it comes), the Fill aspect (taken as Original: the shell keeps
+the PSP's shape, as `usable_aspect` does for a game that cannot draw another), the touch controls
+(`touch_controls_visible` is false), the performance overlay (`set_perf_overlay` does nothing; `PURE_PERF=log` still
+prints), and the menu's resolution, texture filter and texture-pack rows, which need the Vulkan renderer
+(`active_renderer()` is null under this shell, and the menu leaves them out). Since task 064 (patch
+0016-menu-rows-by-capability) the shell says so to the menu, which hides the rows: `supports_frame_interpolation()`,
+`supports_perf_overlay()` and `supports_touch()` answer false and `supports_aspect` false for Fill, so the Video tab
+has no Frame rate, Lower when behind or Performance row and Aspect ratio no Fill, and the Controls tab no F3 line and
+no Touch screen section. `api_name()` is "Metal", so the System tab's graphics line reads "Metal on Apple M4 Pro".
+`tools/menu_check.sh` checks the rows (docs/controls.md, "Rows the menu leaves out").
 
 ### One command queue
 

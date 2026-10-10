@@ -194,6 +194,10 @@ const GameProfile &game() {
         // A US console: English, cross confirms.
         .system_language = 1u,
         .confirm_button = 1u,
+
+        // The menu's game rows (patch 0016-menu-rows-by-capability, D-014): ad hoc play is not a feature of this port
+        // yet, and there is no right-stick or mouse camera (the PSP has neither; the race camera is the game's own).
+        .features = {.adhoc = false, .right_stick_camera = false, .mouse_camera = false},
     };
     return profile;
 }

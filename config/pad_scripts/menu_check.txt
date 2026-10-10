@@ -1,0 +1,11 @@
+# The menu check (task 064, tools/menu_check.sh): boot to the title (frontend.txt's steps before PRESS START), open
+# the Esc menu there and close it again. While the paused menu is open the script counts the menu's frames, so the
+# menu shot and the second Escape come 60 and 70 menu frames after the first Escape, once PURE_MENU_DUMP has printed
+# every tab (a frame a tab).
+700:pad a
+1600:pad a
+1650:pad a
+1750:shot title
+2100:key Escape
+2160:shot menu
+2170:key Escape
