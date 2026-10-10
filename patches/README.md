@@ -57,6 +57,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0012-vulkan-mipmaps | (task 058) | Missing feature | candidate | The mip levels a draw names uploaded by the Vulkan renderer and sampled at the level the GE's rule picks (auto, constant, slope), the mip filter from the minification filter's bits, as the Metal backend does; `<prefix>_NO_MIPMAPS` samples level 0 alone |
 | 0013-vulkan-colortest-depthclamp | (task 059) | Missing feature | candidate | The GE's colour test (NEVER, ALWAYS, EQUAL, NOTEQUAL under COLORTESTMASK against COLORREF, a discard after fog) and CLIPENABLE's depth clamp (near plane only, screen z clamped per vertex, MINZ/MAXZ as clip distances, `depthClampEnable`) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_COLOR_TEST` and `<prefix>_NO_DEPTH_CLAMP` restore the old paths |
 | 0014-vulkan-16bit-dither | (task 060) | Fidelity | candidate | Draws into 5650, 5551 and 4444 targets blended in `ge.frag` on the colour read as the render pass's own input attachment, then dithered by the GE's matrix and cut to the format's bits, as the Metal backend's `ge_fragment_16`; `<prefix>_NO_DITHER` draws them at 8 bits a channel as before; `<prefix>_SHOW_TARGET` presents an offscreen target |
+| 0015-vulkan-fb-texture-wrap | (task 063) | Fidelity | candidate | A render target sampled as a texture takes the GE's wrap mode: the texture's own coordinates wrapped per axis (REPEAT modulo 1, CLAMP between the centres of the edge texels) in `ge.frag`, then placed in the target's copy, as the Metal backend does; the billboards' adverts show instead of their first row stretched into bars |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -340,3 +341,16 @@ recorded, so a draw reads what the ones before it wrote; fragments of one draw t
 `VK_EXT_rasterization_order_attachment_access` on the measured driver). The pipeline key list goes from version 4 to 5
 (25 words). `<prefix>_NO_DITHER` (the Metal backend's name) restores the old drawing; `<prefix>_SHOW_TARGET=ADDR`
 presents that render target in place of the display (the Metal backend's `<prefix>_METAL_SHOW_TARGET`).
+
+### 0015-vulkan-fb-texture-wrap
+Task 063. A draw that samples a render target (the billboards' 128x128 565 target, the bloom chain) had its
+coordinates folded into the target's 480x272 copy (`uv_transform`) and its wrap flags dropped, so the copy's sampler
+clamped them at the target's edge: the billboards, drawn with v scale -1 and REPEAT, clamped -v to 0 and showed the
+advert's first row as vertical bars. Now `uv_transform` stays the texture's own scale and offset, the wrap flags stay,
+and `texture_params.x` gains `kPushPlaced` (2^20; a target has no mip levels, so the mip bits stay clear). Such a draw
+writes an object block whose `uv_remap` is the texture's place in the copy (mapped or not); `ge.vert` hands it on in
+`frag_uv_rect` in place of the through-mode tile clamp, and no longer applies it to modes 1 and 2 itself; `ge.frag`
+takes the coordinate (divided by q in mode 1) modulo 1 on a repeating axis or clamps it between the centres of the
+texture's edge texels (half a texel of the texture's own size, its share of the target's PSP pixels) on a clamping
+one, then places it. Ordinary textures are drawn as before. At an internal scale above 1 a through-mode draw that
+samples a target (the bloom's tiles) loses the tile clamp of `clamp_through_quad`, which only acts there.
