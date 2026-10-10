@@ -13,6 +13,7 @@ the runs and before-and-after tables: [docs/history/verification.md](history/ver
 | Metal against Vulkan | `tools/gerec/metal_check.sh` | the two backends on the TEAM screen and the race, through ge_replay | docs/metal-backend.md, "The 3D check" |
 | ge_replay | `tools/gerec/replay_check.sh` | the replay itself | docs/ge-backend.md, section 7 |
 | no change | `tools/refactor_check.sh` | a change that moves code changes no pixel and no count | docs/metal-backend.md, "Files" |
+| internal scale | `tools/scale_check.sh [S]` | the Metal backend at internal scale S (default 4) against 1 (task 066, D-015's bar): the 18 scenes headless at both, each S capture 480S x 272S and, reduced to 480x272 by nearest neighbour, within 5% of pixels at tol 24 of the 1x one; the race scenes' bloom region within 10% of its mean luminance; about a minute | docs/metal-backend.md, "Internal scale" |
 | audio | `PURE_AUDIO_WAV`, `tools/wavstats.py`, `tools/audio_compare.py` | the game's sound, against PPSSPP's dump | "Audio" |
 | SAS reverb | `tools/sas_reverb_check.sh` | the reverb's tail at a pause against PPSSPP's | "The SAS reverb check" |
 | saves | `tools/save_roundtrip.sh`, `tools/save_interchange.sh` | the round trip of profiles; saves both ways with PPSSPP | docs/savedata.md; "The save interchange check" |

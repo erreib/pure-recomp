@@ -21,6 +21,11 @@ namespace pure::metal {
 id<MTLDevice> device();
 id<MTLCommandQueue> queue();
 
+// The Metal shell's drawable in pixels, which the shell sets when it has made its layer (task 066): the backend's Auto
+// internal scale follows its height (D-015). The shell is made before the backend; 0 x 0 without a Metal shell.
+void set_drawable_size(std::uint32_t width, std::uint32_t height);
+void drawable_size(std::uint32_t &width, std::uint32_t &height);
+
 // The frame trace (PURE_METAL_TRACE, task 033; docs/metal-backend.md, "Frame times"). The backend writes a row per
 // flip; the Metal shell, which presents the backend's picture right after present_image(), hands it its own part
 // of each flip through these calls (the hook the brief offered, rather than a second file). The shell calls them

@@ -81,6 +81,7 @@ private:
     static bool frame_written_back(const Target &target);
     void store_target(GuestMemory &memory, Target &target, std::uint32_t first_row, std::uint32_t rows,
                       GuestWrites &writes);
+    const std::uint8_t *guest_pixels(const Target &target, const std::uint8_t *pixels);
     bool store_pixels(GuestMemory &memory, Target &target, const std::uint8_t *pixels, std::uint32_t first_row,
                       std::uint32_t rows);
     bool store_depth(std::uint32_t color_address, std::uint32_t depth_address, std::uint32_t depth_stride,
@@ -115,6 +116,7 @@ private:
     static bool shader_blend_reads_destination_alpha(const FragmentUniforms &fragment, std::uint8_t write_mask);
 
     // The frame trace (PURE_METAL_TRACE) and the counts printed every 600 frames and at exit (metal_trace.mm)
+    std::string scale_report() const;
     void open_trace(const char *path);
     void end_trace_interval();
     Stats since(const Stats &before) const;
@@ -183,6 +185,7 @@ private:
     std::array<id<MTLFunction>, 32> fragment_functions_{};
     std::array<id<MTLSamplerState>, 48> samplers_{};
     id<MTLTexture> white_;
+    // Each holds the largest target, 480S x 272S at 4 bytes a pixel.
     id<MTLBuffer> readback_;          // the presented picture, read back (picture_)
     id<MTLBuffer> frame_writeback_;   // the presented picture, copied at the flip for write_back_frame()
     id<MTLBuffer> guest_readback_;    // a target's colour or depth for guest memory
@@ -198,6 +201,8 @@ private:
     std::size_t chunk_used_{};
     Bound bound_;
 
+    // The internal scale of the targets at least 480 pixels wide (D-015, initialize()); the narrower ones are 1x.
+    std::uint32_t scale_{1u};
     std::map<TargetKey, std::unique_ptr<Target>> targets_;
     Target *current_target_{};  // of the open encoder
     Target *last_drawn_{};
@@ -218,8 +223,12 @@ private:
     bool lighting_changed_{};       // since it was last bound
     bool lighting_bound_{};         // in the open encoder
 
-    std::vector<std::uint8_t> picture_;  // the last picture read back
+    std::vector<std::uint8_t> picture_;  // the last picture read back, at its target's size
+    std::uint32_t picture_width_{};
+    std::uint32_t picture_height_{};
     std::uint64_t picture_frame_{~0ull};
+    // A scaled target's 480x272 picture for guest memory, the centre pixel of each block (guest_pixels()).
+    std::vector<std::uint8_t> guest_picture_;
     // The picture the next write_back_frame() stores: the target shown at the last flip, with its pixels in
     // picture_ (read back for the Vulkan shell) or in frame_writeback_ once `commands` has run.
     struct PendingFrame {

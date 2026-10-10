@@ -564,6 +564,8 @@ private:
         if (const float density = SDL_GetWindowPixelDensity(window_); density > 0.0f) layer_.contentsScale = density;
         const CGSize size = CGSizeMake(width, height);
         if (!CGSizeEqualToSize(layer_.drawableSize, size)) layer_.drawableSize = size;
+        // The Metal backend, made after the shell, reads it for its Auto internal scale (task 066).
+        pure::metal::set_drawable_size(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
         if (ready_ && !CGSizeEqualToSize(logged_size_, size))
             std::cout << "[shell] metal: window " << window_size() << std::endl;
         logged_size_ = size;

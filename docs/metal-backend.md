@@ -1,8 +1,8 @@
 # The Metal GE backend
 
-`PURE_GE_BACKEND=metal` draws the game with Metal, natively at the PSP's 480x272, behind the GE backend seam of D-003
-(`docs/ge-backend.md`); with the Metal shell (`PURE_SHELL=metal`, "The Metal shell") it is the default on macOS
-(D-008), and the game runs with no Vulkan or MoltenVK in the process. It is `src/gpu/metal_backend.mm` and the files
+`PURE_GE_BACKEND=metal` draws the game with Metal, natively at the PSP's 480x272 or at an internal scale of it (task
+066, "Internal scale"), behind the GE backend seam of D-003 (`docs/ge-backend.md`); with the Metal shell
+(`PURE_SHELL=metal`, "The Metal shell") it is the default on macOS (D-008), and the game runs with no Vulkan or MoltenVK in the process. It is `src/gpu/metal_backend.mm` and the files
 beside it ("Files"), registered as `metal`. It draws everything the framework's GE state carries (`DrawCall`, with
 patch 0002-ge-state-commands): through-mode and transformed draws with the GE's lighting and fog, transformed sprites
 expanded on the screen, culling, the alpha and colour tests, blending with exact FIX colours, the stencil test and
@@ -15,8 +15,8 @@ it differs from the Vulkan backend on purpose".
 
 The backend was built by tasks 023 (the 2D frontend), 024 (3D: lighting, fog, sprites, culling), 025 (the effects),
 027 (the Metal shell), 031 (one command queue), 033 (frame times, the pre-warm), 036 (texture mapping), 037 (mipmaps),
-040 (the colour test, 16-bit writes, the depth clamp), 042 (the pre-warm list over the campaign) and 049 (the split
-into files by concern). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
+040 (the colour test, 16-bit writes, the depth clamp), 042 (the pre-warm list over the campaign), 049 (the split
+into files by concern) and 066 (the internal scale). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
 
 ## Quick start
 
@@ -53,12 +53,14 @@ tools/refactor_check.sh                                   # after it: 0 differin
 | `PURE_NO_MIPMAPS=1` | (task 037) every texture is uploaded and sampled at level 0 alone, as before task 037, whatever levels the GE names ("Mipmaps"); its pictures are those of the build before the task |
 | `PURE_NO_COLOR_TEST=1`, `PURE_NO_DITHER=1`, `PURE_NO_DEPTH_CLAMP=1` | (task 040) each restores what the backend drew before task 040: every fragment kept; 5650, 5551 and 4444 targets blended by the pipeline at 8 bits a channel, never dithered; every transformed draw clipped at both ends of the depth range, MINZ/MAXZ unread. With all three the pictures are those of the build before the task ("The colour test, 16-bit writes and the depth clamp") |
 | `PURE_METAL_SHOW_TARGET=ADDR` | (task 040) each flip presents the target drawn last at ADDR instead of the display: a target the game never shows, such as the race's 565 billboard target (`0x04154000`), in a capture or a `ge_replay --cut ... --out` picture |
+| `PURE_INTERNAL_SCALE=N` | (task 066) the framework's `video.internal_scale` for the run: the backend draws its screen-wide targets at N (1 to 6; 0 Auto), read at start ("Internal scale"). Without a window the backend draws at 1 unless this is set |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
 prints `[render] GE backend metal cannot run (...)`. At start the backend prints the device and the shader compile
-time (`[metal] drawing with Apple M4 Pro at 480x272, shaders compiled in 0.5 ms; pictures shown in the window`;
-about 0.7 s the first time, before macOS has cached the compiled library, and 0.5 to 30 ms after).
+time (`[metal] drawing with Apple M4 Pro, internal scale 1: targets 480x272, effects 480x272; shaders compiled in 0.5
+ms; pictures shown in the window`; about 0.7 s the first time, before macOS has cached the compiled library, and 0.5
+to 30 ms after). Before task 066 the line read `drawing with Apple M4 Pro at 480x272, shaders compiled ...`.
 
 ## Files
 
@@ -73,7 +75,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 |---|---|
 | `src/gpu/metal_backend.mm` | the backend proper: `initialize` (device, shaders, samplers, the switches into `switches_`) and `shutdown`, `submit`, the flip (`present_image`) and `capture_frame`, the frame's command buffers, render passes and vertex space (`commit`, `end_encoder`, `begin_pass`, `allocate`, and `copy_to_buffer`, the one blit of a target's colour or depth into a shared buffer, which `read_back`, the frame write-back, `store_target` and `store_depth` use), `not_emulated`, and the `BackendRegistration("metal", ...)`. Its opening comment is the backend's overview |
 | `src/gpu/metal_backend.hpp` | the class: its members grouped under a heading per concern that names the file defining them, its data members (50, among them one struct each for the switches, the trace and the pre-warm: `switches_`, `trace_`, `prewarm_`), and the eight helpers more than one file uses (`unpack_color`, `not_emulated`, `to_compare`, `stored_reference`, `stencil_alpha`, `alpha_follows_stencil`, `format_name`, `texture_bits`), each with the file that defines it |
-| `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target` (with `bytes()` and `contains(address)`, the guest memory a target covers, which every scan of the targets uses), `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm`; and the three structs the class holds once each (task 062): `Switches` (`switches_`, filled by `initialize`), `TraceState` (`trace_`, metal_trace.mm's) and `PrewarmState` (`prewarm_`, metal_pipelines.mm's) |
+| `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, the guest's 480x272, `kMaxScale`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target` (with `bytes()` and `contains(address)`, the guest memory a target covers, which every scan of the targets uses, and since task 066 its internal `scale`, `width()` and `height()`), `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm`; and the three structs the class holds once each (task 062): `Switches` (`switches_`, filled by `initialize`), `TraceState` (`trace_`, metal_trace.mm's) and `PrewarmState` (`prewarm_`, metal_pipelines.mm's) |
 | `src/gpu/metal_targets.mm` | "Targets" and "Guest memory": the target cache (`target_for`, `latest_target_at`, the guest-word snapshot), a texture bind found in a target (`find_framebuffer_texture`, the rule of task 009) and the copy a draw samples of the target it draws into; `block_transfer`, `read_back_framebuffer`, `write_back_frame`, `write_back_depth` and the stores into guest memory; `upload_frame` |
 | `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule |
 | `src/gpu/metal_pipelines.mm` | "The pipeline key" and "The pre-warm list": the fragment-function variants, `render_pipeline` and `depth_state` (made on first use or taken from the pre-warm), the GE-to-Metal compare and stencil tables, the list's text form and parser, `start_prewarm`, the pipelines' exit line and `PURE_METAL_PIPELINES_OUT`; the pre-warm's state and the keys the draws used are `prewarm_` (`PrewarmState`) |
@@ -84,9 +86,10 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `src/gpu/shaders/embed.cmake` | the build step that turns `ge.metal` into `build/<preset>/generated_metal/ge_metal.hpp`: the file's text byte for byte as a raw string, `pure::metal::kShaderSource`, which `initialize` compiles. Rerun by the build whenever `ge.metal` changes |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
+| `tools/scale_check.sh` | (task 066) the backend at internal scale S against 1: the suite's 18 scenes headless at both, compared after reducing the S captures to 480x272 by their blocks' centre pixels, plus the race scenes' bloom region ("Internal scale") |
 | `tools/refactor_check.sh` | (task 049) the proof that a change moved code and changed no picture: the frame regression suite's 18 scenes captured before the change (`--before`, on the starting commit) and after, compared at `--tol 0`, plus the backend's exit counts per route; PASS only at 0 differing pixels everywhere |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
-| `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), and the frame trace's hook through which the shell reports its presents (task 033, "Frame times"). Objective-C++ with ARC |
+| `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), the frame trace's hook through which the shell reports its presents (task 033, "Frame times"), and the Metal shell's drawable size, which the backend's Auto internal scale reads (task 066, "Internal scale"). Objective-C++ with ARC |
 | `config/metal_pipelines.txt` | the render pipelines and depth-stencil states made at start (task 033, "The pre-warm list"); since task 042 it covers the campaign and the app carries a copy in `Contents/Resources` |
 | `tools/frame_times.py` | the frame trace's summary (task 033, "Frame times") |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
@@ -112,7 +115,7 @@ each file's anonymous namespace.
 | Lighting | per vertex in `ge_vertex`, ported from `ge.vert` for transformed draws with `lighting_enabled` (never through mode or clears), in world space: emissive, plus the global ambient light times the material ambient, plus for each of the four lights that is on its ambient, diffuse and specular terms, scaled by distance attenuation (point and spot) and the spot cone. Directional, point and spot lights; diffuse, diffuse and specular, and powered diffuse kinds; the specular power; the viewer looking down z for the half vector; the normal transformed by the world matrix and normalised (`reverse_normals` flips it). The material update bits make the vertex colour stand in for the ambient, diffuse and specular material colours when the vertex has a colour; alpha is the global ambient alpha times the material ambient's. The result is clamped to 0..1; with the specular kept apart (`LightingState::mode`) the specular is added after texturing. The lights, material and fog go to the vertex function as one 688-byte block (`LightingUniforms`, buffer 2), bound again only when a lit or fogged draw changes it. The race lights with ambient, emissive and up to two directional diffuse lights; point and spot lights, specular, powered diffuse and reversed normals are ported but no recording exercises them |
 | Fog | `ge.vert`/`ge.frag`'s: per vertex, (view-space z + end) x scale (`FogState`), so 1 is clear and 0 fogged, for transformed draws with fog on; in the fragment shader after texturing and the separate specular, the colour mixed towards the fog colour by that factor clamped to 0..1, alpha untouched |
 | Transformed sprites | by the GE's rule, on the screen after projection: both vertices are projected, and the rectangle between them is axis-aligned in window coordinates, at the second vertex's depth, lit, coloured and fogged as the second vertex, texture coordinates interpolated without perspective. The corners go to the vertex function already in the PSP's clip space, all with the second vertex's w (`VertexUniforms::mode.y`), each naming the second vertex (appended to the buffer after the corners) as the one it is lit and fogged as. A sprite with a vertex behind the eye (w <= 0) is dropped. The Vulkan backend expands them in object space; the two agree whenever the transform keeps the rectangle axis-aligned on the screen, as it does for every transformed sprite in the recordings (26 in the TEAM frame, 28 in race frame 6016: 0.0000 px between the corners either way) |
-| Through mode | positions in screen pixels go straight to clip space for a 480x272 target; z is `z / 65535` |
+| Through mode | positions in screen pixels go straight to clip space for the guest's 480x272 screen, which the viewport maps onto the target's pixels (x S at an internal scale S, "Internal scale"); z is `z / 65535` |
 | Transformed | `projection x view x world`; the GE viewport (`screen = ndc x scale + offset - region offset`) folded into clip x and y, so the Metal viewport stays the whole target; clip z remapped from the PSP's [-w, w] to Metal's [0, w], and the GE's z scale and offset become the viewport's `znear` and `zfar` (reversed when the game reverses the range), as the Vulkan backend folds them into `minDepth`/`maxDepth` |
 | Texture coordinates | texels divided by the texture's size in through mode; transformed, by the GE's texture map mode (task 036): the UVs through the GE's scale and offset (mode 0), the texture matrix applied to the position, UV or normal with s and t divided by q per pixel (mode 1), or the environment map from the normal and two lights (mode 2), "Texture mapping modes" |
 | Texture function | modulate, decal, blend, replace and add, with TCC (alpha from the texture or not). The blend function's environment colour is not in the draw state; the texel stands in for it, as in `ge.frag` |
@@ -126,7 +129,7 @@ each file's anonymous namespace.
 | Depth | the GE function as the depth compare; written only where the GE tests it (`test_enabled && write_enabled`), through mode included. With CLIPENABLE on (every transformed draw of the game), as the GE: clipped at the near plane only, each vertex's screen z clamped to 0..65535, and MINZ/MAXZ tested per pixel (task 040) |
 | Clears | CLEARMODE draws have no blend, texture or tests; bits 8..10 choose the colour, the alpha and the depth, and the depth compare is ALWAYS. A clear of the alpha on a 5551, 4444 or 8888 target writes the stencil with it: ALWAYS, REPLACE with the clear colour's alpha (task 011) |
 | Culling | transformed triangles with culling on, back faces culled, the GE's clockwise front as Metal's `MTLWindingClockwise`: Metal counts the winding in window coordinates (y down), as the GE and Vulkan's flipping viewport do. Confirmed on the race (task 024): race frame 6016 culls 593 of its 906 draws, 353 of them among the first 393 (344 with the counter-clockwise front, 266 of those into the display target; 9 with the clockwise one, the shadow volumes, which write only the stencil), and it matches Vulkan's up to its draw 394, while a build with the winding reversed differs from draw 41 on, 49% of the picture by draw 393 ("The 3D check"). The clockwise case, the shadow volumes, reaches the picture through the stencil since task 025 |
-| Scissor | the GE scissor, both ends included, clamped to 480x272; an empty one draws nothing |
+| Scissor | the GE scissor, both ends included, clamped to 480x272, times the target's internal scale; an empty one draws nothing |
 
 ### The pipeline key
 
@@ -155,9 +158,10 @@ Lighting and fog are uniform branches in the one vertex function, not pipeline v
 ## Targets
 
 As section 2 of `docs/ge-backend.md`: a target is keyed by (colour address, stride, format), the address taken
-modulo the cached/uncached mirrors. Each is a 480x272 `RGBA8Unorm` colour texture (5650, 5551 and 4444 targets too:
-since task 040 their draws write only the values the format's bits expand to) and a `Depth32Float_Stencil8` texture,
-both private to the GPU: internal scale 1, as D-002 asks first.
+modulo the cached/uncached mirrors. Each is an `RGBA8Unorm` colour texture (5650, 5551 and 4444 targets too: since
+task 040 their draws write only the values the format's bits expand to) and a `Depth32Float_Stencil8` texture, both
+private to the GPU, at 480x272, or at 480S x 272S for a key at least 480 pixels wide when the backend draws at an
+internal scale S above 1 (task 066, "Internal scale"; until then internal scale 1 alone, as D-002 asked first).
 
 - A pass draws into one target. A draw into another target ends the pass; the next one loads the target, or clears
   it to zero the first time.
@@ -287,11 +291,12 @@ prints them.
   When the frame write-back will store the shown target at the next flip, the picture is kept for it: the read-back
   the Vulkan shell gets anyway, or else a blit into a shared buffer recorded with the frame's commands.
 - `capture_frame` reads that texture back synchronously (a blit into a shared buffer, `waitUntilCompleted`) and
-  writes the 480x272 BMP of `gpu::write_bmp_file` (`PURE_SCREENSHOT_EVERY` captures go through it).
+  writes the BMP of `gpu::write_bmp_file` at the texture's size: 480x272, or 480S x 272S at an internal scale S
+  ("Internal scale"; `PURE_SCREENSHOT_EVERY` captures go through it).
 - `upload_frame` (a CPU-drawn picture: a movie frame shown from main memory, or one decoded into VRAM) copies the
   pixels into the target at that address (made with the given stride and 8888 when there is none) through a staging
-  buffer and a blit. A picture of another size than 480x272 is copied to the top left, unscaled, and logged once
-  (the Vulkan backend stretches it); the frontend's are 480x272.
+  buffer and a blit, each pixel an S x S block at an internal scale S. A picture of another size than 480x272 is
+  copied to the top left, unscaled, and logged once (the Vulkan backend stretches it); the frontend's are 480x272.
 - `shutdown` waits for the GPU, prints the counts, and frees every target, texture and pipeline before the queue and
   the device.
 
@@ -310,7 +315,106 @@ identical at 480x272. This costs one GPU wait and a 2 MB upload a frame. `PURE_M
 other shell `BackendConfig::vulkan_shell` is null and there is no hand-over and no read-back: `present_image` commits
 the frame and names the target's texture, which the Metal shell samples itself (below) and the headless shell never
 looks at (its `shot` steps are `capture_frame`). The start-up line then ends "pictures shown by the shell, not read
-back".
+back". At an internal scale S above 1 the picture read back is 480S x 272S, which `show_in_shell` scales to the shell's
+target the same way ("Internal scale").
+
+## Internal scale
+
+Task 066 (E3, D-015, 2026-10-10): the backend draws at an internal scale S of 1 to 6, the framework's
+`video.internal_scale` (`PURE_INTERNAL_SCALE`), read once at start (a change in the menu takes effect at the next
+start; the menu's row is task 067's). Until then it drew at 1 alone (D-002). The start-up line names it: `[metal]
+drawing with Apple M4 Pro, internal scale 4: targets 1920x1088, effects 480x272; ...` (`scale_report` in
+metal_trace.mm), the screen-wide targets' size and the narrower ones'.
+
+| Setting | S |
+|---|---|
+| 1 to 6 | that; 7 and 8, which the settings allow (the Vulkan renderer's limit), are drawn at 6 (`kMaxScale`) |
+| 0, Auto | the smallest S whose 272 S covers the Metal shell's drawable height, at most 6: 2 for the drawable of a 960x544-point window at 1 pixel a point, 4 at 2 (a Retina panel, task 065); the shell hands its drawable's size to `pure::metal::set_drawable_size` (`metal_device.hpp`) when it makes its layer, before the backend starts. 1 under the Vulkan shell, which has no such drawable |
+| any, with no window (the headless shell, ge_replay) | 1, unless `PURE_INTERNAL_SCALE` decides the setting (`settings::overridden_by`): the suite, the refactor check, the sweeps and every headless tool stay at 1 whatever their settings.ini holds (the framework's default is 2), and ge_replay replays Metal at 1 as before. With the switch set, a headless run and ge_replay's Metal lane draw at its value (ge_replay's Vulkan lane stays at the recording's scale) |
+
+What each path does at S (D-015's rules; at S = 1 every one of them is what the backend did before, which the refactor
+check proves: 0 differing pixels on the 18 scenes and the same counts after each of the task's three code steps):
+
+| Path | At internal scale S |
+|---|---|
+| Targets | a key whose stride is at least 480 (the display buffers, stride 512) is a 480S x 272S colour and depth-stencil texture (`Target::scale`, `width()`, `height()`, `target_for`); a narrower key (the billboard target, stride 128; the bloom buffers, 256) stays 480x272, so the bloom's 11-tap blur keeps the PSP's radius on the screen (PPSSPP's "lower resolution for effects" for this game) and the adverts stay the PSP's. `kWidth` and `kHeight` stay the guest's 480x272: the GE's coordinates, guest memory and the guest-word snapshot are in them. A texture that fails to allocate is named (`[metal] target 0x... at WxH could not be made`); none did at 6 |
+| Positions | through-mode positions (`ge_vertex`) and the folded GE viewport (`fold_viewport`) give clip space for the guest's 480x272 screen, and the Metal viewport is the target's own pixels, so the viewport transform scales every position by S: no uniform and no vertex changes for it. The depth (z / 65535 through the viewport's range, or the clamp's screen z) is untouched |
+| Scissor | the GE scissor's pixels times S, both ends included as before |
+| A target sampled as a texture | the texture's place in the target (`FragmentUniforms::uv_remap`) is relative: its size and first texel at the sampled target's scale over that target's own size. A 1x target sampled by a scaled draw (the bloom's composite reading the 256-stride buffer into the display) and a scaled target sampled by a 1x draw (the downsample reading the display into the 256-stride buffer) go through the same placement, and the sampler's bilinear does the rest. The GE's wrap is applied in the texture's own coordinates, as before (task 063) |
+| Mip levels | the auto rule's gradient is taken per PSP pixel: level 0's size in `FragmentUniforms::level` times S, so the GE picks the level it picks at 1x, as the Vulkan renderer does at its scale ("Mipmaps"). The slope and constant rules do not depend on the scale |
+| The stencil copy | its quad over the guest's screen (`resolve_stencil_alpha`), the viewport and scissor at the target's size |
+| 16-bit targets | blended in the shader on the drawn pixel's own colour and dithered per drawn pixel (the matrix by the window's x & 3 and y & 3). Every 16-bit target of this game is the billboards', at 1x |
+| Points and lines | one pixel wide at any scale (Metal draws no wider line); none of the recordings (the frontend, the TEAM screen, the race at 1x and 2x) has a point or a line |
+| Guest memory | the frame write-back, `read_back_framebuffer`, a block transfer's source rows (`store_target`) and the depth write-back (`store_depth`) blit the target whole at its size and give the guest the centre pixel of each S x S block, (x S + S/2, y S + S/2) (`guest_pixels`): the game sees a 480x272 picture and depth as before, and the lens flare's 4x4 depth test reads the depth at those centres. A block transfer into a target's memory draws nothing into the target, at any scale, as before: the target's guest-word snapshot then no longer matches, so later binds of that memory decode it from guest memory |
+| CPU pictures | `upload_frame` writes each pixel of the picture as an S x S block |
+| Frames | `present_image` reports the display target's own size (480S x 272S, as `PresentedImage` asks); `capture_frame` writes the BMP at that size; the read-back for the Vulkan shell's hand-over is at that size too |
+| Buffers | the three shared buffers (`readback_`, `frame_writeback_`, `guest_readback_`) hold the largest target: 8.4 MB each at 4, 18.8 MB at 6 |
+
+### The checks
+
+`tools/scale_check.sh [S]` (default 4) captures the suite's 18 scenes headless at `PURE_INTERNAL_SCALE=1` and at S,
+checks that each S capture is 480S x 272S, reduces it to 480x272 by its blocks' centre pixels (the guest's rule above)
+and compares it with the 1x capture at tol 24: each must differ in at most 5% of its pixels (D-015's bar). On the three
+race scenes of Vineta K's grid (race_hud, tt_hud, fp_hud) the bloom's region, x 296-479, y 0-55 (the light strips
+under the stand's roof at the top right and their glows), must keep its mean luminance within 10%. The region is where
+the bloom adds the most: race frame 6016 of `out/gerec/race_1x.gerec` replayed into Metal up to the composite draw and
+past it (`--cut 831` and `--cut 832`) differs by 41 to 79 in the mean luminance of the 16x16 cells there and by at
+most 19 elsewhere.
+
+At S = 4 (2026-10-10, the task's build): every capture 1920x1088; by the centre pixels 0.35% (title) to 3.03% (tt_hud)
+of the pixels differ at tol 24, all 18 within 5%; the bloom region's mean luminance moves +1.07% on race_hud, -0.16%
+on tt_hud and -0.17% on fp_hud. The bloom alone, replayed (race_1x.gerec, frame 6016, `PURE_INTERNAL_SCALE=4` before
+and after the composite draw): it adds 16.06 to the region's mean luminance at 1x and 17.18 at 4 (+7%), 4.38 and 4.46
+over the whole frame (+1.7%); the glows keep their radius on the screen and look the same.
+
+`tools/gerec/metal_check.sh` replays Metal at 1 as before and passes as before (the TEAM frames 0 pixels over tol 24,
+race frame 6016 2 pixels; step 4b, `race_warm.gerec` at Vulkan's 2x against Metal's 1x, 0.0804). With
+`PURE_INTERNAL_SCALE=2` the same 2x recording replays into Metal at 2 too, and race frame 6016 then differs from
+Vulkan's by 21 of 522240 pixels over tol 24 at 960x544 (`--a vulkan --b metal --frames 6016 --tol 24`): the two
+backends at the same scale draw the same picture.
+
+| Scene | Centre pixels | Top-left (imgdiff) | Scene | Centre pixels | Top-left (imgdiff) |
+|---|---|---|---|---|---|
+| lang | 0.0172 | 0.0830 | team_select | 0.0198 | 0.0782 |
+| title | 0.0035 | 0.0499 | tt_track_select | 0.0166 | 0.0728 |
+| profile | 0.0131 | 0.0652 | tt_hud | 0.0303 | 0.1084 |
+| main_menu | 0.0077 | 0.0429 | fp_track_select | 0.0177 | 0.0740 |
+| race_hud | 0.0275 | 0.0986 | fp_hud | 0.0290 | 0.1077 |
+| single_player | 0.0092 | 0.0477 | tournament_select | 0.0285 | 0.0922 |
+| class_select | 0.0153 | 0.0679 | zone_track_select | 0.0123 | 0.0541 |
+| league_select | 0.0282 | 0.0907 | zone_hud | 0.0289 | 0.0713 |
+| track_select | 0.0179 | 0.0742 | zone_change | 0.0121 | 0.0560 |
+
+The reduction is the check's own, not `tools/imgdiff.py`'s nearest neighbour, which takes the block's top-left pixel
+(S x, S y): that pixel's centre lies (S - 1) / 2S of a PSP pixel up and left of the 1x pixel's centre (3/8 at S = 4),
+which moves every filtered edge by that much. The table gives that fraction too ("top-left"), for the record; at S = 4
+it is 4.3% to 10.8%, all of it on edges. The picture is centred where the 1x one is: taking the pixel at (4x + k, 4y +
+k) of each block, k = 0, 1, 2, 3 scores 0.0830, 0.0178, 0.0172, 0.0829 on lang, 0.0986, 0.0272, 0.0275, 0.0973 on
+race_hud and 0.1084, 0.0312, 0.0303, 0.1084 on tt_hud: the two outer picks alike, the two inner ones alike. An
+example, the frontend's: the paused movie's picture is drawn with bilinear filtering and its texel centres on the
+pixel centres, so at 1x every pixel reads one texel, while at 4 the outer pixels of a block blend with the
+neighbouring texel, at the screen's edges the wrapped one. Across the left column's block the white background reads
+159, 222, 254, 254 (254 at 1x), across the right column's the mirror: the top-left pick is 95 levels off on the left
+edge, the centre pick 32 off on the right one.
+
+### The cost
+
+A windowed race at 4 and at 6 on this Mac (M4 Pro), the Metal shell's 960x544 window (the drawable at a pixel a point,
+before task 065), `main_menu.txt` + `single_race.txt` (shots dropped) to flip 9850, `PURE_METAL_TRACE` on, read from
+flip 6250, where the race clock starts, for 60 s (`tools/frame_times.py TRACE --long 25 --fps 60 --from 6250`):
+
+| S | Targets | Frames | Mean | 99th pct | Longest | Over 25 ms | GPU waits a frame | Depth write-back wait (median) |
+|---|---|---|---|---|---|---|---|---|
+| 4 | 1920x1088 | 3601 | 16.68 ms | 18.45 ms | 21.60 ms | 0 | 1.17 ms | 1.12 ms |
+| 6 | 2880x1632 | 3601 | 16.68 ms | 18.42 ms | 20.51 ms | 0 | 1.55 ms | 1.33 ms |
+
+No frame over 25 ms in either: the plan's 60 fps bar holds at 4 and at 6. The longest frames' cause is `outside` (the
+game, the HLE, the kernel's pacing) or `wait depth` (the SIGNAL's depth write-back, 12.5 ms once at 4), as at 1x (task
+033: a 0.6 ms median wait there). Neither run met a two-vblank stretch of the game's own within its 60 s. The
+window was occluded for both races (SDL's flag from flip 3515 at 4 and 876 at 6; the trace's `occluded` column), so no
+picture reached the screen and the rows say nothing of the drawable's timing; the backend's side, the draws at the
+scale, the GPU waits and the write-backs, is all in them. The three shared buffers and the targets at 6 were made
+without a failure.
 
 ## The Metal shell
 
@@ -385,14 +489,16 @@ or a wait, and the window dropped the race HUD in most frames; why one queue and
 
 ### The scaling filter
 
-The backend draws at 480x272 and the default window is 960x544 points: as many pixels on a 1x display, 1920x1088 on a
-2x one ("The drawable" above). At an exact 2x, linear sampling mixes every window pixel with its neighbour by a quarter:
+The backend draws at the internal scale ("Internal scale": 1x headless, the settings' scale in a window, Auto the
+drawable's size) and the default window is 960x544 points: as many pixels on a 1x display, 1920x1088 on a 2x one
+("The drawable" above). At an exact 2x, linear sampling mixes every window pixel with its neighbour by a quarter:
 with plain bilinear the suite scores lang 0.0521, title 0.0388 and profile 0.0473 (inside the limits, far from the
 backend's own 0.0002, 0.0002 and 0.0000), and the picture is visibly softer than the Vulkan shell's, which at the same
 settings copies its 2x target 1:1. So the shell samples nearest whenever the picture covers a whole multiple of its
-size in the drawable's pixels, where each game pixel covers whole window pixels and filtering could only blur (the
-default window on a 2x display is a whole 4x). Sharp (the sharp-screen setting) is nearest at any size; Smooth is
-bilinear at the sizes that are not whole multiples (a resized window, full screen).
+size in the drawable's pixels, where each game pixel covers whole window pixels and filtering could only blur (a 1x
+picture in the default window on a 2x display is a whole 4x; a picture at Auto covers it 1:1). Sharp (the
+sharp-screen setting) is nearest at any size; Smooth is bilinear at the sizes that are not whole multiples (a resized
+window, full screen).
 
 ## Frame times
 
@@ -786,8 +892,8 @@ clamp](history/metal-backend.md#the-colour-test-16-bit-writes-and-the-depth-clam
 
 - What the Metal shell leaves out ("The Metal shell"): frame interpolation, the Fill aspect, the touch controls, the
   performance overlay, and the menu's resolution, texture filter and texture-pack rows.
-- Drawing above 480x272 (an internal scale above 1, which D-002 leaves for after the native picture) and texture
-  packs, both the Vulkan renderer's today: enhancements, after fidelity (D-009).
+- Texture packs, the Vulkan renderer's today: an enhancement, after fidelity (D-009). Drawing above 480x272 came
+  with task 066 ("Internal scale"); the menu's Resolution row for it is task 067's.
 
 The race exercises neither `read_back_framebuffer` nor a block transfer from a target (its transfers come from
 main memory), and the frontend calls only `write_back_frame`: the 16-bit store formats and the transfer's row range
@@ -803,8 +909,10 @@ as before and named once; the game never draws one.
 
 ## Where it differs from the Vulkan backend on purpose
 
-- Native 480x272 (D-002); the Vulkan backend draws at 2x by default, which is where its 0.054 on `lang` and
-  `profile` comes from (one-pixel edges moved by the 2x-to-1x reduction).
+- Native 480x272 (D-002) headless and in every check, at the settings' internal scale in a window (task 066), with
+  the bloom's and the billboards' targets at 480x272 at any scale; the Vulkan backend draws every target at 2x by
+  default, which is where its 0.054 on `lang` and `profile` comes from (one-pixel edges moved by the 2x-to-1x
+  reduction).
 - The GE's texture filter bits are honoured (the Vulkan backend samples everything bilinear).
 - Through-mode draws are depth-tested when the GE enables the test (the Vulkan backend never tests them).
 - TCC and the ADD texture function are honoured; the alpha test reads its mask.
@@ -814,7 +922,8 @@ as before and named once; the game never draws one.
 - An empty scissor draws nothing (the Vulkan backend draws one row or column).
 - Mip levels: both backends upload them and pick the level by the GE's rule (task 037 here, task 058 and patch
   0012-vulkan-mipmaps there). Drawing at 2x, the Vulkan backend adds 16 x log2 of its internal scale to the auto
-  rule's D, so that g, the screen gradient, stays per PSP pixel; Metal, at 1x, needs no such term.
+  rule's D, so that g, the screen gradient, stays per PSP pixel; Metal takes g per PSP pixel the same way at its
+  internal scale (task 066: level 0's size times S).
 - 16-bit targets keep the format's bits with the GE's dithering, the colour test and CLIPENABLE's depth clamp with
   MINZ/MAXZ are in both (task 040 here; tasks 059 and 060, patches 0013-vulkan-colortest-depthclamp and
   0014-vulkan-16bit-dither there). The Vulkan backend reads a 16-bit target's colour as an input attachment with a
