@@ -4,9 +4,10 @@
 // registration below is linked into the program directly. Task 023 built what the 2D frontend needs, task
 // 024 the 3D draws, task 025 the effects:
 //
-//   targets    keyed by (colour address, stride, format), each a 480x272 RGBA8 colour texture (5650, 5551
-//              and 4444 targets too, for now) and a Depth32Float_Stencil8 texture (internal scale 1,
-//              D-002). A pass draws into one target; switching targets ends it.
+//   targets    keyed by (colour address, stride, format), each an RGBA8 colour texture (5650, 5551 and 4444
+//              targets too) and a Depth32Float_Stencil8 texture, at 480x272, or at 480S x 272S for a key at
+//              least 480 wide at the internal scale S (task 066, D-015; guest memory gets each block's
+//              centre pixel). A pass draws into one target; switching targets ends it.
 //   stencil    the GE's stencil test and operations on the attachment; the colour target's alpha kept as
 //              the PSP's stencil by patch 0006's rule: written by the zpass REPLACE/ZERO where the colour
 //              path can (dual-source blending under a source-alpha blend), copied from the attachment where
