@@ -16,6 +16,7 @@
 | D-012 | 2026-10-07 | The expanded version gets its own save format (the game's profile blob in our container, with an extensions area); the PSP format stays as the import/export bridge; designed when the DLC loader and the first sequel feature are concrete | accepted (Erik), scheduled |
 | D-013 | 2026-10-07 | VFPU dot products round as the real PSP does (pspautotests' truncating rule); PPSSPP's fused chain is a test-only mode for the scorecard's comparisons | accepted (Fable; Erik informed) |
 | D-014 | 2026-10-10 | The Esc menu shows only what this game and this shell can do; enhancements are open (D-009's condition met) | accepted (Erik) |
+| D-015 | 2026-10-10 | E3 opens: the Metal shell draws at the display's pixels and the Metal backend draws at an internal scale, effects buffers at 1x | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -208,5 +209,34 @@ of our own (D-009's unification with the game's pause screen) stays unscheduled.
 Consequences: task 064 (docs/tasks/064-menu-rows-by-capability.md: a vendor patch with the gates, the profile's
 flags, the Metal shell's answers, a menu-rows dump and a menu check). The Network tab is hidden until ad hoc play
 is a feature of this port.
+Status: accepted (Erik).
+
+## D-015  2026-10-10  E3: native resolution on the Mac
+Context: Erik's first enhancement: the picture at the display's native resolution. Two gaps. The Metal shell makes its
+window without SDL's high-pixel-density flag, so on this Mac (a 3024x1964 Retina panel, 2x backing) the layer's
+drawable is 960x544 for a 960x544-point window and macOS upscales it: every pixel the game draws is shown blurred,
+whatever the scaling filter says. And the Metal backend draws at internal scale 1 only (D-002: the native picture
+first), while the Vulkan renderer draws at 2x by default or follows the window (Auto).
+Decision (Erik): do both, in this order, as the enhancement E3.
+1. The shell's drawable is the window's size in pixels (the high-pixel-density flag; `SDL_GetWindowSizeInPixels`),
+   the present's viewport in those pixels, the window-size setting still in points (multiples of 480x272 points).
+2. The Metal backend draws at an internal scale S of 1 to 6 (`video.internal_scale`, `PURE_INTERNAL_SCALE`; Auto
+   follows the drawable: the smallest S whose 272*S covers the drawable's height, at most 6), on these rules:
+   - a target at least 480 pixels wide (the display buffers, 512 stride) is 480S x 272S; a narrower one (the 128-wide
+     billboard targets, the 256-wide bloom buffers) stays 480x272 as today, so the bloom's 11-tap blur keeps the
+     PSP's radius on screen (PPSSPP's lesson for this game: its "lower resolution for effects" flag) and the adverts
+     stay the PSP's;
+   - the GE's coordinates (the viewport, the scissor, through-mode positions, the texture placement of a target
+     sampled as a texture) scale by S; a draw's state is otherwise unchanged, dithering included (per drawn pixel);
+   - what goes back to guest memory (the frame write-back, read-backs, the lens flare's depth read) is the centre
+     pixel of each S x S block, so the game sees a 480x272 picture as before;
+   - headless runs and every check stay at S = 1 unless they say otherwise: at S = 1 the output is pixel-identical to
+     today's (the refactor check proves it);
+   - the menu's Resolution row shows for a backend that reports the capability (a vendor patch in the pattern of
+     0016-menu-rows-by-capability).
+Consequences: tasks 065 (the shell) and 066 (the backend's scale), then 067 (the Resolution row, the perf table, the
+Vulkan renderer's bloom buffers at 1x as a patch for Windows). The exit from the plan: at S = 4 a scene downsampled
+to 480x272 differs from the S = 1 capture by at most 5% of pixels at tol 24, the bloom's brightness within 10%; a
+race holds 60 fps at S = 4 on this Mac.
 Status: accepted (Erik).
 
