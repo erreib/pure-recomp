@@ -319,10 +319,9 @@ void MetalGeBackend::fill_lighting(const DrawCall &call, bool lit, bool fogged, 
 }
 
 // The texture mapping mode of a textured, transformed draw (task 036): the texture matrix (1) or the
-// environment map (2) computed in ge_vertex, or the UVs (0) as before. `source` is the target sampled as the
-// texture, if any: the mapped coordinates are placed in it as uv_transform places the UVs.
-void MetalGeBackend::set_texture_map(const DrawCall &call, const Target *source, std::uint32_t source_x,
-                                     std::uint32_t source_y, VertexUniforms &vertex, FragmentUniforms &fragment) {
+// environment map (2) computed in ge_vertex, or the UVs (0) as before. A target sampled as the texture is placed in
+// its image by the fragment function (FragmentUniforms::uv_remap), whatever the mode.
+void MetalGeBackend::set_texture_map(const DrawCall &call, VertexUniforms &vertex, FragmentUniforms &fragment) {
     const pk::TextureMapState &map = call.texture_map;
     if (call.through || switches_.no_texture_map || map.map_mode == 0u) return;
     if (map.map_mode == 3u) {
@@ -346,13 +345,6 @@ void MetalGeBackend::set_texture_map(const DrawCall &call, const Target *source,
         if (length > 0.0f)
             for (float &value : viewer) value /= length;
         vertex.viewer = {viewer[0], viewer[1], viewer[2], 0.0f};
-    }
-    if (source != nullptr) {
-        const float width = static_cast<float>(call.texture.width);
-        const float height = static_cast<float>(call.texture.height);
-        vertex.uv_remap = {width / static_cast<float>(kWidth), height / static_cast<float>(kHeight),
-                           static_cast<float>(source_x) / static_cast<float>(kWidth),
-                           static_cast<float>(source_y) / static_cast<float>(kHeight)};
     }
     ++stats_.texture_mapped;
 }
@@ -405,17 +397,17 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
         const bool linear_min = !switches_.sharp && (state.min_filter & 1u) != 0u;
         source = find_framebuffer_texture(memory, state, source_x, source_y);
         if (source != nullptr) {
-            // The texture's first texel is pixel (x, y) of a 480x272 target; the sampler clamps at
-            // the target's edges.
+            // The texture's first texel is pixel (x, y) of a 480x272 target. The coordinates stay the texture's
+            // own; the fragment function wraps them by the GE's wrap mode and places them in the target (task
+            // 063), whose sampler clamps at its edges.
             texture = sample_target(*source, target);
             sampler = (linear_mag ? 1u : 0u) | (linear_min ? 2u : 0u) | 4u | 8u;
             const float width = static_cast<float>(state.width);
             const float height = static_cast<float>(state.height);
-            const std::array<float, 4> uv = vertex.uv_transform;
-            vertex.uv_transform = {uv[0] * width / static_cast<float>(kWidth),
-                                   uv[1] * height / static_cast<float>(kHeight),
-                                   (uv[2] * width + static_cast<float>(source_x)) / static_cast<float>(kWidth),
-                                   (uv[3] * height + static_cast<float>(source_y)) / static_cast<float>(kHeight)};
+            fragment.uv_remap = {width / static_cast<float>(kWidth), height / static_cast<float>(kHeight),
+                                 static_cast<float>(source_x) / static_cast<float>(kWidth),
+                                 static_cast<float>(source_y) / static_cast<float>(kHeight)};
+            fragment.wrap = {1u, state.wrap_s != 0u ? 1u : 0u, state.wrap_t != 0u ? 1u : 0u, 0u};
             ++stats_.framebuffer_textures;
         } else {
             const std::uint32_t levels = mip_levels(memory, state);
@@ -431,7 +423,7 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
         }
         fragment.texture = {state.function, state.alpha_from_texture ? 1u : 0u,
                             source != nullptr && state.format == TextureFormat::Rgba5650 ? 1u : 0u, 0u};
-        set_texture_map(call, source, source_x, source_y, vertex, fragment);
+        set_texture_map(call, vertex, fragment);
     }
 
     // Pipeline state. The target's alpha is the PSP's stencil (patches 0004 and 0006): the stencil
