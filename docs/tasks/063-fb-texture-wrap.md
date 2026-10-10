@@ -1,6 +1,6 @@
 # 063: A target sampled as a texture takes the GE's wrap mode (the billboard screens)
 
-Milestone: M8 fidelity (difference 15) | Branch: task/063-fb-texture-wrap | Status: OPEN
+Milestone: M8 fidelity (difference 15) | Branch: task/063-fb-texture-wrap | Status: MERGED (08b57e2, 2026-10-10)
 
 ## Goal
 The track-side advert screens show a flat colour with vertical bars where PPSSPP (and a video of the game) show the
@@ -223,4 +223,19 @@ Open questions:
 4. No `<prefix>_NO_...` off switch for the new wrap, unlike patches 0011-0014. The brief did not ask for one.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge and patch 0015 applied to the vendor tree (15 patches reproduce
+the pin), 2026-10-10: PASS (frame suite 18/18 headless; billboard_check Metal vertical 18.70 / horizontal 12.45).
+The gate: `--shell metal --backend metal` 18/18 (19m 48s); `--shell vulkan --backend vulkan` 18/18 (20m 0s; race_hud
+0.0466, tt_hud 0.0491, fp_hud 0.0470 against the column's 0.053, 0.048, 0.056); `billboard_check --backend vulkan
+--shell vulkan` PASS (13.76 / 7.69); `tools/hud_check.sh` 61/61; `tools/gerec/metal_check.sh` PASS.
+Spot-read: ge.metal's `place_in_target` (fract for REPEAT, the half-texel clamp in the texture's own texels for
+CLAMP, then uv * size + origin) and the Vulkan patch's equivalent in ge.frag; the sampler table untouched; the
+cut-27 proof (15 px, all inside draw #26's footprint, Metal and Vulkan identical) is the right evidence that only
+the placement changed. The main checkout's capture of flip 6490 shows the sunburst advert on the orange board.
+Merged: `git merge --no-ff` into batch/m2, 08b57e2; the stale "Texture mapping modes" sentence (open question 1)
+fixed at the merge (dd19dc7).
+Notes: the Vulkan whole-frame change of 344 px outside the billboards is the bloom's coordinates now interpolated
+in the texture's own space, which brings Vulkan to Metal's pixels (523 to 179 differing at tol 0): a gain.
+Follow-ups recorded in docs/status.md: the through-mode tile clamp lost on Vulkan above internal scale 1 (open
+question 2, E3's territory); bilinear at the REPEAT seam blends with the target's neighbour pixel rather than the
+far edge (open question 3; a screen 128 px tall or more); no off switch for the wrap (open question 4).
