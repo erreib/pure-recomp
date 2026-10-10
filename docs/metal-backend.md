@@ -322,11 +322,11 @@ black); the Vulkan backend needs the Vulkan shell and draws nothing here, as in 
 
 | Part | What it does |
 |---|---|
-| Window | an SDL window (`SDL_WINDOW_METAL \| SDL_WINDOW_RESIZABLE`, 480x272 times the window-size setting, full screen by the setting), titled as the Vulkan shell's (`PURE_WINDOW_TITLE`, else the program's name and build label); `SDL_Metal_CreateView` and its `CAMetalLayer`: BGRA8, tagged sRGB (as MoltenVK tags its swapchain, so the colours look the same), `framebufferOnly` off for the captures, the program's one device and command queue (`src/gpu/metal_device.hpp`, the backend's; "One command queue" below). Prints `[shell] metal: Apple M4 Pro, window 960x544, vsync` |
+| Window | an SDL window (`SDL_WINDOW_METAL \| SDL_WINDOW_RESIZABLE \| SDL_WINDOW_HIGH_PIXEL_DENSITY`, 480x272 points times the window-size setting, full screen by the setting), titled as the Vulkan shell's (`PURE_WINDOW_TITLE`, else the program's name and build label); `SDL_Metal_CreateView` and its `CAMetalLayer`: BGRA8, tagged sRGB (as MoltenVK tags its swapchain, so the colours look the same), `framebufferOnly` off for the captures, the drawable the window's size in pixels ("The drawable" below), the program's one device and command queue (`src/gpu/metal_device.hpp`, the backend's; "One command queue" below). Prints `[shell] metal: Apple M4 Pro, window 960x544 points, 1920x1088 pixels, 2x, vsync`, and `[shell] metal: window ...` again when the drawable's size changes |
 | Events and input | `pump_events` handles the window's events as the Vulkan renderer's pump does: close, gamepads arriving and leaving, a display change, the mouse while it is captured for the game (only the script's mouse under scripted input), then the interface's event hook. The pad is a `host::SdlPad` the shell holds, the code the Vulkan shell uses: the keyboard through the player's bindings, the first gamepad or the input script's virtual one, the script's keys (`set_scripted_key`), the neutral pad while an interface screen is up (`set_game_input`). The pointer is captured by the Vulkan renderer's rule. `sample_pad` pumps SDL and samples without handling events |
 | Present | the backend's `Metal` image (its target's `id<MTLTexture>`) is drawn into the layer's next drawable by one triangle over the letterboxed rectangle, placed as the Vulkan renderer's `record_game_blit` places it (Original), or over the whole drawable (Stretch); a `Cpu` image is uploaded to a texture first; no image clears to black. The interface is drawn in the same pass, then `presentDrawable` and commit; while the game is held to real time the drawable is presented at the real time of the PSP vblank after the one its frame began from (`presentDrawable:atTime:`, task 033, "Frame times"; `PURE_METAL_PACE=0` presents at once). A fast-forwarding load presents a flip only when none was shown for 33 ms, as the Vulkan shell does. Vsync is the layer's `displaySyncEnabled`, off for Immediate; there is no Mailbox (`supports_present_mode`) |
-| Scaling filter | nearest when the sharp-screen setting is on, and whenever the picture covers a whole multiple of 480x272 (the default 2x window); linear otherwise (below) |
-| Captures | `capture_window` (the input script's `shot`): the next present also copies the drawable, interface included, into a shared buffer, waits for it and writes the BMP (`[render] window 960x544 -> PATH`), as the Vulkan shell's window captures are written. `ShellConfig::capture_frame` is not used |
+| Scaling filter | nearest when the sharp-screen setting is on, and whenever the picture covers a whole multiple of its size in the drawable's pixels (the default window on a 2x display, 1920x1088: 4x a 480x272 picture); linear otherwise (below) |
+| Captures | `capture_window` (the input script's `shot`): the next present also copies the drawable, interface included, into a shared buffer, waits for it and writes the BMP at the drawable's size (`[render] window 1920x1088 -> PATH` on a 2x display), as the Vulkan shell's window captures are written. `ShellConfig::capture_frame` is not used |
 | Interface | `initialize_ui`: `ImGui_ImplSDL3_InitForMetal` and `ImGui_ImplMetal_Init` (task 027 moved the SDL3 platform init from `Layer::attach` into the shells); `begin_ui_frame`: `ImGui_ImplMetal_NewFrame` with a render pass descriptor that has the drawable's attachments (one BGRA8 colour attachment, no depth: a 1x1 stand-in texture, since the drawable itself is taken at the present); `set_ui_draw_data` keeps the draw data, drawn by the next `present` or `present_ui` over the picture; `present_ui(show_game)` presents the last game picture (behind the paused menu) or the setup screens' brown, with the interface; `shutdown_ui` waits for the GPU and shuts both ImGui backends down |
 | Other | `hold_frame` keeps a copy of the picture on screen while the hold lasts; `frame_rate_now` counts the presents of the last second; `display_refresh` is the refresh rate SDL gives for the window's display; `game_aspect` is 480/272; `device_name` the Metal device's name |
 
@@ -341,6 +341,24 @@ prints), and the menu's resolution, texture filter and texture-pack rows, which 
 has no Frame rate, Lower when behind or Performance row and Aspect ratio no Fill, and the Controls tab no F3 line and
 no Touch screen section. `api_name()` is "Metal", so the System tab's graphics line reads "Metal on Apple M4 Pro".
 `tools/menu_check.sh` checks the rows (docs/controls.md, "Rows the menu leaves out").
+
+### The drawable
+
+The window is made with `SDL_WINDOW_HIGH_PIXEL_DENSITY`, and the layer's `drawableSize` is the window's size in pixels
+(`SDL_GetWindowSizeInPixels`), its `contentsScale` the window's pixel density (`SDL_GetWindowPixelDensity`), set at
+creation and again on every `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED` (a resize, full screen and back, a move to a display of
+another density) and display change (task 065). Until then the drawable was the window's size in points, 960x544 on this
+Mac's 2x panel, and macOS upscaled it, blurring every pixel whatever the scaling filter said. The window-size setting
+still counts points (480x272 times the setting), so the default window here is 960x544 points and 1920x1088 pixels, and
+the present's viewport (`viewport_for`), the scaling filter's rule and the window captures are in drawable pixels: the
+letterbox and Stretch keep their proportions, 1920x1088 is a whole 4x of a 480x272 picture (nearest), and a `shot` is
+1920x1088, each 4x4 block one pixel of the backend's picture (the title shot reduced by 2 against the backend's own
+capture enlarged by 2: 0 of 522240 pixels differ; the suite's reduction to 480x272 is unchanged). The interface keeps
+its size in points: ImGui's SDL3 backend gives it the window's size in points and the density as its framebuffer scale,
+so the menu covers the same share of the window as before, its glyphs rasterised at 2x. In full screen macOS keeps the
+window below the camera housing: on this Mac the shell logs `[shell] metal: window 1512x945 points, 3024x1890 pixels,
+2x`, the panel's 3024x1964 less the 74-pixel strip beside the camera, which the letterboxed picture (3024x1714 at
+Original) would not reach anyway.
 
 ### One command queue
 
@@ -367,13 +385,14 @@ or a wait, and the window dropped the race HUD in most frames; why one queue and
 
 ### The scaling filter
 
-The backend draws at 480x272 and the default window is 960x544. At an exact 2x, linear sampling mixes every window
-pixel with its neighbour by a quarter: with plain bilinear the suite scores lang 0.0521, title 0.0388 and profile
-0.0473 (inside the limits, far from the backend's own 0.0002, 0.0002 and 0.0000), and the picture is visibly softer
-than the Vulkan shell's, which at the same settings copies its 2x target 1:1. So the shell samples nearest whenever the
-picture covers a whole multiple of its size, where each game pixel covers whole window pixels and filtering could only
-blur. Sharp (the sharp-screen setting) is nearest at any size; Smooth is bilinear at the sizes that are not whole
-multiples (a resized window, full screen).
+The backend draws at 480x272 and the default window is 960x544 points: as many pixels on a 1x display, 1920x1088 on a
+2x one ("The drawable" above). At an exact 2x, linear sampling mixes every window pixel with its neighbour by a quarter:
+with plain bilinear the suite scores lang 0.0521, title 0.0388 and profile 0.0473 (inside the limits, far from the
+backend's own 0.0002, 0.0002 and 0.0000), and the picture is visibly softer than the Vulkan shell's, which at the same
+settings copies its 2x target 1:1. So the shell samples nearest whenever the picture covers a whole multiple of its
+size in the drawable's pixels, where each game pixel covers whole window pixels and filtering could only blur (the
+default window on a 2x display is a whole 4x). Sharp (the sharp-screen setting) is nearest at any size; Smooth is
+bilinear at the sizes that are not whole multiples (a resized window, full screen).
 
 ## Frame times
 
