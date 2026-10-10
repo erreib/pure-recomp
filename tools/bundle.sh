@@ -35,7 +35,7 @@
 #            frame 2200, and DIR/shots/title.png is within tol 24, max-frac 0.05 of ref/title.png (the suite's limit)
 #   finder   open "<app>" (LaunchServices, as a double click in Finder; --env passes the same data directory and
 #            route, --stdout DIR/finder.log): the Metal window opens and the route's title shot,
-#            DIR/finder_shots/title.png (the window's picture, 960x544), is within the same limit
+#            DIR/finder_shots/title.png (the window's picture at its pixel size), is within the same limit
 #   prewarm  (task 042) Contents/Resources/metal_pipelines.txt is config/metal_pipelines.txt, and the route and finder
 #            runs each print `[metal] pre-warm: R render pipelines ... and D depth-stencil states from` that copy,
 #            with its own counts; their exit lines' "not in the list" counts are reported

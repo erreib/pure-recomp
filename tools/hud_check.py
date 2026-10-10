@@ -3,7 +3,7 @@
 
   tools/hud_check.py DIR [--expect N]
 
-Reads every `h<FLIP>.bmp` in DIR (tools/hud_check.sh writes them: window shots at 960x544, or the backend's own
+Reads every `h<FLIP>.bmp` in DIR (tools/hud_check.sh writes them: window shots at the window's pixel size (960x544, or the Metal shell's drawable since task 065), or the backend's own
 480x272 captures headless) and looks for the HUD's two yellow labels in their regions below, given in PSP pixels
 (480x272) and scaled to the shot's size:
 

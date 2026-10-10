@@ -127,7 +127,7 @@ The table lives at the top of the script (`SCENES`), with a measured column per 
 as a comment; the one above is the script's as of 2026-10-07 (task 040's re-baseline of the Metal column; task 056's
 viewport fix, 2026-10-08, moved race_hud, tt_hud and fp_hud by under 0.001 and left the Vulkan column as it was). A scene's
 fraction is the share of pixels that differ by more than Tol in any channel, with both frames at 480x272 (a window's
-960x544 capture is reduced by nearest neighbour; a headless capture is 480x272 already). The scene passes at or below
+window capture (960x544 under the Vulkan shell; the Metal shell's drawable, 1920x1088 on a Retina Mac since task 065) is reduced by nearest neighbour; a headless capture is 480x272 already). The scene passes at or below
 Limit, which is shared by both backends. The Metal column serves the Metal window and the headless shell alike: the
 headless captures equal the Metal window's reduced to 480x272, pixel for pixel (task 034).
 
@@ -267,6 +267,11 @@ data directory:
 Since task 050 the Python tools share one runner, `tools/purelib` ("The shared runner"), and every headless run it
 starts sets `PURE_NO_BUSY_CLOCK=1`, so a run does not depend on the machine's load. The wall times before and after
 task 034: [Fast, silent test runs](history/verification.md#fast-silent-test-runs-task-034-2026-10-06).
+
+The window columns wobble on the race scenes: a paced window run's race frames differ from the headless ones in
+content (the camera and the ship have moved by the frame's timing), so a window run of `zone_change` scores anywhere
+from 0.002 to 0.042 (task 065 measured three runs: 0.0024, 0.0148, 0.0423) and the suite's "moved more than 0.03"
+line fires at random there; the Metal column is the headless value and is not re-baselined from a window run.
 
 ## Which path for which change
 

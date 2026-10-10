@@ -27,7 +27,7 @@
 # The runs are silent and use the data directory out/data/frame_regress (settings.ini, pipeline caches), not the
 # player's, unless the environment sets PURE_NO_AUDIO or PURE_DATA_DIR (tools/run_boot.py; task 034).
 # A scene's fraction is the share of pixels that differ by more than `tol` in any channel, with the capture (480x272
-# headless, 960x544 in a window) and the 480x272 reference both at 480x272 (nearest neighbour). It passes at or below
+# headless, the window's pixels in a window: 960x544 under the Vulkan shell, the Metal shell's drawable since task 065) and the 480x272 reference both at 480x272 (nearest neighbour). It passes at or below
 # `limit`. The measured columns hold what the scene scored on each backend when its limit or the backend last
 # changed; the table prints the difference from the running backend's column, and a move of more than 0.03 means
 # something changed even when the scene still passes. Re-baselining: docs/verification.md, "Frame regression suite".
