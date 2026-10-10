@@ -61,7 +61,98 @@ returns); the interface (ImGui) draws at the wrong scale after the change and th
 code (host/ui/layer.cpp): report, do not patch vendor.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+Changed (branch task/065-metal-shell-retina from batch/m2 7f4afce, two commits, then this Result):
+- 029e408 src/host/metal_shell.mm:
+  - `SDL_WINDOW_HIGH_PIXEL_DENSITY` on the window.
+  - `update_drawable_size()` sets the layer's `drawableSize` from `SDL_GetWindowSizeInPixels` and its
+    `contentsScale` from `SDL_GetWindowPixelDensity`. It runs at creation, and on `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED`
+    and `SDL_EVENT_WINDOW_DISPLAY_CHANGED` (each followed by `update_display_info`). A new drawable size after
+    start-up is logged once, as `[shell] metal: window ...`.
+  - The start line is now `[shell] metal: Apple M4 Pro, window 960x544 points, 1920x1088 pixels, 2x, vsync`.
+  - `viewport_for`, `sampler_for` and the capture keep their code: they already worked in the drawable's pixels.
+    `sampler_for`'s comment now says so.
+- 422ffe4 docs/metal-backend.md, "The Metal shell":
+  - a new subsection, "The drawable" (one paragraph);
+  - the Window, Scaling filter and Captures rows and "The scaling filter" paragraph now give sizes in drawable pixels.
+- src/gpu/metal_shell.hpp, docs/verification.md and README.md are untouched (see Open questions).
+
+Acceptance:
+- The default window logs `[shell] metal: Apple M4 Pro, window 960x544 points, 1920x1088 pixels, 2x, vsync`.
+- Full screen (there is no `PURE_FULLSCREEN` variable; I used `video.fullscreen=1` in a scratch data directory's
+  settings.ini):
+  - At creation, mid-transition, it logs `window 1512x872 points, 3024x1744 pixels, 2x`. Then it logs
+    `[shell] metal: window 1512x945 points, 3024x1890 pixels, 2x`, and that run's shots are 3024x1890.
+  - That is the panel's 3024x1964 less 74 pixels (37 points): macOS places a full-screen window below the camera
+    housing.
+  - The picture, letterboxed at Original, is 3024x1714 either way and does not reach that strip. The full-screen menu
+    shot showed the menu at its point size over the letterboxed picture.
+- `tools/frame_regress.sh` headless: 18/18. Every value is as before; zone_change is 0.0369, as in every run since
+  task 049.
+- `--shell metal --backend metal`: 18/18, with 1920x1088 window captures. zone_change moved by -0.0329 (0.0024
+  against 0.0353), and the suite flagged it. The resize did not cause this move:
+  - Three window runs of zone_change scored 0.0024, 0.0148 and 0.0423 (median 0.0148, -0.0205). The last window run
+    before this change (main checkout, commit b92537a, today 14:19) scored 0.0416.
+  - The window's race frames differ from the headless ones in content, not at edges: the camera and the ship have
+    moved. In half-size pixels: zone_change 213872, race_hud 87716, tt_hud 49468, zone_hud 9392. Every
+    difference covers whole 4x4 blocks.
+  - That is the paced race wobble the scene's comment already describes.
+  - Not re-baselined. The metal column is the deterministic headless value, the SCENES table lives in tools/ (Must
+    not touch), and no value moved by the resize.
+- Capture pixels: the title window capture (1920x1088), downsampled by 2, against the backend's own 480x272 capture
+  upsampled by 2: 0 of 522240 pixels differ. Every window pixel against the texel it covers (4x): 0 of 2088960.
+  The same zero holds for 14 scenes: the 13 non-race scenes and fp_hud.
+- `tools/hud_check.sh`: 61 of 61 shots have the HUD.
+- The interface: `tools/menu_check.sh` PASS. The 1920x1088 menu shot shows the panel at the same share of the window
+  (about 7% to 93% of its width) as the main checkout's 960x544 shot, with its glyphs rasterised at 2x. ImGui's SDL3
+  backend gives the size in points and the density as the framebuffer scale, so host/ui/layer.cpp was not needed.
+- The diff is only src/host/metal_shell.mm and docs/metal-backend.md: no change to the Vulkan shell, the backend or
+  the settings' keys.
+
+Verify output (last 20 lines; the Verify line ran on the final code, before the docs edits):
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0152   0.10   32    0.0149 +0.0003  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0089   0.12   32    0.0112 -0.0023  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0024   0.10   32    0.0353 -0.0329  PASS
+
+moved more than 0.03 from the metal measured value: zone_change (something changed; docs/verification.md)
+frame regression: PASS, 18/18 scenes pass, shell metal, backend metal (19m 51s)
+```
+
+Open questions:
+- Some text still says 960x544 for the Metal window, in files this task could not edit:
+  - README.md's `PURE_SHELL` row: "`shot` captures (the window, 960x544 at the default 2x)" and "Prints
+    `[shell] metal: DEVICE, window WxH, vsync`";
+  - docs/verification.md: "a window's 960x544 capture is reduced by nearest neighbour";
+  - tools/frame_regress.sh's header ("960x544 in a window"), tools/hud_check.py's docstring, and tools/bundle.sh's
+    finder check ("the window's picture, 960x544").
+
+  The brief lets this task edit README.md only for a new switch and verification.md only for a measured value, and
+  tools/ is under Must not touch, so they are left as they were. The suite's reduction and hud_check.py's region
+  scaling work at any size.
+- zone_change in the window ranged from 0.0024 to 0.0423 over three runs (0.0416 before this change). The ">0.03
+  moved" line will fire on Metal window runs at random. Should the table say that this scene's window score
+  wobbles?
+- In full screen the camera-housing strip stays black, by macOS's placement. Covering it (full screen without
+  Spaces, or ignoring the safe area) would help only Stretch (74 more rows) and would put the menu's top beside the
+  camera, so it is not done.
+- Not tested on a 1x display (there is no external display here). The code takes the density SDL reports, so the
+  drawable there is the window's points.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

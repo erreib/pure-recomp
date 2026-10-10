@@ -4,10 +4,12 @@
 // registration below is linked into the program directly, as the Metal GE backend's is. With PURE_GE_BACKEND=metal
 // the game runs with no Vulkan or MoltenVK at all:
 //
-//   window     an SDL window (SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE) with SDL's Metal view, whose CAMetalLayer
-//              draws with the program's one Metal device and command queue (src/gpu/metal_device.hpp), the ones
-//              the Metal backend draws with: its textures are ours to sample, and our presents are ordered after
-//              its frames.
+//   window     an SDL window (SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY) with SDL's
+//              Metal view, whose CAMetalLayer draws with the program's one Metal device and command queue
+//              (src/gpu/metal_device.hpp), the ones the Metal backend draws with: its textures are ours to sample,
+//              and our presents are ordered after its frames. The window's size is in points (480x272 times the
+//              window-size setting); the layer's drawable is that size in the display's pixels (task 065), kept so
+//              on every pixel-size change, so a Retina display shows the picture unblurred by the system.
 //   input      the window's events as the Vulkan renderer's pump handles them (close, gamepads coming and going,
 //              the captured mouse, the interface's event hook); the pad from host::SdlPad, which the Vulkan
 //              shell shares, so the keyboard, the gamepad, the input script's keys and its virtual gamepad reach
@@ -64,6 +66,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -138,7 +141,8 @@ public:
             // A missing gamepad subsystem is not fatal; the keyboard still drives the pad.
             if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) std::cout << "[pad] no gamepad support: " << SDL_GetError() << "\n";
             else input_.scan_gamepads();
-            SDL_WindowFlags flags = SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE;
+            // The drawable in the display's pixels, not in points the system then upscales (task 065).
+            SDL_WindowFlags flags = SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
             if (player.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
             const std::uint32_t scale = std::clamp<std::uint32_t>(player.window_scale, 1u, pk::settings::kMaxWindowScale);
             const std::string title = config.title.empty() ? default_title() : config.title;
@@ -171,6 +175,7 @@ public:
             layer_.colorspace = srgb;
             CGColorSpaceRelease(srgb);
             layer_.displaySyncEnabled = present_mode_ != pk::settings::PresentMode::Immediate;
+            update_drawable_size();
 
             NSError *failure = nil;
             id<MTLLibrary> library = [device_ newLibraryWithSource:@(kShaderSource) options:nil error:&failure];
@@ -214,9 +219,7 @@ public:
 
             update_display_info();
             ready_ = true;
-            const CGSize size = layer_.drawableSize;
-            std::cout << "[shell] metal: " << device_.name.UTF8String << ", window "
-                      << static_cast<int>(size.width) << "x" << static_cast<int>(size.height) << ", "
+            std::cout << "[shell] metal: " << device_.name.UTF8String << ", window " << window_size() << ", "
                       << (layer_.displaySyncEnabled ? "vsync" : "no vsync") << std::endl;
             return true;
         }
@@ -269,7 +272,11 @@ public:
             if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) quit_ = true;
             if (event.type == SDL_EVENT_GAMEPAD_ADDED) input_.open_gamepad(event.gdevice.which);
             if (event.type == SDL_EVENT_GAMEPAD_REMOVED) input_.close_gamepad(event.gdevice.which);
-            if (event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) update_display_info();
+            // A resize, full screen and back, a move to a display of another density: the drawable follows.
+            if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
+                update_drawable_size();
+                update_display_info();
+            }
             // The mouse, while captured for the game; releases always count. With scripted input on, only the
             // script's mouse reaches the game. Touches arrive as mouse events too and never reach it.
             if (event.type == SDL_EVENT_MOUSE_MOTION && mouse_captured_ && event.motion.which != SDL_TOUCH_MOUSEID &&
@@ -547,6 +554,33 @@ private:
         if (wanted) input_.suppress_held = true;
     }
 
+    // The layer's drawable as the window's size in pixels, and its contents scale as the window's pixel density, so
+    // that the drawable maps 1:1 onto the display's pixels (task 065). A new size after start-up is logged once.
+    void update_drawable_size() {
+        if (window_ == nullptr || layer_ == nil) return;
+        int width = 0;
+        int height = 0;
+        if (!SDL_GetWindowSizeInPixels(window_, &width, &height) || width <= 0 || height <= 0) return;
+        if (const float density = SDL_GetWindowPixelDensity(window_); density > 0.0f) layer_.contentsScale = density;
+        const CGSize size = CGSizeMake(width, height);
+        if (!CGSizeEqualToSize(layer_.drawableSize, size)) layer_.drawableSize = size;
+        if (ready_ && !CGSizeEqualToSize(logged_size_, size))
+            std::cout << "[shell] metal: window " << window_size() << std::endl;
+        logged_size_ = size;
+    }
+
+    // "960x544 points, 1920x1088 pixels, 2x": the window's size, its drawable's, and the pixel density.
+    std::string window_size() const {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSize(window_, &width, &height);
+        const CGSize pixels = layer_.drawableSize;
+        std::ostringstream text;
+        text << width << "x" << height << " points, " << static_cast<int>(pixels.width) << "x"
+             << static_cast<int>(pixels.height) << " pixels, " << SDL_GetWindowPixelDensity(window_) << "x";
+        return text.str();
+    }
+
     void update_display_info() {
         float refresh = 0.0f;
         if (window_ != nullptr) {
@@ -608,7 +642,9 @@ private:
     // Nearest when the sharp-screen setting asks for it, and whenever the picture is shown at a whole multiple of
     // its own size, where each of its pixels covers whole pixels of the window: linear filtering would only blend
     // neighbours there. That is how the Vulkan shell shows a frame at its default settings (its 2x target copied
-    // 1:1 into the 2x window), and it gives the frame regression suite the backend's pixels back exactly.
+    // 1:1 into the 2x window), and it gives the frame regression suite the backend's pixels back exactly. The
+    // viewport is in the drawable's pixels: the default 960x544-point window on a 2x display is 1920x1088, a whole
+    // 4x of a 480x272 picture.
     id<MTLSamplerState> sampler_for(id<MTLTexture> picture, const MTLViewport &viewport) const {
         if (sharp_) return nearest_;
         const auto width = static_cast<std::uint64_t>(viewport.width);
@@ -769,6 +805,7 @@ private:
     Clock::time_point fast_forward_shown_{};
     std::deque<Clock::time_point> presents_;  // the last second's, for frame_rate_now()
 
+    CGSize logged_size_{};  // the drawable's size the log last named
     pk::settings::PresentMode present_mode_{pk::settings::PresentMode::Fifo};
     pk::settings::Aspect aspect_{pk::settings::Aspect::Original};
     bool sharp_{};
