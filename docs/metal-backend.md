@@ -174,7 +174,8 @@ both private to the GPU: internal scale 1, as D-002 asks first.
   texel is pixel (x, y) of the target, the sampler clamps at the target's edges, and a 5650 texture reads alpha 1. A
   draw that samples the target it draws into reads a copy made by a blit when the target has changed (which ends
   the pass); any other target is sampled directly, Metal ordering the passes. The frontend reads no target; the
-  race's billboards and bloom do ("The bloom chain").
+  race's billboards and bloom do ("The bloom chain"). The GE's wrap mode applies to such a texture as to any other
+  (below).
 - **From guest memory.** Anything else is decoded with the framework's `decode_texture` (every PSP format to
   RGBA8888; no decoder of our own) and cached by its contents: the key hashes the address, size, format, buffer
   width and swizzle, every byte of the texels the decoder reads, and for the palette formats the CLUT address,
@@ -184,6 +185,19 @@ both private to the GPU: internal scale 1, as D-002 asks first.
   uses one keeps it alive). A texture that cannot be decoded is drawn white and logged once. A texture with mip
   levels (task 037) is one mipmapped texture, its key covering every level's address, size, row length and texels
   ("Mipmaps").
+
+The wrap of a target sampled as a texture (task 063). A texture of its own is wrapped by its sampler (REPEAT or clamp
+to edge, per axis, from the GE's wrap register). A target's texture covers part of a 480x272 image, so its sampler
+clamps at the image's edges and the wrap is done in `ge.metal`: the vertex function hands on the texture's own
+coordinate (the UV times the scale plus the offset, or the mapped s and t of modes 1 and 2), and the fragment function
+(`place_in_target`) takes it modulo 1 on a REPEAT axis or holds it between the centres of the texture's edge texels on
+a CLAMP axis, then places it in the image (`FragmentUniforms::uv_remap`: the texture's size and its first texel over
+480x272; `wrap` says it is a target and which axes clamp). The billboards need it: each screen samples its 128x128
+advert with v scale -1 and REPEAT, so the GE reads -v modulo 1, that is 1 - v: the strip's v runs against the target's
+rows, and the advert comes out upright, as in PPSSPP. Clamped at the image's edge, -v gave row 0 for every pixel and
+the screens showed the advert's first row stretched into vertical bars (docs/fidelity.md, difference 15). The bloom
+chain's draws clamp with coordinates inside the texture, which the change leaves alone. The Vulkan renderer does the
+same since task 063 (patch 0015-vulkan-fb-texture-wrap).
 
 In the frontend route 57 textures are decoded by frame 600 and 347 by frame 2130, over 19853 draws: unchanged
 textures are found again rather than decoded. (The language page draws the paused intro movie's picture as a

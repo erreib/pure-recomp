@@ -49,9 +49,10 @@ draw with the depth test off and no depth writes, so colour and depth alias the 
 2. Billboards, four render-to-texture rounds. Target 0x04154000 565 stride 128, depth 0x0415C000 stride 128, scissor
    128x128. Each round clears (draws 1, 27, 46, 70), draws a small 3D scene (21, 14, 19 and 6 draws), switches back to
    0x04088000 and draws a billboard frame whose last draw (26, 45, 69, 82) binds texture 0x04154000, 565, 128x128,
-   bufw 128, linear, bilinear, transform mode, v scale -1 (flipped). That texture is the colour target the round
-   just drew (dump VRAM flags 5: a target, drawn to). Opaque, depth test GREATER with writes. [Ours: rounds of 37,
-   12, 7 and 6 draws after the clear at that moment; same addresses and formats.]
+   bufw 128, linear, bilinear, transform mode, v scale -1 (flipped: the wrap is REPEAT, and the GE's REPEAT takes -v
+   modulo 1, so the strip reads the target's rows from the far end; both backends since task 063). That texture is the
+   colour target the round just drew (dump VRAM flags 5: a target, drawn to). Opaque, depth test GREATER with writes.
+   [Ours: rounds of 37, 12, 7 and 6 draws after the clear at that moment; same addresses and formats.]
 3. Opaque world into 0x04088000 (draws 77-602, the fourth billboard at 82 among them) with depth writes, ending with
    the five sky-cube faces (598-602, RAM CLUT8 256x256 textures). Materials write the bloom mask through the
    stencil, which on the PSP is the 8888 alpha channel: STENCILTEST ALWAYS with ref 0x04 for most materials, 0xFF for

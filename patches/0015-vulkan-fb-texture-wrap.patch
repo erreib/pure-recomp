@@ -1,0 +1,260 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index 4de7478..73f2e2a 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -58,11 +58,15 @@ layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput ta
+ layout(push_constant) uniform Push {
+     mat4 transform;
+     vec4 viewport;
+-    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q, +32 x mip rule, +128 linear mip, +256 x (mip constant + 2048)), y: texture function, z: alpha ref, w: alpha func
++    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q, +32 x mip rule, +128 linear mip, +256 x (mip constant + 2048), or +kPlaced without mip levels), y: texture function, z: alpha ref, w: alpha func
+     vec4 uv_transform;
+     vec4 view_z;
+ } push;
+ 
++// texture_params.x: the texture is a render target, placed in its copy by
++// frag_uv_rect (ge.vert).
++const int kPlaced = 1 << 20;
++
+ // Only the fog colour is read here; the block is described in ge.vert.
+ layout(set = 1, binding = 0) uniform Environment {
+     vec4 ambient;
+@@ -194,15 +198,26 @@ void main() {
+         // Texture map mode 1 (texture_params.x bit 4): s and t divided by q.
+         int flags = int(push.texture_params.x + 0.5);
+         vec2 uv = (flags & 16) != 0 ? frag_texcoord / frag_q : frag_texcoord;
+-        uv = clamp(uv, frag_uv_rect.xy, frag_uv_rect.zw);
++        bool placed = (flags & kPlaced) != 0;
++        if (!placed) uv = clamp(uv, frag_uv_rect.xy, frag_uv_rect.zw);
+         // A texture with mip levels (texture_params.x bits 5 and 6 the rule).
+         bool mipmapped = (flags & 96) != 0;
+         float lod = mipmapped ? mip_lod(flags) : 0.0;
+-        // The GE's clamp wrap mode, per axis (texture_params.x bits 1 and 2):
+-        // the sampler repeats, so the coordinate stays between the centres of
+-        // the edge texels, which is what clamping to the edge samples (of the
+-        // smaller of the two levels sampled).
+-        if ((flags & 6) != 0) {
++        if (placed) {
++            // A render target sampled as the texture: the GE's wrap in the
++            // texture's own coordinates, per axis (bits 1 and 2: between the
++            // centres of its edge texels; else repeat, modulo 1, so a v scale
++            // of -1 shows it upside down), then its place in the target's
++            // copy, whose sampler clamps at the target's edges. Its size in
++            // texels is its share of the target's PSP pixels (viewport.xy).
++            vec2 half_texel = 0.5 / (frag_uv_rect.xy * push.viewport.xy);
++            uv = mix(fract(uv), clamp(uv, half_texel, 1.0 - half_texel), bvec2((flags & 2) != 0, (flags & 4) != 0));
++            uv = uv * frag_uv_rect.xy + frag_uv_rect.zw;
++        } else if ((flags & 6) != 0) {
++            // The GE's clamp wrap mode, per axis (texture_params.x bits 1 and
++            // 2): the sampler repeats, so the coordinate stays between the
++            // centres of the edge texels, which is what clamping to the edge
++            // samples (of the smaller of the two levels sampled).
+             vec2 half_texel = 0.5 / vec2(textureSize(guest_texture, int(ceil(lod))));
+             if ((flags & 2) != 0) uv.x = clamp(uv.x, half_texel.x, 1.0 - half_texel.x);
+             if ((flags & 4) != 0) uv.y = clamp(uv.y, half_texel.y, 1.0 - half_texel.y);
+diff --git a/host/gpu/shaders/ge.vert b/host/gpu/shaders/ge.vert
+index fdbb5b8..f94e8b1 100644
+--- a/host/gpu/shaders/ge.vert
++++ b/host/gpu/shaders/ge.vert
+@@ -162,7 +162,10 @@ layout(location = 3) out float frag_fog;
+ // Through-mode tiles: the texture coordinates the tile may sample, as min.xy,
+ // max.xy. The vertex carries them in texels, in in_normal.xy and
+ // (in_normal.z, in_position.w), which through-mode vertices do not use
+-// otherwise; see clamp_through_quads() in vulkan_renderer.cpp.
++// otherwise; see clamp_through_quads() in vulkan_renderer.cpp. A draw that
++// samples a render target (texture_params.x + kPlaced) has instead the
++// texture's place in the target's copy, uv * xy + zw (the object block's
++// uv_remap), which ge.frag applies after the GE's wrap.
+ layout(location = 4) flat out vec4 frag_uv_rect;
+ // Texture map mode 1: q, which the fragment shader divides s and t by
+ // (texture_params.x bit 4); 1 otherwise.
+@@ -177,11 +180,14 @@ out float gl_ClipDistance[3];
+ layout(push_constant) uniform Push {
+     mat4 transform;      // WVP, or identity for through vertices
+     vec4 viewport;       // xy: target size in PSP pixels, z: through, w: 1 fog + 2 lighting
+-    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q), y: texture function, z: alpha ref, w: alpha func
++    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q, +kPlaced), y: texture function, z: alpha ref, w: alpha func
+     vec4 uv_transform;   // xy: scale, zw: offset
+     vec4 view_z;         // row of view * world that gives view-space z
+ } push;
+ 
++// texture_params.x: the texture is a render target, placed by uv_remap.
++const int kPlaced = 1 << 20;
++
+ // The lighting environment, shared by every draw until the game changes it;
+ // the layout matches EnvironmentBlock on the host. Colours are 0..1; small
+ // integers are stored as floats.
+@@ -211,6 +217,7 @@ layout(set = 1, binding = 1) uniform Object {
+     vec4 texture_map;       // x: mode, y: the texture matrix's source, z, w: the shade lights of s and t
+     mat4 texture_matrix;    // the GE's 4x3 texture matrix
+     vec4 viewer;            // xyz: the viewer's direction in world space; w: reverse normals
++    // A draw that samples a render target (texture_params.x + kPlaced):
+     vec4 uv_remap;          // the texture's coordinates into the image sampled: uv * xy + zw
+ } object;
+ 
+@@ -287,9 +294,9 @@ vec3 unit_or_zero(vec3 v) {
+ // The texture coordinates of the texture matrix (mode 1) and the environment
+ // map (mode 2), by the GE's rules as PPSSPP's hardware notes give them (the
+ // UV modes; lighting, "Shade mapping"). Neither takes the texture scale and
+-// offset; uv_remap only places the texture in the image sampled.
++// offset. A render target sampled as the texture is placed in its copy by
++// ge.frag, as for mode 0.
+ void map_texture() {
+-    vec4 remap = object.uv_remap;
+     if (int(object.texture_map.x + 0.5) == 1) {
+         // The source with the matrix's translation added, times the matrix:
+         // s, t and q, interpolated and divided per pixel.
+@@ -300,7 +307,7 @@ void map_texture() {
+         else if (which == 2) source = unit_or_zero(in_normal);
+         else source = in_normal;
+         vec3 stq = (object.texture_matrix * vec4(source, 1.0)).xyz;
+-        frag_texcoord = vec2(stq.x * remap.x + stq.z * remap.z, stq.y * remap.y + stq.z * remap.w);
++        frag_texcoord = stq.xy;
+         frag_q = stq.z;
+         return;
+     }
+@@ -325,7 +332,7 @@ void map_texture() {
+         if (int(lighting.light_attenuation[light].w + 0.5) == 1) to_light = unit_or_zero(to_light + object.viewer.xyz);
+         st[i] = (dot(normal, to_light) * inverse_length + 1.0) * 0.5;
+     }
+-    frag_texcoord = st * remap.xy + remap.zw;
++    frag_texcoord = st;
+ }
+ 
+ void main() {
+@@ -338,13 +345,16 @@ void main() {
+     frag_fog = 1.0;
+     frag_q = 1.0;
+     frag_uv_rect = vec4(-1e30, -1e30, 1e30, 1e30);
++    bool placed = (int(push.texture_params.x + 0.5) & kPlaced) != 0;
++    if (placed) frag_uv_rect = object.uv_remap;
+     gl_ClipDistance[0] = 1.0;
+     gl_ClipDistance[1] = 1.0;
+     gl_ClipDistance[2] = 1.0;
+     if (push.viewport.z > 0.5) {
+         vec4 rect = vec4(in_normal.xy, in_normal.z, in_position.w);
+-        frag_uv_rect = vec4(rect.xy * push.uv_transform.xy + push.uv_transform.zw,
+-                            rect.zw * push.uv_transform.xy + push.uv_transform.zw);
++        if (!placed)
++            frag_uv_rect = vec4(rect.xy * push.uv_transform.xy + push.uv_transform.zw,
++                                rect.zw * push.uv_transform.xy + push.uv_transform.zw);
+         // Screen-space vertices: pixels to clip space.
+         vec2 ndc = vec2(in_position.x / push.viewport.x, in_position.y / push.viewport.y) * 2.0 - 1.0;
+         gl_Position = vec4(ndc, clamp(in_position.z / 65535.0, 0.0, 1.0), 1.0);
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index fe33c67..51e8bac 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -129,7 +129,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
+ struct PushConstants {
+     std::array<float, 16> transform{};
+     std::array<float, 4> viewport{};        // x,y: target size; z: through flag; w: 1 fog + 2 lighting + 4 stencil
+-    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v + 8 mapped + 16 q, y: function, z: alpha ref, w: alpha func
++    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v + 8 mapped + 16 q (+ 2^20 placed), y: function, z: alpha ref, w: alpha func
+     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
+     std::array<float, 4> view_z{};          // row of view * world that gives view-space z, for fog
+ };
+@@ -138,6 +138,11 @@ struct PushConstants {
+ static_assert(sizeof(PushConstants) == 128u, "PushConstants must fit the guaranteed push constant size");
+ constexpr float kPushFog = 1.0f;
+ constexpr float kPushLighting = 2.0f;
++// texture_params.x: the texture is a render target placed in the copy's
++// sub-rectangle by the object block's uv_remap after the GE's wrap
++// (ge.vert, ge.frag). A target has no mip levels, so the mip bits (5 to 19)
++// are clear beside it.
++constexpr float kPushPlaced = 1048576.0f;
+ // The fragment shader stores the stencil value in bits 3..10 of viewport.w as
+ // the target's alpha instead of the fragment's (stencil_alpha below).
+ constexpr float kPushStencilAlpha = 4.0f;
+@@ -244,8 +249,9 @@ struct ObjectBlock {
+     std::array<float, 4> material_specular{}; // w: reverse normals
+     // A texture-mapped draw's (texture map mode 1 or 2): the mode, the
+     // matrix's source, the two shade lights; the texture matrix; the viewer's
+-    // direction in world space (w: reverse normals); the texture's place in
+-    // the image sampled, uv * xy + zw.
++    // direction in world space (w: reverse normals). A draw that samples a
++    // render target, mapped or not: the texture's place in the image
++    // sampled, uv * xy + zw.
+     std::array<float, 4> texture_map{};
+     std::array<float, 16> texture_matrix{};
+     std::array<float, 4> viewer{};
+@@ -6242,10 +6248,16 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             ? call.texture_map.map_mode
+             : 0u;
+     const bool mapped = map_mode != 0u;
++    // A render target sampled as the texture: ge.frag wraps the texture's own
++    // coordinates by the GE's wrap mode, then places them in the target's
++    // copy by the object block's uv_remap (kPushPlaced, set below with the
++    // copy's descriptor).
++    const bool placed = framebuffer_source.target != nullptr;
+ 
+     // Lighting and fog read the environment block; lit and texture-mapped
+-    // draws also read an object block. Each is written into the vertex buffer
+-    // only when it changed, and the vertices follow whatever was written.
++    // draws, and draws that sample a target, also read an object block. Each
++    // is written into the vertex buffer only when it changed, and the
++    // vertices follow whatever was written.
+     const bool fogged = call.fog.enabled && !no_fog && !call.through && !call.clear_mode;
+     const auto view_world = multiply(call.view, call.world);
+     // CLIPENABLE's depth clamp (patch 0013; PPSSPP's hardware notes, "Z
+@@ -6290,7 +6302,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         impl.environment_version = call.environment_version;
+         impl.environment_depth = clamp_values;
+     }
+-    if (lit || mapped) {
++    if (lit || mapped || placed) {
+         const LightingState &state = call.lighting;
+         ObjectBlock object{};
+         object.world = call.world;
+@@ -6322,15 +6334,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             if (length > 0.0f)
+                 for (float &value : viewer) value /= length;
+             object.viewer = {viewer[0], viewer[1], viewer[2], state.reverse_normals ? 1.0f : 0.0f};
+-            // A target sampled as the texture: the mapped coordinates are
+-            // placed in it as uv_transform places the UVs below.
+-            if (framebuffer_source.target != nullptr) {
+-                const float width = static_cast<float>(call.texture.width);
+-                const float height = static_cast<float>(call.texture.height);
+-                object.uv_remap = {width / static_cast<float>(kPspWidth), height / static_cast<float>(kPspHeight),
+-                                   static_cast<float>(framebuffer_source.x) / static_cast<float>(kPspWidth),
+-                                   static_cast<float>(framebuffer_source.y) / static_cast<float>(kPspHeight)};
+-            }
++        }
++        // A target sampled as the texture: its first texel is pixel (x, y)
++        // of a target that holds 480x272 guest pixels at any internal scale.
++        if (placed) {
++            const float width = static_cast<float>(call.texture.width);
++            const float height = static_cast<float>(call.texture.height);
++            object.uv_remap = {width / static_cast<float>(kPspWidth), height / static_cast<float>(kPspHeight),
++                               static_cast<float>(framebuffer_source.x) / static_cast<float>(kPspWidth),
++                               static_cast<float>(framebuffer_source.y) / static_cast<float>(kPspHeight)};
+         }
+         if (!impl.object_valid || std::memcmp(&object, &impl.last_object, sizeof(object)) != 0) {
+             if (!impl.write_uniform(&object, sizeof(object), impl.object_offset)) return;
+@@ -6698,20 +6710,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 ? impl.framebuffer_descriptor(*source.target, call.texture.format == TextureFormat::Rgba5650)
+                 : VK_NULL_HANDLE;
+         if (copy != VK_NULL_HANDLE) {
+-            // Texture coordinates address the game's texture, whose first texel
+-            // is pixel (x, y) of a target that holds 480x272 guest pixels at
+-            // any internal scale.
++            // Texture coordinates address the game's texture, whose place in
++            // the copy is the object block's uv_remap. They stay the texture's
++            // own, and ge.frag applies the GE's wrap (the clamp flags above,
++            // else repeat) before it places them; the copy's sampler clamps
++            // at the target's edges.
+             texture_descriptor = copy;
+-            // The copy's sampler clamps at the target's edges; the shader's
+-            // clamp would take the whole target for the texture.
+-            push.texture_params[0] = 1.0f;
+-            const float width = static_cast<float>(call.texture.width);
+-            const float height = static_cast<float>(call.texture.height);
+-            const std::array<float, 4> uv = push.uv_transform;
+-            push.uv_transform = {uv[0] * width / static_cast<float>(kPspWidth),
+-                                 uv[1] * height / static_cast<float>(kPspHeight),
+-                                 (uv[2] * width + static_cast<float>(source.x)) / static_cast<float>(kPspWidth),
+-                                 (uv[3] * height + static_cast<float>(source.y)) / static_cast<float>(kPspHeight)};
++            push.texture_params[0] += kPushPlaced;
+         } else {
+             texture_levels = impl.mip_levels(memory, call.texture);
+             texture_descriptor = impl.texture_descriptor(memory, call, texture_levels);

@@ -69,10 +69,9 @@ struct VertexUniforms {
     std::array<std::uint32_t, 4> texture_map{};  // mode, projection source, the two shade lights (task 036)
     std::array<float, 16> texture_matrix{};
     std::array<float, 4> viewer{};
-    std::array<float, 4> uv_remap{1.0f, 1.0f, 0.0f, 0.0f};
     std::array<float, 4> depth{};  // the depth clamp (task 040): the GE's z scale and offset, MINZ, MAXZ
 };
-static_assert(sizeof(VertexUniforms) == 256u, "VertexUniforms must match shaders/ge.metal");
+static_assert(sizeof(VertexUniforms) == 240u, "VertexUniforms must match shaders/ge.metal");
 
 struct Light {
     std::array<float, 4> position{};
@@ -119,8 +118,13 @@ struct FragmentUniforms {
     std::array<float, 4> fix_destination{};
     std::array<std::uint32_t, 4> dither{};
     std::array<std::uint32_t, 4> target{};
+    // A target sampled as the texture (task 063): the texture's place in the 480x272 image, uv * xy + zw, applied
+    // after the GE's wrap in the texture's own coordinates; x of `wrap` 1 when both apply, y and z 1 when s and t
+    // clamp (0: they repeat).
+    std::array<float, 4> uv_remap{1.0f, 1.0f, 0.0f, 0.0f};
+    std::array<std::uint32_t, 4> wrap{};
 };
-static_assert(sizeof(FragmentUniforms) == 208u, "FragmentUniforms must match shaders/ge.metal");
+static_assert(sizeof(FragmentUniforms) == 240u, "FragmentUniforms must match shaders/ge.metal");
 
 // FragmentUniforms::level.x: how the level is chosen. None samples level 0 with the derivatives Metal takes (a
 // texture without levels); the others are TEXLEVEL's modes 0 to 2 plus one, the level computed in the shader.

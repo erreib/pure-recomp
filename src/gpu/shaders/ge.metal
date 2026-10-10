@@ -46,8 +46,6 @@ struct VertexUniforms {
     uint4 texture_map;
     float4x4 texture_matrix;  // the GE's 4x3 texture matrix, column major as the others
     float4 viewer;        // xyz: the viewer's direction in world space (the view matrix's third column, normalized)
-    float4 uv_remap;      // modes 1 and 2: the texture's coordinates into the image sampled, uv * xy + zw (a target
-                          // sampled as a texture covers part of it); identity otherwise
     // The depth clamp (task 040), for transformed draws with mode.w 1 (CLIPENABLE on): x and y the GE viewport's z
     // scale and offset, z and w MINZ and MAXZ.
     float4 depth;
@@ -102,6 +100,9 @@ struct FragmentUniforms {
     uint4 dither;         // DITH0 to DITH3: the matrix's rows for y & 3, four signed 4-bit offsets each, x & 3's at
                           // bits 4 x (x & 3)
     uint4 target;         // x: the target's format (0 5650, 1 5551, 2 4444), y: 1 when the draw dithers
+    // A target sampled as the texture (task 063, place_in_target):
+    float4 uv_remap;      // the texture's place in the 480x272 image, uv * xy + zw
+    uint4 wrap;           // x: 1 for a target (the wrap and uv_remap apply), y, z: 1 when s, t clamp (0: repeat)
 };
 
 // What ge_fragment_dual hands the blend: the colour with the stored alpha, and the fragment's own alpha as the
@@ -211,7 +212,7 @@ float3 unit_or_zero(float3 v) {
 
 // The texture coordinates of the texture matrix (mode 1) and the environment map (mode 2), by the GE's rules as
 // PPSSPP's hardware notes give them (docs/metal-backend.md, "Texture mapping modes"). Neither takes the texture
-// scale and offset; uv_remap only places the texture in the image sampled.
+// scale and offset. A target sampled as the texture is placed in its image by the fragment function, as for mode 0.
 float3 map_texture(const GeVertex v, constant VertexUniforms &u, constant LightingUniforms &l) {
     if (u.texture_map.x == 1u) {
         // The source, as three components with the matrix's translation added (a fourth component of 1), times
@@ -223,9 +224,7 @@ float3 map_texture(const GeVertex v, constant VertexUniforms &u, constant Lighti
         case 2u: source = unit_or_zero(v.normal.xyz); break;
         default: source = v.normal.xyz; break;
         }
-        const float3 stq = (u.texture_matrix * float4(source, 1.0f)).xyz;
-        return float3(fma(stq.x, u.uv_remap.x, stq.z * u.uv_remap.z), fma(stq.y, u.uv_remap.y, stq.z * u.uv_remap.w),
-                      stq.z);
+        return (u.texture_matrix * float4(source, 1.0f)).xyz;
     }
     // The environment map: s and t are (N.L' + 1) / 2 for the two shade lights, in world space, where N is the
     // normal through the world matrix (the dot product divided by its length), and L' the light's position for a
@@ -247,7 +246,7 @@ float3 map_texture(const GeVertex v, constant VertexUniforms &u, constant Lighti
         if (light.mode.z == 1u) to_light = unit_or_zero(to_light + u.viewer.xyz);
         st[i] = (dot(normal, to_light) * inverse_length + 1.0f) * 0.5f;
     }
-    return float3(fma(st, u.uv_remap.xy, u.uv_remap.zw), 1.0f);
+    return float3(st, 1.0f);
 }
 
 vertex VertexOut ge_vertex(uint vid [[vertex_id]],
@@ -312,8 +311,19 @@ float ge_log16(float x) {
 // gives as 1/w), times the texture matrix's q; s and t are the texture coordinates times q, whose screen
 // gradients g takes, in texels. D is clamped to the levels the texture has; the sampler's mip filter takes the
 // nearest level or blends the two around it.
+// A target sampled as the texture (task 063): the GE's wrap in the texture's own coordinates, per axis, then the
+// texture's place in the target's 480x272 image (u.uv_remap), whose sampler clamps at the image's edges. REPEAT takes
+// the coordinate modulo 1 (a v scale of -1 shows the texture upside down: the billboards); CLAMP holds it between the
+// centres of the texture's edge texels. A texture of its own is wrapped by its sampler instead.
+float2 place_in_target(float2 uv, constant FragmentUniforms &u) {
+    const float2 half_texel = 0.5f / (u.uv_remap.xy * float2(480.0f, 272.0f));
+    const float2 wrapped = select(fract(uv), clamp(uv, half_texel, 1.0f - half_texel), u.wrap.yz != 0u);
+    return fma(wrapped, u.uv_remap.xy, u.uv_remap.zw);
+}
+
 float4 sample_texture(Varyings in, constant FragmentUniforms &u, texture2d<float> image, sampler image_sampler) {
-    const float2 uv = u.texture.w != 0u ? in.uv.xy / in.uv.z : in.uv.xy;
+    float2 uv = u.texture.w != 0u ? in.uv.xy / in.uv.z : in.uv.xy;
+    if (u.wrap.x != 0u) uv = place_in_target(uv, u);
     if (u.level.x == 0.0f) return image.sample(image_sampler, uv);
     const float q = in.position.w * in.uv.z;
     float d = u.level.y;

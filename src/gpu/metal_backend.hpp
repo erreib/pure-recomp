@@ -136,8 +136,7 @@ private:
     void translate_blend(const BlendState &blend, RenderKey &key, FragmentUniforms &fragment,
                          std::uint32_t &blend_color);
     void fill_lighting(const DrawCall &call, bool lit, bool fogged, bool shade_mapped);
-    void set_texture_map(const DrawCall &call, const Target *source, std::uint32_t source_x, std::uint32_t source_y,
-                         VertexUniforms &vertex, FragmentUniforms &fragment);
+    void set_texture_map(const DrawCall &call, VertexUniforms &vertex, FragmentUniforms &fragment);
     void draw(const DrawCall &call, const GuestMemory &memory);
     void set_pipeline_key(const DrawCall &call, bool sixteen, PipelineKey &key, FragmentUniforms &fragment,
                           std::uint32_t &blend_color, std::uint32_t &stencil_reference, bool &follows);
