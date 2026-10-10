@@ -22,6 +22,9 @@ The data directory (task 034): PURE_DATA_DIR (settings.ini, pipeline caches, log
 so a test run never reads or writes the player's ~/Library/Application Support/pure-recomp/PureNative/ and settings
 changed while playing never reach a test. A new one starts with a settings.ini holding ui.menu_hint_seen=1 (the
 menu hint would sit over a window's first 12 s). The game itself comes from PURE_GAME_DIR (default game/).
+The internal scale (task 066): a run draws at internal scale 1 unless PURE_INTERNAL_SCALE is set, so the checks
+measure the native picture whatever the data directory's settings say.
+
 The clock (task 050): a run without a window and without --sound gets PURE_NO_BUSY_CLOCK=1 (the framework's
 busy-time charge off, so the run does not depend on the machine's load), unless the environment (or --env) names
 it; a window or --sound keeps the framework's charge, as a player has it.
@@ -157,6 +160,9 @@ def main(argv=None):
     env = dict(os.environ)
     env.setdefault("PURE_GAME_DIR", os.path.join(ROOT, "game"))
     env.setdefault("PURE_LIST_STUBS", "1")
+    # The checks measure the native picture (task 066): a test run draws at internal scale 1 unless the caller
+    # sets PURE_INTERNAL_SCALE (tools/scale_check.sh does); a player's data directory may say otherwise.
+    env.setdefault("PURE_INTERNAL_SCALE", "1")
     headless = opts.shell == "headless"
     window = opts.window or (opts.shell is not None and not headless) or \
         (not headless and (opts.script is not None or opts.shots is not None))

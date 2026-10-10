@@ -396,8 +396,8 @@ check() {
     # audio.mute=1 in DIR/data/settings.ini, which the app reads from PURE_DATA_DIR (the environment has no variable
     # for it, so `open --env` could not pass it). The audio sink still opens the device, at gain 0, as a player's app
     # does with Mute on. The setup wrote the file without the key; of two lines with one key the later one counts.
-    printf 'audio.mute=1\n' >> "$data/settings.ini"
-    echo "silent: audio.mute=1 in $data/settings.ini for route and finder"
+    printf 'audio.mute=1\nvideo.internal_scale=1\n' >> "$data/settings.ini"
+    echo "silent, native: audio.mute=1 and video.internal_scale=1 in $data/settings.ini for route and finder"
     route_check "$dir" "$data" "$script"
     finder_check "$dir" "$data" "$script"
     prewarm_check "$dir"
