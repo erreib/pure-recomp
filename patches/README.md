@@ -58,6 +58,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0013-vulkan-colortest-depthclamp | (task 059) | Missing feature | candidate | The GE's colour test (NEVER, ALWAYS, EQUAL, NOTEQUAL under COLORTESTMASK against COLORREF, a discard after fog) and CLIPENABLE's depth clamp (near plane only, screen z clamped per vertex, MINZ/MAXZ as clip distances, `depthClampEnable`) drawn by the Vulkan renderer, as the Metal backend draws them; `<prefix>_NO_COLOR_TEST` and `<prefix>_NO_DEPTH_CLAMP` restore the old paths |
 | 0014-vulkan-16bit-dither | (task 060) | Fidelity | candidate | Draws into 5650, 5551 and 4444 targets blended in `ge.frag` on the colour read as the render pass's own input attachment, then dithered by the GE's matrix and cut to the format's bits, as the Metal backend's `ge_fragment_16`; `<prefix>_NO_DITHER` draws them at 8 bits a channel as before; `<prefix>_SHOW_TARGET` presents an offscreen target |
 | 0015-vulkan-fb-texture-wrap | (task 063) | Fidelity | candidate | A render target sampled as a texture takes the GE's wrap mode: the texture's own coordinates wrapped per axis (REPEAT modulo 1, CLAMP between the centres of the edge texels) in `ge.frag`, then placed in the target's copy, as the Metal backend does; the billboards' adverts show instead of their first row stretched into bars |
+| 0016-menu-rows-by-capability | (task 064) | Behaviour, tooling | candidate | The Esc menu draws a row only when its feature exists: `GameProfile::features` (`MenuFeatures`: ad hoc play, the right-stick camera, the mouse camera) and five `Shell` answers (frame interpolation, the performance overlay, each aspect, touch controls, the API's name), every default today's; `<prefix>_MENU_DUMP` prints each tab's rows when the menu opens |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -354,3 +355,21 @@ takes the coordinate (divided by q in mode 1) modulo 1 on a repeating axis or cl
 texture's edge texels (half a texel of the texture's own size, its share of the target's PSP pixels) on a clamping
 one, then places it. Ordinary textures are drawn as before. At an internal scale above 1 a through-mode draw that
 samples a target (the bloom's tiles) loses the tile clamp of `clamp_through_quad`, which only acts there.
+
+### 0016-menu-rows-by-capability
+Task 064 (D-014). The Esc menu (`host/ui/menu.cpp`) drew the framework's first game's rows for every game and every
+shell. Two sets of gates now decide which rows are drawn; a hidden row keeps its settings key and value.
+- The game's: `GameProfile::features` (`MenuFeatures` in `host/profile.hpp`): `adhoc` (the Network tab and the System
+  tab's "Pause during multiplayer"; without it the menu turns `network.adhoc` off when it opens, so the game sees the
+  wireless switch off), `right_stick_camera` (the Right stick row's Camera choice and the two camera inversion rows;
+  a Camera setting is shown as Off, which it is for a game that never reads the second stick's bytes) and
+  `mouse_camera` (Mouse, Mouse sensitivity and the two mouse inversion rows; the bindings stay).
+- The shell's: `Shell::supports_frame_interpolation()` (Frame rate, Lower when behind), `supports_perf_overlay()`
+  (Performance, the F3 row), `supports_aspect(Aspect)` (the Aspect ratio row's choices; an aspect not offered shows as
+  Original), `supports_touch()` (the Touch screen section) and `api_name()` (the System tab's "<api> on <device>").
+Every default is today's behaviour (all true; `api_name()` is the shell's registered name with a capital, "Vulkan"),
+so a game that sets nothing and the Vulkan shell draw every row they drew before. Restore video defaults restores the
+rows shown only. `<prefix>_MENU_DUMP` (tests): when the menu opens, its first frames draw each tab once and print
+`[menu] tabs: ...` and one `[menu] <Tab>: <rows>` line a tab, the labels in draw order, the offered choices of Aspect
+ratio and Right stick and the Graphics line in parentheses, and the rows another screen's code draws as one entry
+(`[font rows]`, `[texture pack rows]`, `[save rows]`).

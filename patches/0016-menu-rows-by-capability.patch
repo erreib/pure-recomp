@@ -1,0 +1,517 @@
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 8ffdb28..e8072a0 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -117,6 +117,21 @@ struct ProfileVariant {
+     std::span<const std::uint32_t> overlay_slots = {};
+ };
+ 
++// What a game has of the features the in-game menu offers rows for (ui/menu.cpp). The menu draws a feature's rows
++// only when the game has it; hidden rows keep their settings. The defaults are the framework's first game's, which
++// has them all.
++struct MenuFeatures {
++    // Ad hoc play: the Network tab and the System tab's "Pause during multiplayer". Without it the wireless switch
++    // stays off: the menu turns it off when it opens.
++    bool adhoc = true;
++    // The HD release's right-stick camera: the Right stick row's Camera choice and the two camera inversion rows.
++    // Without it the right stick presses the D-pad or nothing.
++    bool right_stick_camera = true;
++    // A camera the mouse turns: the Mouse, Mouse sensitivity and the two mouse inversion rows. The bindings of keys
++    // and mouse buttons stay.
++    bool mouse_camera = true;
++};
++
+ struct GameProfile {
+     // --- What the port is called -------------------------------------------
+     const char *app_name;          // the executable: "MHP3rdNative"
+@@ -259,6 +274,10 @@ struct GameProfile {
+     // Where the game caches the glyphs it has drawn. Null: a font changed while
+     // the game runs applies to text the game has not drawn yet.
+     const GlyphCacheLayout *glyph_cache = nullptr;
++
++    // --- The menu ------------------------------------------------------------
++    // Which of the menu's game features the game has (MenuFeatures).
++    MenuFeatures features = {};
+ };
+ 
+ // Defined by the port, exactly once. Everything under host/ reads the game
+diff --git a/host/shell/shell.hpp b/host/shell/shell.hpp
+index 66f9a3e..1abfa11 100644
+--- a/host/shell/shell.hpp
++++ b/host/shell/shell.hpp
+@@ -187,6 +187,30 @@ public:
+     virtual void set_perf_overlay(bool visible) = 0;
+     [[nodiscard]] virtual std::string device_name() const = 0;
+ 
++    // What the shell implements of the features the menu offers rows for
++    // (ui/menu.cpp leaves out the rows of what it does not). The defaults are
++    // the Vulkan shell's, which implements them all.
++    // Frames blended between the game's (set_frame_rate, set_frame_rate_auto):
++    // the Frame rate and Lower when behind rows.
++    [[nodiscard]] virtual bool supports_frame_interpolation() const noexcept { return true; }
++    // The overlay set_perf_overlay shows: the Performance row and F3's.
++    [[nodiscard]] virtual bool supports_perf_overlay() const noexcept { return true; }
++    // set_aspect draws `aspect` as the menu describes it: the Aspect ratio
++    // row's choices (Fill needs a game that widens its view as well).
++    [[nodiscard]] virtual bool supports_aspect(settings::Aspect aspect) const noexcept {
++        (void)aspect;
++        return true;
++    }
++    // The on-screen touch controls: the Touch screen rows.
++    [[nodiscard]] virtual bool supports_touch() const noexcept { return true; }
++    // The graphics API it draws with, for the menu's "<api> on <device_name()>":
++    // by default its registered name with a capital, "Vulkan".
++    [[nodiscard]] virtual std::string api_name() const {
++        std::string api = name();
++        if (!api.empty() && api[0] >= 'a' && api[0] <= 'z') api[0] = static_cast<char>(api[0] - 'a' + 'A');
++        return api;
++    }
++
+     // Interface (Dear ImGui), on a shell with a window. The caller has made the
+     // ImGui context and loaded its fonts; initialize_ui starts ImGui's SDL3
+     // platform backend for the window (the ImGui_ImplSDL3_InitFor... of the API
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 517ffd7..8a797b7 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -48,6 +48,7 @@
+ #include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ #include <filesystem>
+ #include <iostream>
+ #include <functional>
+@@ -109,16 +110,86 @@ std::string file_url(const std::string &path) {
+ 
+ float gain(const settings::Settings &s) { return s.mute ? 0.0f : static_cast<float>(s.volume) / 100.0f; }
+ 
++// <prefix>_MENU_DUMP (for tests): when the menu opens, its first frames draw
++// each tab once and print the tab's rows on the console, one line a tab:
++// "[menu] Video: Display, Window size, ...". Rows another screen's code draws
++// (the fonts, texture packs, saves) are one entry, "[font rows]". These are
++// the rows of the tab being drawn, while it is drawn.
++std::vector<std::string> *g_dumped_rows = nullptr;
++
++// Notes a row for the dump: its label without ImGui's "##" id part.
++void dump_row(const char *label) {
++    if (g_dumped_rows == nullptr) return;
++    const char *hidden = std::strstr(label, "##");
++    g_dumped_rows->emplace_back(label, hidden != nullptr ? hidden : label + std::strlen(label));
++}
++
++// Adds what the dump shows of the row noted last, such as the choices a
++// choice row offers: "Aspect ratio (Original / Stretch)".
++void dump_detail(const std::string &detail) {
++    if (g_dumped_rows != nullptr && !g_dumped_rows->empty()) g_dumped_rows->back() += " (" + detail + ")";
++}
++
++// The rows of widgets.hpp, noted for the dump as they are drawn. They are
++// objects, not functions, so that a call in this file finds them and not, by
++// argument-dependent lookup, widgets.hpp's own as well.
++struct ChoiceRow {
++    int operator()(const char *label, const std::string &value, const RowOptions &options = {}) const {
++        dump_row(label);
++        return ui::choice_row(label, value, options);
++    }
++};
++struct ToggleRow {
++    bool operator()(const char *label, bool value, const RowOptions &options = {}) const {
++        dump_row(label);
++        return ui::toggle_row(label, value, options);
++    }
++};
++struct SliderRow {
++    bool operator()(const char *label, int &value, int minimum, int maximum, int step, const char *format,
++                    const RowOptions &options = {}) const {
++        dump_row(label);
++        return ui::slider_row(label, value, minimum, maximum, step, format, options);
++    }
++};
++struct ButtonRow {
++    bool operator()(const char *label, const RowOptions &options = {}, ImU32 color = colors::kText) const {
++        dump_row(label);
++        return ui::button_row(label, options, color);
++    }
++};
++struct ValueRow {
++    bool operator()(const char *label, const std::string &value, const RowOptions &options = {}) const {
++        dump_row(label);
++        return ui::value_row(label, value, options);
++    }
++};
++struct InfoRow {
++    void operator()(const char *label, const std::string &value) const {
++        dump_row(label);
++        ui::info_row(label, value);
++    }
++};
++constexpr ChoiceRow choice_row{};
++constexpr ToggleRow toggle_row{};
++constexpr SliderRow slider_row{};
++constexpr ButtonRow button_row{};
++constexpr ValueRow value_row{};
++constexpr InfoRow info_row{};
++
+ class Menu {
+ public:
+-    explicit Menu(bool paused) : paused_(paused) {}
++    explicit Menu(bool paused) : paused_(paused), dump_tab_(portablekit::env_set("MENU_DUMP") ? 0 : -1) {}
+     // One frame; false once the menu closes.
+     bool frame();
+     [[nodiscard]] bool quit() const noexcept { return quit_; }
+ 
+ private:
+     enum class Confirm { None, Quit, Setup };
++    enum class Tab { Video, Audio, Controls, Network, System };
+ 
++    // The tabs the game has: Network only with ad hoc play.
++    static std::vector<Tab> tabs();
+     void video();
+     void audio();
+     void controls();
+@@ -133,7 +204,8 @@ private:
+     gpu::VulkanRenderer *renderer() { return active_renderer(); }
+ 
+     bool paused_{};  // the game is paused behind the menu, rather than running
+-    int tab_{};
++    int tab_{};      // in tabs()
++    int dump_tab_{}; // the tab <prefix>_MENU_DUMP draws this frame; -1 once done or without it
+     bool first_frame_{true};
+     bool close_{};
+     bool quit_{};
+@@ -144,8 +216,21 @@ private:
+     std::optional<input::Action> binding_;  // waiting for a key for this control
+ };
+ 
++std::vector<Menu::Tab> Menu::tabs() {
++    std::vector<Tab> shown{Tab::Video, Tab::Audio, Tab::Controls};
++    if (portablekit::game().features.adhoc) shown.push_back(Tab::Network);
++    shown.push_back(Tab::System);
++    return shown;
++}
++
+ bool Menu::frame() {
+     Layer &layer = Layer::get();
++    const std::vector<Tab> shown = tabs();
++    const int count = static_cast<int>(shown.size());
++    const bool dumping = dump_tab_ >= 0 && dump_tab_ < count;
++    if (dumping) tab_ = dump_tab_;
++    tab_ = std::clamp(tab_, 0, count - 1);
++    Tab tab = shown[static_cast<std::size_t>(tab_)];
+     // A text field's keyboard takes the whole screen until it closes.
+     if (text_input_open()) {
+         text_input_frame();
+@@ -161,28 +246,50 @@ bool Menu::frame() {
+     const bool start = ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false);
+     // Back closes the font list, or the save import and export, before it
+     // closes the menu.
+-    const bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
+-                                    (tab_ == 4 && save_screen_open());
++    const bool font_list_was_open = (tab == Tab::Video && (font_list_open() || texture_pack_screen_open())) ||
++                                    (tab == Tab::System && save_screen_open());
+     back_ = back || pad_back;
+ 
+     begin_panel("##menu", portablekit::game().project_name, paused_ ? "Paused" : "Running", true);
+-    static const char *const kTabs[] = {"Video", "Audio", "Controls", "Network", "System"};
+-    const bool switched = tab_bar(kTabs, 5, tab_) || first_frame_;
++    static const char *const kTabNames[] = {"Video", "Audio", "Controls", "Network", "System"};
++    std::vector<const char *> labels;
++    for (const Tab shown_tab : shown) labels.push_back(kTabNames[static_cast<int>(shown_tab)]);
++    if (dumping && dump_tab_ == 0) {
++        std::string line = "[menu] tabs:";
++        for (std::size_t i = 0; i < labels.size(); ++i) line += (i == 0 ? " " : ", ") + std::string(labels[i]);
++        std::cout << line << std::endl;
++    }
++    const bool switched = tab_bar(labels.data(), count, tab_) || first_frame_;
++    tab = shown[static_cast<std::size_t>(tab_)];
+     first_frame_ = false;
+     begin_content();
+     if (switched) {
+         focus_next_row();
+         ImGui::SetScrollY(0.0f);
+     }
+-    switch (tab_) {
+-    case 0: video(); break;
+-    case 1: audio(); break;
+-    case 2: controls(); break;
+-    case 3: network(); break;
+-    default: system(); break;
++    std::vector<std::string> dumped;
++    if (dumping) g_dumped_rows = &dumped;
++    switch (tab) {
++    case Tab::Video: video(); break;
++    case Tab::Audio: audio(); break;
++    case Tab::Controls: controls(); break;
++    case Tab::Network: network(); break;
++    case Tab::System: system(); break;
++    }
++    if (dumping) {
++        g_dumped_rows = nullptr;
++        std::string line = std::string("[menu] ") + kTabNames[static_cast<int>(tab)] + ":";
++        for (std::size_t i = 0; i < dumped.size(); ++i) line += (i == 0 ? " " : ", ") + dumped[i];
++        std::cout << line << std::endl;
++        // Every tab printed: back to the first, focused as when the menu opened.
++        if (++dump_tab_ == count) {
++            dump_tab_ = -1;
++            tab_ = 0;
++            first_frame_ = true;
++        }
+     }
+     begin_footer();
+-    if (tab_ == 4)
++    if (tab == Tab::System)
+         hints({{Control::Confirm, "Select"}, {Control::Back, "Back"}, {Control::Tabs, "Section"},
+                {Control::Menu, "Resume"}});
+     else
+@@ -257,20 +364,35 @@ void Menu::video() {
+ #endif
+     {
+         static const char *const kAspects[] = {"Original", "Stretch", "Fill"};
+-        // Fill is offered only to a game that can widen its own view.
+-        const bool fill = gpu::VulkanRenderer::supports_fill();
+-        const int current = static_cast<int>(gpu::VulkanRenderer::usable_aspect(s.aspect));
++        // Stretch and Fill are offered where the shell draws them, and Fill
++        // only to a game that can widen its own view.
++        std::vector<settings::Aspect> offered{settings::Aspect::Original};
++        if (shell().supports_aspect(settings::Aspect::Stretch)) offered.push_back(settings::Aspect::Stretch);
++        if (gpu::VulkanRenderer::supports_fill() && shell().supports_aspect(settings::Aspect::Fill))
++            offered.push_back(settings::Aspect::Fill);
++        const bool stretch = offered.size() > 1u && offered[1] == settings::Aspect::Stretch;
++        const bool fill = offered.back() == settings::Aspect::Fill;
++        // One that is not offered is drawn as Original, and shown so.
++        const settings::Aspect usable = gpu::VulkanRenderer::usable_aspect(s.aspect);
++        int current = 0;
++        for (std::size_t i = 0; i < offered.size(); ++i)
++            if (offered[i] == usable) current = static_cast<int>(i);
++        const char *value = kAspects[static_cast<int>(offered[static_cast<std::size_t>(current)])];
+         const std::string description =
+-            std::string("Original keeps the PSP's shape with black bars at the sides or top. Stretch fills the "
+-                        "window by stretching the picture.") +
++            std::string("Original keeps the PSP's shape with black bars at the sides or top.") +
++            (stretch ? " Stretch fills the window by stretching the picture." : "") +
+             (fill ? " Fill widens (or narrows) the game's view to the window's shape, keeping its height, and "
+                     "keeps the interface in the PSP's proportions."
+                   : "");
+-        if (const int delta = choice_row("Aspect ratio", kAspects[current], options_for("video.aspect", description))) {
+-            s.aspect = static_cast<settings::Aspect>(cycle(current, delta, fill ? 3 : 2));
++        if (const int delta = choice_row("Aspect ratio", value, options_for("video.aspect", description))) {
++            s.aspect = offered[static_cast<std::size_t>(cycle(current, delta, static_cast<int>(offered.size())))];
+             shell().set_aspect(s.aspect);
+             settings::save();
+         }
++        std::string choices;
++        for (const settings::Aspect aspect : offered)
++            choices += (choices.empty() ? "" : " / ") + std::string(kAspects[static_cast<int>(aspect)]);
++        dump_detail(choices);
+     }
+     if (choice_row("Scaling filter", s.sharp_screen ? "Sharp" : "Smooth",
+                    options_for("video.sharp_screen", "How the finished picture is scaled to the window: smooth "
+@@ -308,7 +430,10 @@ void Menu::video() {
+             settings::save();
+         }
+     }
+-    if (renderer() != nullptr) texture_pack_rows();
++    if (renderer() != nullptr) {
++        dump_row("[texture pack rows]");
++        texture_pack_rows();
++    }
+     section("Timing");
+     {
+         struct Mode {
+@@ -332,7 +457,11 @@ void Menu::video() {
+             settings::save();
+         }
+     }
+-    {
++    // Frame rates above the game's own, and the overlay, only where the shell
++    // has them.
++    const bool interpolation = shell().supports_frame_interpolation();
++    const bool overlay = shell().supports_perf_overlay();
++    if (interpolation) {
+         // The game's own rate stands first; the rates at or below it are not
+         // offered (a game at 60 has no 45 or 60 to blend up to).
+         const double own_rate = gpu::pacing::game_rate();
+@@ -376,7 +505,7 @@ void Menu::video() {
+             settings::save();
+         }
+     }
+-    {
++    if (interpolation) {
+         RowOptions o = options_for("video.frame_rate_auto",
+                                    "On lowers the frame rate by itself when presenting that often would slow the "
+                                    "game. Off keeps the chosen rate, and the game may then run below full speed.");
+@@ -407,7 +536,7 @@ void Menu::video() {
+             settings::save();
+         }
+     }
+-    {
++    if (overlay) {
+         static const char *const kPerf[] = {"Off", "Overlay", "Overlay and log", "Log only"};
+         const int current = static_cast<int>(s.perf);
+         if (const int delta = choice_row(
+@@ -419,6 +548,7 @@ void Menu::video() {
+             settings::save();
+         }
+     }
++    dump_row("[font rows]");
+     font_rows();
+     ImGui::Dummy({0.0f, font_gap()});
+     if (button_row("Restore video defaults", {false, {}, std::string("Every setting on this page back to how ") + portablekit::game().project_name + " ships."})) {
+@@ -426,19 +556,20 @@ void Menu::video() {
+         const auto restore = [&](const char *key, auto &value, const auto &fallback) {
+             if (settings::overridden_by(key).empty()) value = fallback;
+         };
+-        restore("video.internal_scale", s.internal_scale, d.internal_scale);
++        // Only the rows shown: a hidden row's setting stays as it is.
++        if (renderer() != nullptr) restore("video.internal_scale", s.internal_scale, d.internal_scale);
+         restore("video.fullscreen", s.fullscreen, d.fullscreen);
+         restore("video.window_scale", s.window_scale, d.window_scale);
+         restore("video.aspect", s.aspect, d.aspect);
+         restore("video.sharp_screen", s.sharp_screen, d.sharp_screen);
+-        restore("video.sharp_textures", s.sharp_textures, d.sharp_textures);
+-        restore("video.texture_pack", s.texture_pack, d.texture_pack);
++        if (renderer() != nullptr) restore("video.sharp_textures", s.sharp_textures, d.sharp_textures);
++        if (renderer() != nullptr) restore("video.texture_pack", s.texture_pack, d.texture_pack);
+         restore("video.present_mode", s.present_mode, d.present_mode);
+-        restore("video.frame_rate", s.frame_rate, d.frame_rate);
+-        restore("video.frame_rate_auto", s.frame_rate_auto, d.frame_rate_auto);
++        if (interpolation) restore("video.frame_rate", s.frame_rate, d.frame_rate);
++        if (interpolation) restore("video.frame_rate_auto", s.frame_rate_auto, d.frame_rate_auto);
+         restore("video.unthrottled", s.unthrottled, d.unthrottled);
+         restore("video.fast_loading", s.fast_loading, d.fast_loading);
+-        restore("video.performance", s.perf, d.perf);
++        if (overlay) restore("video.performance", s.perf, d.perf);
+         if (renderer() != nullptr) renderer()->set_internal_scale(s.internal_scale);
+         shell().set_fullscreen(s.fullscreen);
+         shell().set_window_scale(s.window_scale);
+@@ -503,6 +634,7 @@ struct TextField {
+ 
+ bool text_row(const char *id, const char *label, std::string &value, std::size_t max_length, bool allow_empty,
+               const std::function<bool(char32_t)> &allowed, const RowOptions &o) {
++    dump_row(label);
+     static std::map<std::string, TextField> fields;
+     TextField &field = fields[id];
+     bool committed = false;
+@@ -627,16 +759,33 @@ void Menu::controls() {
+             settings::save();
+         }
+     }
++    const MenuFeatures &features = portablekit::game().features;
+     {
+         static const char *const kModes[] = {"Camera", "D-pad", "Off"};
+-        const int current = static_cast<int>(s.right_stick);
++        // Camera only for a game with the HD release's right-stick camera. Any
++        // other never reads the two bytes Camera sends the stick to, so there
++        // it is Off, and shown so.
++        std::vector<settings::RightStick> offered;
++        if (features.right_stick_camera) offered.push_back(settings::RightStick::Camera);
++        offered.push_back(settings::RightStick::DPad);
++        offered.push_back(settings::RightStick::Off);
++        int current = static_cast<int>(offered.size()) - 1;
++        for (std::size_t i = 0; i < offered.size(); ++i)
++            if (offered[i] == s.right_stick) current = static_cast<int>(i);
+         if (const int delta = choice_row(
+-                "Right stick", kModes[current],
+-                options_for("input.right_stick", "Camera uses the HD release's own right-stick camera. D-pad "
+-                                                 "presses the D-pad instead, like the PSP's camera controls."))) {
+-            s.right_stick = static_cast<settings::RightStick>(cycle(current, delta, 3));
++                "Right stick", kModes[static_cast<int>(offered[static_cast<std::size_t>(current)])],
++                options_for("input.right_stick",
++                            features.right_stick_camera
++                                ? "Camera uses the HD release's own right-stick camera. D-pad presses the D-pad "
++                                  "instead, like the PSP's camera controls."
++                                : "D-pad: the right stick presses the D-pad. Off: it presses nothing."))) {
++            s.right_stick = offered[static_cast<std::size_t>(cycle(current, delta, static_cast<int>(offered.size())))];
+             settings::save();
+         }
++        std::string choices;
++        for (const settings::RightStick mode : offered)
++            choices += (choices.empty() ? "" : " / ") + std::string(kModes[static_cast<int>(mode)]);
++        dump_detail(choices);
+     }
+     // On Android a finger drag drives the analog camera whatever the right
+     // stick does, so the row stays open there.
+@@ -683,7 +832,8 @@ void Menu::controls() {
+             }
+         }
+     }
+-    {
++    // The inversion acts on the stick's Camera mode alone.
++    if (features.right_stick_camera) {
+         RowOptions o = options_for("input.invert_camera_x", "Turn the camera the other way left and right.");
+         if (!camera && !o.disabled) {
+             o.disabled = true;
+@@ -735,7 +885,8 @@ void Menu::controls() {
+         settings::save();
+ 
+     section("Keyboard and mouse");
+-    {
++    // The pointer is taken for a camera the mouse turns.
++    if (features.mouse_camera) {
+         RowOptions o = options_for("input.mouse",
+                                    "While the game runs, the window takes the pointer: moving the mouse turns the "
+                                    "camera and its buttons press what they are bound to. Esc opens this menu and "
+@@ -802,7 +953,7 @@ void Menu::controls() {
+         }
+     }
+     info_row("Esc", "This menu");
+-    info_row("F3", "Performance overlay");
++    if (shell().supports_perf_overlay()) info_row("F3", "Performance overlay");
+ 
+     ImGui::Dummy({0.0f, font_gap()});
+     if (button_row("Restore control defaults",
+@@ -838,8 +989,8 @@ void Menu::controls() {
+         settings::save();
+     }
+ 
+-    section("Touch screen");
+-    {
++    if (shell().supports_touch()) {
++        section("Touch screen");
+         RowOptions o = options_for("input.touch_controls",
+                                    "A pad drawn over the game once the screen is touched: a stick that appears "
+                                    "where the left thumb lands, the face buttons on the right, L and R at the top "
+@@ -1207,7 +1358,8 @@ void Menu::system() {
+         s.menu_pause = !s.menu_pause;
+         settings::save();
+     }
+-    if (toggle_row("Pause during multiplayer", s.menu_pause_multiplayer,
++    if (portablekit::game().features.adhoc &&
++        toggle_row("Pause during multiplayer", s.menu_pause_multiplayer,
+                    options_for("ui.menu_pause_multiplayer",
+                                "In ad hoc play the game keeps running behind the menu unless this is on: a paused "
+                                "game stops answering the other players and can drop a quest. Applies the next time "
+@@ -1257,6 +1409,7 @@ void Menu::system() {
+         confirm_ = Confirm::Quit;
+ 
+     section("Saves");
++    dump_row("[save rows]");
+     save_rows();
+ 
+     section("About");
+@@ -1266,7 +1419,9 @@ void Menu::system() {
+     info_row("Data folder", data_dir);
+     if (!savedata::memory_stick().empty())
+         info_row("Saves folder", install::path_to_utf8(savedata::memory_stick() / "PSP" / "SAVEDATA"));
+-    info_row("Graphics", "Vulkan on " + shell().device_name());
++    const std::string graphics = shell().api_name() + " on " + shell().device_name();
++    info_row("Graphics", graphics);
++    dump_detail(graphics);
+     info_row("Interface", std::string("Dear ImGui ") + IMGUI_VERSION);
+ }
+ 
+@@ -1390,6 +1545,13 @@ void note_menu_opened(bool paused) {
+         s.menu_hint_seen = true;
+         settings::save();
+     }
++    // A game without ad hoc play has no Network tab to turn the wireless
++    // switch off in: it is off.
++    if (!portablekit::game().features.adhoc && s.adhoc) {
++        s.adhoc = false;
++        settings::save();
++        adhoc_apply_settings();
++    }
+     std::cout << (paused ? "[menu] opened; the game is paused" : "[menu] opened; the game keeps running")
+               << std::endl;
+     menu_opened_at() = Clock::now();
