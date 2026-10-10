@@ -40,6 +40,8 @@ using pk::Vertex;
 constexpr std::uint32_t kWidth = pk::kScreenWidth;
 constexpr std::uint32_t kHeight = pk::kScreenHeight;
 constexpr std::size_t kPictureBytes = static_cast<std::size_t>(kWidth) * kHeight * 4u;
+// The highest internal scale (D-015): 2880x1632 targets. The settings allow 8; 7 and 8 are drawn at this.
+constexpr std::uint32_t kMaxScale = 6u;
 // Vertex and upload space comes in chunks of this size, reused once the GPU has finished with them.
 constexpr std::size_t kChunkBytes = 4u << 20u;
 constexpr std::size_t kMaxTextures = 1024u;

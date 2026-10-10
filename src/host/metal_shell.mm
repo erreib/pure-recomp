@@ -215,6 +215,9 @@ public:
             update_display_info();
             ready_ = true;
             const CGSize size = layer_.drawableSize;
+            // The Metal backend, made after the shell, reads it for its Auto internal scale (task 066).
+            pure::metal::set_drawable_size(static_cast<std::uint32_t>(size.width),
+                                           static_cast<std::uint32_t>(size.height));
             std::cout << "[shell] metal: " << device_.name.UTF8String << ", window "
                       << static_cast<int>(size.width) << "x" << static_cast<int>(size.height) << ", "
                       << (layer_.displaySyncEnabled ? "vsync" : "no vsync") << std::endl;

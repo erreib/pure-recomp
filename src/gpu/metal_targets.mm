@@ -19,6 +19,9 @@ Target &MetalGeBackend::target_for(const TargetKey &key) {
     if (found != targets_.end()) return *found->second;
     auto target = std::make_unique<Target>();
     target->key = key;
+    // D-015: a screen-wide target (the display buffers, stride 512) at the internal scale; a narrower one (the
+    // billboards' 128, the bloom's 256) at 480x272, so the bloom's blur keeps the PSP's radius on the screen.
+    target->scale = key.stride >= kWidth ? scale_ : 1u;
     MTLTextureDescriptor *descriptor =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                            width:target->width()
@@ -30,6 +33,9 @@ Target &MetalGeBackend::target_for(const TargetKey &key) {
     descriptor.pixelFormat = MTLPixelFormatDepth32Float_Stencil8;
     descriptor.usage = MTLTextureUsageRenderTarget;
     target->depth = [device_ newTextureWithDescriptor:descriptor];
+    if (target->color == nil || target->depth == nil)
+        std::cout << "[metal] target 0x" << std::hex << key.address << std::dec << " at " << target->width() << "x"
+                  << target->height() << " could not be made\n";
     if (switches_.log_draws)
         std::cout << "[metal] frame " << frames_ + 1u << " new target 0x" << std::hex << key.address << std::dec
                   << " stride " << key.stride << " format " << key.format << "\n";

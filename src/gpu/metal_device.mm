@@ -23,6 +23,23 @@ id<MTLCommandQueue> queue() {
 
 namespace {
 
+std::atomic<std::uint32_t> drawable_width{};
+std::atomic<std::uint32_t> drawable_height{};
+
+} // namespace
+
+void set_drawable_size(std::uint32_t width, std::uint32_t height) {
+    drawable_width.store(width, std::memory_order_relaxed);
+    drawable_height.store(height, std::memory_order_relaxed);
+}
+
+void drawable_size(std::uint32_t &width, std::uint32_t &height) {
+    width = drawable_width.load(std::memory_order_relaxed);
+    height = drawable_height.load(std::memory_order_relaxed);
+}
+
+namespace {
+
 struct Trace {
     std::mutex lock;
     std::atomic<std::uint64_t> flip{};

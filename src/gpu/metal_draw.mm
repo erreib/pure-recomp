@@ -423,6 +423,12 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
                 // min_filter bit 1: linear between the two levels around D, else the nearest one.
                 sampler |= (state.min_filter & 2u) != 0u ? kMipLinear : kMipNearest;
                 set_level_rule(state, levels, fragment);
+                // The auto rule's gradient per PSP pixel, not per drawn one, as the Vulkan renderer takes it: at
+                // internal scale S level 0's size times S, so the GE picks the level it picks at 1x (D-015).
+                if (target.scale != 1u) {
+                    fragment.level[2] *= static_cast<float>(target.scale);
+                    fragment.level[3] *= static_cast<float>(target.scale);
+                }
                 ++stats_.mipmapped_draws;
             }
         }

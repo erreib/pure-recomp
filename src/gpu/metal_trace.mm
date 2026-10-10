@@ -24,6 +24,14 @@ constexpr std::uint64_t kTraceDelay = 30u;
 
 } // namespace
 
+// The internal scale (D-015), for the start-up line: `internal scale 4: targets 1920x1088, effects 480x272`, the
+// screen-wide targets' size and the narrower ones' (the bloom's and the billboards'). Part of the line that opens with
+// "drawing with", which tools/refactor_check.sh leaves out of the counts it compares.
+std::string MetalGeBackend::scale_report() const {
+    return "internal scale " + std::to_string(scale_) + ": targets " + std::to_string(kWidth * scale_) + "x" +
+           std::to_string(kHeight * scale_) + ", effects " + std::to_string(kWidth) + "x" + std::to_string(kHeight);
+}
+
 void MetalGeBackend::open_trace(const char *path) {
     std::error_code ignored;
     const std::filesystem::path file(path);
