@@ -178,7 +178,9 @@ def main(argv=None):
     # unless the caller sets PURE_INTERNAL_SCALE (tools/scale_check.sh does), whatever the data directory says.
     # The Vulkan backend's runs keep the settings' scale (2): its columns were measured on its 2x target copied
     # 1:1 into the 960x544 window, and a 1x target there is upscaled bilinear by its shell, which moves them.
-    backend = env.get("PURE_GE_BACKEND") or ("metal" if sys.platform == "darwin" else "vulkan")
+    extra_env = dict(kv.split("=", 1) for kv in opts.env)
+    backend = extra_env.get("PURE_GE_BACKEND") or env.get("PURE_GE_BACKEND") or \
+        ("metal" if sys.platform == "darwin" else "vulkan")
     if backend == "metal":
         env.setdefault("PURE_INTERNAL_SCALE", "1")
     if opts.strict:
