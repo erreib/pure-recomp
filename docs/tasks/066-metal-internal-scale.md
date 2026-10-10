@@ -1,6 +1,6 @@
 # 066: The Metal backend draws at an internal scale (E3, step 2)
 
-Milestone: E3 (D-015) | Branch: task/066-metal-internal-scale | Status: OPEN
+Milestone: E3 (D-015) | Branch: task/066-metal-internal-scale | Status: MERGED (d874184, 2026-10-10)
 
 ## Goal
 The Metal backend draws every target at 480x272 (D-002). After this task it draws at an internal scale S (1 to 6)
@@ -197,4 +197,21 @@ Open questions:
    `PURE_INTERNAL_SCALE=8` gives 6.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge, 2026-10-10: PASS once the refactor check's before captures
+were retaken on the merged build (the main checkout's dated from 2026-10-07, before task 063 moved the three race
+scenes' billboards by 145, 595 and 590 pixels, exactly the three the stale baseline flagged); scale check at 4:
+18/18 within 5% (centre-pixel reduction), bloom regions +1.07%, -0.16%, -0.17%. The gate: `--shell metal
+--backend metal` 18/18 at the pinned scale 1; `tools/hud_check.sh` 61/61; `tools/menu_check.sh` PASS;
+`tools/gerec/metal_check.sh` PASS.
+Spot-read: `Target::scale` by the stride rule (>= 480 scaled, narrower 1x); `guest_pixels` and `store_depth` take
+(xS + S/2, yS + S/2); the Metal viewport at the target's size does the x S with no uniform, so the 1x path is bit
+for bit the old one; the mip gradient per PSP pixel as the Vulkan renderer does.
+Merged: `git merge --no-ff` into batch/m2, d874184, with two conflicts resolved against task 065 (the shell hands
+its drawable size to the backend inside `update_drawable_size`, so Auto sees every change; the scaling-filter
+paragraph merged).
+Notes: open question 1 accepted and written into D-015 (the centre-pixel reduction). Open question 5 settled at
+the merge (a2fb6fb): `tools/run_boot.py` sets `PURE_INTERNAL_SCALE=1` unless the caller does, and the bundle
+check's data directory says `video.internal_scale=1`, so the fidelity columns stay native. For task 067: the
+per-game default of Auto (the framework's default is 2), the Resolution row, an un-occluded windowed race at Auto
+(4 at 1920x1088) for the on-screen timing, the Vulkan renderer's effects at 1x; block transfers into a scaled
+target invalidate rather than write (no recording has one); Auto under the Vulkan shell is 1.
