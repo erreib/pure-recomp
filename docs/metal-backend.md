@@ -503,8 +503,8 @@ name mode 0 as the scale-and-offset mode. (The task's brief expected them to app
 draws do not tell the two apart: in the port's race frame the environment-mapped draws that reach the screen carry
 scale 1 and offset 0, while the 12 into the billboard target 0x04154000 and the 40 texture-matrix draws carry a v
 scale of -1, by all appearances left from earlier draws; a throwaway build that applied the scale and offset in mode
-2 drew the suite's 18 scenes pixel-identical to this one.) A target sampled as a texture keeps its place in the
-image applied (`uv_remap`, what `uv_transform` folds in for mode 0). Reversed normals (0x51) flip N as they do for
+2 drew the suite's 18 scenes pixel-identical to this one.) A target sampled as a texture is placed in the
+image by the fragment function after the GE's wrap, in every mode (`FragmentUniforms::uv_remap`, task 063; "Textures"). Reversed normals (0x51) flip N as they do for
 lighting: the notes do not say, and no draw of the game's sets them. A transformed sprite keeps its UVs (its corners
 are made on the CPU in clip space; none of the game's is mapped), and mode 3 is drawn as mode 0, each logged once
 (`[metal] ... is not emulated`). Through-mode draws take no mapping.
