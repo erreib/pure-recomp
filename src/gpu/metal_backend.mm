@@ -67,21 +67,28 @@
 namespace pure::gpu::metal_backend {
 namespace {
 
-// The internal scale of the screen-wide targets (D-015, task 066), read once at start: video.internal_scale
-// (PURE_INTERNAL_SCALE), 1 to kMaxScale. Auto (0) is the smallest S whose 272 S covers the Metal shell's drawable
-// height, at most kMaxScale; 1 without a Metal shell. With no window at all (the headless shell, ge_replay) it is 1
-// unless PURE_INTERNAL_SCALE decides the setting, and then that (ge_replay's config holds the recording's scale), so
+// The internal scale of the screen-wide targets (D-015, task 066): video.internal_scale (PURE_INTERNAL_SCALE), 1 to
+// kMaxScale, at start; then the menu's Resolution row's (task 067, set_internal_scale()). The setting at start: the
+// config's (the settings'), except with no window at all (the headless shell, ge_replay), where it is 1 unless
+// PURE_INTERNAL_SCALE decides the setting, and then that (ge_replay's config holds the recording's scale), so
 // headless runs and the checks stay at 1 whatever settings.ini holds.
-std::uint32_t internal_scale(const pk::BackendConfig &config) {
+std::uint32_t setting_at_start(const pk::BackendConfig &config) {
     std::uint32_t drawable_width = 0u, drawable_height = 0u;
     pure::metal::drawable_size(drawable_width, drawable_height);
     const bool window = config.vulkan_shell != nullptr || drawable_height != 0u;
-    std::uint32_t scale = config.internal_scale;
-    if (!window)
-        scale = portablekit::settings::overridden_by("video.internal_scale").empty()
-                    ? 1u
-                    : portablekit::settings::current().internal_scale;
+    if (window) return config.internal_scale;
+    return portablekit::settings::overridden_by("video.internal_scale").empty()
+               ? 1u
+               : portablekit::settings::current().internal_scale;
+}
+
+// The scale a setting gives now: 1 to kMaxScale as it says (7 and 8 drawn at kMaxScale); Auto (0) the smallest S
+// whose 272 S covers the Metal shell's drawable height as it is now, at most kMaxScale, and 1 without a Metal shell.
+std::uint32_t scale_for(std::uint32_t setting) {
+    std::uint32_t scale = setting;
     if (scale == 0u) {
+        std::uint32_t drawable_width = 0u, drawable_height = 0u;
+        pure::metal::drawable_size(drawable_width, drawable_height);
         scale = 1u;
         while (scale < kMaxScale && kHeight * scale < drawable_height) ++scale;
     }
@@ -162,7 +169,8 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         white_ = [device_ newTextureWithDescriptor:white];
         const std::uint32_t opaque_white = 0xFFFFFFFFu;
         [white_ replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&opaque_white bytesPerRow:4];
-        scale_ = internal_scale(config);
+        setting_ = setting_at_start(config);
+        scale_ = scale_for(setting_);
         // The largest target's colour (or depth, 4 bytes a pixel too): 480S x 272S.
         const std::size_t largest = kPictureBytes * scale_ * scale_;
         readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
@@ -248,6 +256,7 @@ void MetalGeBackend::shutdown() {
         last_drawn_ = nullptr;
         current_target_ = nullptr;
         targets_.clear();
+        retired_.clear();
         textures_.clear();
         list_keys_.clear();
         render_pipelines_.clear();
@@ -277,6 +286,23 @@ void MetalGeBackend::shutdown() {
     }
 }
 
+// After each flip: a scale the menu changed while the frame was drawn (the menu over the running game), or Auto's
+// when the drawable's height crossed a multiple of 272 (a resize, full screen and back), takes effect here.
+void MetalGeBackend::begin_frame() { apply_scale(); }
+
+// The menu's Resolution row (task 067). Between two frames, with nothing drawn since the flip (the paused menu runs
+// there), the scale changes now; otherwise at the next begin_frame(), so that no frame is drawn at two scales.
+void MetalGeBackend::set_internal_scale(std::uint32_t setting) {
+    setting_ = setting;
+    if (!frame_drawn_) apply_scale();
+}
+
+void MetalGeBackend::apply_scale() {
+    if (!ready_) return;
+    const std::uint32_t wanted = scale_for(setting_);
+    if (wanted != scale_) change_scale(wanted);
+}
+
 void MetalGeBackend::submit(const DrawCall &call, const GuestMemory &memory) {
     if (!ready_) return;
     const TraceClock clock(trace_.file != nullptr, trace_.times.submit);
@@ -299,6 +325,8 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         if (switches_.show_target != 0u)
             if (Target *named = latest_target_at(GuestMemory::canonical(switches_.show_target)); named != nullptr)
                 shown = named;
+        // After a scale change, until the game draws its display again: the picture at the scale before (task 067).
+        if (shown == nullptr && !retired_.empty()) shown = latest_retired_at(GuestMemory::canonical(display_address));
         if (shown == nullptr) shown = last_drawn_;
         presented_ = shown;
         // The next write_back_frame() stores this picture (as the Vulkan backend stores at each flip the
@@ -313,8 +341,12 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         } else {
             if (written_back) copy_to_buffer(shown->color, frame_writeback_, MTLBlitOptionNone);
             id<MTLCommandBuffer> committed = commit(false);
-            if (written_back) pending_frame_ = PendingFrame{shown, committed, false};
+            if (written_back) pending_frame_ = PendingFrame{shown, committed, false, frame_writeback_};
         }
+        frame_drawn_ = false;
+        // The targets of the scale before a change go once nothing reads them: the write-back pending now is this
+        // picture's, and it is the new scale's (or nothing at all).
+        if (!retired_.empty() && !retired(shown)) retired_.clear();
         if (frames_ % kReportEvery == 0u) report();
         if (prewarm_.shared && !prewarm_.reported) report_prewarm_done();
         if (shown != nullptr) {
@@ -456,6 +488,7 @@ void MetalGeBackend::begin_pass(Target &target) {
     pass.stencilAttachment.clearStencil = 0u;
     pass.stencilAttachment.storeAction = MTLStoreActionStore;
     encoder_ = [commands_ renderCommandEncoderWithDescriptor:pass];
+    frame_drawn_ = true;
     target.color_defined = true;
     target.depth_defined = true;
     current_target_ = &target;
@@ -479,12 +512,15 @@ void MetalGeBackend::read_back(Target &target) {
 
 // A blit of a target's `texture`, whole (480S x 272S at its internal scale), into `buffer` at 4 bytes a pixel,
 // recorded in the frame's commands: its colour (RGBA) with MTLBlitOptionNone, its depth (floats) with
-// MTLBlitOptionDepthFromDepthStencil. Each caller commits, waits and counts as it needs.
-void MetalGeBackend::copy_to_buffer(id<MTLTexture> texture, id<MTLBuffer> buffer, MTLBlitOption options) {
+// MTLBlitOptionDepthFromDepthStencil. Each caller commits, waits and counts as it needs. A buffer smaller than the
+// texture (a target of the scale before a change, read after the buffers were made for the new one) is made anew.
+void MetalGeBackend::copy_to_buffer(id<MTLTexture> texture, __strong id<MTLBuffer> &buffer, MTLBlitOption options) {
     ensure_commands();
     end_encoder();
     const NSUInteger width = texture.width;
     const NSUInteger height = texture.height;
+    if (buffer.length < width * height * 4u)
+        buffer = [device_ newBufferWithLength:width * height * 4u options:MTLResourceStorageModeShared];
     id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
     [blit copyFromTexture:texture
                      sourceSlice:0

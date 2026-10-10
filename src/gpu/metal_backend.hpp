@@ -43,7 +43,7 @@ public:
 
     bool initialize(const pk::BackendConfig &config, std::string &error) override;
     void shutdown() override;
-    void begin_frame() override {}
+    void begin_frame() override;
     void begin_display_list() override { list_keys_.clear(); }
     void submit(const DrawCall &call, const GuestMemory &memory) override;
     void block_transfer(const pk::BlockTransfer &transfer, GuestMemory &memory) override;
@@ -59,6 +59,14 @@ public:
     std::uint64_t draws_submitted() const noexcept override { return stats_.draws; }
     std::uint64_t frames_presented() const noexcept override { return frames_; }
 
+    // The menu's Resolution row (patch 0017-internal-scale-by-backend, task 067): the setting (0 Auto) takes effect
+    // at the next frame (metal_backend.mm); the screen-wide targets' size now.
+    bool supports_internal_scale() const noexcept override { return true; }
+    void set_internal_scale(std::uint32_t setting) override;
+    std::array<std::uint32_t, 2> target_size() const noexcept override {
+        return {kWidth * scale_, kHeight * scale_};
+    }
+
 private:
     // The frame flow: start, shutdown, submit, the flip, captures; command buffers, passes, space (metal_backend.mm)
     void ensure_commands();
@@ -68,11 +76,15 @@ private:
     std::pair<id<MTLBuffer>, NSUInteger> allocate(std::size_t bytes);
     void begin_pass(Target &target);
     void read_back(Target &target);
-    void copy_to_buffer(id<MTLTexture> texture, id<MTLBuffer> buffer, MTLBlitOption options);
+    void copy_to_buffer(id<MTLTexture> texture, __strong id<MTLBuffer> &buffer, MTLBlitOption options);
+    void apply_scale();
 
     // Targets and guest memory: the target cache, transfers, read-backs, write-backs, CPU pictures (metal_targets.mm)
     Target &target_for(const TargetKey &key);
+    void change_scale(std::uint32_t scale);
     Target *latest_target_at(std::uint32_t address);
+    Target *latest_retired_at(std::uint32_t address);
+    bool retired(const Target *target) const;
     void snapshot_guest_words(const GuestMemory &memory, Target &target);
     Target *find_framebuffer_texture(const GuestMemory &memory, const TextureState &texture, std::uint32_t &x,
                                      std::uint32_t &y);
@@ -116,7 +128,7 @@ private:
     static bool shader_blend_reads_destination_alpha(const FragmentUniforms &fragment, std::uint8_t write_mask);
 
     // The frame trace (PURE_METAL_TRACE) and the counts printed every 600 frames and at exit (metal_trace.mm)
-    std::string scale_report() const;
+    std::string scale_report(bool changed = false) const;
     void open_trace(const char *path);
     void end_trace_interval();
     Stats since(const Stats &before) const;
@@ -203,7 +215,15 @@ private:
 
     // The internal scale of the targets at least 480 pixels wide (D-015, initialize()); the narrower ones are 1x.
     std::uint32_t scale_{1u};
+    // video.internal_scale as the backend takes it (0 Auto, which follows the drawable): from initialize(), then
+    // from the menu (set_internal_scale()). scale_ follows it at the next frame (apply_scale()).
+    std::uint32_t setting_{1u};
+    // A target was drawn into or uploaded to since the last flip: a scale change waits for the next one.
+    bool frame_drawn_{};
     std::map<TargetKey, std::unique_ptr<Target>> targets_;
+    // The screen-wide targets of the scale before the last change (change_scale()), out of targets_: kept while the
+    // pending frame write-back or the picture shown reads one, until a flip shows a target of the new scale.
+    std::vector<std::unique_ptr<Target>> retired_;
     Target *current_target_{};  // of the open encoder
     Target *last_drawn_{};
     Target *presented_{};
@@ -235,6 +255,7 @@ private:
         Target *target{};
         id<MTLCommandBuffer> commands;
         bool from_picture{};
+        id<MTLBuffer> buffer;  // the frame_writeback_ the commands copy into (a scale change replaces that member)
     };
     PendingFrame pending_frame_;
     double last_wait_ms_{};  // of the last commit(true)

@@ -42,6 +42,47 @@ Target &MetalGeBackend::target_for(const TargetKey &key) {
     return *targets_.emplace(key, std::move(target)).first->second;
 }
 
+// A change of the internal scale (task 067), between two frames (apply_scale()): the screen-wide targets go to
+// retired_, so the next frame makes them anew at 480S x 272S as it draws into them (the narrower ones, at 1x
+// whatever the scale, stay with what they hold), and the three shared buffers are made for the new size. Nothing is
+// read back: the frame write-back pending since the last flip keeps its target and its buffer, and a flip that finds
+// no target of the new scale at the display address shows the retired one, until the game draws it again. The
+// start line's clause is printed again, `[metal] internal scale now S: ...`.
+void MetalGeBackend::change_scale(std::uint32_t scale) {
+    end_encoder();
+    for (auto it = targets_.begin(); it != targets_.end();) {
+        if (it->first.stride < kWidth) {
+            ++it;
+            continue;
+        }
+        if (last_drawn_ == it->second.get()) last_drawn_ = nullptr;
+        retired_.push_back(std::move(it->second));
+        it = targets_.erase(it);
+    }
+    scale_ = scale;
+    const std::size_t largest = kPictureBytes * scale_ * scale_;
+    readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
+    frame_writeback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
+    guest_readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
+    std::cout << "[metal] " << scale_report(true) << "\n" << std::flush;
+}
+
+// The retired target at `address` drawn into last (change_scale()).
+Target *MetalGeBackend::latest_retired_at(std::uint32_t address) {
+    Target *best = nullptr;
+    for (const std::unique_ptr<Target> &target : retired_)
+        if (target->key.address == address && target->color_defined &&
+            (best == nullptr || target->draw_serial > best->draw_serial))
+            best = target.get();
+    return best;
+}
+
+bool MetalGeBackend::retired(const Target *target) const {
+    return target != nullptr && std::any_of(retired_.begin(), retired_.end(), [target](const auto &old) {
+               return old.get() == target;
+           });
+}
+
 // The target at `address` drawn into last, of any stride and format.
 Target *MetalGeBackend::latest_target_at(std::uint32_t address) {
     Target *best = nullptr;
@@ -180,7 +221,7 @@ void MetalGeBackend::write_back_frame(GuestMemory &memory) {
                 trace_.times.wait_frame += ms;
                 ++stats_.waits;
             }
-            pixels = static_cast<const std::uint8_t *>(frame_writeback_.contents);
+            pixels = static_cast<const std::uint8_t *>(pending.buffer.contents);
         } else if (picture_.size() != pending.target->picture_bytes()) {
             return;
         }
@@ -420,6 +461,7 @@ void MetalGeBackend::upload(std::uint32_t display_address, const std::uint8_t *p
           destinationOrigin:MTLOriginMake(0, 0, 0)];
     [blit endEncoding];
     target->color_defined = true;
+    frame_drawn_ = true;
     // The picture came from guest memory, which texturing reads correctly anyway.
     target->draw_serial = ++draw_counter_;
     target->guest_words.clear();
