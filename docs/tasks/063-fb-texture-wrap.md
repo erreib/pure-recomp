@@ -100,7 +100,127 @@ polarity question: report both pictures and stop, do not tune by eye); a pipelin
 pre-warm list beyond adding keys.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+Changed (branch task/063-fb-texture-wrap from e12e789, four commits in the brief's order):
+- 5699c44 Metal: src/gpu/shaders/ge.metal, src/gpu/metal_draw.mm, src/gpu/metal_types.hpp, src/gpu/metal_backend.hpp.
+  - For a target sampled as the texture the vertex function now hands on the texture's own coordinate:
+    `uv_transform` is no longer folded, and modes 1 and 2 no longer apply `uv_remap`.
+  - The fragment function's new `place_in_target` applies the GE's wrap per axis in that space, then places the result
+    in the 480x272 image. REPEAT is `fract`; CLAMP clamps to [0.5/size, 1 - 0.5/size] in the texture's own texels.
+  - `uv_remap` moved from VertexUniforms (now 240 bytes) to FragmentUniforms (now 240 bytes, with a `wrap` uint4: x
+    target, y/z clamp s/t), so `set_texture_map` lost its source parameters.
+  - The target's sampler stays clamp on both axes, and the sampler table is unchanged. No pipeline key change, so
+    config/metal_pipelines.txt is untouched. Ordinary textures take the old path.
+- aa706ce tools/billboard_check.sh (new). It runs the race route headless on Metal (or `--backend vulkan --shell
+  vulkan`) to flip 6490 with a shot there. Over x 169-180 y 119-131 (inside the orange screen, left of the strut that
+  crosses it), it prints the mean absolute luminance step between vertically and horizontally adjacent pixels.
+  PASS: vertical >= 8.
+- fc18f4b patches/0015-vulkan-fb-texture-wrap.patch (new; vendor host/gpu/vulkan_renderer.cpp, shaders/ge.vert,
+  ge.frag) with its row and section in patches/README.md. `tools/patches.sh check`: ok, 15 patches reproduce the pin.
+  - For a framebuffer texture the wrap flags stay, and `uv_transform` stays the texture's own.
+  - `texture_params.x` gains `kPushPlaced` (2^20). A target has no mip levels, so bits 5-19 stay clear.
+  - The object block is written for every target draw (`lit || mapped || placed`), with `uv_remap` = the copy's
+    sub-rectangle. ge.vert hands it on in `frag_uv_rect`, replacing the through-mode tile clamp for this case, and
+    `map_texture` no longer applies it.
+  - ge.frag: `fract` or the half-texel clamp per axis, then `uv * rect.xy + rect.zw`. The texture's size is
+    `frag_uv_rect.xy * viewport.xy`.
+  - `framebuffer_descriptor` hands over the whole target's copy (target_extent, sampled 0..1). The texture's
+    sub-rectangle is (x, y, w, h) / 480x272 of it, so the shader can wrap into it (no escalation).
+- a1e44e7 docs: fidelity.md difference 15 ("fixed (task 063)"), metal-backend.md "Textures" (one paragraph and a
+  pointer in the "From a target" bullet), ge-effects.md item 2 ("(flipped)" is the GE's REPEAT taking -v modulo 1),
+  verification.md (a row for billboard_check). `tools/docs_check.py`: 0 findings.
+- This Result.
+
+Numbers, by acceptance criterion:
+- **billboard_check** (vertical / horizontal):
+
+  | Run | Before | After |
+  |---|---|---|
+  | Metal headless | 2.00 / 20.25 | 18.70 / 12.45 |
+  | Vulkan window | 1.70 / 24.57 | 18.92 / 11.46 |
+  | PPSSPP | | 25.59 / 26.74 |
+
+  - The PPSSPP figure is from /Users/erreib/dev/pure-recomp/out/billboard/ppsspp/f07600.png, x 181-187 y 121-127
+    (inside its screen, left of its strut). Over its whole screen with the strut: 24.76 / 20.43.
+  - The threshold is 8, four times the bars' figure and under half of the picture's.
+  - Crops (the rectangle, 8x) under /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-add0c6966f7211031/out/billboard_check/:
+    - before-metal/crop.png, after-metal/crop.png (also metal-headless/crop.png, the Verify run);
+    - before-vulkan/crop.png, after-vulkan/crop.png.
+  - The whole shots are in `shots/b6490.png` beside each crop.
+  - The capture puts the screen at x 167-198 y 117-133 at race time 0:03.9 in both shells, not at the brief's estimate
+    of x 182-208.
+- **frame_regress**: 18/18 headless on Metal. Only the billboards' pixels moved:
+  - race_hud: 145 px, fraction 0.0148 to 0.0148.
+  - tt_hud: 595 px, 0.0113 to 0.0112.
+  - fp_hud: 590 px, 0.0115 to 0.0116.
+  - The zone scenes: 0 px.
+  - The diff images (out/refactor/*.diff.png in the worktree) show red only on the two screens of each scene.
+- **The Vulkan window suite** (`--shell vulkan --backend vulkan`): 18/18 PASS (19m 48s): race_hud 0.0466, tt_hud 0.0492 and fp_hud 0.0475, every scene within 0.01 of the vulkan column (out/regress_vulkan in the worktree).
+- **metal_check**: PASS, after both fixes.
+  - team: 0/130560 px at tol 24, both frames.
+  - race_1x frame 6016: 2/130560 at tol 24, the same as the main checkout's last run.
+- **race_1x frame 6016 replayed with `--cut 27`** (cut after draw #26), before and after, on both backends, `--out`.
+  Captures and footprint crops are in the worktree's out/cut063/ (cut27_footprint.png: Metal top, Vulkan bottom,
+  before left, after right).
+  - Draw #26's footprint (where it changes the cut after #25): 126 px, x 201-216 y 126-133.
+  - Metal: 15 px changed, all inside the footprint, 0 outside. Vulkan: the same 15 px, 0 outside.
+  - At the cut, Metal and Vulkan are pixel-identical both before and after (0 px).
+  - The picture: before, flat red. After, the PIRANHA advert's yellow logo at x 209 y 129-130 and its text row at
+    y 131-132. PPSSPP's ref/vineta_k_start.png (the same moment) has the logo on the same pixels. The advert in
+    PPSSPP's own VRAM (`ppdmp.py tex` draw 26, out/cut063/pp_tex26.png) has the logo in the middle and the text in the
+    lower third, as the port's screen shows.
+  - Not mirrored, not flipped. A one-row offset cannot be seen at this size (128 rows over 7 screen rows), so there was
+    nothing to tune.
+  - The sunburst advert's close view at flip 6530 (out/billboard_seq/after-metal/shots) has the sun at the top right with
+    rays down and a glyph on the left, as PPSSPP's q7660.
+- **No ordinary texture changes.**
+  - `tools/refactor_check.sh --before` was run on e12e789 before any edit. After: lang, title and main_menu have 0
+    differing pixels, and so do the other 12 non-race scenes plus zone_hud and zone_change. Counts are the same in
+    every route (86 [metal] lines).
+  - On Vulkan, team.gerec replays to 0 px change between the build without 0015 and with it.
+- **The whole race frame on Vulkan.**
+  - race_1x frame 6016 changes by 380 px: 36 on the billboards (Metal's 36) and 344 elsewhere, at most 4 levels.
+  - All 344 now equal Metal's pixels: the bloom's coordinates are now interpolated in the texture's own space, as on
+    Metal. Vulkan against Metal at tol 0 goes from 523 px to 179.
+
+Verify output (last 20 lines):
+```
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 22s)
+billboard_check: backend metal, shell headless, shot at flip 6490, out /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-add0c6966f7211031/out/billboard_check/metal-headless
+billboard_check: run_boot exit 0, frame 6500 reached: yes, 6 s, log /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-add0c6966f7211031/out/billboard_check/metal-headless/run.log
+rectangle x 169-180 y 119-131 of /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-add0c6966f7211031/out/billboard_check/metal-headless/shots/b6490.png (480x272), crop /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-add0c6966f7211031/out/billboard_check/metal-headless/crop.png
+vertical 18.70 horizontal 12.45 (mean absolute luminance difference of adjacent pixels)
+billboard_check: PASS, vertical 18.70 against the threshold 8
+verify 063: PASS
+```
+
+Open questions:
+1. A stale clause in docs/metal-backend.md "Texture mapping modes", which is outside May touch ("Textures" only):
+   "A target sampled as a texture keeps its place in the image applied (`uv_remap`, what `uv_transform` folds in for
+   mode 0)". `uv_remap` is now a fragment uniform applied after the wrap for every mode, and `uv_transform` no longer
+   folds it in.
+2. Vulkan above internal scale 1: a through-mode draw that samples a target (the bloom's blur tiles) loses
+   `clamp_through_quad`'s tile clamp, as the brief's "replacing the frag_uv_rect clamp" implies. race_warm frame 6016
+   (2x) moves 38701 px: 35772 by 1 level, and 508 by more than 4 outside the billboards, at most 11 levels along a
+   blur-tile seam (x 638-639). Keeping both would need a second flat varying.
+3. REPEAT and bilinear at the wrap seam: within half a texel of the texture's edge the sampler blends with the pixel
+   beyond the texture in the target's image, not with the far edge's texel as the GE does. For the billboards that
+   only happens when a screen is about 128 px tall or more. Not tuned.
+4. No `<prefix>_NO_...` off switch for the new wrap, unlike patches 0011-0014. The brief did not ask for one.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
