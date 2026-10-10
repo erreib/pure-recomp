@@ -165,6 +165,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   `tools/menu_check.sh` keeps the lists. Follow-ups: the bindings list's framework labels ("Move forward", four
   "Camera" bindings this game never reads); the Vulkan shell's Touch section on a desktop; Restore control defaults
   resets hidden rows. The enhancements are open.
+- **E3, native resolution** (D-015, 2026-10-10): task 065 merged 3c674e4 (the Metal shell's drawable at the
+  display's pixels: 1920x1088 for the default window on this Mac, the panel below the camera housing in full
+  screen); task 066 (the backend's internal scale, effects at 1x) running; then 067 (the Resolution row, the perf
+  table, the Vulkan renderer's effects at 1x for Windows).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

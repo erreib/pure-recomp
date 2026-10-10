@@ -1,6 +1,6 @@
 # 065: The Metal shell draws at the display's pixels (E3, step 1)
 
-Milestone: E3 (D-015) | Branch: task/065-metal-shell-retina | Status: OPEN
+Milestone: E3 (D-015) | Branch: task/065-metal-shell-retina | Status: MERGED (3c674e4, 2026-10-10)
 
 ## Goal
 On a Retina Mac the Metal shell's layer is 960x544 for a 960x544-point window and the system upscales it, so the game
@@ -155,4 +155,13 @@ Open questions:
   drawable there is the window's points.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge, 2026-10-10: PASS (headless 18/18; `--shell metal --backend
+metal` 18/18 with 1920x1088 captures, zone_change's window wobble flagged as the worker measured);
+`tools/hud_check.sh` 61/61; `tools/menu_check.sh` PASS, the interface at its point size over the 2x drawable.
+Spot-read: the density flag, `update_drawable_size` (pixel size and contents scale, at creation and on the
+pixel-size and display-changed events), the start line; `viewport_for`, the samplers and the capture untouched,
+as they already worked in drawable pixels. The 0-of-2088960 capture proof is the right one.
+Merged: `git merge --no-ff` into batch/m2, 3c674e4; the stale 960x544 texts in README.md, docs/verification.md and
+three tool headers updated at the merge (2e1e4ad), with a note on the race scenes' window wobble.
+Notes: full screen lands below the camera housing (3024x1890 of 3024x1964), by macOS's placement, and the picture
+never reaches that strip: left as is. Not tested on a 1x display (none here); the code takes SDL's density.
