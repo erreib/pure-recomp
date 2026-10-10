@@ -9,6 +9,7 @@ the runs and before-and-after tables: [docs/history/verification.md](history/ver
 |---|---|---|---|
 | frame regression | `tools/frame_regress.sh` | 18 scenes against PPSSPP, headless on Metal in about 25 s; the merge gate for renderer changes | "Frame regression suite" |
 | race HUD | `tools/hud_check.sh` | the race's HUD in 61 shots of the Metal window | "The race HUD check" |
+| billboards | `tools/billboard_check.sh` | an advert screen shows the advert, not bars (task 063): headless on Metal in about 10 s, or `--backend vulkan --shell vulkan` | docs/fidelity.md, difference 15 |
 | Metal against Vulkan | `tools/gerec/metal_check.sh` | the two backends on the TEAM screen and the race, through ge_replay | docs/metal-backend.md, "The 3D check" |
 | ge_replay | `tools/gerec/replay_check.sh` | the replay itself | docs/ge-backend.md, section 7 |
 | no change | `tools/refactor_check.sh` | a change that moves code changes no pixel and no count | docs/metal-backend.md, "Files" |
