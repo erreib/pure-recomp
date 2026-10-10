@@ -86,8 +86,13 @@ void MetalGeBackend::resolve_stencil_alpha(const char *reason) {
         lighting_bound_ = true;
         lighting_changed_ = false;
     }
-    [encoder_ setViewport:MTLViewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0}];
-    [encoder_ setScissorRect:MTLScissorRect{0u, 0u, kWidth, kHeight}];
+    // The quad is in the guest's 480x272 screen, as a through-mode draw; the viewport and scissor are the target's
+    // own pixels, at its internal scale.
+    const std::uint32_t target_width = current_target_->width();
+    const std::uint32_t target_height = current_target_->height();
+    [encoder_ setViewport:MTLViewport{0.0, 0.0, static_cast<double>(target_width), static_cast<double>(target_height),
+                                      0.0, 1.0}];
+    [encoder_ setScissorRect:MTLScissorRect{0u, 0u, target_width, target_height}];
     [encoder_ setCullMode:MTLCullModeNone];
     RenderKey render;
     render.write_mask = MTLColorWriteMaskAlpha;

@@ -21,8 +21,8 @@ Target &MetalGeBackend::target_for(const TargetKey &key) {
     target->key = key;
     MTLTextureDescriptor *descriptor =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                           width:kWidth
-                                                          height:kHeight
+                                                           width:target->width()
+                                                          height:target->height()
                                                        mipmapped:NO];
     descriptor.storageMode = MTLStorageModePrivate;
     descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
@@ -105,8 +105,8 @@ id<MTLTexture> MetalGeBackend::sample_target(Target &source, const Target &drawn
     if (source.copy == nil) {
         MTLTextureDescriptor *descriptor =
             [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                               width:kWidth
-                                                              height:kHeight
+                                                               width:source.width()
+                                                              height:source.height()
                                                            mipmapped:NO];
         descriptor.storageMode = MTLStorageModePrivate;
         descriptor.usage = MTLTextureUsageShaderRead;

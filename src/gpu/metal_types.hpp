@@ -35,7 +35,9 @@ using pk::TextureFormat;
 using pk::TextureState;
 using pk::Vertex;
 
-constexpr std::uint32_t kWidth = pk::kScreenWidth;    // internal scale 1 (D-002)
+// The guest's screen, 480x272: what the GE's coordinates and guest memory are in. A target is drawn at an internal
+// scale of it (Target::scale, D-015).
+constexpr std::uint32_t kWidth = pk::kScreenWidth;
 constexpr std::uint32_t kHeight = pk::kScreenHeight;
 constexpr std::size_t kPictureBytes = static_cast<std::size_t>(kWidth) * kHeight * 4u;
 // Vertex and upload space comes in chunks of this size, reused once the GPU has finished with them.
@@ -146,6 +148,8 @@ struct TargetKey {
 
 struct Target {
     TargetKey key;
+    // The internal scale it is drawn at (D-015): 480S x 272S pixels, each S x S block one pixel of the guest's.
+    std::uint32_t scale{1u};
     id<MTLTexture> color;
     id<MTLTexture> depth;  // depth and the stencil, whose copy the colour's alpha is
     id<MTLTexture> copy;   // what a draw samples when it reads the target it draws into
@@ -159,6 +163,10 @@ struct Target {
     std::vector<std::uint32_t> guest_words;
 
     [[nodiscard]] std::uint32_t bytes_per_pixel() const { return key.format == 3u ? 4u : 2u; }
+    // Its textures' size in pixels, and its colour's bytes at 4 a pixel.
+    [[nodiscard]] std::uint32_t width() const { return kWidth * scale; }
+    [[nodiscard]] std::uint32_t height() const { return kHeight * scale; }
+    [[nodiscard]] std::size_t picture_bytes() const { return static_cast<std::size_t>(width()) * height() * 4u; }
     // The guest memory the target covers from its address: kHeight rows of `stride` pixels.
     [[nodiscard]] std::uint64_t bytes() const {
         return static_cast<std::uint64_t>(key.stride) * kHeight * bytes_per_pixel();

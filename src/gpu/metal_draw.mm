@@ -397,16 +397,21 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
         const bool linear_min = !switches_.sharp && (state.min_filter & 1u) != 0u;
         source = find_framebuffer_texture(memory, state, source_x, source_y);
         if (source != nullptr) {
-            // The texture's first texel is pixel (x, y) of a 480x272 target. The coordinates stay the texture's
-            // own; the fragment function wraps them by the GE's wrap mode and places them in the target (task
-            // 063), whose sampler clamps at its edges.
+            // The texture's first texel is pixel (x, y) of the target's 480x272 guest screen. The coordinates stay
+            // the texture's own; the fragment function wraps them by the GE's wrap mode and places them in the
+            // target (task 063), whose sampler clamps at its edges. The place is relative: the texture's size and
+            // first texel at the sampled target's internal scale over that target's own size (D-015), so a target
+            // at 1x and one at 480S x 272S place the same rectangle, whatever the scale of the target drawn into.
             texture = sample_target(*source, target);
             sampler = (linear_mag ? 1u : 0u) | (linear_min ? 2u : 0u) | 4u | 8u;
-            const float width = static_cast<float>(state.width);
-            const float height = static_cast<float>(state.height);
-            fragment.uv_remap = {width / static_cast<float>(kWidth), height / static_cast<float>(kHeight),
-                                 static_cast<float>(source_x) / static_cast<float>(kWidth),
-                                 static_cast<float>(source_y) / static_cast<float>(kHeight)};
+            const float scale = static_cast<float>(source->scale);
+            const float source_width = static_cast<float>(source->width());
+            const float source_height = static_cast<float>(source->height());
+            const float width = static_cast<float>(state.width) * scale;
+            const float height = static_cast<float>(state.height) * scale;
+            fragment.uv_remap = {width / source_width, height / source_height,
+                                 static_cast<float>(source_x) * scale / source_width,
+                                 static_cast<float>(source_y) * scale / source_height};
             fragment.wrap = {1u, state.wrap_s != 0u ? 1u : 0u, state.wrap_t != 0u ? 1u : 0u, 0u};
             ++stats_.framebuffer_textures;
         } else {
@@ -448,8 +453,11 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
         vertex.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
     }
 
-    // Positions: screen pixels in through mode; the GE viewport folded into clip space otherwise.
-    MTLViewport viewport{0.0, 0.0, static_cast<double>(kWidth), static_cast<double>(kHeight), 0.0, 1.0};
+    // Positions: screen pixels in through mode; the GE viewport folded into clip space otherwise. Both are in the
+    // guest's 480x272 screen; the Metal viewport is the target's own pixels, so at internal scale S it maps the
+    // screen onto 480S x 272S and every position is scaled by S there (D-015), the depth untouched.
+    MTLViewport viewport{0.0, 0.0, static_cast<double>(target.width()), static_cast<double>(target.height()), 0.0,
+                         1.0};
     // CLIPENABLE's depth clamp (task 040) for transformed draws; without it, Metal clips at both planes.
     const bool clamp_depth = !call.through && call.clip_enabled && !switches_.no_depth_clamp;
     vertex.mode = {call.through ? 1u : 0u, sprite_corners_ != 0u ? kClipPositions : 0u,
@@ -474,7 +482,12 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     const auto [buffer, offset] = allocate(bytes);
     std::memcpy(static_cast<std::uint8_t *>(buffer.contents) + offset, vertices_.data(), bytes);
 
-    bind_state(call, key, pipeline, depth, stencil_reference, viewport, clamp_depth, scissor, cull, blend_color);
+    // The scissor in the target's pixels: each guest pixel an S x S block.
+    const std::uint32_t scale = target.scale;
+    const ViewportScissor scaled_scissor{scissor.x * scale, scissor.y * scale, scissor.width * scale,
+                                         scissor.height * scale};
+    bind_state(call, key, pipeline, depth, stencil_reference, viewport, clamp_depth, scaled_scissor, cull,
+               blend_color);
     bind_inputs(buffer, offset, vertex, lit || fogged || shade_mapped, fragment, texture, sampler);
     [encoder_ drawPrimitives:type vertexStart:0 vertexCount:drawn];
 
@@ -564,7 +577,8 @@ void MetalGeBackend::fold_viewport(const DrawCall &call, const std::array<float,
     vertex.transform = transform;
     const pk::ViewportState &vp = call.viewport;
     if (vp.x_scale != 0.0f && vp.y_scale != 0.0f) {
-        // screen = ndc * scale + offset - region offset, then to Metal's y-up device space.
+        // screen = ndc * scale + offset - region offset, then to Metal's y-up device space: the guest's 480x272
+        // screen, which the viewport maps onto the target's pixels (x S at internal scale S, D-015).
         vertex.screen = {2.0f * vp.x_scale / static_cast<float>(kWidth),
                          2.0f * (vp.x_offset - vp.offset_x) / static_cast<float>(kWidth) - 1.0f,
                          -2.0f * vp.y_scale / static_cast<float>(kHeight),
