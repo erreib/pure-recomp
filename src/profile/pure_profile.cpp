@@ -187,6 +187,12 @@ const GameProfile &game() {
 
         .register_extra_hle = &register_pure_hle,
 
+        // E3 (D-015, task 067): the picture at the display's own resolution out of the box. Auto draws the Metal
+        // backend's screen-wide targets at the smallest multiple of 272 lines that covers the window's drawable (4 in
+        // the default window on a 2x display), and the Vulkan renderer's at the window's size. A settings.ini that
+        // already holds a value keeps it (patch 0017-internal-scale-by-backend).
+        .default_internal_scale = 0u,
+
         // Single Race and Tournament run free up to the vblank rate; the other modes lock to two vblanks
         // (docs/timing.md). 1 keeps the renderer's frame-rate menu honest for the fast modes.
         .frame_vblanks = 1u,

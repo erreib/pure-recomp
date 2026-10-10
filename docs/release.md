@@ -93,7 +93,7 @@ application names), or `PURE_DATA_DIR` when it is set:
 |---|---|
 | `EBOOT.ELF` | the executable prepared from the image (3.6 MB) |
 | `disc.iso` | the copy of the image (241 MiB); absent when it is used in place, `settings.ini` then names where it is |
-| `settings.ini` | `disc_image=` and every setting of the Esc menu (docs/controls.md) |
+| `settings.ini` | `disc_image=` and every setting of the Esc menu (docs/controls.md). `video.internal_scale` (the Video tab's Resolution) starts at `auto` for this game since task 067 (the framework's default is 2): the app draws at the display's resolution out of the box, 1920x1088 in the default window on a 2x display. A file that already holds a value keeps it, since the setting is the player's: a data directory an earlier build wrote holds `video.internal_scale=2` (every save writes every key) and stays at 2 until Resolution is set to Auto in the menu |
 | `ms0/` | the memory stick: saves in `ms0/PSP/SAVEDATA/` |
 | `pipeline_cache.bin`, `pipeline_keys.bin` | the Vulkan path's pipeline cache, when it has run |
 
