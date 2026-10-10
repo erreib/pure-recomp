@@ -1,0 +1,194 @@
+diff --git a/host/gpu/ge_backend.hpp b/host/gpu/ge_backend.hpp
+index 5ddd2df..53826f3 100644
+--- a/host/gpu/ge_backend.hpp
++++ b/host/gpu/ge_backend.hpp
+@@ -32,6 +32,7 @@
+ //    calls begin_frame() for the next frame)
+ #include "ge_state.hpp"
+ 
++#include <array>
+ #include <cstdint>
+ #include <functional>
+ #include <memory>
+@@ -142,6 +143,17 @@ public:
+ 
+     [[nodiscard]] virtual std::uint64_t draws_submitted() const noexcept = 0;
+     [[nodiscard]] virtual std::uint64_t frames_presented() const noexcept = 0;
++
++    // The internal scale while it runs (the menu's Resolution row, which is
++    // drawn only for a backend that answers true): set_internal_scale() takes
++    // the setting as BackendConfig::internal_scale does (0 Auto, else
++    // multiples of 480x272) and applies it from a frame the backend chooses,
++    // the next one at the latest; target_size() is the size a screen-wide
++    // target is drawn at now, in pixels. A backend that draws at one size
++    // whatever it is told keeps these defaults.
++    [[nodiscard]] virtual bool supports_internal_scale() const noexcept { return false; }
++    virtual void set_internal_scale(std::uint32_t) {}
++    [[nodiscard]] virtual std::array<std::uint32_t, 2> target_size() const noexcept { return {480u, 272u}; }
+ };
+ 
+ using BackendFactory = std::function<std::unique_ptr<GeBackend>()>;
+@@ -155,6 +167,10 @@ void register_backend(std::string name, BackendFactory factory, std::string desc
+ [[nodiscard]] std::string backend_description(std::string_view name);
+ // The backend <prefix>_GE_BACKEND names; "vulkan" when it is unset or empty.
+ [[nodiscard]] std::string selected_backend();
++// The backend the HLE draws with, while it can draw (hle_media.cpp): null
++// before it is made, without one, and for one that needs the Vulkan shell's
++// renderer while there is none. For the interface (the menu's Resolution row).
++[[nodiscard]] GeBackend *running_backend();
+ 
+ // One line in a backend's source file registers it before main():
+ //   const BackendRegistration registration("null", "draws nothing", [] { return std::make_unique<NullBackend>(); });
+diff --git a/host/gpu/vulkan_ge_backend.cpp b/host/gpu/vulkan_ge_backend.cpp
+index 5f52f4f..f227c0f 100644
+--- a/host/gpu/vulkan_ge_backend.cpp
++++ b/host/gpu/vulkan_ge_backend.cpp
+@@ -61,6 +61,14 @@ public:
+     std::uint64_t frames_presented() const noexcept override {
+         return renderer_ ? renderer_->frames_presented() : 0u;
+     }
++    // The renderer's own scale, which the menu set on it before the seam.
++    bool supports_internal_scale() const noexcept override { return true; }
++    void set_internal_scale(std::uint32_t scale) override {
++        if (renderer_ != nullptr) renderer_->set_internal_scale(scale);
++    }
++    std::array<std::uint32_t, 2> target_size() const noexcept override {
++        return renderer_ ? renderer_->target_size() : std::array<std::uint32_t, 2>{kScreenWidth, kScreenHeight};
++    }
+ 
+ private:
+     VulkanRenderer *renderer_{};
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index b648924..10332e5 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -1286,6 +1286,8 @@ gpu::GeBackend *ensure_shell_and_backend() {
+ 
+ void initialize_renderer() { (void)ensure_shell_and_backend(); }
+ 
++gpu::GeBackend *gpu::running_backend() { return portablekit::active_backend(); }
++
+ // A picture the CPU wrote straight into a VRAM framebuffer (the movie
+ // player decoding into the display buffers, as God of War's does): the
+ // renderer keeps each framebuffer on the GPU, so the pixels go to that
+diff --git a/host/profile.hpp b/host/profile.hpp
+index e8072a0..6fd1286 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -13,6 +13,7 @@
+ 
+ #include <array>
+ #include <cstdint>
++#include <optional>
+ #include <span>
+ #include <string>
+ #include <string_view>
+@@ -239,6 +240,11 @@ struct GameProfile {
+     // where it keeps its projection. Null: the game draws only the PSP's
+     // 480:272, and the renderer does not offer to widen it.
+     void (*view_aspect_frame)(psprecomp::Runtime &, float aspect) = nullptr;
++    // The internal scale a new player starts with (video.internal_scale: 0
++    // Auto, the window's own size; else multiples of 480x272), for a game
++    // whose renderer draws it well. Unset: the framework's default, 2. A value
++    // in settings.ini, or <prefix>_INTERNAL_SCALE, still decides.
++    std::optional<std::uint32_t> default_internal_scale = std::nullopt;
+ 
+     // --- Frame interpolation -----------------------------------------------
+     // What tells a camera cut from motion when frames are blended
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index 8f825b6..fc4be13 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -10,6 +10,7 @@
+ #include <functional>
+ #include <iostream>
+ #include <map>
++#include <optional>
+ #include <string>
+ #include <vector>
+ 
+@@ -461,6 +462,9 @@ std::string game_default_name() {
+ 
+ Settings defaults_for(Platform platform) {
+     Settings values{};
++    // The game's own default resolution, where it gives one (GameProfile).
++    if (const std::optional<std::uint32_t> scale = game().default_internal_scale; scale.has_value())
++        values.internal_scale = std::min(*scale, kMaxInternalScale);
+     if (platform == Platform::Android) {
+         values.aspect = Aspect::Fill;
+         values.fullscreen = true;
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 8a797b7..bd31979 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -20,6 +20,7 @@
+ #include "adhoc/session.hpp"
+ #include "audio/audio_sink.hpp"
+ #include "gpu/frame_pacing.hpp"
++#include "gpu/ge_backend.hpp"
+ #include "gpu/vulkan_renderer.hpp"
+ #include "hle/hle_common.hpp"
+ #include "profile.hpp"
+@@ -198,10 +199,16 @@ private:
+     bool confirm_dialog();
+ 
+     host::Shell &shell() { return Layer::get().shell(); }
+-    // The rows that are the Vulkan renderer's own (the resolution, the
+-    // texture filter, texture packs) need it; under another shell they are
+-    // left out.
++    // The rows that are the Vulkan renderer's own (the texture filter,
++    // texture packs) need it; under another shell they are left out.
+     gpu::VulkanRenderer *renderer() { return active_renderer(); }
++    // The GE backend whose internal scale the Resolution row changes: the
++    // one drawing, when it can change its scale while it runs; else null and
++    // the row is left out.
++    static gpu::GeBackend *scalable_backend() {
++        gpu::GeBackend *backend = gpu::running_backend();
++        return backend != nullptr && backend->supports_internal_scale() ? backend : nullptr;
++    }
+ 
+     bool paused_{};  // the game is paused behind the menu, rather than running
+     int tab_{};      // in tabs()
+@@ -316,12 +323,12 @@ void Menu::video() {
+     if (texture_pack_screen(back_)) return;
+     settings::Settings &s = settings::current();
+     section("Picture");
+-    if (renderer() != nullptr) {
++    if (gpu::GeBackend *backend = scalable_backend(); backend != nullptr) {
+         RowOptions o = options_for("video.internal_scale",
+                                    "Auto draws the game at the window's own size and follows it (at most 1632 "
+                                    "lines). ×1 to ×6 draw 272 lines per step, 480×272 times the step unless the "
+                                    "aspect ratio is Fill. Higher is sharper and needs more from the GPU.");
+-        const std::array<std::uint32_t, 2> size = renderer()->target_size();
++        const std::array<std::uint32_t, 2> size = backend->target_size();
+         const std::string drawn = std::to_string(size[0]) + "×" + std::to_string(size[1]);
+         const std::string value =
+             (s.internal_scale == 0u ? std::string("Auto") : "×" + std::to_string(s.internal_scale)) + "   " + drawn;
+@@ -331,7 +338,7 @@ void Menu::video() {
+             const int limit = std::max<int>(kMenuMaxInternalScale, static_cast<int>(s.internal_scale));
+             s.internal_scale =
+                 static_cast<std::uint32_t>(cycle(static_cast<int>(s.internal_scale), delta, limit + 1));
+-            renderer()->set_internal_scale(s.internal_scale);
++            backend->set_internal_scale(s.internal_scale);
+             settings::save();
+         }
+     }
+@@ -557,7 +564,8 @@ void Menu::video() {
+             if (settings::overridden_by(key).empty()) value = fallback;
+         };
+         // Only the rows shown: a hidden row's setting stays as it is.
+-        if (renderer() != nullptr) restore("video.internal_scale", s.internal_scale, d.internal_scale);
++        gpu::GeBackend *scalable = scalable_backend();
++        if (scalable != nullptr) restore("video.internal_scale", s.internal_scale, d.internal_scale);
+         restore("video.fullscreen", s.fullscreen, d.fullscreen);
+         restore("video.window_scale", s.window_scale, d.window_scale);
+         restore("video.aspect", s.aspect, d.aspect);
+@@ -570,7 +578,7 @@ void Menu::video() {
+         restore("video.unthrottled", s.unthrottled, d.unthrottled);
+         restore("video.fast_loading", s.fast_loading, d.fast_loading);
+         if (overlay) restore("video.performance", s.perf, d.perf);
+-        if (renderer() != nullptr) renderer()->set_internal_scale(s.internal_scale);
++        if (scalable != nullptr) scalable->set_internal_scale(s.internal_scale);
+         shell().set_fullscreen(s.fullscreen);
+         shell().set_window_scale(s.window_scale);
+         shell().set_aspect(s.aspect);

@@ -59,6 +59,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0014-vulkan-16bit-dither | (task 060) | Fidelity | candidate | Draws into 5650, 5551 and 4444 targets blended in `ge.frag` on the colour read as the render pass's own input attachment, then dithered by the GE's matrix and cut to the format's bits, as the Metal backend's `ge_fragment_16`; `<prefix>_NO_DITHER` draws them at 8 bits a channel as before; `<prefix>_SHOW_TARGET` presents an offscreen target |
 | 0015-vulkan-fb-texture-wrap | (task 063) | Fidelity | candidate | A render target sampled as a texture takes the GE's wrap mode: the texture's own coordinates wrapped per axis (REPEAT modulo 1, CLAMP between the centres of the edge texels) in `ge.frag`, then placed in the target's copy, as the Metal backend does; the billboards' adverts show instead of their first row stretched into bars |
 | 0016-menu-rows-by-capability | (task 064) | Behaviour, tooling | candidate | The Esc menu draws a row only when its feature exists: `GameProfile::features` (`MenuFeatures`: ad hoc play, the right-stick camera, the mouse camera) and five `Shell` answers (frame interpolation, the performance overlay, each aspect, touch controls, the API's name), every default today's; `<prefix>_MENU_DUMP` prints each tab's rows when the menu opens |
+| 0017-internal-scale-by-backend | (task 067) | Behaviour | candidate | The menu's Resolution row asks the GE backend, not the Vulkan renderer: `GeBackend::supports_internal_scale()`, `set_internal_scale()` and `target_size()` (defaults: no, nothing, 480x272), the Vulkan backend forwarding to its renderer as the menu did; `gpu::running_backend()` for the menu; `GameProfile::default_internal_scale`, the scale a new player starts with (unset: the framework's 2) |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -373,3 +374,17 @@ rows shown only. `<prefix>_MENU_DUMP` (tests): when the menu opens, its first fr
 `[menu] tabs: ...` and one `[menu] <Tab>: <rows>` line a tab, the labels in draw order, the offered choices of Aspect
 ratio and Right stick and the Graphics line in parentheses, and the rows another screen's code draws as one entry
 (`[font rows]`, `[texture pack rows]`, `[save rows]`).
+
+### 0017-internal-scale-by-backend
+Task 067 (D-015, E3 step 3). The Video tab's Resolution row, its value text and "Restore video defaults"'s line for it
+were the Vulkan renderer's (`active_renderer()`), so a GE backend that draws at an internal scale of its own (our
+Metal backend, task 066) had no row. Now they ask the backend the HLE draws with, `gpu::running_backend()` (declared
+in `host/gpu/ge_backend.hpp`, defined in `hle_media.cpp` over its `active_backend()`): the row is drawn when
+`GeBackend::supports_internal_scale()` answers true, its value is `target_size()`, and a change calls
+`set_internal_scale(setting)`, the setting as `BackendConfig::internal_scale` takes it (0 Auto). The defaults are no,
+nothing and 480x272, so the null and record backends have no row; the Vulkan backend (`vulkan_ge_backend.cpp`) answers
+true and forwards both to its renderer, which is what the menu called before, so the Vulkan shell's menu is unchanged
+(the texture filter and texture pack rows keep their renderer gate). `GameProfile::default_internal_scale`
+(`std::optional`, unset by default) is the scale a new player starts with: `settings::defaults_for` applies it, so it
+is also what "Restore video defaults" restores; a value in settings.ini or `<prefix>_INTERNAL_SCALE` still decides.
+Our profile sets 0 (Auto).

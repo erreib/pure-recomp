@@ -24,6 +24,7 @@ it uses.
 | 0008-sas-reverb | yes | nothing | nothing |
 | 0009-vfpu-rounding | yes | nothing | nothing |
 | 0016-menu-rows-by-capability | no | 0004 (`host/shell/shell.hpp` is new there; tried in task 064 with `patch` on the pin plus 0003 and 0004) | 0004 (`host::Shell`, the menu's `shell()`) |
+| 0017-internal-scale-by-backend | no | 0004 (`host/gpu/ge_backend.hpp` and `vulkan_ge_backend.cpp` are new there), 0016 (the menu's lines it changes, its `restore` gate) | 0004 (`gpu::GeBackend`, `active_backend()` in `hle_media.cpp`) |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -120,6 +121,15 @@ opens) is test tooling any port's checks could use; it routes the menu's rows th
 `menu.cpp`, which upstream may prefer as a hook in `widgets.cpp`'s shared row code, where it would also list the
 rows the font, texture-pack and save screens draw.
 
+### 0017-internal-scale-by-backend: candidate
+The menu's Resolution row asks the GE backend the HLE draws with (`gpu::running_backend()`) rather than the Vulkan
+renderer: `GeBackend::supports_internal_scale()`, `set_internal_scale(setting)` and `target_size()`, with defaults
+that leave the row out (no, nothing, 480x272) and a Vulkan backend that answers yes and forwards to its renderer, which
+is what the menu called before, so the framework's games and the Vulkan shell show the same rows. A backend of a port's
+own (our Metal one) then gets the row by answering. With it, `GameProfile::default_internal_scale` (unset: the
+framework's 2), for a game whose renderer draws a higher default well; `settings::defaults_for` applies it. Needs the
+backend seam (0004) and follows 0016, whose menu lines it edits; offer it with or after 0016.
+
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
 readers for early recordings (0004); comments that cite this repo's tasks, fidelity differences and old patch
@@ -129,5 +139,5 @@ that this list stays true.
 ## An order to offer them in
 0001; 0006; the kernel part of 0005; 0002; the standalone renderer fixes of 0003 (exact target, alpha test numbers,
 shutdown order); 0008; the rules of 0009; the stencil, shadow volume and dual-source part of 0003; 0007's no-key
-mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list and 0016 after them; the depth
+mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list, 0016 and 0017 after them; the depth
 write-back of 0003 behind a profile switch.
