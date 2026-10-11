@@ -62,8 +62,8 @@ const GameOption kOptions[] = {
      .label = "Text and sprites",
      .choices = kSpriteChoices,
      .description = "The menus' text and art and the race HUD are small bitmaps on the PSP. Upscaled redraws them four "
-                    "times finer with smooth edges. Metal only: the Vulkan renderer draws the originals until a texture "
-                    "pack exists.",
+                    "times finer with smooth edges. Metal only: the Vulkan renderer draws the originals, or the same "
+                    "upscaled art from the texture pack tools/sprite_pack.sh builds (the Texture pack row).",
      .default_choice = 1u,
      .tab = MenuTab::Video},
 };
