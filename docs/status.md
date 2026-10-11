@@ -174,8 +174,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   patch 0017-internal-scale-by-backend; Auto as this game's default; a live change at the next frame; the on-screen
   perf table: 16.68 ms mean at Auto (4), 6 and 1, no frame over 25 ms); task 068 merged 867cad6 (patch
   0018-vulkan-effects-at-1x: the Vulkan renderer's narrow targets at 1x, Vulkan 2x now Metal's picture). **E3 is
-  complete on both backends.** The app repacked from 056d27f (Auto by default). Task 069 (the window checks unpaced
-  to the scene; Erik, 2026-10-10) running.
+  complete on both backends.** The app repacked from 056d27f (Auto by default). Task 069 merged 22d3ba5 (2026-10-11):
+  the window checks run unpaced to the scene and capture the seven window scenes by default (`--all-scenes` for
+  18): the window suites 19m 48s to 5m 10s, the HUD check 227 s to 82 s; `--paced` keeps the old pacing for a
+  pacing change. Follow-up: a built-in wait in frame_regress.sh while another game runs.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

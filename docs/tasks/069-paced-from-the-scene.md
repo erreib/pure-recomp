@@ -1,6 +1,6 @@
 # 069: The window checks run unpaced to the scene (tools)
 
-Milestone: tools (Erik, 2026-10-10) | Branch: task/069-paced-from-the-scene | Status: OPEN
+Milestone: tools (Erik, 2026-10-10) | Branch: task/069-paced-from-the-scene | Status: MERGED (22d3ba5, 2026-10-11)
 
 ## Goal
 A windowed run is held to real time from boot, so each route of `tools/frame_regress.sh --shell metal|vulkan` takes
@@ -187,4 +187,16 @@ Open questions:
    like menu_check.sh's, would be a small follow-up if it is wanted.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge, 2026-10-11: PASS (headless 18/18 in 21 s; `--shell metal
+--backend metal` 7/7 in 5m 10s; `tools/hud_check.sh` 61/61 in 81 s). The gate: `--shell vulkan --backend vulkan`
+7/7 in 5m 10s; `tools/menu_check.sh` PASS.
+Spot-read: the pace is a per-route `PURE_PACED_FROM` from the first captured scene minus 300, a caller's value
+winning; `--paced` restores pacing from boot; the window scene set is the seven a shell can change, `--all-scenes`
+the table; headless untouched (0 differing pixels against the starting commit's captures).
+Merged: `git merge --no-ff` into batch/m2, 22d3ba5.
+Notes: PARTIAL by 10 s on the brief's five-minute bar, accepted: the bar was a round target, and the remaining time
+is the panel's 120 Hz presenting the unpaced menus (the two ways under five minutes are recorded in the Result and
+not taken). The race scenes did not move with the pacing (pixel-identical captures in both shells); the seed moved
+in 2 of 16 window runs independent of it, the wobble note now carries the figures. The Vulkan column's race scenes
+now hold this Mac's medians; the Windows medians stay in the comments. Follow-up: `tools/frame_regress.sh` refuses
+at once while another game runs where refactor_check and scale_check wait; a built-in wait like menu_check's.
