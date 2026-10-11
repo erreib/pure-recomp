@@ -153,7 +153,97 @@ Two commits on the branch, in this order.
 - a build takes over 5 minutes, or the change needs include/psprecomp/ or generated code
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE. Every acceptance criterion holds; no escalation condition occurred (details below).
+
+Changed (branch task/070-smooth-flashes from batch/m2 fcf89c2):
+- Commit 1 (a1afaac), the framework patch: `patches/0019-game-option-rows.patch` (generic: names no game, key or
+  label of this one), `patches/README.md` (row and section), `docs/upstream.md` (dependency row, candidate section,
+  the order). `host/profile.hpp`: `MenuTab` (Video, Audio, Controls, Network, System) and `GameOption` (`key`,
+  `label`, `choices`, `description`, `default_choice`, `tab`; `default` is a C++ keyword, so the brief's `default` is
+  `default_choice`), `GameProfile::options`. `host/settings/`: `Settings::game_options` (an index each),
+  `defaults_for` gives each its default, `all_fields()` adds `game.<key>` per option after the bindings, with the
+  variable `<KEY>` (so `PURE_SMOOTH_FLASHES`, `overridden_by("game.smooth_flashes")`), an index out of range ignored
+  (`[settings] ignoring ...`, the default stays), `save()` drops a `game.` key no option has,
+  `settings::game_option(key)`. `host/ui/menu.cpp`: `game_rows(tab)` at the end of each tab (a `section("Game")`, a
+  `choice_row` per option through the dump's row object, saving on change), and `restore_game_rows(tab)` in each
+  tab's Restore button (not in the brief; "Restore video defaults" says every setting on the page). Tried: 0019
+  applies on the pin plus 0003, 0004, 0016 and 0017, not without 0017.
+- Commit 2: `src/profile/enhancements.{hpp,cpp}` (new: the option table, Flashes, `smooth_flashes`, Original/Smooth,
+  default 1, Video; the `sceGeDrawSync` wrap), `src/profile/pure_profile.cpp` (installs it after the flip counter and
+  before the test hooks, so `PURE_TRACE_CALLS` can wrap it; `.options`), `CMakeLists.txt` (the source),
+  `tools/purelib/port.py` (`original_pacing`, called by `silence` and `steady_clock` so the sweep, which this task
+  may not touch, gets it; `SCRATCH_SETTINGS` adds `game.smooth_flashes=0`), `tools/run_boot.py` (the call after
+  `--env` is merged, and its doc), `tools/flash_check.sh` (new), `tools/menu_check.sh` (Flashes last in Video, both
+  shells), README.md, docs/timing.md ("E6"), docs/fidelity.md, docs/controls.md, docs/verification.md,
+  docs/release.md, this Result.
+
+The readers of `+0x117c` (`grep 4476 generated/*.cpp`, each hit read in place):
+- `FUN_0886511c` (generated_unit_0024.cpp lines 8780 and 8787): `aot_load32(s0 + 4476)`, the one load, at
+  0x08865248: emitted twice, inline as the delay slot of the beq at 0x08865244 and at its own label. The only reader.
+  Its decrement's store at 0x0886525C (lines 8805, 8809, likewise twice).
+- The other stores, as the audit found: `FUN_0882da04` (FxScreen, unit 0010 line 12060, 0x0882E198, the 2) and
+  `RenderManager_cpp__088666c4` (unit 0024 line 14769, 0x08866BC0, the 0).
+- `FUN_0889e5ac` (unit 0038 lines 13274 and 13278): `a1 = (0x8A5 << 16) + 4476` = 0x08A5117C, a constant address
+  (a string of the network-error names handed to FUN_088DF8EC), not the frame object: not a reader.
+
+Measured:
+- `sceGeDrawSync` (traced with `PURE_TRACE_CALLS=sceDisplay:0x289D82FE,sceGe_user:0xB287BD61`): exactly one call
+  before each flip from the race's first frame (flips 5707 to 6400: 694 of 694); the frontend makes 1 to 3 a flip
+  (+0x116c 0 there, so the hook writes nothing). The frame object is `0x08B77020` in these runs.
+- The fade (`tools/flash_check.sh`): with 0, 57 flips at two vblanks (5708 to 5764, 1.90 s); with 1, none from 5708
+  to 6100. The race clock starts at flip 6253 with 0 and 6309 with 1, 10.04 s and 10.02 s from the fade's first
+  flip: the same time in 56 more flips. With 1, `[pure] smooth flashes: on (game.smooth_flashes)` once, in the
+  race's first frame (after flip 5700); with 0, `off` at start-up only. HUD at 6100 in both.
+- The race (`--race`): with 0, PASS, 4 stretches (flip 9649: 16 flips 0.53 s; 10540: 18, 0.60 s; 10648: 22, 0.73 s;
+  10833: 16, 0.53 s), laps 59.6, 64.1, 56.4 s (mean 60.03); with 1, PASS, 0 stretches, laps 62.9, 55.4, 58.2 s
+  (mean 58.83): -2.0%.
+- 2200-flip frontend (`run_boot.py --frames 2200 --shell headless --script config/pad_scripts/main_menu.txt`):
+  `[pure] smooth flashes: off` and no `on`; with `--env PURE_SMOOTH_FLASHES=1`, no line at all (the frontend's byte
+  is 0; the `on` comes with the race, as above).
+- settings.ini, a windowed run of the binary without the pin (data directory holding `game.smooth_flashes=5` and
+  `game.bogus=1`): `[settings] ignoring game.smooth_flashes=5`, the row read Smooth, Right made it Original, and the
+  file then held `game.smooth_flashes=0` and no `game.bogus`. The row and its help text drawn in the Game section.
+- `tools/hud_check.sh`: 61 of 61 (Metal window). `tools/frame_regress.sh`: 18/18 with task 069's headless fractions
+  to the digit (race_hud 0.0148, zone_change 0.0369).
+
+Verify output (each part run on its own, last lines):
+```
+$ tools/patches.sh check
+ok: 19 patch(es) reproduce vendor/portablekit at 8b0c3fe
+$ tools/flash_check.sh
+PURE_SMOOTH_FLASHES=0: flips 5600-6100: 164 at two vblanks, longest run 107; 107 before the race's first one-vblank flip (5707); the fade: flips 5708-5764, 57 flips, 1.90 s; the race clock starts at flip 6253, 546 flips and 10.04 s from the fade's first
+PURE_SMOOTH_FLASHES=1: flips 5600-6100: 107 at two vblanks, longest run 107; 107 before the race's first one-vblank flip (5707); from the fade's first flip (5708) to 6100: 0 at two vblanks; the fade's 1.90 s span flips 5708-5822, 115 flips; the race clock starts at flip 6309, 602 flips and 10.02 s from the fade's first; '[pure] smooth flashes: on (game.smooth_flashes)' after flip 5700
+flash_check: PASS (fade 57 flips off, 0 on; the race and its HUD in both)
+$ tools/flash_check.sh --race
+PURE_SMOOTH_FLASHES=0: PASS, laps 59.6, 64.1, 56.4 s (mean 60.03 s), 4 two-vblank stretch(es) (3+ flips over 25000 us)
+PURE_SMOOTH_FLASHES=1: PASS, laps 62.9, 55.4, 58.2 s (mean 58.83 s), 0 two-vblank stretch(es) (3+ flips over 25000 us)
+flash_check: PASS (race: stretches 4 off, 0 on; mean lap -2.0% on against off)
+$ tools/menu_check.sh
+Video: ok (11)
+menu_check: PASS
+$ tools/menu_check.sh --shell vulkan
+Video: ok (17)
+menu_check: PASS
+$ tools/frame_regress.sh
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 21s)
+$ python3 tools/docs_check.py
+docs_check: 33 files, 0 findings: PASS
+```
+
+Open questions:
+1. The brief asks for a race clock above 0 "by flip 6100", but the race clock starts at flip 6253 with the option
+   off (6309 on; single_race.txt: "goes at ~6250"), so no run can show it by 6100. The fade check runs to flip 6400
+   and asks for it by then; the counted flips stay 5600 to 6100 and the HUD shot stays at 6100.
+2. Flips 5600 to 5706 (TEAM SELECTION and the race load) are 107 two-vblank flips in both runs, the longest run of
+   the brief's window, so the check takes the fade as the first run after the race's first one-vblank flip (5707).
+   The load's flips (5701 to 5706) keep two vblanks with the option on although +0x116c is 1 and the countdown 0, so
+   their wait is not step 5's; not chased.
+3. With the option on the fade cannot be seen in the flip times (its flips are one vblank like their neighbours):
+   the check prints the flips run 0's fade seconds span in run 1 (115) and, measured, the race clock's start from
+   the fade's first flip in both runs (the same seconds, 56 more flips).
+4. In the frontend the countdown runs negative (the locked path decrements it every frame: -5572 at flip 5700); the
+   game's own, untouched, and cleared at the race's first frame with the option on.
+5. The acceptance's `--pad` is not a run_boot flag; the frontend runs used `--script ... --shell headless`.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

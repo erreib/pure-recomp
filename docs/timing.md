@@ -45,6 +45,30 @@ the reported "double speed in 30 fps areas".
   vblanks. These are the race's two-vblank stretches, the game's own and PPSSPP's too (docs/fidelity.md; every
   writer: [What writes the two fields](history/fidelity.md#what-writes-the-two-fields)).
 
+## E6: the flash lock cleared (task 070)
+D-016: the player's Esc menu has a Flashes row (Video tab, Game section; `game.smooth_flashes`, `PURE_SMOOTH_FLASHES`;
+patch 0019-game-option-rows), Smooth by default. With Smooth, `src/profile/enhancements.cpp` wraps `sceGeDrawSync`
+(NID 0xB287BD61), which the end-of-frame routine calls once a frame at step 1, before step 5 reads the fields: when
+the frame object (`*0x08A8E960`) is in user RAM and `+0x116c` is 1 (Single Race, Tournament), it stores 0 to `+0x117c`
+first, so a flash frame takes the free path (`sceKernelDelayThreadCB(150)`) like any other. With `+0x116c` 0 (Time
+Trial, Free Play, Zone, the frontend) nothing is written: their 30 fps is E4's question. No generated code changes.
+- The only reader of `+0x117c` in the corpus is `FUN_0886511c` (the load at 0x08865248, emitted twice in
+  `generated/` as a branch delay slot; its decrement's store at 0x0886525C); the other stores are FxScreen's
+  (`FUN_0882da04`, 0x0882E198) and the render manager's set-up (`RenderManager_cpp__088666c4`, 0x08866BC0). The only
+  other `4476` in an address is `FUN_0889e5ac`'s constant 0x08A5117C, a string of the network error names, not the
+  frame object.
+- On the Vineta K start route (`tools/flash_check.sh`): with Original the fade waits two vblanks for 57 flips
+  (5708 to 5764, 1.90 s); with Smooth none of flips 5708 to 6100 does, and the race clock starts 10.02 s after the
+  fade's first flip (flip 6309) where it starts 10.04 s after it with Original (flip 6253): the same time in more
+  flips, since the intro runs on the measured dt. A traced run shows one `sceGeDrawSync` a flip from the race's first
+  frame on. TEAM SELECTION and the race load (to flip 5706) keep their two vblanks with either choice: the load's
+  flips wait so with `+0x116c` 1 and the countdown 0, so their pace is not step 5's.
+- Every tool run has Original unless it names the variable (`tools/purelib/port.py`'s `original_pacing`), so the
+  suites, the HUD check and the sweep measure the PSP's pacing; `tools/flash_check.sh --race` has a swept race's
+  stretches and laps with both. Task 070's run of Vineta K: Original, 4 stretches of 16 to 22 flips and laps of 59.6,
+  64.1 and 56.4 s; Smooth, no stretch and laps of 62.9, 55.4 and 58.2 s (the mean 2.0% lower, inside the 5% the check
+  allows; the follower's laps vary by more than that from lap to lap).
+
 ## Frame structure (from `out/frame.txt`)
 - `FUN_088ed190` is the GE init: `sceGeEdramGetAddr`, `sceKernelCreateEventFlag`, `sceGeSetCallback` (one callback
   set with signal/finish handlers that set the event flag), then an initial `sceGeListEnQueue` + `sceGeListSync`.

@@ -1,8 +1,10 @@
 // The Wipeout Pure profile: what the framework cannot read off the executable. See vendor/portablekit/host/profile.hpp.
 // Values below were read from Erik's disc (docs/research.md, "Erik's dump") and from spike S4 (docs/codegen-baseline.md).
 // The test switches and probes are in test_hooks.cpp (task 051); this file keeps the game's port and the run-control
-// switches (PURE_EXIT_AT_FRAME, PURE_FRAME_LOG, PURE_PACED_FROM).
+// switches (PURE_EXIT_AT_FRAME, PURE_FRAME_LOG, PURE_PACED_FROM); the enhancements, each a menu option, are in
+// enhancements.cpp (task 070).
 #include "profile.hpp"
+#include "enhancements.hpp"
 #include "test_hooks.hpp"
 
 #include "hle/hle_common.hpp"
@@ -103,6 +105,8 @@ void register_pure_hle(HleRegistrar &hle) {
         apply_paced_from(0u);
     }
     wrap_flip_counter(hle);
+    // The enhancements' hooks (enhancements.cpp): E6 wraps sceGeDrawSync, which PURE_TRACE_CALLS may then wrap.
+    enhancements::install(hle);
     // The test switches and probes (test_hooks.cpp), installed here, once: after the flip counter, which
     // PURE_TRACE_CALLS may wrap, and before the audio capture and the GPI answer, which are bound over what it wrapped.
     const test_hooks::Hooks tests = test_hooks::install(hle);
@@ -204,6 +208,10 @@ const GameProfile &game() {
         // The menu's game rows (patch 0016-menu-rows-by-capability, D-014): ad hoc play is not a feature of this port
         // yet, and there is no right-stick or mouse camera (the PSP has neither; the race camera is the game's own).
         .features = {.adhoc = false, .right_stick_camera = false, .mouse_camera = false},
+
+        // The enhancements, each a row of the menu's Game section (patch 0019-game-option-rows; enhancements.cpp): E6,
+        // Flashes (D-016, task 070), game.smooth_flashes, default Smooth.
+        .options = enhancements::options(),
     };
     return profile;
 }
