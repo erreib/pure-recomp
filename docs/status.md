@@ -142,7 +142,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   decal at draw 508 of 864), so the two complete backends agree on one recording and step 3 is DONE. Step 4 (packaging) is task 061, merged 18c5df4 (2026-10-09): the `win-x64-release` preset,
   `tools/bundle_windows.sh` (the folder, `--zip`, `--check`: all seven checks PASS, docs/release.md "Windows");
   task 071 gave the executable its icon and a version resource (`packaging/windows/pure.ico` and `pure.rc`, through
-  llvm-rc) and the check an eighth, `icon`: all eight checks PASS (out/071-icon); the follow-up is code signing. With it the Windows bring-up's four steps
+  llvm-rc) and the check an eighth, `icon`: all eight checks PASS (out/071-icon); code signing is declined (Erik,
+  2026-10-11: not paying a CA for a private build; the zip stays unsigned, README.txt's SmartScreen note is the
+  answer, and a signature would put a verified legal name in the binary). With it the Windows bring-up's four steps
   are done, the Mac A/B included (2026-10-09). Step 1 was task 054 on `task/054-windows-build-boot`,
   run 2026-10-08 on Erik's Windows machine by the planning session itself (the corpus regeneration and the first
   cold build sit outside a worker's limits): the game builds with clang-cl on the win-x64 preset, the corpus
