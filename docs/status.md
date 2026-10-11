@@ -208,6 +208,14 @@ simplification task, then the enhancements. The session-by-session resume notes 
   18/18 to the digit, HUD 61/61 (out/072_gate.log). Follow-ups: Original chosen during a free-running race takes
   effect at the next race; a save dialog in a race runs free with the option on; the frontend at 60 (not audited);
   the check on the rig with `--shell vulkan`.
+- **E7, the frontend's resolution** (D-018, 2026-10-11; Erik's pick after E4: the menus look low-resolution). The
+  menus are bitmap font atlases and art atlases drawn at one texel a screen pixel in through mode, so E3 only
+  magnified their texels (the planning session; out/fe_tex/). A prototype edge-preserving 4x resample on the real
+  atlases gave crisp text and logos. Task 073 (in flight): the Metal backend upscales through-mode palette and
+  16-bit textures 4x at decode, a "Text and sprites" row (Original / Upscaled, default Upscaled,
+  `game.sprite_upscale`, `PURE_SPRITE_UPSCALE`), the pin beside the other two, a check `sprite_check.sh` and a dump
+  switch. Then task 074: the same output as a PPSSPP-format texture pack for the Vulkan renderer (Windows) and as
+  the base for an AI pass. The frontend at 60 fps comes after.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

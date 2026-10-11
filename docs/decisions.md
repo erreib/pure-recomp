@@ -19,6 +19,7 @@
 | D-015 | 2026-10-10 | E3 opens: the Metal shell draws at the display's pixels and the Metal backend draws at an internal scale, effects buffers at 1x | accepted (Erik) |
 | D-016 | 2026-10-11 | E6: the race keeps its frame rate through the full-screen flashes (the game's two-vblank lock cleared in the 60-fps modes), a game option row in the Esc menu, on by default; the checks run with it off | accepted (Erik) |
 | D-017 | 2026-10-11 | E4: Time Trial, Free Play and Zone free-running at the display's rate (the frame object's lock byte set while the race backend lives), a "30 fps modes" row in the Esc menu, 60 fps by default; the checks run with it off; the frontend stays at 30 | accepted (Erik) |
+| D-018 | 2026-10-11 | E7: the menus' and HUD's bitmap art upscaled 4x at decode in the Metal backend (through-mode draws' palette textures, an edge-preserving resample), a "Text and sprites" row in the Esc menu, on by default; the checks run with it off; a texture pack from the same scaler for the Vulkan renderer and as the base for an AI pass, second | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -332,4 +333,52 @@ frontend at 60 (a follow-up if the menus prove dt-driven), the Vulkan window's a
 check), and a window that cannot draw 60 (the game then runs at what it draws, dt measured, as Single Race does).
 Alternatives: NOP the loop's branch as the CWCheat does (no instruction to NOP in a static recomp, and it would also
 touch the frontend); set the byte from the race managers' constructors (generated code, three sites, no option).
+Status: accepted (Erik).
+
+## D-018  2026-10-11  E7: the frontend's resolution, the bitmap art upscaled
+Context: Erik's next pick: the frontend (the game's menus) looks low-resolution, more so than the races, and he
+wants that before the frontend's 60 fps. E3 did not touch it, and the main menu's draws say why (ref/main_menu.ppdmp
+through `tools/ppsspp/ppdmp.py draws`; the planning session, out/fe_tex/ on the Mac): 32 draws, the text drawn glyph
+by glyph from two bitmap font atlases in RAM (CLUT4, 256x128 and 256x256, glyphs about 15 texels tall, antialiased
+in 16 alpha levels), the decoration from static art atlases the game keeps in VRAM (CLUT8 256x128: logos, the
+katakana "wipeout" strip, the menu's bars), the rest untextured panels; every sprite drawn at one texel a screen
+pixel of the 480x272 picture, in through mode. A higher internal scale (E3) magnifies those texels more sharply; the
+detail is not there. The race HUD is drawn the same way. The 3D scenes gained from E3 and are not the problem.
+Two ways to add the detail: replacement textures (PortableKit loads PPSSPP-format packs, `textures.ini` and PNGs
+keyed by a content hash, on its Vulkan renderer; the Metal backend has no pack path yet but keys every texture by
+its contents already), or an upscaler at decode. A pack holds the game's art and cannot be committed (CLAUDE.md), so
+it would be built locally from the disc; an upscaler ships in the app and needs nothing. A prototype of an
+edge-preserving resample on the real atlases (out/fe_tex/upscale_proto.py: separable Catmull-Rom 4x on premultiplied
+RGBA with the alpha normalised to the texture's peak, then, for a texture whose texels are mostly empty or at the
+peak, a smoothstep of half-width 0.22 about 0.5 coverage) gave crisp, smooth glyphs and logos where nearest
+neighbour gives blocks; only hairline strokes thin out. An AI upscaler (Real-ESRGAN or similar) would do better on
+the art and worse on text, and brings a model and a tool to install.
+Decision (Erik, from the recommendation): the upscaler first, in the app; the pack second, from the same scaler.
+1. The Metal backend upscales, at decode, the textures of through-mode draws that come from guest memory in a
+   palette or 16-bit format (the fonts, the icons, the art; not the 32-bit movie and TV pictures, not targets, not
+   mipmapped textures), by 4 whatever the internal scale, with the prototype's resample written in C++ in
+   `src/gpu/`. The cache keys the upscaled texture apart from the plain one. Through-mode UVs are already normalised
+   by the GE's texture size, so a larger texture samples in place; an upscaled texture samples linear, since the
+   GE's nearest filter was for one texel a pixel.
+2. The player's switch is a game option row (patch 0019-game-option-rows): "Text and sprites", choices "Original"
+   and "Upscaled", default Upscaled (`game.sprite_upscale=1`, `PURE_SPRITE_UPSCALE`), on the Video tab after the
+   30 fps modes and Flashes rows. It is the Metal backend's: under the Vulkan renderer the row is shown but does
+   nothing until the pack exists (point 4), and says so in its help.
+3. The checks measure the PSP's picture: every tool run has `PURE_SPRITE_UPSCALE=0` through `tools/purelib/port.py`
+   beside the other two, so the suites, the HUD check and the sweep stay where they were measured. One check runs
+   with it on: a frontend scene and a race HUD scene at internal scale 4, each reduced to 480x272 by the centre
+   pixel, within the scene's limit of the reference (the picture is the same picture), with the full-size shots
+   differing from the plain ones (the detail is there), the HUD found, and the route's decode time bounded.
+4. Second (task 074): a dump switch that writes the upscaled textures as a PPSSPP-format texture pack with the
+   framework's keys, so the Vulkan renderer on Windows draws the same art through its pack loader, and so an AI pass
+   can replace the PNGs of the art atlases in that pack and be compared. The pack is built locally from the player's
+   disc and is never committed.
+Consequences: task 073 (the scaler, the row, the pin, the check), then 074 (the pack). The exit for 073: the
+frontend's text and art at 4x without blocks (Erik's eye, and the check's two scenes); the suite, the HUD check and
+the menu dumps unchanged with the option off; a race at internal scale 4 still at 60 fps. The frontend at 60 fps
+stays a later item.
+Alternatives: a texture pack first (needs a local build step and the Metal pack path before anything is seen); a
+pixel-art scaler of the xBR family (GPL-3 for xBRZ, which would change the binary's licence; and its look suits
+pixel art more than antialiased type); vector fonts drawn by the port in place of the atlas (the text is drawn
+glyph by glyph from the atlas by the game, so the hook would be deep).
 Status: accepted (Erik).
