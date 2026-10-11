@@ -1,6 +1,6 @@
 # 072: Time Trial, Free Play and Zone free-running (E4)
 
-Milestone: E4 (Erik, 2026-10-11; D-017) | Branch: task/072-sixty-fps-modes | Status: OPEN
+Milestone: E4 (Erik, 2026-10-11; D-017) | Branch: task/072-sixty-fps-modes | Status: MERGED (8fb4955, 2026-10-11)
 
 ## Goal
 Time Trial, Free Play and Zone run at 30 fps on the PSP: their race managers set the frame object's lock byte
@@ -246,3 +246,23 @@ Open questions:
    184/255 in Free Play.
 7. The acceptance's `--pad` is not a run_boot flag. The frontend run used `--script config/pad_scripts/main_menu.txt
    --shell headless`.
+
+## Review
+Verify rerun: `tools/verify_task.sh 072` from the main checkout after the merge, 2026-10-11 17:00 to 17:08
+(out/072_gate.log): PASS. framerate_check (route): frontend medians 33.37/33.37 ms, race 33.37/16.68 ms and
+29.97/59.94 flips a race-clock second off/on, the `on` line after flip 5704, the HUD drawn. `--race`: 29.97 against
+59.95 flips a second, game clock 0.9994 and 1.0001, the start 42.1/80.5/124.2/174.4 against 39.3/77.5/121.1/168.2
+km/h, laps 71.5/68.5/67.6 s (55 contacts) against 68.5/59.4/60.0 (44). flash_check PASS, menu_check PASS both shells,
+suite 18/18 to the digit, docs_check PASS; `tools/hud_check.sh` 61 of 61 after it.
+Spot-read: the hook's two guards (backend and frame pointers in user RAM, the byte 0) and its order before E6's
+clear; `original_pacing` over a tuple with setdefault, so `--env` still wins; the check reads the built game's
+behaviour (flip intervals from the trace, the clock from the ship lines) rather than the option's value, and its
+`--race` parse takes the game clock from its values above 1000 as the brief asked.
+Merged: 8fb4955 into batch/m2. Then 88fc1cf: the row renamed from "Frame rate" to "30 fps modes" (the worker's
+open question 5: the Vulkan shell's Video tab already has the renderer's Frame rate row); code, menu_check's
+expected rows and the docs follow, this brief and the Result keep the original name.
+Notes: the brief's "after flip 5900" was wrong, the backend is made at the race load (flip 5704) and the check
+uses that; the `--pad` in the acceptance should have read `--script`. Follow-ups, none blocking: switching back to
+Original during a free-running race leaves the byte at 1 until the race ends (storing 0 back for a backend the hook
+set would make it immediate); a save dialog while the backend lives runs free with the option on; the frontend at
+60 (not audited); the check on the rig (`tools/framerate_check.sh --shell vulkan`, both forms).

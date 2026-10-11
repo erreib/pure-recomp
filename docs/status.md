@@ -199,10 +199,14 @@ simplification task, then the enhancements. The session-by-session resume notes 
   and the save-dialog driver; the frame timer's fixed-step bytes are dead (never written, 0 in .data); with the byte
   forced to 1 while the backend lives (`DAT_08a8c5f4`) a paced Time Trial ran at 59.95 flips a race-clock second
   with the same standing start and game-clock rate, the ghost samples by time (0.05 s), Zone's zone timer and shield
-  drain follow the race clock. No per-frame logic found; the cheat's double speed is not the port's. Task 072 (in
-  flight): the hook in the E6 wrap, a 30 fps modes row (Original / 60 fps, default 60 fps, `game.sixty_fps`,
-  `PURE_SIXTY_FPS`), the pin beside `PURE_SMOOTH_FLASHES`, a check `framerate_check.sh` beside flash_check. The frontend stays at 30
-  (not audited; a follow-up).
+  drain follow the race clock. No per-frame logic found; the cheat's double speed is not the port's. **Task 072
+  merged 8fb4955 (2026-10-11), the row renamed in 88fc1cf: E4 complete.** The hook in the E6 wrap, a "30 fps modes"
+  row (Original / 60 fps, default 60 fps, `game.sixty_fps`, `PURE_SIXTY_FPS`), the pin beside `PURE_SMOOTH_FLASHES`,
+  `tools/framerate_check.sh [--race]`. Gate: verify PASS (route 33.4/16.7 ms and 29.97/59.94 flips a second off/on;
+  race 29.97/59.95, game clock 0.9994/1.0001, the standing start within 5%), flash_check, both menu dumps, suite
+  18/18 to the digit, HUD 61/61 (out/072_gate.log). Follow-ups: Original chosen during a free-running race takes
+  effect at the next race; a save dialog in a race runs free with the option on; the frontend at 60 (not audited);
+  the check on the rig with `--shell vulkan`.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
