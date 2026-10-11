@@ -34,13 +34,16 @@ DRAWING = ("vulkan", "vulkan") if WINDOWS else ("headless", "metal")
 BLIND = ("headless", "null") if WINDOWS else ("headless", "metal")
 FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the frame exit before it is killed
 # What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
-# over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings.
-SCRATCH_SETTINGS = "ui.menu_hint_seen=1\n"
+# over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings; the
+# enhancements are off, as original_pacing pins them (task 070).
+SCRATCH_SETTINGS = "ui.menu_hint_seen=1\ngame.smooth_flashes=0\n"
 CHECKOUT_VARS = ("PURE_ROOT", "PURE_MAIN_CHECKOUT")     # name checkouts, not switches: clean_env keeps them
 # The framework's busy-time charge (Kernel::charge_busy_time: a thread that runs over 100 ms of wall time without a
 # wait has up to 250 ms added to the virtual clock) makes a headless run's game state depend on the machine's load
 # (task 051 saw it twice in twelve runs); with this switch set, to any value, the charge is off and a run repeats.
 STEADY_CLOCK = "PURE_NO_BUSY_CLOCK"
+# The enhancements a tool run has off unless its caller names them (task 070, D-016): E6, Flashes (game.smooth_flashes).
+ORIGINAL_PACING = "PURE_SMOOTH_FLASHES"
 REFUSED = "another PureNative is running"               # the guard's words (refuse, wait_game)
 WAITED = 0.0                                            # seconds this process has spent in wait_until
 
@@ -89,15 +92,26 @@ def scratch_data_dir(env, path):
 def silence(env, sound=False, window=True):
     """PURE_NO_AUDIO=1 unless sound is asked for or env decides (task 034): env sets PURE_NO_AUDIO, or PURE_AUDIO_WAV
     with a window. No audio device only: the game's sceAudio calls still run on the virtual clock and PURE_AUDIO_WAV
-    still captures them."""
+    still captures them. Also original_pacing(env), so every run made through here has the PSP's pacing."""
     if not sound and "PURE_NO_AUDIO" not in env and not (window and "PURE_AUDIO_WAV" in env):
         env["PURE_NO_AUDIO"] = "1"
+    original_pacing(env)
 
 
 def steady_clock(env):
     """PURE_NO_BUSY_CLOCK=1 for a headless test run (the busy-time charge off, so the run does not depend on the
-    machine's load) unless env names it already; windowed and sound-on runs, a player's, are not given it."""
+    machine's load) unless env names it already; windowed and sound-on runs, a player's, are not given it. Also
+    original_pacing(env), as silence() does."""
     env.setdefault(STEADY_CLOCK, "1")
+    original_pacing(env)
+
+
+def original_pacing(env):
+    """PURE_SMOOTH_FLASHES=0 unless env names it (task 070, D-016): the full-screen flashes keep the PSP's two vblanks
+    a frame, so every tool's run measures the game as the PSP paces it and the suites' scenes, the HUD check and the
+    sweep stay where they were measured. Every tool run calls it, through silence() and steady_clock() (run_boot,
+    campaign_sweep and what goes through them); tools/flash_check.sh is the check that names the variable."""
+    env.setdefault(ORIGINAL_PACING, "0")
 
 
 def fresh_stick(game_dir):

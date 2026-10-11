@@ -164,6 +164,13 @@ PURE_..." beside it.
 5. The change is saved to settings.ini at once and applies to the game when the menu closes. "Restore control
    defaults" puts every binding and every row of the tab back (rows an environment variable decides excepted).
 
+The Video tab ends with a Game section (since task 070, patch 0019-game-option-rows: the options our profile lists in
+`GameProfile::options`, `src/profile/enhancements.cpp`). It holds one row, Flashes: Smooth (the default) keeps a
+Single Race's or a Tournament's frame rate through the full-screen flashes (the race-start fade, a weapon going off
+near the ship, the ship put back on the track), Original halves it while they play, as the PSP does (E6, D-016;
+docs/timing.md, "E6"). Time Trial, Free Play and Zone run at 30 fps either way. "Restore video defaults" puts it
+back to Smooth; `PURE_SMOOTH_FLASHES` locks it for a run ("Set by PURE_SMOOTH_FLASHES"), as every tool run does.
+
 Checked under the Metal shell on 2026-10-06 (task 030): Cross rebound to Space / X from the menu, X then confirmed
 the game's language screen (`[pad] buttons 0x4000`), and settings.ini held `input.bind.cross=Space / X` until the
 second edit removed X again.
@@ -209,6 +216,10 @@ The other input keys are those of the tuning table, `input.trigger_profile` (`st
 `input.mouse_sensitivity`, `input.invert_mouse_x`, `input.invert_mouse_y`, the camera's `input.invert_camera_x`,
 `input.invert_camera_y`, `input.analog_camera`, `input.camera_speed`, `input.aim_speed` (no effect without a camera
 driver), the name's `input.name_entry` and `input.name`, and the touch controls' `input.touch_*`.
+
+The game's own options are `game.<key>=<index>`, the index of the row's choice: `game.smooth_flashes=1` (Flashes:
+Smooth, the default) or `0` (Original). An index out of range is ignored with `[settings] ignoring KEY=VALUE` and
+reads as the default, and a `game.` key this port has no option for is dropped when the file is next written.
 
 ## The input script's names (for tests)
 

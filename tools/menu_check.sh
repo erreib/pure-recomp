@@ -15,7 +15,9 @@
 # 0017-internal-scale-by-backend, task 067; locked by the run's PURE_INTERNAL_SCALE=1). Metal: no Texture filter or
 # texture pack rows (the Vulkan renderer's), no Frame rate, Lower when behind or Performance, no F3 row, no Touch
 # screen rows, "Metal on". Vulkan: all of those, "Vulkan on". Aspect ratio offers Original and Stretch in both: Fill needs a game that widens its view
-# (GameProfile::view_aspect_frame), which this one does not. A `*` in a list matches any text (the device's name).
+# (GameProfile::view_aspect_frame), which this one does not. Both: the Video tab ends with the game's own options
+# (patch 0019-game-option-rows, task 070): Flashes (game.smooth_flashes; locked by the run's PURE_SMOOTH_FLASHES=0,
+# tools/purelib/port.py's pin). A `*` in a list matches any text (the device's name).
 # Waits up to 600 s while another PureNative runs (one game at a time). Prints `menu_check: PASS` or each tab's
 # differences and `menu_check: FAIL`; exit 0 only on PASS.
 set -u
@@ -82,7 +84,7 @@ expected = {
     "Video": ["Resolution", "Display", "Window size", "Aspect ratio (Original / Stretch)", "Scaling filter"]
              + ([] if metal else ["Texture filter", "Texture pack", "[texture pack rows]"]) + ["Vsync"]
              + ([] if metal else ["Frame rate", "Lower when behind"]) + ["Game speed", "Fast loading"]
-             + ([] if metal else ["Performance"]) + ["[font rows]", "Restore video defaults"],
+             + ([] if metal else ["Performance"]) + ["[font rows]", "Restore video defaults", "Flashes"],
     "Audio": ["Volume", "Mute", "Device", "Restore audio defaults"],
     "Controls": ["Connected", "Confirm button", "Stick dead zone", "Trigger point", "Right stick (D-pad / Off)",
                  "Right stick D-pad point", "When the game asks for a name", "Pilot name"] + bindings

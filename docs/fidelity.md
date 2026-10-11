@@ -91,6 +91,9 @@ camera, the ship being put back on the track, the race-start fade (57 flips on b
 a game event, not a time the game measures, and PPSSPP shows the same stretches for the same reason, so a smoother
 race would be an enhancement (the countdown store skipped), not a fix. Which writer sets which field, and the
 stretches measured on both sides: [What writes the two fields](history/fidelity.md#what-writes-the-two-fields).
+That enhancement exists since task 070 (E6, D-016): the menu's Flashes row, Smooth by default, clears the countdown
+in Single Race and Tournament (docs/timing.md, "E6"); every check runs with it off (Original, `PURE_SMOOTH_FLASHES=0`),
+so what this page measures is the PSP's pacing, and `tools/flash_check.sh` is the check that runs it on.
 
 ## PPSSPP references beyond the suite (item 3)
 

@@ -1,0 +1,303 @@
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 6fd1286..53cc773 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -133,6 +133,24 @@ struct MenuFeatures {
+     bool mouse_camera = true;
+ };
+ 
++// The tabs of the in-game menu, for the rows a game adds (GameOption::tab).
++enum class MenuTab { Video, Audio, Controls, Network, System };
++
++// A setting of the game's own: a row of the in-game menu that cycles through
++// its choices, in a "Game" section at the end of the tab it names. Its value
++// is an index into the choices, kept in settings.ini as game.<key>=<index>;
++// <prefix>_<KEY> (the key upper-cased) decides it for one run, as the
++// framework's own variables do. The port reads it with
++// settings::game_option(key).
++struct GameOption {
++    const char *key;                       // settings.ini without "game.": lower snake case, e.g. "fast_intro"
++    const char *label;                     // the row's text
++    std::span<const char *const> choices;  // the texts the row cycles through
++    const char *description;               // the row's help text
++    std::uint32_t default_choice = 0u;     // an index into choices
++    MenuTab tab = MenuTab::Video;          // the tab that shows the row
++};
++
+ struct GameProfile {
+     // --- What the port is called -------------------------------------------
+     const char *app_name;          // the executable: "MHP3rdNative"
+@@ -284,6 +302,9 @@ struct GameProfile {
+     // --- The menu ------------------------------------------------------------
+     // Which of the menu's game features the game has (MenuFeatures).
+     MenuFeatures features = {};
++    // The game's own settings, each a menu row (GameOption). Empty: none, and
++    // no tab has a Game section.
++    std::span<const GameOption> options = {};
+ };
+ 
+ // Defined by the port, exactly once. Everything under host/ reads the game
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index fc4be13..02bf7d5 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -4,6 +4,7 @@
+ #include "install/user_data.hpp"
+ 
+ #include <algorithm>
++#include <cctype>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -11,6 +12,7 @@
+ #include <iostream>
+ #include <map>
+ #include <optional>
++#include <span>
+ #include <string>
+ #include <vector>
+ 
+@@ -132,6 +134,25 @@ std::string format_trigger_profile(std::uint32_t profile) {
+     const std::span<const TriggerProfile> profiles = game().trigger_profiles;
+     return profile == 0u || profile > profiles.size() ? std::string("standard") : std::string(profiles[profile - 1u].key);
+ }
++// A game option's value (GameOption): the index of one of its `count`
++// choices, as a whole number.
++bool parse_choice(const char *text, std::size_t count, std::uint32_t &out) {
++    char *end = nullptr;
++    const unsigned long value = std::strtoul(text, &end, 10);
++    if (end == text || *end != '\0' || value >= count) return false;
++    out = static_cast<std::uint32_t>(value);
++    return true;
++}
++
++// The value of the game's option `index`, kept in Settings::game_options; a
++// Settings made without defaults_for() gets the options' defaults first.
++std::uint32_t &game_option_value(Settings &s, std::size_t index) {
++    const std::span<const GameOption> options = game().options;
++    while (s.game_options.size() < options.size())
++        s.game_options.push_back(options[s.game_options.size()].default_choice);
++    return s.game_options[index];
++}
++
+ const Names<NameEntry> kNameEntries{{{NameEntry::Keyboard, "keyboard"}, {NameEntry::Fixed, "fixed"}}};
+ const Names<FrameRate> kFrameRates{{{FrameRate::Fps30, "30"},
+                                     {FrameRate::Fps45, "45"},
+@@ -386,7 +407,8 @@ const std::vector<Field> &fields() {
+ }
+ 
+ // One key per bound action, "input.bind.triangle=Mouse Left", after the
+-// fixed table.
++// fixed table; then one per game option, "game.<key>=<index>", which
++// <prefix>_<KEY> overrides (GameProfile::options).
+ const std::vector<Field> &all_fields() {
+     static const std::vector<Field> table = [] {
+         // Field keys are C strings; these hold them for the program's life.
+@@ -398,6 +420,26 @@ const std::vector<Field> &all_fields() {
+                                  [i](Settings &s, const std::string &t) { return input::parse(t, s.bindings[i]); },
+                                  [i](const Settings &s) { return input::format(s.bindings[i]); }, nullptr});
+         }
++        const std::span<const GameOption> options = game().options;
++        static std::vector<std::string> option_keys(options.size()), option_variables(options.size());
++        for (std::size_t i = 0; i < options.size(); ++i) {
++            const std::size_t count = options[i].choices.size();
++            option_keys[i] = std::string("game.") + options[i].key;
++            for (const char *c = options[i].key; *c != '\0'; ++c)
++                option_variables[i] += static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
++            const char *variable = option_variables[i].c_str();
++            list.push_back(Field{
++                option_keys[i].c_str(), variable,
++                [i, count](Settings &s, const std::string &t) { return parse_choice(t.c_str(), count, game_option_value(s, i)); },
++                [i](const Settings &s) {
++                    return std::to_string(i < s.game_options.size() ? s.game_options[i] : game().options[i].default_choice);
++                },
++                [i, count, variable](Settings &s, const char *t) {
++                    if (!parse_choice(t, count, game_option_value(s, i)))
++                        std::cerr << "[settings] " << env_name(variable) << ": 0 to " << (count == 0u ? 0u : count - 1u)
++                                  << "; ignored\n";
++                }});
++        }
+         return list;
+     }();
+     return table;
+@@ -465,6 +507,8 @@ Settings defaults_for(Platform platform) {
+     // The game's own default resolution, where it gives one (GameProfile).
+     if (const std::optional<std::uint32_t> scale = game().default_internal_scale; scale.has_value())
+         values.internal_scale = std::min(*scale, kMaxInternalScale);
++    // The game's own options, each at its default.
++    for (const GameOption &option : game().options) values.game_options.push_back(option.default_choice);
+     if (platform == Platform::Android) {
+         values.aspect = Aspect::Fill;
+         values.fullscreen = true;
+@@ -495,6 +539,13 @@ void save() {
+             entries[field.key] = field.format(s.values);
+         }
+         entries.erase(kRetiredTypeNameKey);
++        // A game key the game has no option for (any more) is dropped.
++        std::erase_if(entries, [](const auto &entry) {
++            if (entry.first.rfind("game.", 0) != 0) return false;
++            for (const Field &field : all_fields())
++                if (entry.first == field.key) return false;
++            return true;
++        });
+         install::write_settings_file(s.data_dir, entries);
+     } catch (const std::exception &e) {
+         std::cerr << "[settings] cannot write settings.ini: " << e.what() << "\n";
+@@ -508,4 +559,14 @@ std::string overridden_by(const char *key) {
+     return found != s.overrides.end() ? found->second : std::string();
+ }
+ 
++std::uint32_t game_option(const char *key) {
++    const std::span<const GameOption> options = game().options;
++    for (std::size_t i = 0; i < options.size(); ++i) {
++        if (std::strcmp(options[i].key, key) != 0) continue;
++        const Settings &s = current();
++        return i < s.game_options.size() ? s.game_options[i] : options[i].default_choice;
++    }
++    return 0u;
++}
++
+ } // namespace portablekit::settings
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index dc2d92b..2335631 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -116,6 +116,11 @@ struct Settings {
+ 
+     // Saves
+     bool backup_timestamp{true};       // a backup made from the menu goes to a new folder named by its time
++
++    // The game's own options (GameProfile::options), in that order: each an
++    // index into the option's choices, game.<key> in settings.ini.
++    // defaults_for() gives each its default_choice.
++    std::vector<std::uint32_t> game_options;
+ };
+ 
+ inline constexpr std::uint32_t kMaxInternalScale = 8u;
+@@ -159,4 +164,9 @@ void save();
+ // file or the default did. The name carries the game's own prefix.
+ [[nodiscard]] std::string overridden_by(const char *key);
+ 
++// The current choice of the game's option `key` (GameOption::key, without
++// "game."): an index into its choices. 0 for a key the game has no option
++// for. Cheap enough to read every frame.
++[[nodiscard]] std::uint32_t game_option(const char *key);
++
+ } // namespace portablekit::settings
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index bd31979..b9bba38 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -196,6 +196,11 @@ private:
+     void controls();
+     void network();
+     void system();
++    // The game's own options on `tab` (GameProfile::options): a Game section
++    // at the end of the tab, a row each; nothing when the tab has none.
++    void game_rows(Tab tab);
++    // Those options back to their defaults, for the tab's Restore button.
++    static void restore_game_rows(Tab tab);
+     bool confirm_dialog();
+ 
+     host::Shell &shell() { return Layer::get().shell(); }
+@@ -223,6 +228,42 @@ private:
+     std::optional<input::Action> binding_;  // waiting for a key for this control
+ };
+ 
++// GameOption::tab names the tabs in Tab's order.
++static_assert(static_cast<int>(MenuTab::Video) == 0 && static_cast<int>(MenuTab::Audio) == 1 &&
++              static_cast<int>(MenuTab::Controls) == 2 && static_cast<int>(MenuTab::Network) == 3 &&
++              static_cast<int>(MenuTab::System) == 4);
++
++void Menu::game_rows(Tab tab) {
++    const std::span<const GameOption> options = portablekit::game().options;
++    settings::Settings &s = settings::current();
++    bool shown = false;
++    for (std::size_t i = 0; i < options.size(); ++i) {
++        const GameOption &option = options[i];
++        if (static_cast<int>(option.tab) != static_cast<int>(tab) || option.choices.empty()) continue;
++        if (!shown) section("Game");
++        shown = true;
++        const int count = static_cast<int>(option.choices.size());
++        const int current = std::min(static_cast<int>(settings::game_option(option.key)), count - 1);
++        const std::string key = std::string("game.") + option.key;
++        if (const int delta = choice_row(option.label, option.choices[static_cast<std::size_t>(current)],
++                                         options_for(key.c_str(), option.description));
++            delta != 0 && i < s.game_options.size()) {
++            s.game_options[i] = static_cast<std::uint32_t>(cycle(current, delta, count));
++            settings::save();
++        }
++    }
++}
++
++void Menu::restore_game_rows(Tab tab) {
++    const std::span<const GameOption> options = portablekit::game().options;
++    settings::Settings &s = settings::current();
++    for (std::size_t i = 0; i < options.size() && i < s.game_options.size(); ++i) {
++        const std::string key = std::string("game.") + options[i].key;
++        if (static_cast<int>(options[i].tab) == static_cast<int>(tab) && settings::overridden_by(key.c_str()).empty())
++            s.game_options[i] = options[i].default_choice;
++    }
++}
++
+ std::vector<Menu::Tab> Menu::tabs() {
+     std::vector<Tab> shown{Tab::Video, Tab::Audio, Tab::Controls};
+     if (portablekit::game().features.adhoc) shown.push_back(Tab::Network);
+@@ -589,8 +630,10 @@ void Menu::video() {
+         shell().set_frame_rate(s.frame_rate);
+         shell().set_frame_rate_auto(s.frame_rate_auto);
+         shell().set_perf_overlay(perf::options().overlay);
++        restore_game_rows(Tab::Video);
+         settings::save();
+     }
++    game_rows(Tab::Video);
+ }
+ 
+ void Menu::audio() {
+@@ -625,8 +668,10 @@ void Menu::audio() {
+         s.volume = settings::defaults().volume;
+         s.mute = settings::defaults().mute;
+         sink.set_volume(gain(s));
++        restore_game_rows(Tab::Audio);
+         settings::save();
+     }
++    game_rows(Tab::Audio);
+ }
+ 
+ // A text field row. Returns true when an edit was committed; the new text is
+@@ -994,6 +1039,7 @@ void Menu::controls() {
+         restore("input.touch_size", s.touch_size, d.touch_size);
+         restore("input.touch_camera_speed", s.touch_camera_speed, d.touch_camera_speed);
+         s.bindings = d.bindings;
++        restore_game_rows(Tab::Controls);
+         settings::save();
+     }
+ 
+@@ -1048,6 +1094,7 @@ void Menu::controls() {
+         s.bindings = input::classic_bindings();
+         settings::save();
+     }
++    game_rows(Tab::Controls);
+ }
+ 
+ std::string format_duration(std::uint64_t ms) {
+@@ -1336,9 +1383,11 @@ void Menu::network() {
+         restore("network.adhoc", s.adhoc, defaults.adhoc);
+         restore("network.server", s.adhoc_server, defaults.adhoc_server);
+         restore("network.nickname", s.adhoc_nickname, defaults.adhoc_nickname);
++        restore_game_rows(Tab::Network);
+         settings::save();
+         adhoc_apply_settings();
+     }
++    game_rows(Tab::Network);
+ }
+ 
+ void Menu::system() {
+@@ -1431,6 +1480,7 @@ void Menu::system() {
+     info_row("Graphics", graphics);
+     dump_detail(graphics);
+     info_row("Interface", std::string("Dear ImGui ") + IMGUI_VERSION);
++    game_rows(Tab::System);
+ }
+ 
+ // The quit and setup confirmations. False when the menu should close.

@@ -61,6 +61,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0016-menu-rows-by-capability | (task 064) | Behaviour, tooling | candidate | The Esc menu draws a row only when its feature exists: `GameProfile::features` (`MenuFeatures`: ad hoc play, the right-stick camera, the mouse camera) and five `Shell` answers (frame interpolation, the performance overlay, each aspect, touch controls, the API's name), every default today's; `<prefix>_MENU_DUMP` prints each tab's rows when the menu opens |
 | 0017-internal-scale-by-backend | (task 067) | Behaviour | candidate | The menu's Resolution row asks the GE backend, not the Vulkan renderer: `GeBackend::supports_internal_scale()`, `set_internal_scale()` and `target_size()` (defaults: no, nothing, 480x272), the Vulkan backend forwarding to its renderer as the menu did; `gpu::running_backend()` for the menu; `GameProfile::default_internal_scale`, the scale a new player starts with (unset: the framework's 2) |
 | 0018-vulkan-effects-at-1x | (task 068) | Fidelity | candidate, behind a profile switch | Each Vulkan target the size its stride gives (D-015, as the Metal backend draws): the internal resolution for a buffer at least 480 pixels wide, 480x272 for a narrower one (the bloom's buffers, the billboards'), so the bloom's blur and glow stay the PSP's at any scale; every pass, viewport, scissor, copy, blit and read-back takes the target's own size, and guest memory gets the centre pixel of each block |
+| 0019-game-option-rows | (task 070) | Missing feature | candidate | A game's own settings as menu rows: `GameProfile::options` (`GameOption`: key, label, choices, help, default, tab), each kept as an index in settings.ini (`game.<key>`), `<prefix>_<KEY>` deciding it for a run, `settings::game_option(key)` for the port, and a Game section at the end of the tab it names; no option, no section |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -417,3 +418,22 @@ At internal scale 1 every target is 480x272 as before and the pictures are the s
 pixels differ). A target keeps the size it was made at when a later draw gives its address a stride on the other side
 of 480 (no recording has one: each address keeps one stride) until the next change of scale makes it again. The tile
 clamp that 0015 notes as lost above 1x is left as it is.
+
+### 0019-game-option-rows
+Task 070 (D-016, the enhancement E6, and E4 and E5 after it). A port could add HLE hooks but had no player setting of
+its own: the menu's rows and settings.ini's keys are the framework's table. Now a game lists its options in
+`GameProfile::options` (`host/profile.hpp`): a `GameOption` has a `key` (settings.ini's name without `game.`, lower
+snake case), a `label` (the row's text), `choices` (the texts the row cycles through), a `description` (the help
+text), a `default_choice` (an index into the choices) and a `tab` (`MenuTab`: Video, Audio, Controls, Network,
+System). `host/settings/`: `Settings::game_options` keeps each value as an index, in the options' order; `all_fields()`
+adds a field per option after the bindings', `game.<key>=<index>`, so loading, saving and the environment work as for
+the framework's own keys: an index out of range is ignored (`[settings] ignoring ...`, the default stays), the
+variable `<prefix>_<KEY>` (the key upper-cased) decides the value for the run and `overridden_by("game.<key>")` names
+it, and `save()` drops a `game.` key that no option has. `defaults_for()` gives each option its default, and
+`settings::game_option(key)` returns the current index (a lookup by key in the profile's small table, cheap enough
+for every frame; 0 for a key no option has). `host/ui/menu.cpp`: `game_rows(tab)` draws a `section("Game")` and a
+`choice_row` per option at the end of each tab that has options (`options_for("game.<key>", description)`, so the
+row is locked with "Set by <variable>" when the environment decides it), saving on change; the `<prefix>_MENU_DUMP`
+lines list the rows as the others; each tab's Restore button puts that tab's options back to their defaults (not one
+the environment decides). A game that lists no option gets no section and no key: every tab and settings.ini are as
+before. Our profile lists one, Flashes (`game.smooth_flashes`, `src/profile/enhancements.cpp`).
