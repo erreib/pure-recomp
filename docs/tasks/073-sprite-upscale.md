@@ -133,3 +133,118 @@ One or two commits on the branch.
 - the main menu's upscales take over 2 s, or a race at scale 4 drops under 60 fps with the option on
 - a shader change, a vendor change or a change under include/psprecomp/ would be needed; a build takes over
   5 minutes
+
+## Result
+
+Status: BLOCKED
+
+The brief's premise does not hold: the menus' text and art and the race HUD are not drawn in through mode. They are
+transformed draws under an orthographic projection, both in the port and in PPSSPP's dumps. Under the brief's rule
+("never for a transformed draw") nothing in the seven scenes is upscaled, so `tools/sprite_check.sh` fails on every
+scene. Widening the rule would get around the Verify line, which this task may not do, so the rule is left for the
+planning session.
+
+Evidence:
+- The port's draw log of the `main_menu` scene (`PURE_METAL_LOG=1`, route `main_menu.txt`, frame 4700, 32 draws): the
+  clear (#0) is the only through-mode draw. The text is transformed sprites from CLUT4 256x128 (`0x8cde860`, #3-5 and
+  #29-31) and CLUT4 256x256 (`0x8ce3c10`, #24-28). The art is transformed tristrips from the CLUT8 256x128 VRAM atlases
+  (`0x417be80` to `0x41be500`, #14-23), CLUT8 256x32 (`0x4179a40`, #2) and CLUT8 8x1 (#19). PPSSPP's dump agrees
+  (`tools/ppsspp/ppdmp.py draws ref/main_menu.ppdmp --all --vt`): draw 0 is the only `thru` draw.
+- The race HUD (`ref/vineta_k_start.ppdmp`, draws 839-866: CLUT4 512x256 `0x08cc84d0` and CLUT4 256x128 `0x08cd9290`) is
+  transformed too. The frame's 11 through-mode draws are the bloom chain, the billboard target and one CLUT4 256x32
+  (`0x08e5d8a0`).
+- The whole frontend route to flip 4702 has these through-mode textured draws: 8888 512x512 movie pictures, plus three
+  CLUT4 textures (512x64 and 256x32 in flips 5-123, 64x64 in flips 1090-4305). None of them is in a checked scene. The
+  same route has 30001 transformed draws from the CLUT4 256x256 font, 11331 from CLUT4 256x128 and 4400 from CLUT8
+  256x128. With the briefed rule each route upscales 3 to 6 textures (main_menu 3 in 3.6 ms; the race routes 6 in 12
+  to 15 ms), and the `1` captures equal the `0` captures (the "vs 0" column below).
+- A second problem, separate from the upscale: `zone_hud` fails `tools/hud_check.py` with the option off as well as on.
+  The Zone HUD has no CURRENT or LAP label, so both regions hold 0 yellow pixels. `race_hud` and `tt_hud` pass.
+
+A measured alternative, not committed: a temporary build that also upscaled transformed draws with an orthographic
+projection (the w row `projection[3] == projection[7] == projection[11] == 0`), with the same check:
+
+| Scene | Reduced against the reference (limit) | Full capture against the 0 capture | HUD |
+|---|---|---|---|
+| title | 0.0198 (0.05) | 0.0213 | - |
+| main_menu | 0.0411 (0.05) | 0.0359 | - |
+| class_select | 0.0621 (0.07) | 0.0583 | - |
+| team_select | 0.0585 (0.06) | 0.0689 | - |
+| race_hud | 0.0414 (0.10) | 0.0156 | yes |
+| tt_hud | 0.0411 (0.12) | 0.0213 | yes |
+| zone_hud | 0.0337 (0.09) | 0.0120 | no |
+
+Six of seven scenes pass; zone_hud fails only because of the hud_check problem above. Textures upscaled per route:
+frontend 12 (23 ms), main_menu 25 (68 ms), Single Race 49 (125 ms), Time Trial 49 (122 ms), Zone 39 (99 ms). team_select
+comes close to its limit. The TEAM screen's rotating ship is also drawn under an orthographic projection
+(docs/metal-backend.md, "The 3D check"), so this rule upscales it too. Not measured under that rule: which race
+textures it takes beyond the HUD, and the race's frame rate at scale 4.
+
+The scaler against the prototype passes. That build's dump (`PURE_SPRITE_DUMP`) holds the prototype's three inputs
+with identical decoded pixels: font2 = `d231aa0c90948bec`, vram_a2 = `13971c915eaa2601`, strip2 = `7ea636709ae8ed8f`.
+`tools/sprite_proto_check.py out/sprites_ortho --inputs .../font2.png,.../vram_a2.png,.../strip2.png` reports a largest
+difference of 0 on all three (PASS). The prototype file itself, run on copies of its inputs in a scratch folder, matches
+the port's three outputs exactly (0 channel values differ). One thing to know: the main checkout's
+`out/fe_tex/vram_a_4x.png` and `strip_4x.png` predate the last edit of `upscale_proto.py` (17:56 against 17:57) and
+differ from the current prototype by up to 33 levels. `font_4x.png` is up to date.
+
+Scaler cost on this Mac (M4 Pro), `upscale_sprite` at -O2, best of 10 runs: 64x64 0.24 ms, 128x128 1.05 ms,
+256x256 4.45 ms (mean 5.07 ms), 512x512 18.2 ms.
+
+What the branch holds (commit ba11b95), all to the brief except the draw rule's premise:
+- The scaler: the prototype's method in double precision, its operations in its order, fused multiply-add off. One
+  departure, documented in the header: a texture whose alpha is 0 everywhere keeps its colour instead of turning
+  black.
+- The backend: `decoded_texture(..., upscale)`. The key is apart from the plain one, the texture is 4W x 4H and samples
+  linear with the GE's wrap. The stats count the upscaled textures and their scaler time, `PURE_SPRITE_DUMP=DIR` writes
+  `<key>.src.png` and `<key>.png`, and the option is read at start and at each frame. The `[pure] sprite upscale: on
+  (game.sprite_upscale)` and `... off` lines are printed.
+- The option row "Text and sprites" (default Upscaled).
+- The pin: `ENHANCEMENTS_OFF` (was `ORIGINAL_PACING`) plus `game.sprite_upscale=0` in `SCRATCH_SETTINGS`.
+- The menu_check row, and `tools/sprite_check.sh` and `tools/sprite_proto_check.py`.
+- Not written: the docs (metal-backend.md section, controls.md, verification.md, release.md, README rows), because
+  they would describe a draw rule the replan will change. Also not run: the 2200-flip run and the race at 60 fps with
+  the option on.
+
+Changed: src/gpu/sprite_upscale.cpp, src/gpu/sprite_upscale.hpp (new), src/gpu/metal_textures.mm,
+src/gpu/metal_draw.mm, src/gpu/metal_backend.hpp, src/gpu/metal_backend.mm, src/gpu/metal_trace.mm,
+src/gpu/metal_types.hpp, CMakeLists.txt (source list), src/profile/enhancements.cpp, src/profile/enhancements.hpp,
+tools/purelib/port.py, tools/run_boot.py (docstring), tools/menu_check.sh, tools/sprite_check.sh (new),
+tools/sprite_proto_check.py (new), docs/tasks/073-sprite-upscale.md (this Result).
+
+Verify output (`tools/verify_task.sh 073`; it stops at the first command):
+```
+each PURE_SPRITE_UPSCALE=1 capture: its size, by its blocks' centre pixels against the scene's reference at the scene's tol and limit (tools/frame_regress.sh), the full capture against the PURE_SPRITE_UPSCALE=0 one at tol 24 (at least 1%), and the race HUD (tools/hud_check.py):
+scene                size  reduced  limit  tol     vs 0  HUD  result
+title           1920x1088   0.0061   0.05   24   0.0000    -  FAIL (differs from the 0 capture in under 1%)
+main_menu       1920x1088   0.0207   0.05   24   0.0000    -  FAIL (differs from the 0 capture in under 1%)
+class_select    1920x1088   0.0193   0.07   24   0.0000    -  FAIL (differs from the 0 capture in under 1%)
+team_select     1920x1088   0.0240   0.06   24   0.0000    -  FAIL (differs from the 0 capture in under 1%)
+race_hud        1920x1088   0.0363    0.1   32   0.0000  yes  FAIL (differs from the 0 capture in under 1%)
+tt_hud          1920x1088   0.0342   0.12   32   0.0000  yes  FAIL (differs from the 0 capture in under 1%)
+zone_hud        1920x1088   0.0345   0.09   32   0.0000   no  FAIL (differs from the 0 capture in under 1%; no HUD (hud_check: 0 of 1 shots have the HUD))
+
+main_menu run: 3 textures upscaled in 3.6 ms (at least 2, under 2000 ms): PASS
+
+sprite check: 0/7 scenes pass, the main menu's upscales PASS (0m 34s)
+sprite_check: FAIL
+verify 073: FAIL (exit 1)
+```
+The rest of the Verify line, run separately on the same build: `tools/menu_check.sh` PASS (Video 13 rows, Text and
+sprites last), `tools/menu_check.sh --shell vulkan` PASS (Video 19 rows), `tools/frame_regress.sh` PASS 18/18 (21 s),
+`tools/scale_check.sh` PASS (18/18 within 5%, 3/3 bloom regions), `python3 tools/docs_check.py` PASS (33 files, 0
+findings).
+
+Open questions:
+1. Which draws should be upscaled? Through mode alone reaches almost nothing. A suggestion: also transformed draws
+   with an orthographic projection (measured above). Keep in mind that the TEAM screen's ship is orthographic too, and
+   that the race textures beyond the HUD were not checked under that rule. A narrower test such as sprite primitives
+   plus orthographic would leave out the art's tristrips.
+2. The race scenes for the HUD check: zone_hud has no CURRENT or LAP labels. Use fp_hud in its place, or give
+   hud_check a Zone region (SCORE).
+3. The exit line carries the count at its end (`... in S s; N textures upscaled (T ms)`), not beside "textures
+   decoded", because `tools/purelib/logs.py`'s `METAL_EXIT_RE` (outside May touch) expects ", N framebuffer textures"
+   right after "textures decoded". The 600-frame line has it beside `decoded`.
+4. `tools/gerec/metal_check.sh` runs `PureNative --replay` without going through port.py's pin. Its Metal lane
+   therefore follows the settings' `game.sprite_upscale` (default Upscaled). Under the briefed rule this touches
+   little, but a wider rule would move its Metal-against-Vulkan comparison unless the replay pins the option.
