@@ -74,6 +74,42 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
    runtime and the windows subsystem, and no pre-warm list ships (it is the Metal backend's; Vulkan keeps a pipeline
    cache in the data directory). docs/release.md, "Windows".
 
+## Updating the rig for 0017-internal-scale-by-backend, 0018-vulkan-effects-at-1x and 0019-game-option-rows (checklist, 2026-10-11)
+
+The Windows build last ran with patches up to 0016 (task 061). Since then E3 added 0017-internal-scale-by-backend and
+0018-vulkan-effects-at-1x, and E6 added 0019-game-option-rows with the Flashes row (D-016, task 070). None of the
+three has Windows-only code; this is the rebuild and the checks. Git Bash in the checkout, one game at a time, each
+command finished before the next. Expected last lines in brackets. The rig's session of 2026-10-11 did steps 1 to 3,
+the suite of step 4 and step 5 (and task 071 on top); what is left is marked **open**.
+
+1. **Pull** to 1101ce0 or later (`git pull`), on the branch the rig tracks. Done 2026-10-11.
+2. **Vendor:** `tools/patches.sh check || tools/vendor_setup.sh`, then `tools/patches.sh check`
+   [`ok: 19 patch(es) reproduce vendor/portablekit at 8b0c3fe`]. The corpus is untouched: no `tools/regen.sh`. Done.
+3. **Build:** `tools/build.sh profile` (host and profile only, a few minutes). Done.
+4. **Checks** (the Vulkan shell is the one that draws here, so every check that reads a picture names it):
+   - `tools/frame_regress.sh` [`frame regression: PASS, 7/7 scenes pass, the window scenes, shell vulkan, backend
+     vulkan`; `--all-scenes` for 18]. Done 2026-10-11 with all 18: 18/18 in 12m 17s on the RTX 3080, every scene
+     within 0.012 of the Mac-measured Vulkan column (out/071-suite.log on the rig; docs/status.md's E3 row).
+   - **open** `tools/menu_check.sh --shell vulkan` [`menu_check: PASS`; the Video tab ends `Restore video defaults,
+     Flashes`].
+   - **open** `tools/flash_check.sh --shell vulkan` [`flash_check: PASS (fade 57 flips off, 0 on; the race and its HUD
+     in both)`; windowed, paced from flip 5500; about 2 minutes]. The default shell is headless, which draws nothing
+     on Windows, so `--shell vulkan` is required here.
+   - **open** `tools/flash_check.sh --shell vulkan --race` [`flash_check: PASS (race: stretches N off, 0 on; mean lap
+     ...)`; two swept races, about 8 minutes. The lap bound is coarse (two different races); a FAIL on the lap figure
+     alone with 0 stretches is worth a second run before it is believed].
+   - **open**, by hand: a Single Race in a window, Esc, Video, Performance on, and watch the frame time through the
+     start fade and a bomb or mine near the ship: with Flashes Smooth no 33 ms frames; set Original and the same
+     moments show them, as the PSP does. The row's choice is saved to settings.ini (`game.smooth_flashes`).
+5. **Package:** `tools/bundle_windows.sh --zip` (rebuilds the Release binary when stale: 15 to 25 minutes cold), then
+   `tools/bundle_windows.sh --check out/repack-win-070` [`bundle check: PASS`]. Done 2026-10-11: the zip
+   pure-recomp-0.1.0-6393b67-windows-x64.zip, seven checks PASS (out/repack-071.log on the rig); then task 071 added
+   the icon and version resource and the eighth check, all eight PASS (out/071-verify-main.log). A pack from the
+   current tree carries the icon. Still **open** from task 071: open the staged folder in Explorer once and look at the
+   exe's icon and Properties > Details, and whether the running window and its taskbar button show the icon.
+6. **Record** the last lines of each open check in this section (or send them to the Mac session); the
+   docs/status.md E3 follow-up row is cleared, the E6 bullet names the two open checks.
+
 ## What to decide before starting
 
 - Which compiler: clang-cl keeps the flags and warnings the Mac build has; MSVC is what the framework's own Windows

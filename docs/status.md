@@ -190,7 +190,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   times within 5%) is the check with it on. **Task 070 merged 68803cd (2026-10-11): E6 complete.** Gate: verify
   PASS, both menu dumps, suite 18/18 to the digit, HUD 61/61 (out/070_gate.log). Follow-ups: the `--race` lap bound
   is coarse (two different races; widen to 10% or compare the race clock's advance), the Flashes row's place after
-  the Restore button when more rows come.
+  the Restore button when more rows come; on Windows `tools/menu_check.sh --shell vulkan` and
+  `tools/flash_check.sh --shell vulkan` (and `--race`) have not run yet (docs/windows.md "Updating the rig": the rig's
+  2026-10-11 session ran the suite and repacked, those two and the by-hand race are open).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

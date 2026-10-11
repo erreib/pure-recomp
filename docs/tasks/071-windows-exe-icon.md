@@ -1,6 +1,6 @@
 # 071: The Windows executable's icon
 
-Milestone: W4 follow-up (task 061's deliverable 6) | Branch: task/071-windows-exe-icon | Status: OPEN
+Milestone: W4 follow-up (task 061's deliverable 6) | Branch: task/071-windows-exe-icon | Status: MERGED (d1cf4ce, 2026-10-11)
 
 ## Goal
 The Windows release executable carries the app icon, so `Wipeout Pure.exe` shows it in Explorer, on the taskbar
