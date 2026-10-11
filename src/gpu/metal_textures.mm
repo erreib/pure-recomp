@@ -1,7 +1,7 @@
 // The Metal backend's textures from guest memory (docs/metal-backend.md, "Textures", "Mipmaps" and "Sprite
 // upscale"): the mip levels a draw samples, the content key (address, layout, every texel and the palette entries
 // they reach), hashed once per display list, the decode with the framework's decode_texture() into a cache of
-// kMaxTextures, the sprite upscale of a through-mode draw's texture (task 073, sprite_upscale.cpp), and the GE's
+// kMaxTextures, the sprite upscale of a 2D draw's texture (task 073, sprite_upscale.cpp), and the GE's
 // level rule. Textures that lie in a target are metal_targets.mm's.
 #include "metal_backend.hpp"
 #include "gpu/texture_decode.hpp"
@@ -43,8 +43,8 @@ std::uint64_t hash_value(std::uint64_t hash, std::uint64_t value) {
     return hash ^ (hash >> 31u);
 }
 
-// Hashed into the content key of an upscaled texture (task 073): the same texels cached plainly for a transformed
-// draw and upscaled for a through-mode one are two textures.
+// Hashed into the content key of an upscaled texture (task 073): the same texels cached plainly for a 3D draw and
+// upscaled for a 2D one are two textures.
 constexpr std::uint64_t kUpscaledKey = 0x5350524954453478ull;  // "SPRITE4x"
 
 // `size` bytes of guest memory from `address` into the hash: one run of host memory when they are one,
@@ -185,7 +185,7 @@ std::uint64_t MetalGeBackend::content_key(const GuestMemory &memory, const Textu
     return key;
 }
 
-// The formats whose textures a through-mode draw has upscaled (task 073, D-018): the palette ones and the 16-bit
+// The formats whose textures a 2D draw has upscaled (task 073, D-018): the palette ones and the 16-bit
 // ones, the menus' fonts, icons and art. Not 8888 (the movie and TV pictures), not DXT.
 bool MetalGeBackend::upscalable(TextureFormat format) {
     return indexed(format) || format == TextureFormat::Rgba5650 || format == TextureFormat::Rgba5551 ||
@@ -215,10 +215,10 @@ void MetalGeBackend::dump_sprite(std::uint64_t key, const TextureState &state) {
 }
 
 // The texture with its first `levels` levels (mip_levels()), each decoded from its own address with the
-// framework's decoder; with more than one it is a mipmapped texture. With `upscale` (a through-mode draw's texture
-// of one level in a palette or 16-bit format, the option on: metal_draw.mm decides) level 0 is upscaled 4x by
-// upscale_sprite() and cached under a key of its own: a texture of 4W x 4H texels that the through-mode coordinates,
-// divided by the GE's W and H, sample in place.
+// framework's decoder; with more than one it is a mipmapped texture. With `upscale` (a 2D draw's texture of one
+// level in a palette or 16-bit format, the option on: metal_draw.mm decides) level 0 is upscaled 4x by
+// upscale_sprite() and cached under a key of its own: a texture of 4W x 4H texels that the draw's normalised
+// coordinates sample in place.
 id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const TextureState &state,
                                                std::uint32_t levels, bool upscale) {
     const TraceClock clock(trace_.file != nullptr, trace_.times.texture);

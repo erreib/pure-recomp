@@ -278,7 +278,7 @@ struct Stats {
     GuestWrites frames;              // write_back_frame()
     GuestWrites depths;              // write_back_depth()
     std::uint64_t decoded_bytes{};   // of the decoded textures, as uploaded (RGBA8)
-    std::uint64_t upscaled{};        // of the decoded textures, those upscaled 4x for through-mode draws (task 073)
+    std::uint64_t upscaled{};        // of the decoded textures, those upscaled 4x for 2D draws (task 073)
     double upscale_ms{};             // the time the scaler took for them (sprite_upscale.cpp)
     std::uint64_t pipelines_made{};  // render pipelines a draw made, or waited for while pre-warming made them
     std::uint64_t depth_states_made{};

@@ -1,6 +1,6 @@
 // The sprite upscale (task 073, E7, D-018; docs/metal-backend.md, "Sprite upscale"): a texture of the menus' and the
 // HUD's bitmap art, W x H RGBA8, redrawn 4W x 4H with an edge-preserving resample, the planning session's prototype
-// (out/fe_tex/upscale_proto.py) in C++. The Metal backend calls it at decode for the textures of through-mode draws;
+// (out/fe_tex/upscale_proto.py) in C++. The Metal backend calls it at decode for the textures of 2D draws;
 // tools/sprite_proto_check.py runs the prototype's maths on the same input and compares. Plain C++, no Metal.
 #pragma once
 

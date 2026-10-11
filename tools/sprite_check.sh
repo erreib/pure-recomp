@@ -16,7 +16,8 @@
 #     rule by which the backend feeds guest memory, D-015), it is within the scene's own limit of its PPSSPP reference
 #     at the scene's tol, both read from tools/frame_regress.sh's scene table (the picture is the same picture);
 #   - the full 1 capture differs from the full 0 capture in at least 1% of its pixels at tol 24 (the detail is there);
-#   - for the race scenes (race_hud, tt_hud, zone_hud), the 1 capture passes tools/hud_check.py (the HUD found);
+#   - for the race scenes (race_hud, tt_hud, fp_hud), the 1 capture passes tools/hud_check.py (the HUD found; not
+#     zone_hud, whose HUD has no CURRENT or LAP label);
 # and the main_menu run's exit line (`[metal] ...; N textures upscaled (T ms)`) says at least 2 textures were
 # upscaled, in under 2000 ms in all. Prints the table and `sprite_check: PASS` or `FAIL` last. Exit 0 PASS, 1 FAIL,
 # 2 cannot run (a suite refused for longer than --wait, no capture at all).
@@ -28,8 +29,8 @@ export PURE_ROOT="$PWD"
 DIR=out/sprite_check
 WAIT=600
 SCALE=4
-SCENES="title main_menu class_select team_select race_hud tt_hud zone_hud"
-HUD_SCENES="race_hud tt_hud zone_hud"
+SCENES="title main_menu class_select team_select race_hud tt_hud fp_hud"
+HUD_SCENES="race_hud tt_hud fp_hud"
 usage() {
   echo "usage: tools/sprite_check.sh [--out DIR] [--wait SECONDS]"
   exit 2

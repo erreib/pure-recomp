@@ -34,8 +34,8 @@ const char *const kFrameRateChoices[] = {"Original", "60 fps"};
 const char *const kFlashChoices[] = {"Original", "Smooth"};
 
 // --- E7: Text and sprites (D-018, task 073) --------------------------------------------------------------------------
-// The menus' text and art and the race HUD are bitmap atlases (CLUT4 fonts, CLUT8 art) drawn at one texel a screen pixel
-// in through mode, so a higher internal scale only magnifies their texels. Upscaled has the Metal backend redraw such a
+// The menus' text and art and the race HUD are bitmap atlases (CLUT4 fonts, CLUT8 art) drawn as 2D draws (orthographic,
+// unlit), so a higher internal scale only magnifies their texels. Upscaled has the Metal backend redraw such a
 // texture 4x finer at decode (src/gpu/sprite_upscale.cpp, docs/metal-backend.md "Sprite upscale"); the backend reads
 // the option itself, once a frame, so there is no hook here. The Vulkan renderer draws the originals either way.
 const char *const kSpriteChoices[] = {"Original", "Upscaled"};

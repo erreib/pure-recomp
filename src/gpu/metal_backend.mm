@@ -17,9 +17,9 @@
 //              in the frame; anything else is decoded from guest memory with the framework's
 //              decode_texture() and cached by its contents (texels and the palette entries it can reach);
 //              a texture with mip levels (task 037) is a mipmapped texture, each level decoded from its own
-//              address, sampled at the level the GE's rule (TEXLEVEL) picks. A through-mode draw's texture in a
-//              palette or 16-bit format is upscaled 4x at decode (task 073, the menu's Text and sprites row:
-//              sprite_upscale.cpp) and sampled linear.
+//              address, sampled at the level the GE's rule (TEXLEVEL) picks. A 2D draw's texture (through
+//              mode, or orthographic and unlit) in a palette or 16-bit format is upscaled 4x at decode (task
+//              073, the menu's Text and sprites row: sprite_upscale.cpp) and sampled linear.
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
 //              blend, the write masks, the alpha test, the colour test, the depth test and the stencil; clears;
 //              scissor; the GE viewport folded into clip space; back-face culling. A draw into a 5650, 5551 or
