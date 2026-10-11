@@ -37,6 +37,15 @@ if(WIN32 AND PORTABLEKIT_RELEASE)
     target_link_options(PureNative PRIVATE /ENTRY:mainCRTStartup)
 endif()
 
+# The executable's icon and version resource (task 071), in both Windows presets: packaging/windows/pure.rc, compiled
+# by llvm-rc (CMAKE_RC_COMPILER), with the project version; the icon is packaging/windows/pure.ico (make_icon.py).
+if(WIN32)
+    target_sources(PureNative PRIVATE packaging/windows/pure.rc)
+    set_source_files_properties(packaging/windows/pure.rc PROPERTIES
+        COMPILE_DEFINITIONS "PURE_VERSION_MAJOR=${PROJECT_VERSION_MAJOR};PURE_VERSION_MINOR=${PROJECT_VERSION_MINOR};PURE_VERSION_PATCH=${PROJECT_VERSION_PATCH}"
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/pure.ico")
+endif()
+
 if(APPLE)
     # The Metal GE backend (PURE_GE_BACKEND=metal, docs/metal-backend.md), the Metal shell (PURE_SHELL=metal) and Dear
     # ImGui's Metal renderer backend (1.92.9b, the vendored ImGui's release, MIT): Objective-C++ with ARC, compiled by the
