@@ -25,6 +25,7 @@ it uses.
 | 0009-vfpu-rounding | yes | nothing | nothing |
 | 0016-menu-rows-by-capability | no | 0004 (`host/shell/shell.hpp` is new there; tried in task 064 with `patch` on the pin plus 0003 and 0004) | 0004 (`host::Shell`, the menu's `shell()`) |
 | 0017-internal-scale-by-backend | no | 0004 (`host/gpu/ge_backend.hpp` and `vulkan_ge_backend.cpp` are new there), 0016 (the menu's lines it changes, its `restore` gate) | 0004 (`gpu::GeBackend`, `active_backend()` in `hle_media.cpp`) |
+| 0018-vulkan-effects-at-1x | no | 0002 to 0004 and 0010 to 0015 (the renderer lines it changes; tried in task 068 on the pin: it applies on those, not on 0002 to 0004 alone) | 0003 (the framebuffer textures, the depth write-back), 0004 (`display_image`), 0012 (the mip rule), 0014 (the 16-bit pixel scale), 0015 (the placement) |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -129,6 +130,17 @@ is what the menu called before, so the framework's games and the Vulkan shell sh
 own (our Metal one) then gets the row by answering. With it, `GameProfile::default_internal_scale` (unset: the
 framework's 2), for a game whose renderer draws a higher default well; `settings::defaults_for` applies it. Needs the
 backend seam (0004) and follows 0016, whose menu lines it edits; offer it with or after 0016.
+
+### 0018-vulkan-effects-at-1x: candidate, behind a profile switch
+Each Vulkan target is made at the size its stride gives: the internal resolution for a buffer at least 480 pixels
+wide, 480x272 for a narrower one; every pass, viewport, scissor, copy, blit and read-back takes the target's own size;
+the frame write-back and `read_back_framebuffer` give the guest the centre pixel of each block, as the depth
+write-back did. The size per target is a fix any game could take (the display blit, the captures and the read-backs
+no longer assume one size). The rule itself suits this game (its bloom is drawn in 256-wide buffers and its adverts in
+a 128-wide one, which the PSP and PPSSPP's "lower resolution for effects" keep at 480x272) but would cost a game whose
+narrow targets want the scale (a mirror, a scene drawn to a texture and shown large), so upstream would take it as a
+`GameProfile` field or a setting, as PPSSPP keeps it a per-game flag. Needs the Vulkan patches before it (0003, 0004,
+0010 to 0015); offer it after them.
 
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's

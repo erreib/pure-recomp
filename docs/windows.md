@@ -61,6 +61,9 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
    the race scenes.)
    Exit met 2026-10-09 on the Mac: `tools/gerec/metal_check.sh` PASS — the TEAM SELECTION frames pixel-identical
    between the backends, race frame 6016 at 0.000015 (2 pixels over tol 24 of 130560).
+   Since task 068 (patch 0018-vulkan-effects-at-1x) the Windows build's default scale (Auto, the multiple of 480x272
+   that covers the window) draws the screens at that scale and the bloom's and the adverts' buffers at 1x, as the
+   Metal backend does (D-015), so the glow is the PSP's at any scale.
 4. **Packaging (one task).** The Windows zip through the framework's release script, the game-data check, a
    first-run setup that takes the disc image, the pre-warm list shipped, a bundle check equivalent to the macOS one.
    Exit (task 061, 2026-10-09): `tools/bundle_windows.sh --check out/061` passes files, dlls, machine, names,
