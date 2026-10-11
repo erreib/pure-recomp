@@ -1,6 +1,6 @@
 # 067: The Resolution row for the Metal backend, Auto as this game's default, the perf run (E3, step 3)
 
-Milestone: E3 (D-015) | Branch: task/067-resolution-row-and-default | Status: OPEN
+Milestone: E3 (D-015) | Branch: task/067-resolution-row-and-default | Status: MERGED (790e628, 2026-10-10)
 
 ## Goal
 Task 066 gave the Metal backend an internal scale, read once at start from `video.internal_scale`, whose default is
@@ -220,4 +220,19 @@ Open questions:
      for a drawable that macOS held back while the window was hidden.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge and patch 0017 applied to the vendor tree (17 patches
+reproduce the pin), 2026-10-10: PASS (headless 18/18, menu_check Metal Video 10 with Resolution first, refactor
+check 0 differing pixels). The gate: `--shell metal --backend metal` 18/18; `--shell vulkan --backend vulkan`
+18/18 (the Vulkan runs at their 2x: Auto in a 960x544 window); `tools/hud_check.sh` 61/61; `tools/menu_check.sh`
+PASS in both shells; `tools/gerec/metal_check.sh` PASS; `tools/scale_check.sh 4` PASS.
+Spot-read: the three virtuals default to today's behaviour; `running_backend()` is one line over
+`active_backend()`; the Vulkan adapter forwards to its renderer; `default_internal_scale` optional, unset for the
+framework's games; `change_scale` retires the screen-wide targets and frees them at the first flip of the new
+size, the pending write-back keeping its copy. The perf table was taken with the window visible (rows shown
+3600/3601, 3601, 3601).
+Merged: `git merge --no-ff` into batch/m2, 790e628.
+Notes: open question 2 (`target_size()`) accepted as the row's value text; 3 (Auto follows the drawable at every
+flip) is D-015's intent; 4 (the record backend answers no, so the row hides under it) is right: a change during a
+recording would be missing from the file. Follow-ups: settings.hpp's comment on `defaults_for`; a scripted check
+of a live change needs a pad script and a way past run_boot's pin; a game frame drawn over the previous picture
+would start from black once after a change (none seen).

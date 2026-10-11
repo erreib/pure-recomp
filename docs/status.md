@@ -168,8 +168,11 @@ simplification task, then the enhancements. The session-by-session resume notes 
 - **E3, native resolution** (D-015, 2026-10-10): task 065 merged 3c674e4 (the Metal shell's drawable at the
   display's pixels: 1920x1088 for the default window on this Mac, the panel below the camera housing in full
   screen); task 066 merged d874184 (the backend at internal scale 1 to 6 or Auto, effects buffers at 1x, scale 1
-  pixel-identical, `tools/scale_check.sh`; test runs pinned to scale 1 by `tools/run_boot.py`); next 067 (the
-  Resolution row, Auto as this game's default, the un-occluded perf run, the Vulkan renderer's effects at 1x).
+  pixel-identical, `tools/scale_check.sh`; the Metal backend's test runs pinned to scale 1 by `tools/run_boot.py`,
+  the Vulkan backend's at their 2x); task 067 merged 790e628 (the Resolution row for any backend that answers,
+  patch 0017-internal-scale-by-backend; Auto as this game's default; a live change at the next frame; the on-screen
+  perf table: 16.68 ms mean at Auto (4), 6 and 1, no frame over 25 ms). Task 068 (the Vulkan renderer's effects at
+  1x, for Windows) running; with it E3 is complete.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
