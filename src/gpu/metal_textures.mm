@@ -1,10 +1,12 @@
 // The Metal backend's textures from guest memory (docs/metal-backend.md, "Textures", "Mipmaps" and "Sprite
 // upscale"): the mip levels a draw samples, the content key (address, layout, every texel and the palette entries
 // they reach), hashed once per display list, the decode with the framework's decode_texture() into a cache of
-// kMaxTextures, the sprite upscale of a 2D draw's texture (task 073, sprite_upscale.cpp), and the GE's
-// level rule. Textures that lie in a target are metal_targets.mm's.
+// kMaxTextures, the sprite upscale of a 2D draw's texture (task 073, sprite_upscale.cpp) and its dump as a texture
+// pack (task 074), and the GE's level rule. Textures that lie in a target are metal_targets.mm's.
 #include "metal_backend.hpp"
 #include "gpu/texture_decode.hpp"
+#include "gpu/texture_pack.hpp"
+#include "profile.hpp"
 #include "settings/settings.hpp"
 #include "sprite_upscale.hpp"
 
@@ -13,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <system_error>
@@ -46,6 +49,19 @@ std::uint64_t hash_value(std::uint64_t hash, std::uint64_t value) {
 // Hashed into the content key of an upscaled texture (task 073): the same texels cached plainly for a 3D draw and
 // upscaled for a 2D one are two textures.
 constexpr std::uint64_t kUpscaledKey = 0x5350524954453478ull;  // "SPRITE4x"
+
+// The texture pack's options (task 074): the xxh64 hash and the address left out of the key (the port's guest
+// addresses differ from PPSSPP's and may differ between runs; the texels and the palette identify the art), the rest
+// the format's defaults. textures.ini says the same, so the framework's loader keys each texture as the dump did.
+const pk::TexturePackOptions &pack_options() {
+    static const pk::TexturePackOptions options = [] {
+        pk::TexturePackOptions o;
+        o.hash = pk::TexturePackHash::Xxh64;
+        o.ignore_address = true;
+        return o;
+    }();
+    return options;
+}
 
 // `size` bytes of guest memory from `address` into the hash: one run of host memory when they are one,
 // word by word otherwise.
@@ -200,18 +216,57 @@ void MetalGeBackend::read_sprite_upscale(bool at_start) {
 }
 
 // PURE_SPRITE_DUMP=DIR: an upscaled texture's decoded input as DIR/<key>.src.png and its output (upscaled_) as
-// DIR/<key>.png, the cache key in 16 hex digits, once per key. pixels_ holds the input.
-void MetalGeBackend::dump_sprite(std::uint64_t key, const TextureState &state) {
+// DIR/<key>.png, the cache key in 16 hex digits, once per key (task 073). pixels_ holds the input.
+// And the output as an entry of the texture pack DIR/pack (task 074): DIR/pack/<pack key>.png, and the line
+// `<pack key> = <pack key>.png` appended under textures.ini's [hashes]. The pack key is the framework's
+// (compute_texture_pack_key() with pack_options(), the whole texture hashed: no through-mode row limit), so the Vulkan
+// renderer's loader finds the file for the same texels and palette. textures.ini ([options], [games] naming the disc,
+// [hashes]) is written when the folder is first used and has none. A key already in the folder, from this run or an
+// earlier one into the same DIR, is skipped; a texture the key function refuses is said once and left out.
+void MetalGeBackend::dump_sprite(const GuestMemory &memory, std::uint64_t key, const TextureState &state) {
     if (!sprites_dumped_.insert(key).second) return;
     char name[24];
     std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(key));
     const std::filesystem::path base = std::filesystem::path(switches_.sprite_dump) / name;
+    const std::uint32_t width = state.width * kSpriteScale;
+    const std::uint32_t height = state.height * kSpriteScale;
     const bool written =
         pure::gpu::write_png(base.string() + ".src.png", reinterpret_cast<const std::uint8_t *>(pixels_.data()),
                              state.width, state.height) &&
-        pure::gpu::write_png(base.string() + ".png", upscaled_.data(), state.width * kSpriteScale,
-                             state.height * kSpriteScale);
+        pure::gpu::write_png(base.string() + ".png", upscaled_.data(), width, height);
     if (!written) std::cout << "[metal] sprite dump: cannot write " << base.string() << ".png\n";
+
+    pk::TexturePackKey pack_key;
+    std::uint32_t covered_width = 0u, covered_height = 0u;
+    if (!pk::compute_texture_pack_key(memory, state, 0u, pack_options(), pack_key, covered_width, covered_height)) {
+        std::cout << "[metal] sprite pack: no pack key for texture 0x" << std::hex << state.address << std::dec << " "
+                  << format_name(state.format) << " " << state.width << "x" << state.height << "; left out\n";
+        return;
+    }
+    const std::string entry = pk::format_texture_pack_key(pack_key);
+    if (!pack_keys_.insert(entry).second) return;
+    const std::filesystem::path pack = std::filesystem::path(switches_.sprite_dump) / "pack";
+    const std::filesystem::path ini = pack / "textures.ini";
+    std::error_code ec;
+    if (!pack_ready_) {
+        pack_ready_ = true;
+        std::filesystem::create_directories(pack, ec);
+        if (!std::filesystem::exists(ini, ec)) {
+            std::ofstream out(ini);
+            out << "# " << portablekit::game().game_title << " (" << portablekit::game().disc_id_display
+                << "): the menus' and the HUD's art upscaled 4x by the port's sprite upscale (PURE_SPRITE_DUMP,\n"
+                   "# tools/sprite_pack.sh). Made from the player's own disc; the pictures are the game's.\n"
+                   "[options]\nversion = 1\nhash = xxh64\nignoreAddress = true\n\n[games]\n"
+                << portablekit::game().disc_id << " = true\n\n[hashes]\n";
+        }
+    }
+    const std::filesystem::path file = pack / (entry + ".png");
+    if (std::filesystem::exists(file, ec)) return;  // an earlier run into the same folder wrote it, and its line
+    if (!pure::gpu::write_png(file.string(), upscaled_.data(), width, height)) {
+        std::cout << "[metal] sprite pack: cannot write " << file.string() << "\n";
+        return;
+    }
+    std::ofstream(ini, std::ios::app) << entry << " = " << entry << ".png\n";
 }
 
 // The texture with its first `levels` levels (mip_levels()), each decoded from its own address with the
@@ -272,7 +327,7 @@ id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const 
             sprite_upscale_said_ = true;
             std::cout << "[pure] sprite upscale: on (game.sprite_upscale)\n";
         }
-        if (!switches_.sprite_dump.empty()) dump_sprite(key, state);
+        if (!switches_.sprite_dump.empty()) dump_sprite(memory, key, state);
     }
     const std::uint32_t width = upscale ? state.width * kSpriteScale : state.width;
     const std::uint32_t height = upscale ? state.height * kSpriteScale : state.height;
