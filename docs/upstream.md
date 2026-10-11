@@ -26,6 +26,7 @@ it uses.
 | 0016-menu-rows-by-capability | no | 0004 (`host/shell/shell.hpp` is new there; tried in task 064 with `patch` on the pin plus 0003 and 0004) | 0004 (`host::Shell`, the menu's `shell()`) |
 | 0017-internal-scale-by-backend | no | 0004 (`host/gpu/ge_backend.hpp` and `vulkan_ge_backend.cpp` are new there), 0016 (the menu's lines it changes, its `restore` gate) | 0004 (`gpu::GeBackend`, `active_backend()` in `hle_media.cpp`) |
 | 0018-vulkan-effects-at-1x | no | 0002 to 0004 and 0010 to 0015 (the renderer lines it changes; tried in task 068 on the pin: it applies on those, not on 0002 to 0004 alone) | 0003 (the framebuffer textures, the depth write-back), 0004 (`display_image`), 0012 (the mip rule), 0014 (the 16-bit pixel scale), 0015 (the placement) |
+| 0019-game-option-rows | no | 0016 and 0017 (the menu, profile and settings lines it sits beside; tried in task 070 on the pin plus 0003, 0004, 0016 and 0017: it applies, and not without 0017) | 0016 (`choice_row` through the dump's `ChoiceRow`) |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -142,6 +143,15 @@ narrow targets want the scale (a mirror, a scene drawn to a texture and shown la
 `GameProfile` field or a setting, as PPSSPP keeps it a per-game flag. Needs the Vulkan patches before it (0003, 0004,
 0010 to 0015); offer it after them.
 
+### 0019-game-option-rows: candidate
+A game's own settings as rows of the menu: `GameProfile::options` (`GameOption`: key, label, choices, help text,
+default, tab), stored as `game.<key>=<index>` in settings.ini with `<prefix>_<KEY>` deciding one run, read by the port
+with `settings::game_option(key)`, and drawn in a Game section at the end of the tab each names, restored with the
+tab's defaults. No option, nothing changes, so the framework's games are untouched. Any port with an enhancement or a
+per-game choice the framework does not know (a frame-rate unlock, a skip of an intro, a fix with an off switch) can
+use it instead of an environment variable alone. Needs 0016's menu lines (the dump's row objects) and applies on 0017;
+offer it after them. Upstream may prefer the value as text (the choice's own name) rather than an index in the file.
+
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
 readers for early recordings (0004); comments that cite this repo's tasks, fidelity differences and old patch
@@ -151,5 +161,5 @@ that this list stays true.
 ## An order to offer them in
 0001; 0006; the kernel part of 0005; 0002; the standalone renderer fixes of 0003 (exact target, alpha test numbers,
 shutdown order); 0008; the rules of 0009; the stencil, shadow volume and dual-source part of 0003; 0007's no-key
-mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list, 0016 and 0017 after them; the depth
+mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list, 0016, 0017 and 0019 after them; the depth
 write-back of 0003 behind a profile switch.
