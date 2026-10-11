@@ -113,9 +113,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
 
 ## Resume
 
-- **Branches.** `main` = the commit below (Erik's seventeenth fast-forward, 2026-10-11: tasks up to 070, M1 to M9,
-  the Windows bring-up, the billboard fix, the Esc menu by capability, E3 native resolution and E6 smooth flashes
-  done, nineteen patches by topic). `batch/m2` is the integration branch, equal to `main` at this point; every task branches
+- **Branches.** `main` = the commit below (Erik's eighteenth fast-forward, 2026-10-11: tasks up to 071, M1 to M9,
+  the Windows bring-up with its icon, the billboard fix, the Esc menu by capability, E3 native resolution and E6 smooth
+  flashes done, nineteen patches by topic). `batch/m2` is the integration branch, equal to `main` at this point; every task branches
   from it (`git switch -c task/NNN-slug batch/m2`). Remote: `origin` = Erik's private GitLab
   (https://dev.eriksmedia.com/erreib/pure-recomp.git); Erik alone pushes.
 - **The gate.** `tools/verify_task.sh NNN` reruns a brief's Verify from the main checkout; `tools/frame_regress.sh`
