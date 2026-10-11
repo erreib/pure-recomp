@@ -18,6 +18,7 @@
 | D-014 | 2026-10-10 | The Esc menu shows only what this game and this shell can do; enhancements are open (D-009's condition met) | accepted (Erik) |
 | D-015 | 2026-10-10 | E3 opens: the Metal shell draws at the display's pixels and the Metal backend draws at an internal scale, effects buffers at 1x | accepted (Erik) |
 | D-016 | 2026-10-11 | E6: the race keeps its frame rate through the full-screen flashes (the game's two-vblank lock cleared in the 60-fps modes), a game option row in the Esc menu, on by default; the checks run with it off | accepted (Erik) |
+| D-017 | 2026-10-11 | E4: Time Trial, Free Play and Zone free-running at the display's rate (the frame object's lock byte set while the race backend lives), a Frame rate row in the Esc menu, 60 fps by default; the checks run with it off; the frontend stays at 30 | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -278,4 +279,56 @@ most 2 with the option on and stay at 57 with it off; a swept Single Race with t
 stretch, and its lap times are within 5% of the same race with it off (the game's speed unchanged); the menu dumps
 of both shells show the row; the headless suite, the HUD check and a 2200-flip frontend run are unchanged with the
 option off.
+Status: accepted (Erik).
+
+## D-017  2026-10-11  E4: the 30-fps modes free-running
+Context: Erik's next pick after E6: 60 fps in the modes the game locks to two vblanks (Time Trial, Free Play, Zone).
+The plan held E4 back for an audit of per-frame logic, since the CWCheat that NOPs the end-of-frame loop's branch
+was reported to run those modes at double speed. The audit (the planning session, 2026-10-11, out/e4/ on the Mac):
+- The lock is one byte, the frame object's `+0x116c` (docs/timing.md step 5). The race backend's constructor
+  (`BackendRoot_cpp__0880c068`) sets it to 1 and stores the backend object at `DAT_08a8c5f4`; the Time Trial, Free
+  Play and Zone race managers (`LinkObj_etc__08818d80`, `LinkObj_etc__08819a0c`, `LinkObj_etc__0881bc8c`) set it
+  back to 0; the destructor (`BackendRoot_cpp__0880c328`) zeroes both. Its only readers in the corpus are the
+  end-of-frame routine `FUN_0886511c` and MemStickUtil's save-dialog driver, which saves and restores it around a
+  dialog. Nothing else branches on it.
+- The frame timer `FUN_08804390` measures dt from the system clock (capped at 0.067 s). Its two fixed-step bytes
+  (`DAT_08a8e964` forces 1/30, `DAT_08a8e965` 1/60) are 0 in the executable and nothing in the corpus writes them;
+  their two other readers (`FUN_0881e6bc`, `FUN_0892195c`) only toggle a display flag. The timer also counts frames
+  into `DAT_08a8c3d8`, which only it reads (it hands the count to every object's update beside dt).
+- Measured with a temporary switch that stores 1 to the byte while `DAT_08a8c5f4` is set, in paced sweep cells
+  against the same cells at the game's pacing: Time Trial on Vineta K ran at 59.95 flips a race-clock second
+  (29.98 before); the game clock advanced 1.0001 s a virtual second (0.9993 before); the standing start reached the
+  same speeds at the same race clock to within 3% up to the speed pad (12 to 647 km/h over 3.0 s, against 14 to
+  647); the ghost ship samples by accumulated dt at 0.05 s (`FUN_0891e8a0`, 89 s at most). Zone 1 ran at 58.8 flips
+  a second with the ship stuck against a wall: destroyed at 59.5 s of race clock with 7 zones cleared, against
+  59.2 s and 6 (the zone timer and the shield drain follow time). Free Play on Vineta K: 60.6 flips a second
+  against 30.5, the game clock 1.0002 against 0.9993, the standing start the same to 2.0 s (12 to 166 km/h against
+  14 to 164). The follower's laps were faster at 60 (65.0, 55.1,
+  58.2 s against 76.0, 69.0, 69.9) with fewer wall contacts (47 against 66), because it reads its steering file every
+  10 flips, twice as often at 60: the driver's doing, not the game's speed, which the start and the clocks show
+  unchanged. No per-frame logic was found in the race; the cheat's double speed is not reproduced by the port.
+Decision (Erik): the port offers those modes free-running, as the enhancement E4, in E6's shape:
+1. While the race backend lives (`DAT_08a8c5f4` points into user RAM) and the frame object's `+0x116c` is 0, the hook
+   stores 1 to it each frame before the end-of-frame routine reads it, so Time Trial, Free Play and Zone take the
+   free path (the GE sync and `sceKernelDelayThreadCB(150)`) and run at the display's rate. The frontend, whose byte
+   is 0 outside the backend, keeps its 30 fps: its menus were not audited and the PSP's menus are 30 fps.
+2. The hook is the port's, in `src/profile/enhancements.cpp`, in the same `sceGeDrawSync` wrap as E6 and before it,
+   so a Smooth flash in a free-running Time Trial takes E6's path too; with Flashes Original a flash frame still
+   waits two vblanks there, as it does in Single Race. No generated code is changed.
+3. The player's switch is a game option row (patch 0019-game-option-rows): "Frame rate", choices "Original" (the
+   PSP's 30 fps in those modes) and "60 fps", default 60 fps (`game.sixty_fps=1`, `PURE_SIXTY_FPS`), on the Video
+   tab before Flashes.
+4. The checks measure the PSP's behaviour: every tool run has `PURE_SIXTY_FPS=0` through `tools/purelib/port.py`
+   beside `PURE_SMOOTH_FLASHES=0`, so the Time Trial, Free Play and Zone scenes of the suites stay where they were
+   measured. The check task 072 adds (`framerate_check.sh`, beside `tools/flash_check.sh`) is the one that runs with the option on.
+Consequences: task 072. The exit: on the Time Trial route the race's flips are two vblanks apart with the option off
+and one with it on, while the frontend's stay two in both; a swept Time Trial with the option on runs at 58 to 61
+flips a race-clock second, its game clock within 1% of real time, its standing start within 5% of the run with it
+off; the menu dumps of both shells show the row; the headless suite and a frontend run are unchanged with the option
+off. A Time Trial at 60 integrates its physics in 1/60 steps where the PSP took 1/30, so a lap record may differ in
+its last digits from the same drive at 30: the price of the option, as in Single Race already. Not in this task: the
+frontend at 60 (a follow-up if the menus prove dt-driven), the Vulkan window's actual rate on Windows (the rig's
+check), and a window that cannot draw 60 (the game then runs at what it draws, dt measured, as Single Race does).
+Alternatives: NOP the loop's branch as the CWCheat does (no instruction to NOP in a static recomp, and it would also
+touch the frontend); set the byte from the race managers' constructors (generated code, three sites, no option).
 Status: accepted (Erik).

@@ -193,6 +193,16 @@ simplification task, then the enhancements. The session-by-session resume notes 
   the Restore button when more rows come; on Windows `tools/menu_check.sh --shell vulkan` and
   `tools/flash_check.sh --shell vulkan` (and `--race`) have not run yet (docs/windows.md "Updating the rig": the rig's
   2026-10-11 session ran the suite and repacked, those two and the by-hand race are open).
+- **E4, Time Trial, Free Play and Zone free-running** (D-017, 2026-10-11; Erik's pick after E6). The audit the plan
+  asked for is done (the planning session; out/e4/ on the Mac): the lock is the frame object's byte `+0x116c`, set
+  to 0 by the three modes' race managers after the race backend set it to 1, read only by the end-of-frame routine
+  and the save-dialog driver; the frame timer's fixed-step bytes are dead (never written, 0 in .data); with the byte
+  forced to 1 while the backend lives (`DAT_08a8c5f4`) a paced Time Trial ran at 59.95 flips a race-clock second
+  with the same standing start and game-clock rate, the ghost samples by time (0.05 s), Zone's zone timer and shield
+  drain follow the race clock. No per-frame logic found; the cheat's double speed is not the port's. Task 072 (in
+  flight): the hook in the E6 wrap, a Frame rate row (Original / 60 fps, default 60 fps, `game.sixty_fps`,
+  `PURE_SIXTY_FPS`), the pin beside `PURE_SMOOTH_FLASHES`, a check `framerate_check.sh` beside flash_check. The frontend stays at 30
+  (not audited; a follow-up).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
