@@ -106,7 +106,7 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
      8 minutes] writes `out/sprite_pack/pack` (textures.ini and 48 PNGs, 3.5 MB: the game's art, never committed nor
      put in the zip). Copy that folder to the rig, then: `tools/sprite_pack.sh --check --pack DIR` (DIR the copied
      folder; the script installs it in a scratch data directory of its own and captures main_menu and race_hud in the
-     Vulkan window without and with it, about 4 minutes) [`sprite_pack: PASS`; the pack opened, at least 10 of its
+     Vulkan window without and with it, 1 to 4 minutes) [`sprite_pack: PASS`; the pack opened, at least 10 of its
      pictures drawn, both scenes changed by at least 1% and within their limits after the reduction, the HUD found].
      To play with it, copy the folder into the rig's data directory as `textures/UCUS98612`
      (`%APPDATA%\pure-recomp\PureNative\textures\UCUS98612\textures.ini`), or install it from the game: Esc, Video,

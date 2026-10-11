@@ -604,9 +604,9 @@ backend draws. The pack is the base an AI pass can replace atlas by atlas later.
 `PURE_SPRITE_DUMP=DIR/dump`, the frame regression suite's 18 scenes' routes (`tools/frame_regress.sh --out`: 44 keys)
 and the Single Race and the Time Trial on Vineta K on to their results screens (`tools/campaign_sweep.py --no-damage`,
 the race paced, about 3.5 minutes each: 2 keys each), then moves `DIR/dump/pack` to `DIR/pack` (default
-`out/sprite_pack/pack`). On 2026-10-11: 48 keys, 3.5 MB, the build 7m 43s. A Zone run to its end panel added no key
+`out/sprite_pack/pack`). On 2026-10-11: 48 keys, 3.5 MB, the build 7m 43s; with `--check`, 8m 17s to 11m. A Zone run to its end panel added no key
 and is not run. Twelve of the keys are one CLUT4 32x16 picture (texels hash `cd0aa2c1`) under palettes the game
-animates: which of them a run meets varies from run to run, the other 36 are the same each time.
+animates: which of them a run meets varies from run to run; the other 36 were the same in three builds.
 
 `--check` installs the pack in a scratch data directory of its own (`DIR/check/data/textures/UCUS98612`) and captures
 main_menu and race_hud in the Vulkan window (`tools/frame_regress.sh --shell vulkan --backend vulkan`, paced from the
