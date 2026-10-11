@@ -35,6 +35,7 @@ the reported "double speed in 30 fps areas".
 - E4 (60 fps in locked modes) is not a one-instruction patch for us: the right change is to find what reads
   `param_1+0x116c` (the per-mode lock flag) and what advances per frame while locked. Callers of `sceDisplayGetVcount`:
   `FUN_0886511c`, `FUN_08865f7c` (debug overlay), `LoadingScreen_cpp__088822dc` (loading screen animation).
+  Done as task 072 (D-017, "E4" below): the byte's readers are step 5 and the save dialog, and the race integrates dt.
 - Input is read by `FUN_08898568` / `FUN_0889859c` (`sceCtrlReadBufferPositive`), not tied to pacing.
 
 ## The two lock fields (answered by the fidelity audit, task 035)
@@ -51,7 +52,8 @@ patch 0019-game-option-rows), Smooth by default. With Smooth, `src/profile/enhan
 (NID 0xB287BD61), which the end-of-frame routine calls once a frame at step 1, before step 5 reads the fields: when
 the frame object (`*0x08A8E960`) is in user RAM and `+0x116c` is 1 (Single Race, Tournament), it stores 0 to `+0x117c`
 first, so a flash frame takes the free path (`sceKernelDelayThreadCB(150)`) like any other. With `+0x116c` 0 (Time
-Trial, Free Play, Zone, the frontend) nothing is written: their 30 fps is E4's question. No generated code changes.
+Trial, Free Play, Zone, the frontend) nothing is written: their 30 fps is E4's question ("E4", below). No generated
+code changes.
 - The only reader of `+0x117c` in the corpus is `FUN_0886511c` (the load at 0x08865248, emitted twice in
   `generated/` as a branch delay slot; its decrement's store at 0x0886525C); the other stores are FxScreen's
   (`FUN_0882da04`, 0x0882E198) and the render manager's set-up (`RenderManager_cpp__088666c4`, 0x08866BC0). The only
@@ -68,6 +70,50 @@ Trial, Free Play, Zone, the frontend) nothing is written: their 30 fps is E4's q
   stretches and laps with both. Task 070's run of Vineta K: Original, 4 stretches of 16 to 22 flips and laps of 59.6,
   64.1 and 56.4 s; Smooth, no stretch and laps of 62.9, 55.4 and 58.2 s (the mean 2.0% lower, inside the 5% the check
   allows; the follower's laps vary by more than that from lap to lap).
+
+## E4: the 30-fps modes free-running (task 072)
+D-017: the Esc menu's Frame rate row (Video tab, Game section, before Flashes; `game.sixty_fps`, `PURE_SIXTY_FPS`;
+patch 0019-game-option-rows), 60 fps by default. In E6's `sceGeDrawSync` wrap and before E6's clear,
+`src/profile/enhancements.cpp` stores 1 to the frame object's `+0x116c` when it reads 0 there while the race backend
+lives (`DAT_08a8c5f4`, 0x08A8C5F4, and the frame object pointer both in user RAM). Time Trial, Free Play and Zone then
+take step 5's free path as Single Race does; with Smooth E6 clears their flash countdown too, and with Original a
+flash frame still waits two vblanks there. The frontend has no backend, so its byte is never written. No generated
+code changes.
+- The gate. `DAT_08a8c5f4` is 0 in the executable's .data; its only writers (Ghidra's references to it, and the stores
+  at offset -14860 from 0x08A90000 in `generated/`) are the backend's constructor `BackendRoot_cpp__0880c068`, which
+  stores the backend at 0x0880C0CC right after its 1 to `+0x116c` (0x0880C0C8), and its destructor
+  `BackendRoot_cpp__0880c328`, which zeroes it at 0x0880C5CC (the byte at 0x0880C378). The other 25 references are
+  reads.
+- The byte's readers (the loads at offset 4460 in `generated/`): `FUN_0886511c` (0x08865240, step 5) and eight
+  functions of MemStickUtil.cpp's save dialog, `FUN_088965e0`, `MemStickUtil_cpp__08896730`, `FUN_088968f4`,
+  `MemStickUtil_cpp__08896b68`, `FUN_08896ea4`, `FUN_08897050`, `FUN_08897180` and `FUN_088972b8`, each of which
+  saves it to `DAT_08b17c14` and stores 0 (the dialog runs at two vblanks; it calls `sceUtilitySavedataUpdate(2)`);
+  the dialog driver `FUN_08897f20` (called at step 2), `FUN_08896d7c` and `FUN_08896e30` store the saved value back.
+  Nothing else reads it. The race managers that store its 0 are `LinkObj_etc__08818d80` (SPFreePlay_RaceManager.cpp),
+  `LinkObj_etc__08819a0c` (SPTimeTrial_RaceManager.cpp) and `LinkObj_etc__0881bc8c` (SPZone_RaceManager.cpp); every
+  writer: [What writes the two fields](history/fidelity.md#what-writes-the-two-fields).
+- What follows from step 5's code (read, not measured): a locked frame decrements the countdown even when it is 0
+  (0x08865254), so it runs negative through a 30-fps race, and the hook never stores 0. With the option on from the
+  race's start the byte is 1 at every step 5 and the countdown stays 0 outside a flash. Set to 60 fps in the menu
+  during a 30-fps race, the race runs free at once with Smooth (E6 clears the countdown) but with Original only once a
+  flash has counted down from 2; set back to Original, the byte stays 1 until the backend's destructor and the race
+  ends at 60. A save dialog while the backend lives (the ghost's auto-load, `GhostShip_etc__0891e4cc` calling
+  `MemStickUtil_cpp__08896b68`) runs free with the option on, the byte stored back to 1 the next frame; the port's
+  savedata dialog does not read the update's vblank count.
+- On the Time Trial route (`tools/framerate_check.sh`, Flashes Original in both): the frontend's flips 4000 to 5000
+  have a median of 33.37 ms with either choice; the race's flips 6300 to 6900 33.37 ms and 29.97 flips a race-clock
+  second with Original, 16.68 ms and 59.94 with 60 fps. The `on` line comes after flip 5704, in the race load after
+  the TEAM SELECTION confirm (flip 5700): the backend is made there, the race's first frame is flip 5707 and the
+  race-start fade waits two vblanks from 5708 to 5764 in both runs. The race clock starts at flip 6010 with Original
+  and 6175 with 60 fps, 10.11 and 8.74 s after flip 5707: the route's Cross hold at flip 5900 comes 2.29 s sooner at
+  60 fps, and with the hold moved to flip 6037 (where 5900 falls at 30 fps) the clock starts 10.04 s after 5707, as
+  Single Race's does (above).
+- A swept Time Trial of Vineta K (`tools/framerate_check.sh --race`, task 072's run): 29.98 flips a race-clock second
+  with Original and 59.95 with 60 fps; the game clock (`DAT_08a8c3dc`) 0.9994 and 1.0001 s a virtual second; the
+  standing start 42.1, 80.5, 124.2 and 174.4 km/h in the half seconds about 0.5, 1.0, 1.5 and 2.0 s of race clock
+  with Original and 39.3, 77.5, 121.1 and 168.2 with 60 fps (2.8 to 6.2 km/h lower, each within the check's 5% or
+  10 km/h; the first speed pad is at about 2.2 s); laps of 77.1, 69.8 and 65.2 s with 68 contacts against 65.5, 58.7 and 59.7 s with 44 (the follower reads
+  its steering every 10 flips, twice as often at 60: its doing, not the game's speed).
 
 ## Frame structure (from `out/frame.txt`)
 - `FUN_088ed190` is the GE init: `sceGeEdramGetAddr`, `sceKernelCreateEventFlag`, `sceGeSetCallback` (one callback

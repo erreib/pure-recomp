@@ -105,7 +105,7 @@ void register_pure_hle(HleRegistrar &hle) {
         apply_paced_from(0u);
     }
     wrap_flip_counter(hle);
-    // The enhancements' hooks (enhancements.cpp): E6 wraps sceGeDrawSync, which PURE_TRACE_CALLS may then wrap.
+    // The enhancements' hooks (enhancements.cpp): E4 and E6 wrap sceGeDrawSync, which PURE_TRACE_CALLS may then wrap.
     enhancements::install(hle);
     // The test switches and probes (test_hooks.cpp), installed here, once: after the flip counter, which
     // PURE_TRACE_CALLS may wrap, and before the audio capture and the GPI answer, which are bound over what it wrapped.
@@ -198,7 +198,8 @@ const GameProfile &game() {
         .default_internal_scale = 0u,
 
         // Single Race and Tournament run free up to the vblank rate; the other modes lock to two vblanks
-        // (docs/timing.md). 1 keeps the renderer's frame-rate menu honest for the fast modes.
+        // (docs/timing.md) unless E4's Frame rate row frees them. 1 keeps the renderer's frame-rate menu honest for the
+        // fast modes.
         .frame_vblanks = 1u,
 
         // A US console: English, cross confirms.
@@ -209,8 +210,9 @@ const GameProfile &game() {
         // yet, and there is no right-stick or mouse camera (the PSP has neither; the race camera is the game's own).
         .features = {.adhoc = false, .right_stick_camera = false, .mouse_camera = false},
 
-        // The enhancements, each a row of the menu's Game section (patch 0019-game-option-rows; enhancements.cpp): E6,
-        // Flashes (D-016, task 070), game.smooth_flashes, default Smooth.
+        // The enhancements, each a row of the menu's Game section (patch 0019-game-option-rows; enhancements.cpp): E4,
+        // Frame rate (D-017, task 072), game.sixty_fps, default 60 fps; E6, Flashes (D-016, task 070),
+        // game.smooth_flashes, default Smooth.
         .options = enhancements::options(),
     };
     return profile;

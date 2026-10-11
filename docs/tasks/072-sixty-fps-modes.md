@@ -138,3 +138,111 @@ One commit (or two: the hook and option, then the check and docs).
 - a reader of `+0x116c` acts on it beyond pacing and the dialog's save/restore, or `DAT_08a8c5f4` has a writer other
   than the backend's constructor and destructor
 - a build takes over 5 minutes, or the change needs include/psprecomp/, a patch or generated code
+
+## Result
+Status: DONE. Every acceptance criterion holds and no escalation condition occurred. One number in the brief was
+wrong and the check uses the measured one instead: the `on` line comes after flip 5704, not after 5900 (open
+question 1).
+
+Changed (branch task/072-sixty-fps-modes from batch/m2 55b511b):
+- Commit 1 (c4d997a), the hook and option: `src/profile/enhancements.cpp` (the Frame rate option `sixty_fps`
+  before Flashes: Original / 60 fps, default 1, Video, with the brief's description; Flashes' last sentence now
+  "run at 30 fps unless Frame rate says 60 fps"; `kBackendPtr` = 0x08A8C5F4 beside `kFrameObjectPtr`; the one
+  `sceGeDrawSync` wrap now calls `sixty_fps()` and then E6's `smooth_flashes()`; the two `[pure] sixty fps` lines),
+  `src/profile/enhancements.hpp` and `src/profile/pure_profile.cpp` (comments only), `tools/purelib/port.py`
+  (`ORIGINAL_PACING` is now a tuple of `PURE_SIXTY_FPS` and `PURE_SMOOTH_FLASHES`, `original_pacing` sets each to 0
+  unless it is already named, `SCRATCH_SETTINGS` gains `game.sixty_fps=0`), `tools/run_boot.py` (docstring only:
+  `--env` is merged before `original_pacing` runs, and that call uses setdefault, so `--env PURE_SIXTY_FPS=1` already
+  wins), `tools/menu_check.sh` (Video ends with `Frame rate`, `Flashes` on both shells).
+- Commit 2 (3db1c66): `tools/framerate_check.sh` (new), README.md, docs/timing.md (new "E4" section), docs/fidelity.md,
+  docs/controls.md, docs/verification.md, docs/release.md.
+- Commit 3: this Result.
+
+The facts the hook depends on:
+- (a) Every reader of `+0x116c` (every load at offset 4460 in `generated/`; all 28 accesses are listed by address in
+  out/072/offset4460.txt of the worktree): `FUN_0886511c` at 0x08865240 (step 5), and eight functions of the MemStickUtil save
+  dialog: `FUN_088965e0` (0x088966B8), `MemStickUtil_cpp__08896730` (0x0889687C), `FUN_088968f4` (0x08896AB4),
+  `MemStickUtil_cpp__08896b68` (0x08896CBC), `FUN_08896ea4` (0x08896FD4), `FUN_08897050` (0x088970E4),
+  `FUN_08897180` (0x08897200), `FUN_088972b8` (0x088972F0). I read each of the eight in place: it loads the byte
+  through `*0x08A8E960`, stores it to `DAT_08b17c14` and then stores 0. Nothing else is done with it. The value is
+  put back by `FUN_08897f20` (0x08897FC4, 0x088981E8; the dialog driver, called from `FUN_0886511c`, which calls
+  `sceUtilitySavedataUpdate(2)`), `FUN_08896d7c` (0x08896DD4) and `FUN_08896e30` (0x08896E60). No other reader.
+- (b) Every reference to `DAT_08a8c5f4`. These come from Ghidra's Callers script, run on a read-only copy of the main
+  checkout's ghidra_project in the scratchpad because Ghidra refuses a path containing `.claude`; the output is
+  out/072/refs.txt. They agree with the stores at offset -14860 from 0x08A90000 in `generated/`. Writers:
+  0x0880C0CC `BackendRoot_cpp__0880c068` (stores the backend) and 0x0880C5CC `BackendRoot_cpp__0880c328` (stores 0).
+  Reads: `Text_Item_cpp__088d3000` (0x088D3340), `FUN_08817130` (0x08817640), `FUN_0881b148` (0x0881B398),
+  `LinkObj_etc__08847a54` (0x08847AE8), `FUN_0887be60` (0x0887BE6C), `FUN_088ca0e0` (0x088CA1B0),
+  `LinkObj_h__0888e340` (0x0888E364, 0x0888E5F8, 0x0888E6B4), `FUN_0886e4f8` (0x0886E500), `FUN_088066fc`
+  (0x08806700), `FUN_0888681c` (0x08886830, 0x088868FC), `FUN_0886eda0` (0x0886EDB0), `LinkObj_h__088baeec`
+  (0x088BAF48, 0x088BAF5C, 0x088BAF70, 0x088BB214, 0x088BB238), `FUN_0888db84` (0x0888DC7C), `FUN_08820464`
+  (0x08820500), `FUN_08870db4` (0x08870DFC, 0x08870E20), and two reads outside any function Ghidra knows (0x0886EE8C,
+  0x08886C44). That is 25 reads and 2 writes.
+
+The other acceptance criteria:
+- `tools/framerate_check.sh`: the frontend's median is 33.37 ms in both runs. The race is 33.37 ms at 29.97 flips a
+  second with the option off and 16.68 ms at 59.94 with it on. `[pure] sixty fps: off` is printed with 0, and
+  `on (game.sixty_fps)` with 1 after flip 5704. The HUD is drawn at 6900. Each run takes 7 to 8 s.
+- `--race` (Verify run): 29.98 against 59.95 flips a race-clock second. The game clock runs at 0.9993 and 1.0001 s
+  per virtual second. The start bins are 42.1/80.5/124.2/174.4 against 39.3/77.5/121.1/168.2 km/h. Both cells PASS.
+  Laps were 73.6, 67.3, 66.9 s with 64 contacts against 61.4, 59.5, 53.9 s with 39 contacts. The cells took 223 and
+  186 s. An earlier run gave the same rates and bins to the digit (0.9994 off).
+- `tools/flash_check.sh` PASS (fade 57 flips off, 0 on). `tools/menu_check.sh` PASS on both shells.
+  `tools/frame_regress.sh` 18/18, and tt_hud, fp_hud, zone_hud and zone_change match the main checkout's last run
+  (68803cd) to the digit. The 2200-flip frontend run with `PURE_SIXTY_FPS=1` printed no `sixty fps` line at all.
+  `docs_check` PASS.
+
+Verify output (`tools/verify_task.sh 072`, last 20 lines):
+```
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 21s)
+docs_check: 33 files, 0 findings: PASS
+verify 072: PASS
+```
+
+Open questions:
+1. The brief expected the `on` line after flip 5900 and gave the race's first frame as about flip 6010. That is when
+   the race clock starts at 30 fps. On this route the race backend is made in the race load right after the TEAM
+   SELECTION confirm at flip 5700. The race's first frame is flip 5707, and the fade waits two vblanks from 5708 to
+   5764 in both runs. The hook's first store, and so the `on` line, comes after flip 5704. The check therefore
+   requires the line after flip `RACE_LOAD`=5700. The frontend before that point is never written. With a 5900
+   threshold the check would fail every time.
+2. Measured: the race clock starts at flip 6010 with the option off and at 6175 with it on. In virtual time that is
+   10.11 s and 8.74 s after flip 5707. This comes from the route's flip-indexed Cross hold at 5900, which lands 2.29 s
+   sooner at 60 fps. With the hold moved to flip 6037 (where 5900 falls at 30 fps) the clock starts 10.04 s after
+   5707, as in Single Race. So it is not per-frame logic. A player presses in real time.
+3. These follow from reading step 5's code and were not measured. A locked frame decrements the countdown even when
+   it is 0, so the countdown runs negative through a 30-fps race, and the hook never stores 0. Switching the menu to
+   60 fps during a 30-fps race takes effect at once with Smooth, because E6 clears the countdown. With Original it
+   waits until a flash has counted down from 2. Switching back to Original during the race leaves the byte at 1, and
+   the race ends at 60. Making the switch-off immediate would mean storing 0 back for a backend the hook itself set,
+   which goes beyond the brief's "Nothing else".
+4. A save dialog that runs while the backend lives sets the byte to 0 to run at two vblanks. The hook stores 1 the
+   next frame, so the dialog runs free with the option on, in Single Race and Tournament too. One example is the Time
+   Trial ghost's auto-load: `GhostShip_etc__0891e4cc` calls `MemStickUtil_cpp__08896b68` when "Auto Load Ghost" is
+   set and a ghost exists. The dialog's own restore puts back 1, and the port's savedata HLE ignores the update's
+   vblank count. No run hit this case, because a new profile has no ghost.
+5. Under the Vulkan shell the Video tab now has two rows labelled "Frame rate": the renderer's frame-rate cap and
+   the game's E4 row (D-017's label). A different label might read better there.
+6. On the standing-start bins: the planning figures (42/80/124/174) are reproduced by half-second bins centred on
+   0.5, 1.0, 1.5 and 2.0 s, covering 0.25 to 2.25 s. The check uses those. On Vineta K the first speed pad comes at
+   about 2.2 s, not 2.5 s. A [2.0, 2.5) bin would straddle it: in the planning cells it read 267/262 in Time Trial and
+   184/255 in Free Play.
+7. The acceptance's `--pad` is not a run_boot flag. The frontend run used `--script config/pad_scripts/main_menu.txt
+   --shell headless`.
