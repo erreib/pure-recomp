@@ -179,6 +179,15 @@ simplification task, then the enhancements. The session-by-session resume notes 
   the window checks run unpaced to the scene and capture the seven window scenes by default (`--all-scenes` for
   18): the window suites 19m 48s to 5m 10s, the HUD check 227 s to 82 s; `--paced` keeps the old pacing for a
   pacing change. Follow-up: a built-in wait in frame_regress.sh while another game runs.
+- **E6, a steady frame rate through the full-screen flashes** (D-016, 2026-10-11; Erik's pick after his playtest:
+  the dips at the race start and when a bomb goes off). The dips are the game's own two-vblank lock while a
+  full-screen flash plays (docs/fidelity.md "The two-vblank stretches"); the game integrates a measured dt, so the
+  lock does not set the race's speed. Task 070 (in flight): the countdown cleared each frame in the 60-fps modes
+  from a `sceGeDrawSync` wrap in the profile, behind a Flashes row (Original / Smooth, Smooth by default) drawn by a
+  generic game-option patch (0019-game-option-rows: `GameProfile::options`, `game.<key>` in settings.ini,
+  `PURE_<KEY>`); every tool run pinned to `PURE_SMOOTH_FLASHES=0` through tools/purelib/port.py so the measured
+  scenes stay; `tools/flash_check.sh` (the fade's 57 two-vblank flips to at most 2; a swept race with 0 stretches
+  and lap times within 5%) is the check with it on.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
