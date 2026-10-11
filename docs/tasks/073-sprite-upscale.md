@@ -1,6 +1,6 @@
 # 073: The menus' and HUD's bitmap art upscaled (E7)
 
-Milestone: E7 (Erik, 2026-10-11; D-018) | Branch: task/073-sprite-upscale | Status: OPEN (replanned 2026-10-11 after a BLOCKED first run: the draw rule)
+Milestone: E7 (Erik, 2026-10-11; D-018) | Branch: task/073-sprite-upscale | Status: MERGED (ddad728, 2026-10-11; replanned once after a BLOCKED first run: the draw rule)
 
 ## Goal
 The frontend's text and art are bitmap atlases drawn at one texel a screen pixel in through mode (D-018: the font
@@ -266,3 +266,26 @@ Open questions:
    the frontend today.
 4. Upscaled textures are 16 times the memory of the plain ones: 2 MB for a 256x128 atlas, 16 MB for the one 512x512
    CLUT8 picture. The cache is capped by count (1024), not by bytes, and the runs here kept 51 upscaled textures.
+
+## Review
+Verify rerun: `tools/verify_task.sh 073` from the main checkout after the merge, 2026-10-11 18:40 (out/073_gate.log):
+PASS. sprite_check 7/7 (title 0.0198, main_menu 0.0411, class_select 0.0621 of 0.07, team_select 0.0585 of 0.06,
+race_hud 0.0414, tt_hud 0.0411, fp_hud 0.0413 reduced against the references; 1.6 to 6.9% of the full captures
+changed; the HUD found in the three race scenes; 25 textures upscaled in 66 ms on the main menu), menu_check both
+shells, suite 18/18, scale_check 18/18 and 3/3 bloom regions, docs_check. After it: hud_check 61 of 61,
+`tools/gerec/metal_check.sh` PASS (25 s), the window suites 7/7 on the Metal shell and 7/7 on the Vulkan shell with
+the Vulkan backend (a first Vulkan-shell run without `--backend vulkan` ran the Metal backend under that shell, a
+pairing with no measured column, and failed one scene: the gate's invocation, not the change).
+Spot-read: the rule in metal_draw.mm (through, or orthographic with lighting off; one level; palette or 16-bit;
+not a target) and the forced linear sampler; the cache key hashing the choice; the option read once a frame; the
+scaler's header stating the prototype's maths and its one departure (an all-transparent texture keeps its colour);
+the dump switch off the frame path; the metal_check pin.
+Merged: ddad728 into batch/m2.
+Notes: the first run's BLOCKED was right: the brief said through mode and the menus are orthographic transformed
+draws; the replan (81b03ea) fixed the rule and the Zone HUD scene. The lighting test excludes nothing today (no
+frontend draw is lit; the TEAM ship is an unlit picture and is upscaled, about 0.005 of team_select's figure).
+Follow-ups: team_select and class_select sit near their limits in sprite_check (0.0585 of 0.06, 0.0621 of 0.07):
+if a run wobbles, compare the reduced capture against the plain scale-4 capture with a margin of the check's own
+instead of the reference; the texture cache is capped by count, and an upscaled texture is 16x the bytes (a byte
+cap, small); docs/metal-backend.md's "The 3D check" sentence on the TEAM ship ("ten textured quads") predates the
+recording's one strip; the pack for the Vulkan renderer is task 074.
