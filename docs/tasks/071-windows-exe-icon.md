@@ -154,4 +154,19 @@ Open questions:
 - Cold Release build: about 1 minute in this worktree (ccache-warm), not 10 to 25.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge, 2026-10-11 — the first run FAILED the icon check, and
+rightly: `--check` packed only when the stage was missing, so it judged the morning's pre-071 stage, whose exe had
+no resources. The check's FAIL path is thereby proven end to end in the gate itself. Fixed at the merge:
+`--check` now always re-stages (stage() rebuilds when the sources are newer), so the gate judges the current
+tree. The rerun: all eight checks PASS (out/071-verify-main.log; icon: 7 images, ProductName 'Wipeout Pure',
+ProductVersion 0.1.0.0, IMAGE_SUBSYSTEM_WINDOWS_GUI).
+Spot-read: pure.rc carries no hash, name or path (CompanyName and LegalCopyright name the project and the
+licence); the CMake block is both-presets with the version passed as numbers and the .ico an OBJECT_DEPENDS; the
+icon check reads the built resources back (llvm-readobj) rather than trusting the .rc, and the VERSIONINFO
+strings with a small UTF-16 reader since this llvm-strings lacks `-e l`. make_icon.py's iconutil step is guarded
+by `shutil.which`, so the script runs on either system and rewrote icon.png byte-identically here.
+Merged: d1cf4ce into batch/m2 (the --check fix and this review follow on top).
+Notes: the PARTIAL was only the Explorer look — the worker has no display; Erik should open
+out/release-windows/stage/Wipeout Pure once (the exe's icon, Properties > Details). The running window's and
+taskbar button's icon (SDL window class vs the exe resource) was not looked at: if the window shows a default
+icon it is a vendor follow-up, recorded in docs/release.md. Code signing remains the last 061 follow-up.

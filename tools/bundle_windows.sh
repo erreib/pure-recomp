@@ -19,7 +19,9 @@
 #   --zip   also out/release-windows/dist/pure-recomp-<version>-windows-x64.zip (Windows' own tar.exe -a), SHA256SUMS
 #           and BUILDINFO.txt
 #
-# --check DIR (task 061's Verify line; packs first when the stage is missing; DIR/data and DIR/shots are made afresh,
+# --check DIR (task 061's Verify line; packs first, every time: the stage is remade from the build, which is itself
+# rebuilt when the sources are newer, so the checks always judge the current tree (a stale stage once hid a missing
+# icon resource, task 071's review). DIR/data and DIR/shots are made afresh,
 # nothing outside DIR is written):
 #   files    the folder holds exactly the names above (listed with their sizes in DIR/bundle_files.txt)
 #   dlls     every DLL the executable and each bundled DLL imports (llvm-objdump -p) is beside it in the folder or a
@@ -270,7 +272,7 @@ check() {
   local dir=$1 iso iso_sha
   [ -f ref/title.png ] || { echo "ref/title.png missing (tools/worktree_init.sh links the main checkout's ref/)"; exit 2; }
   iso=$(disc_image) || exit 2
-  if [ ! -f "$EXE" ]; then echo "== no $STAGE/$NAME: packing first"; stage; fi
+  stage   # every time: a stale stage once hid a missing resource (task 071's review)
   mkdir -p "$dir"
   dir=$(cd "$dir" && pwd)
   echo "bundle_windows check $(date '+%Y-%m-%d %H:%M'): $STAGE/$NAME, data $dir/data"
