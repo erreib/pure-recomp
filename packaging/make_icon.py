@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Draws the app icon (task 029): a dark rounded square with the letters WP, W in cyan and P in pink.
 
-  python3 packaging/make_icon.py          # packaging/icon.png (256x256) and packaging/macos/Wipeout Pure.icns
+  python3 packaging/make_icon.py          # packaging/icon.png (256x256), packaging/windows/pure.ico and
+                                          # packaging/macos/Wipeout Pure.icns (on macOS)
 
 A plain generated picture: no game art and no logo of the game's owners. The shapes are signed distance fields in a
-256-unit design square, so every size of the .icns is drawn at its own resolution with one pixel of anti-aliasing
-(no resampling). Writes PNGs with tools/png.py (zlib only); the .icns comes from macOS's iconutil.
+256-unit design square, so every size of the .icns and the .ico is drawn at its own resolution with one pixel of
+anti-aliasing (no resampling). Writes PNGs with tools/png.py (zlib only); the .ico (task 071: 16, 24, 32, 48, 64, 128
+and 256, each a PNG entry, which Windows Vista and later read) is packed here; the .icns comes from macOS's iconutil,
+so elsewhere the .icns is left as it is.
 """
 import math
+import struct
 import os
 import shutil
 import subprocess
@@ -84,10 +88,42 @@ def render(size):
     return bytes(out)
 
 
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
+def write_ico(path, sizes):
+    """An ICONDIR, one ICONDIRENTRY per size (0 means 256), then each size's PNG (packaging/windows/pure.rc)."""
+    tmp = tempfile.mkdtemp()
+    try:
+        images = []
+        for size in sizes:
+            png_path = os.path.join(tmp, f"{size}.png")
+            write_png(png_path, size, size, 4, render(size))
+            with open(png_path, "rb") as f:
+                images.append((size, f.read()))
+    finally:
+        shutil.rmtree(tmp)
+    offset = 6 + 16 * len(images)
+    head = struct.pack("<HHH", 0, 1, len(images))
+    entries = b""
+    for size, data in images:
+        side = 0 if size >= 256 else size
+        entries += struct.pack("<BBBBHHII", side, side, 0, 0, 1, 32, len(data), offset)
+        offset += len(data)
+    with open(path, "wb") as f:
+        f.write(head + entries + b"".join(data for _, data in images))
+
+
 def main():
     icon_png = os.path.join(ROOT, "packaging", "icon.png")
     write_png(icon_png, 256, 256, 4, render(256))
     print("wrote", os.path.relpath(icon_png, ROOT))
+    ico = os.path.join(ROOT, "packaging", "windows", "pure.ico")
+    write_ico(ico, ICO_SIZES)
+    print("wrote", os.path.relpath(ico, ROOT))
+    if shutil.which("iconutil") is None:
+        print("no iconutil (not macOS): packaging/macos/Wipeout Pure.icns left as it is")
+        return
     icns = os.path.join(ROOT, "packaging", "macos", "Wipeout Pure.icns")
     tmp = tempfile.mkdtemp()
     try:

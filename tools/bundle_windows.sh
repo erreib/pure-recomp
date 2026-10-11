@@ -33,6 +33,10 @@
 #            repository writes (README.txt, licenses/THIRD_PARTY_NOTICES.md: they name the disc image and the data
 #            folder's files to the player; their lines are listed), or in a bundled DLL only inside longer words
 #            (avcodec-61.dll's RESIDUEBOOTSTRAP_...: listed); the SHA-256 prefix is in no file at all
+#   icon     the executable's resources (packaging/windows/pure.rc, task 071) as llvm-readobj --coff-resources lists
+#            them: ICON (the 7 images of packaging/windows/pure.ico), GROUP_ICON and VERSIONINFO; the version's
+#            ProductName is RELEASE_NAME and its ProductVersion the project version with a fourth field 0 (the
+#            resource's UTF-16 strings, read from the file); and llvm-readobj --file-headers' subsystem is the windows one
 #   setup    the staged executable with PURE_DATA_DIR=DIR/data and --install <the image disc.iso is> (no other PURE_
 #            variable): exit 0, DIR/data holds EBOOT.ELF, settings.ini and the copied disc.iso (as big as the image)
 #   route    the staged executable again with only PURE_DATA_DIR and the route's variables (PURE_INPUT_SCRIPT from
@@ -217,6 +221,22 @@ ci() {   # ci TEXT: an extended regex matching TEXT in any case, with / matching
   printf '%s' "$1" | sed -e 's/\./\\./g' -e 's#/#[/\\\\]#g' -e 's/[A-Za-z]/[\U&\L&]/g'
 }
 
+version_string() {   # version_string EXE KEY: the value of KEY in the executable's VERSIONINFO (UTF-16 strings)
+  python3 - "$(cygpath -m "$1")" "$2" <<'PY'
+import sys
+data = open(sys.argv[1], "rb").read()
+key = (sys.argv[2] + "\0").encode("utf-16-le")
+i = data.find(key)
+if i >= 0:
+    i += len(key)
+    i += (-i) % 4          # the value starts on a 32-bit boundary
+    j = i
+    while j + 1 < len(data) and data[j:j + 2] != b"\0\0":
+        j += 2
+    print(data[i:j].decode("utf-16-le", "replace"))
+PY
+}
+
 norm() { tr '\\' '/' | tr '[:upper:]' '[:lower:]'; }   # a Windows path as the log prints it, for comparing
 
 route_check() {   # route_check DIR DATA SCRIPT
@@ -364,6 +384,28 @@ check() {
   if [ -n "$bad_content" ]; then result content FAIL "$bad_content"
   else result content PASS "no game file; the disc image's SHA-256 ($iso_sha...) in no file; hits only in the executable's own strings and the read-me texts:"; fi
   [ -n "$listed" ] && printf '%s' "$listed"
+
+  # icon: the executable's resources (packaging/windows/pure.rc), as llvm-readobj reads them.
+  local res res_types icons ver want_ver product subsystem
+  res=$(llvm-readobj --coff-resources "$EXE" | tr -d '\r')
+  res_types=$(printf '%s\n' "$res" | sed -n 's/^  Type: \([A-Z_]*\) (ID [0-9]*).*/\1/p' | paste -sd' ' -)
+  icons=$(printf '%s\n' "$res" | awk '/^  Type: ICON \(ID 3\)/ { f = 1 } f && /Number of ID Entries/ { print $NF; exit }')
+  want_ver="$(sed -n 's/^project(PureRecomp VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | tr -d '\r').0"
+  ver=$(version_string "$EXE" ProductVersion | tr -d '\r')
+  product=$(version_string "$EXE" ProductName | tr -d '\r')
+  subsystem=$(llvm-readobj --file-headers "$EXE" | tr -d '\r' | sed -n 's/^ *Subsystem: \(IMAGE_SUBSYSTEM_[A-Z_]*\).*/\1/p')
+  case " $res_types " in *" ICON "*) ;; *) res_types+=" (no ICON)" ;; esac
+  case " $res_types " in *" GROUP_ICON "*) ;; *) res_types+=" (no GROUP_ICON)" ;; esac
+  case " $res_types " in *" VERSIONINFO "*) ;; *) res_types+=" (no VERSIONINFO)" ;; esac
+  case "$res_types" in
+    *"(no "*) result icon FAIL "resources: '$res_types' (want ICON, GROUP_ICON and VERSIONINFO)" ;;
+    *)
+      if [ "${icons:-0}" -lt 7 ]; then result icon FAIL "${icons:-no} icon images, want 7 (16 to 256)"
+      elif [ "$ver" != "$want_ver" ] || [ "$product" != "$NAME" ]; then
+        result icon FAIL "version resource: ProductName '$product', ProductVersion '$ver' (want '$NAME', '$want_ver')"
+      elif [ "$subsystem" != IMAGE_SUBSYSTEM_WINDOWS_GUI ]; then result icon FAIL "subsystem $subsystem, not the windows one"
+      else result icon PASS "resources $res_types: $icons icon images (packaging/windows/pure.ico), ProductName '$product', ProductVersion $ver; $subsystem"; fi ;;
+  esac
 
   # setup: the installer from the disc image into DIR/data.
   local data="$dir/data" rc copied iso_size installed=no

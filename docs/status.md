@@ -141,7 +141,8 @@ simplification task, then the enhancements. The session-by-session resume notes 
   diff 0.000015 (2 px of 130560 at tol 24; the first differing draw is the stencilled, alpha-tested CLUT4 ship
   decal at draw 508 of 864), so the two complete backends agree on one recording and step 3 is DONE. Step 4 (packaging) is task 061, merged 18c5df4 (2026-10-09): the `win-x64-release` preset,
   `tools/bundle_windows.sh` (the folder, `--zip`, `--check`: all seven checks PASS, docs/release.md "Windows");
-  the follow-ups are an icon (.ico through llvm-rc) and code signing. With it the Windows bring-up's four steps
+  task 071 gave the executable its icon and a version resource (`packaging/windows/pure.ico` and `pure.rc`, through
+  llvm-rc) and the check an eighth, `icon`: all eight checks PASS (out/071-icon); the follow-up is code signing. With it the Windows bring-up's four steps
   are done, the Mac A/B included (2026-10-09). Step 1 was task 054 on `task/054-windows-build-boot`,
   run 2026-10-08 on Erik's Windows machine by the planning session itself (the corpus regeneration and the first
   cold build sit outside a worker's limits): the game builds with clang-cl on the win-x64 preset, the corpus
@@ -156,7 +157,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix and E6 (the Flashes
   row, Smooth by default; a settings.ini an earlier build wrote lacks the key and so reads the default).
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
-  `--check out/repack-071`: all seven checks PASS; out/repack-071.log):
+  `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
   fraction 0.030170, unchanged from the 18c5df4 pack (a menu scene; E3's Auto changes the 3D, not the menus).
 - **The Esc menu** (D-014, task 064, merged b92537a 2026-10-10): rows gated by the game's features and the

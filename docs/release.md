@@ -179,13 +179,19 @@ The `win-x64-release` preset inherits `win-x64` (clang-cl, lld-link, ccache) wit
 build's `VCRUNTIME140.dll` and `MSVCP140.dll` imports need) and its own directory, `build/release-win`. CMakeLists.txt
 links that build alone with the windows subsystem (`WIN32_EXECUTABLE`, entry `mainCRTStartup`, so `main` stays the
 entry): started from Explorer it opens no console window. The developer build keeps the console subsystem every tool
-reads. The corpus compiled again in Release in 10.5 minutes cold on the 6-thread machine (2026-10-09). FFmpeg is
+reads. Both Windows builds compile `packaging/windows/pure.rc` (task 071) with llvm-rc (`CMAKE_RC_COMPILER`) into the
+executable: the icon, `packaging/windows/pure.ico` (drawn by `packaging/make_icon.py` at 16, 24, 32, 48, 64, 128 and
+256, each size at its own resolution like the .icns, PNG entries), so Explorer, a shortcut and the unpacked zip show
+it; and a VERSIONINFO (FileVersion and ProductVersion the project version with a fourth field 0,
+ProductName and FileDescription `Wipeout Pure`, LegalCopyright naming GPL-2.0-or-later; no commit, which is in
+`BUILDINFO.txt`), which Explorer's Properties sheet shows. The running window's (and its taskbar button's) icon is the SDL
+shell's business at run time, not this resource's; it was not looked at in task 071. The corpus compiled again in Release in 10.5 minutes cold on the 6-thread machine (2026-10-09). FFmpeg is
 BtbN's prebuilt LGPL shared build that the framework's `cmake/FFmpeg.cmake` pins; `tools/build.sh release` copies the
 developer build's downloaded zip into the release directory first.
 
 | Path in the folder | What |
 |---|---|
-| `Wipeout Pure.exe` | the program (PureNative, Release, 80 MB): our profile, PortableKit with its Vulkan renderer and shell, Dear ImGui, the recompiled code |
+| `Wipeout Pure.exe` | the program (PureNative, Release, 80 MB): our profile, PortableKit with its Vulkan renderer and shell, Dear ImGui, the recompiled code; the icon and version resource of `packaging/windows/pure.rc` |
 | `SDL3.dll` | SDL3 3.4.18, libsdl-org's prebuilt DLL (the developer build's `SDL3_ROOT`) |
 | `avcodec-61.dll`, `avutil-59.dll`, `swresample-5.dll` | FFmpeg 7.1.5, BtbN's LGPL shared build, dynamically linked |
 | `LICENSE.txt`, `README.txt` | ours (GPL-2.0-or-later) and `packaging/windows/README.txt` |
@@ -205,6 +211,7 @@ files of [The data directory](#the-data-directory).
 | machine | no file holds `H:/errei`, `H:\errei`, `C:/Users/<user>` (either slash), the user name or `dev-stuff`, in any case |
 | names | no file is named like game data (bundle.sh's names and `RELEASE_GAME_NAMES`) |
 | content | bundle.sh's byte checks; `UCUS98612`, `.iso`, `.wad`, `EBOOT`, `BOOT.BIN` only in the executable's own strings, in the two texts this repository writes for the player (`README.txt` and `THIRD_PARTY_NOTICES.md`, which name the disc image and the data directory's files), or in a bundled DLL only inside longer words (BtbN's `avcodec-61.dll` holds libvmaf's `RESIDUEBOOTSTRAP_LIBSVMNUSVR`); each such hit is listed; the disc image's SHA-256 prefix in no file |
+| icon | `llvm-readobj --coff-resources` lists ICON (the seven images of `pure.ico`), GROUP_ICON and VERSIONINFO in the executable; the version's ProductName is `RELEASE_NAME` and its ProductVersion the project version with a fourth field 0 (read from the resource's UTF-16 strings); the subsystem (`llvm-readobj --file-headers`) is still the windows one (task 071) |
 | setup | the staged program with `PURE_DATA_DIR=DIR/data` and `--install` of the image `disc.iso` is (a hard link on Windows), no other `PURE_` variable: exit 0, `EBOOT.ELF`, `settings.ini` and the copied `disc.iso` there |
 | route | the staged program with only `PURE_DATA_DIR` and the route's variables, the default shell and backend (Vulkan, windowed): the log names `DIR/data`'s game and the Vulkan renderer, the frontend route reaches frame 2200 (exit status 4: the runtime stopped by `PURE_EXIT_AT_FRAME`), and `DIR/shots/title.png` is within tol 24, max-frac 0.05 of `ref/title.png` (0.030 on 2026-10-09) |
 

@@ -67,7 +67,91 @@ llvm-rc cannot compile the .rc (a toolchain gap); the resource breaks the link o
 anything from vendor/ or src/.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: PARTIAL. Everything is done and Verify passes. One acceptance item is not done: the look in Explorer. This
+worktree's guard refused to run powershell.exe, and the agent has no display, so I could not open the stage folder or
+read the Shell's Properties fields. Erik or the reviewer needs to open it once.
+
+Changed (commits 55b37e0, 1242b34, c2fdf8a on task/071-windows-exe-icon):
+- packaging/make_icon.py: `write_ico` packs packaging/windows/pure.ico. It holds 16, 24, 32, 48, 64, 128 and 256
+  pixel images, each drawn by `render(size)` at its own resolution and stored as a PNG entry (no resampling).
+  The iconutil step now runs only when `shutil.which("iconutil")` finds it, so off macOS the .icns is left as it is.
+  Rerunning the script on Windows rewrote packaging/icon.png with identical bytes (git sees no change). I parsed the
+  .ico back: 7 entries, each a valid RGBA PNG of its size.
+- packaging/windows/pure.ico (new, 13487 bytes, committed).
+- packaging/windows/pure.rc (new, ASCII): `1 ICON "pure.ico"` and a VERSIONINFO:
+  - FILEVERSION/PRODUCTVERSION are PURE_VERSION_MAJOR, _MINOR, _PATCH, 0. CMake passes these numbers in.
+  - The FileVersion/ProductVersion strings are built from the same numbers by preprocessor stringification
+    ("0.1.0.0").
+  - ProductName and FileDescription are "Wipeout Pure"; LegalCopyright names GPL-2.0-or-later.
+  - No hash, no user name, no path.
+- CMakeLists.txt: an `if(WIN32)` block (both presets) adds pure.rc to PureNative. It sets COMPILE_DEFINITIONS from
+  PROJECT_VERSION_* and makes pure.ico an OBJECT_DEPENDS. llvm-rc compiled it without trouble. The link still
+  works, and the Release exe's subsystem is still IMAGE_SUBSYSTEM_WINDOWS_GUI. The developer build (`build.sh
+  profile`) also rebuilds and relinks in seconds.
+- tools/bundle_windows.sh: an eighth check, `icon`, described in the header. It requires:
+  - `llvm-readobj --coff-resources` lists ICON (at least 7 images), GROUP_ICON and VERSIONINFO.
+  - ProductName equals RELEASE_NAME and ProductVersion equals the project version plus ".0". These are read from the
+    resource's UTF-16 strings by a small inline python3, because this LLVM's llvm-strings has no `-e l`.
+  - `llvm-readobj --file-headers` reports the windows subsystem.
+  The first run, before a pattern fix, showed the FAIL path working.
+- docs/release.md "Windows": a paragraph on pure.rc and pure.ico, the exe row in the folder table, and the `icon` row
+  in the check table.
+- docs/windows.md step 4: exit now names the eighth check.
+- docs/status.md: the task-061 follow-up now says the icon is done (eight checks PASS) and only code signing remains.
+  The 2026-10-11 repack line is still "seven", because that run had seven checks; it is now marked "before task
+  071's icon check".
+- `python tools/docs_check.py`: 33 files, 0 findings: PASS.
+
+Evidence instead of Explorer: llvm-readobj on the built exe shows these resources: ICON (7 entries; the 16 px entry
+starts with the PNG signature, 440 bytes), GROUP_ICON, VERSIONINFO and MANIFEST. The fixed info is 0.1.0.0 / 0.1.0.0,
+FILEOS 0x40004 and FILETYPE APP. The strings are CompanyName "pure-recomp", FileDescription "Wipeout Pure",
+FileVersion "0.1.0.0", InternalName "PureNative", LegalCopyright "pure-recomp, GNU General Public License version 2
+or later (GPL-2.0-or-later)", OriginalFilename "Wipeout Pure.exe", ProductName "Wipeout Pure" and ProductVersion
+"0.1.0.0".
+
+Verify output (`tools/bundle_windows.sh --check out/071-icon`, out/071-icon.log). The per-check lines come first,
+then the last 20 lines:
+```
+files    PASS  16 files, as expected (.../out/071-icon/bundle_files.txt)
+dlls     PASS  the program and 4 DLLs import only each other, API sets and System32's: vulkan-1.dll ws2_32.dll ...
+machine  PASS  no H:/errei, H:\errei, C:/Users/erreib (either slash), erreib or dev-stuff in any file, any case
+names    PASS  no file named like game data (18 entries)
+content  PASS  no game file; the disc image's SHA-256 (87078aee9e4f9557...) in no file; hits only in the executable's own strings and the read-me texts:
+icon     PASS  resources ICON GROUP_ICON VERSIONINFO MANIFEST: 7 icon images (packaging/windows/pure.ico), ProductName 'Wipeout Pure', ProductVersion 0.1.0.0; IMAGE_SUBSYSTEM_WINDOWS_GUI
+setup    PASS  exit 0, image copied (252968960 bytes), data directory 250749 KiB: EBOOT.ELF disc.iso settings.ini; setup.log 24 lines
+route    PASS  exit 4 (4: the runtime stopped, by PURE_EXIT_AT_FRAME) at frame 2200 from DIR/data, Renderer: Vulkan on NVIDIA GeForce RTX 3080, target 960x544; title: PASS fraction 0.030170 (3939/130560 pixels differ by more than 24, limit 0.05) at 480x272 (resized from 960x544 and 480x272)
+---- last 20 lines ----
+files of out/release-windows/stage/Wipeout Pure (bytes, path; .../out/071-icon/bundle_files.txt), 146M in all:
+       549 BUILDINFO.txt
+     18431 LICENSE.txt
+      4323 README.txt
+   2848256 SDL3.dll
+  80753152 Wipeout Pure.exe
+  65771520 avcodec-61.dll
+   2836992 avutil-59.dll
+      1104 licenses/DearImGui-LICENSE.txt
+      7651 licenses/FFmpeg-LICENSE.txt
+       537 licenses/FFmpeg-SOURCE.txt
+      1133 licenses/PortableKit-LICENSE.txt
+       884 licenses/SDL3-LICENSE.txt
+     10058 licenses/THIRD_PARTY_NOTICES.md
+      1235 licenses/tiny-AES-c-UNLICENSE.txt
+      1415 licenses/xxHash-LICENSE.txt
+    670208 swresample-5.dll
+data directory after setup: 246M (EBOOT.ELF disc.iso ms0 pipeline_cache.bin pipeline_keys.bin settings.ini)
+
+bundle_windows check: PASS
+```
+The stage was packed from 55b37e0 with the check edits uncommitted (version 0.1.0-55b37e0-dirty). The exe and the
+icon check code are the same as in the committed tree.
+
+Open questions:
+- Explorer: someone needs to open out/release-windows/stage/Wipeout Pure once and confirm the icon and the
+  Properties > Details version fields. Without that, the second acceptance criterion is only half met.
+- The running window's and its taskbar button's icon: I did not look. If SDL3 does not take the exe's first icon
+  for its window class and the shell sets none, the window shows a default icon. That would be a framework follow-up
+  (vendor/), not done here. docs/release.md says it was not looked at.
+- Cold Release build: about 1 minute in this worktree (ccache-warm), not 10 to 25.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

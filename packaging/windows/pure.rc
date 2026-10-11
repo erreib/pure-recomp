@@ -1,0 +1,40 @@
+// The Windows executable's resources (task 071): the app icon and the version Explorer's Properties sheet shows.
+// Compiled by llvm-rc into PureNative on WIN32 (CMakeLists.txt), which passes the project version as
+// PURE_VERSION_MAJOR, PURE_VERSION_MINOR and PURE_VERSION_PATCH. pure.ico is drawn by packaging/make_icon.py.
+// No commit hash here (it lives in BUILDINFO.txt), no user name, no path.
+
+#define PURE_STR2(x) #x
+#define PURE_STR(x) PURE_STR2(x)
+#define PURE_VERSION_STRING PURE_STR(PURE_VERSION_MAJOR.PURE_VERSION_MINOR.PURE_VERSION_PATCH.0)
+
+// The first icon resource is the one Explorer shows for the file.
+1 ICON "pure.ico"
+
+1 VERSIONINFO
+FILEVERSION PURE_VERSION_MAJOR, PURE_VERSION_MINOR, PURE_VERSION_PATCH, 0
+PRODUCTVERSION PURE_VERSION_MAJOR, PURE_VERSION_MINOR, PURE_VERSION_PATCH, 0
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0x0
+FILEOS 0x40004
+FILETYPE 0x1
+FILESUBTYPE 0x0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "pure-recomp"
+            VALUE "FileDescription", "Wipeout Pure"
+            VALUE "FileVersion", PURE_VERSION_STRING
+            VALUE "InternalName", "PureNative"
+            VALUE "LegalCopyright", "pure-recomp, GNU General Public License version 2 or later (GPL-2.0-or-later)"
+            VALUE "OriginalFilename", "Wipeout Pure.exe"
+            VALUE "ProductName", "Wipeout Pure"
+            VALUE "ProductVersion", PURE_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
