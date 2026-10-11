@@ -155,6 +155,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   8 checks PASS; out/repack-070.log): Wipeout Pure 0.1.0-012631c at out/release-macos/stage, the zip in
   out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix and E6 (the Flashes
   row, Smooth by default; a settings.ini an earlier build wrote lacks the key and so reads the default).
+  The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
+  `--check out/repack-071`: all seven checks PASS; out/repack-071.log):
+  pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
+  fraction 0.030170, unchanged from the 18c5df4 pack (a menu scene; E3's Auto changes the 3D, not the menus).
 - **The Esc menu** (D-014, task 064, merged b92537a 2026-10-10): rows gated by the game's features and the
   shell's (patch 0016-menu-rows-by-capability); four tabs, no camera, mouse-camera, touch (Metal) or network rows;
   `tools/menu_check.sh` keeps the lists. Follow-ups: the bindings list's framework labels ("Move forward", four
