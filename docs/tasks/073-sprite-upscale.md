@@ -1,6 +1,6 @@
 # 073: The menus' and HUD's bitmap art upscaled (E7)
 
-Milestone: E7 (Erik, 2026-10-11; D-018) | Branch: task/073-sprite-upscale | Status: OPEN
+Milestone: E7 (Erik, 2026-10-11; D-018) | Branch: task/073-sprite-upscale | Status: OPEN (replanned 2026-10-11 after a BLOCKED first run: the draw rule)
 
 ## Goal
 The frontend's text and art are bitmap atlases drawn at one texel a screen pixel in through mode (D-018: the font
@@ -47,10 +47,16 @@ One or two commits on the branch.
   output of the same texture, dumped by a switch described below; or run the prototype's own file). Cost: a
   256x256 texture in well under 50 ms on this Mac; note the figure.
 - **The backend**: `decoded_texture` takes whether to upscale. The caller (metal_draw.mm, where it is called for a
-  texture from guest memory) asks for it when the draw is through mode, the texture is not a target's, the format is
-  a palette one (CLUT4, CLUT8, CLUT16, CLUT32) or 16-bit (5650, 5551, 4444), the draw samples one level, and the
-  option is on; never for 8888 (the movie and TV pictures), never for a mipmapped texture, never for a transformed
-  draw. The cache key includes the choice (the same texture may be cached plainly for a transformed draw and
+  texture from guest memory) asks for it when the draw is a **2D draw**: through mode, or a transformed draw whose
+  projection is orthographic (the w row of the projection matrix, `projection[3]`, `[7]` and `[11]`, all 0) with
+  lighting off (the TEAM screen's rotating ship is drawn orthographic but lit: it is a model, not art, and stays
+  plain); and the texture is not a target's, the format is a palette one (CLUT4, CLUT8, CLUT16, CLUT32) or 16-bit
+  (5650, 5551, 4444), the draw samples one level, and the option is on; never for 8888 (the movie and TV pictures),
+  never for a mipmapped texture, never for a perspective draw. (Replan 2026-10-11, after the first run: the menus'
+  text and art and the race HUD are transformed orthographic draws, not through mode; through mode alone reaches
+  three textures in the whole frontend route. The measured orthographic rule passed six of seven scenes, team_select
+  at 0.0585 of 0.06 with the ship included; the lighting test is meant to take the ship out of it. Report the
+  team_select figure with the ship excluded.) The cache key includes the choice (the same texture may be cached plainly for a transformed draw and
   upscaled for a through-mode one). The `MTLTexture` is 4W x 4H; through-mode `uv_transform` already divides by the
   GE's width and height, so nothing else moves. An upscaled texture samples linear in both directions whatever the
   GE's filters say (the sampler bits), with the GE's wrap. `fragment.level` keeps the GE's size (no mips). The
@@ -71,7 +77,8 @@ One or two commits on the branch.
   its docstring if the name no longer fits: it now covers the enhancements in general), `SCRATCH_SETTINGS` gains
   `game.sprite_upscale=0`; `--env PURE_SPRITE_UPSCALE=1` wins as the others do.
 - **`tools/sprite_check.sh [--out DIR] [--wait SECONDS]`**, in the shape of tools/scale_check.sh: the scenes `title`,
-  `main_menu`, `class_select`, `team_select`, `race_hud`, `tt_hud`, `zone_hud` captured headless on Metal at
+  `main_menu`, `class_select`, `team_select`, `race_hud`, `tt_hud`, `fp_hud` (not zone_hud: the Zone HUD has no
+  CURRENT or LAP label for hud_check) captured headless on Metal at
   `PURE_INTERNAL_SCALE=4` twice through `tools/frame_regress.sh --out` (its scene selection if it has one, else the
   whole suite), with `PURE_SPRITE_UPSCALE=0` and with `1`. PASS when, for every scene: the `1` capture is 1920x1088;
   its centre-pixel reduction to 480x272 (scale_check's rule and code, shared or copied with a note) is within the
@@ -81,6 +88,10 @@ One or two commits on the branch.
   says at least 2 textures were upscaled with a total scaler time under 2000 ms. Print a table; `sprite_check: PASS`
   or `FAIL` last; exit 0 only on PASS; the captures and reductions under `--out` (default out/sprite_check).
 - **`tools/menu_check.sh`**: the expected Video rows gain `Text and sprites` after `Flashes` on both shells.
+- **`tools/gerec/metal_check.sh`** (replan): its Metal lane runs `PureNative --replay` outside port.py's pin, so it
+  reads the settings' default (Upscaled) and its Metal-against-Vulkan comparison would move; set
+  `PURE_SPRITE_UPSCALE=0` in that lane's environment (a one-line change with a comment naming this task), and say in
+  the Result whether `tools/gerec/metal_check.sh` still passes.
 - **Docs**: docs/metal-backend.md (a section "Sprite upscale (task 073)": the rule for which textures, the method,
   the key, the sampler, the stats, the dump switch, the cost figures), docs/controls.md (the row and
   `game.sprite_upscale`), docs/verification.md (the pin paragraph; the "Which path" table gains the check),
@@ -90,7 +101,7 @@ One or two commits on the branch.
 
 ## Acceptance criteria
 - [ ] `tools/sprite_check.sh` PASS: seven scenes, each reduced within its limit, each differing at full size, the
-      HUD found in the three race scenes, the main menu's upscales under 2 s in all
+      HUD found in the three race scenes (race_hud, tt_hud, fp_hud), the main menu's upscales under 2 s in all
 - [ ] the port's upscale of the prototype's three inputs matches the prototype within 2 levels per channel (the
       check script or the prototype's own run, figures in the Result)
 - [ ] `tools/menu_check.sh` and `tools/menu_check.sh --shell vulkan` PASS with the new row
@@ -113,7 +124,7 @@ One or two commits on the branch.
   (the source list only)
 - src/profile/enhancements.cpp, src/profile/enhancements.hpp
 - tools/sprite_check.sh (new), tools/sprite_proto_check.py (new, optional), tools/menu_check.sh,
-  tools/purelib/port.py, tools/run_boot.py (docstring)
+  tools/purelib/port.py, tools/run_boot.py (docstring), tools/gerec/metal_check.sh (the pin line only)
 - docs/metal-backend.md, docs/controls.md, docs/verification.md, docs/release.md, README.md,
   docs/tasks/073-sprite-upscale.md (the Result)
 
