@@ -33,6 +33,13 @@ const char *const kFrameRateChoices[] = {"Original", "60 fps"};
 // is written. FUN_0886511c is the only reader of +0x117c in the corpus (task 070).
 const char *const kFlashChoices[] = {"Original", "Smooth"};
 
+// --- E7: Text and sprites (D-018, task 073) --------------------------------------------------------------------------
+// The menus' text and art and the race HUD are bitmap atlases (CLUT4 fonts, CLUT8 art) drawn at one texel a screen pixel
+// in through mode, so a higher internal scale only magnifies their texels. Upscaled has the Metal backend redraw such a
+// texture 4x finer at decode (src/gpu/sprite_upscale.cpp, docs/metal-backend.md "Sprite upscale"); the backend reads
+// the option itself, once a frame, so there is no hook here. The Vulkan renderer draws the originals either way.
+const char *const kSpriteChoices[] = {"Original", "Upscaled"};
+
 const GameOption kOptions[] = {
     {.key = "sixty_fps",
      .label = "30 fps modes",
@@ -49,6 +56,14 @@ const GameOption kOptions[] = {
                     "going off near you, your ship put back on the track. Smooth keeps the race's frame rate through "
                     "them. The game's speed is the same either way (it measures time). Time Trial, Free Play and Zone "
                     "run at 30 fps unless the 30 fps modes row says 60 fps.",
+     .default_choice = 1u,
+     .tab = MenuTab::Video},
+    {.key = "sprite_upscale",
+     .label = "Text and sprites",
+     .choices = kSpriteChoices,
+     .description = "The menus' text and art and the race HUD are small bitmaps on the PSP. Upscaled redraws them four "
+                    "times finer with smooth edges. Metal only: the Vulkan renderer draws the originals until a texture "
+                    "pack exists.",
      .default_choice = 1u,
      .tab = MenuTab::Video},
 };

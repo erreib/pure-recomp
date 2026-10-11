@@ -416,9 +416,14 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
             ++stats_.framebuffer_textures;
         } else {
             const std::uint32_t levels = mip_levels(memory, state);
-            texture = decoded_texture(memory, state, levels);
-            sampler = (linear_mag ? 1u : 0u) | (linear_min ? 2u : 0u) | (state.wrap_s != 0u ? 4u : 0u) |
-                      (state.wrap_t != 0u ? 8u : 0u);
+            // The sprite upscale (task 073, D-018): a through-mode draw's texture of one level in a palette or 16-bit
+            // format, with the option on, is 4W x 4H, which the through-mode coordinates (over the GE's W and H)
+            // sample in place; linear in both directions whatever the GE's filters say (they were for one texel a
+            // pixel), with the GE's wrap. Never an 8888 texture, a target's, a mipmapped one or a transformed draw's.
+            const bool upscale = sprite_upscale_ && call.through && levels == 1u && upscalable(state.format);
+            texture = decoded_texture(memory, state, levels, upscale);
+            sampler = (linear_mag || upscale ? 1u : 0u) | (linear_min || upscale ? 2u : 0u) |
+                      (state.wrap_s != 0u ? 4u : 0u) | (state.wrap_t != 0u ? 8u : 0u);
             if (levels > 1u && texture != white_) {
                 // min_filter bit 1: linear between the two levels around D, else the nearest one.
                 sampler |= (state.min_filter & 2u) != 0u ? kMipLinear : kMipNearest;

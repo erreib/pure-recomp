@@ -157,7 +157,8 @@ void MetalGeBackend::report() {
     std::cout << "[metal] frame " << frames_ << ", " << stats_.draws << " draws ("
               << (stats_.draws - trace_.report_draws) << " in the last " << frames << " frames, "
               << (seconds > 0.0 ? static_cast<double>(frames) / seconds : 0.0) << " fps), " << targets_.size()
-              << " targets, " << textures_.size() << " textures cached, " << stats_.decoded << " decoded\n";
+              << " targets, " << textures_.size() << " textures cached, " << stats_.decoded << " decoded, "
+              << stats_.upscaled << " upscaled (" << stats_.upscale_ms << " ms)\n";
     trace_.report_start = now;
     trace_.report_frames = frames_;
     trace_.report_draws = stats_.draws;

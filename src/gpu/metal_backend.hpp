@@ -101,11 +101,16 @@ private:
     void upload(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
                 std::uint32_t stride);
 
-    // Textures from guest memory: mip levels, the content key, the decode and cache, the level rule (metal_textures.mm)
+    // Textures from guest memory: mip levels, the content key, the decode and cache, the sprite upscale (task 073), the
+    // level rule (metal_textures.mm)
     std::uint32_t mip_levels(const GuestMemory &memory, const TextureState &state);
     const Target *target_holding(std::uint32_t address, std::size_t bytes) const;
     static std::uint64_t content_key(const GuestMemory &memory, const TextureState &state, std::uint32_t levels);
-    id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state, std::uint32_t levels);
+    static bool upscalable(TextureFormat format);
+    void read_sprite_upscale(bool at_start);
+    id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state, std::uint32_t levels,
+                                   bool upscale);
+    void dump_sprite(std::uint64_t key, const TextureState &state);
     static void set_level_rule(const TextureState &state, std::uint32_t levels, FragmentUniforms &fragment);
 
     // Pipelines: fragment-function variants, render and depth-stencil states, the pre-warm list (metal_pipelines.mm)
@@ -236,6 +241,12 @@ private:
     std::map<TextureIdentity, std::uint64_t> list_keys_;  // this display list's binds, hashed once
     std::uint64_t texture_clock_{};
     std::vector<std::uint32_t> pixels_;
+    // The sprite upscale (task 073): game.sprite_upscale as read at the last frame (read_sprite_upscale()), whether its
+    // `on` line was said, the last upscaled texture's texels, and the keys PURE_SPRITE_DUMP has written.
+    bool sprite_upscale_{};
+    bool sprite_upscale_said_{};
+    std::vector<std::uint8_t> upscaled_;
+    std::set<std::uint64_t> sprites_dumped_;
     std::vector<GpuVertex> vertices_;
     std::vector<GpuVertex> sprite_sources_;
     std::size_t sprite_corners_{};  // of a transformed sprite draw: vertices_ holds its sources after them

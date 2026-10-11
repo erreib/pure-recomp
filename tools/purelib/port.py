@@ -35,16 +35,17 @@ BLIND = ("headless", "null") if WINDOWS else ("headless", "metal")
 FRAME_EXIT_GRACE = 15.0     # seconds the runtime gets to shut down after the frame exit before it is killed
 # What a new scratch data directory's settings.ini starts with: the menu hint ("Esc / L3+R3 opens the menu", drawn
 # over a window for its first 12 s until the menu has been opened once) counts as seen, as in a player's settings; the
-# enhancements are off, as original_pacing pins them (tasks 070 and 072).
-SCRATCH_SETTINGS = "ui.menu_hint_seen=1\ngame.sixty_fps=0\ngame.smooth_flashes=0\n"
+# enhancements are off, as original_pacing pins them (tasks 070, 072 and 073).
+SCRATCH_SETTINGS = "ui.menu_hint_seen=1\ngame.sixty_fps=0\ngame.smooth_flashes=0\ngame.sprite_upscale=0\n"
 CHECKOUT_VARS = ("PURE_ROOT", "PURE_MAIN_CHECKOUT")     # name checkouts, not switches: clean_env keeps them
 # The framework's busy-time charge (Kernel::charge_busy_time: a thread that runs over 100 ms of wall time without a
 # wait has up to 250 ms added to the virtual clock) makes a headless run's game state depend on the machine's load
 # (task 051 saw it twice in twelve runs); with this switch set, to any value, the charge is off and a run repeats.
 STEADY_CLOCK = "PURE_NO_BUSY_CLOCK"
-# The enhancements a tool run has off unless its caller names them: E4, Frame rate (game.sixty_fps; task 072, D-017),
-# and E6, Flashes (game.smooth_flashes; task 070, D-016).
-ORIGINAL_PACING = ("PURE_SIXTY_FPS", "PURE_SMOOTH_FLASHES")
+# The enhancements a tool run has off unless its caller names them (original_pacing): E4, 30 fps modes (game.sixty_fps;
+# task 072, D-017), E6, Flashes (game.smooth_flashes; task 070, D-016), and E7, Text and sprites (game.sprite_upscale;
+# task 073, D-018). Named ORIGINAL_PACING before task 073, when the two it held were both the PSP's pacing.
+ENHANCEMENTS_OFF = ("PURE_SIXTY_FPS", "PURE_SMOOTH_FLASHES", "PURE_SPRITE_UPSCALE")
 REFUSED = "another PureNative is running"               # the guard's words (refuse, wait_game)
 WAITED = 0.0                                            # seconds this process has spent in wait_until
 
@@ -108,12 +109,14 @@ def steady_clock(env):
 
 
 def original_pacing(env):
-    """PURE_SIXTY_FPS=0 and PURE_SMOOTH_FLASHES=0, each unless env names it (ORIGINAL_PACING): Time Trial, Free Play
-    and Zone keep the PSP's two vblanks a frame (task 072, D-017) and so do the full-screen flashes (task 070, D-016),
-    so every tool's run measures the game as the PSP paces it and the suites' scenes, the HUD check and the sweep stay
-    where they were measured. Every tool run calls it, through silence() and steady_clock() (run_boot, campaign_sweep
-    and what goes through them); tools/framerate_check.sh and tools/flash_check.sh are the checks that name them."""
-    for name in ORIGINAL_PACING:
+    """The enhancements off: PURE_SIXTY_FPS=0, PURE_SMOOTH_FLASHES=0 and PURE_SPRITE_UPSCALE=0, each unless env names it
+    (ENHANCEMENTS_OFF). Time Trial, Free Play and Zone keep the PSP's two vblanks a frame (task 072, D-017), so do the
+    full-screen flashes (task 070, D-016), and the Metal backend draws the menus' and the HUD's bitmaps as the PSP's
+    texels (task 073, D-018), so every tool's run measures the game as the PSP paces and draws it and the suites'
+    scenes, the HUD check and the sweep stay where they were measured. The name is the first two's. Every tool run
+    calls it, through silence() and steady_clock() (run_boot, campaign_sweep and what goes through them);
+    tools/framerate_check.sh, tools/flash_check.sh and tools/sprite_check.sh are the checks that name them."""
+    for name in ENHANCEMENTS_OFF:
         env.setdefault(name, "0")
 
 

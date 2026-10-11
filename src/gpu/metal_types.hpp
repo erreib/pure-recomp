@@ -278,6 +278,8 @@ struct Stats {
     GuestWrites frames;              // write_back_frame()
     GuestWrites depths;              // write_back_depth()
     std::uint64_t decoded_bytes{};   // of the decoded textures, as uploaded (RGBA8)
+    std::uint64_t upscaled{};        // of the decoded textures, those upscaled 4x for through-mode draws (task 073)
+    double upscale_ms{};             // the time the scaler took for them (sprite_upscale.cpp)
     std::uint64_t pipelines_made{};  // render pipelines a draw made, or waited for while pre-warming made them
     std::uint64_t depth_states_made{};
 };
@@ -360,6 +362,7 @@ struct Switches {
     bool no_dither{};
     bool no_depth_clamp{};
     std::uint32_t show_target{};  // PURE_METAL_SHOW_TARGET: the target each flip presents instead of the display
+    std::string sprite_dump;      // PURE_SPRITE_DUMP (task 073): the folder each upscaled texture is written to once
 };
 
 // The frame trace and the counts' lines (metal_trace.mm), and the framework's traces. The class's trace_.
