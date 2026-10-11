@@ -1,6 +1,6 @@
 # 068: The Vulkan renderer draws the effects buffers at 1x (E3, step 4, for Windows)
 
-Milestone: E3 (D-015) | Branch: task/068-vulkan-effects-at-1x | Status: OPEN (after task 067)
+Milestone: E3 (D-015) | Branch: task/068-vulkan-effects-at-1x | Status: MERGED (867cad6, 2026-10-10)
 
 ## Goal
 The Vulkan renderer draws every target at its internal scale, the bloom buffers included, so above 1x the bloom's
@@ -176,4 +176,18 @@ Open questions:
    running frame_regress with `pgrep -f` sees them.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun: from the main checkout after the merge and patch 0018 applied to the vendor tree (18 patches
+reproduce the pin), 2026-10-10: PASS (`--shell vulkan --backend vulkan` 18/18 at its 2x; `tools/gerec/metal_check.sh`
+PASS). The gate: `--shell metal --backend metal` 18/18; headless 18/18; `tools/hud_check.sh` 61/61;
+`tools/menu_check.sh --shell vulkan` PASS; `tools/refactor_check.sh` PASS at scale 1.
+Spot-read: `Target::extent` by the stride rule, `extent_for` at creation and `resize_targets`; the read-backs' centre
+texel shared with the depth write-back; the frame write-back's 272 row copies replacing the averaging blit. The
+measurements are the right ones: Vulkan 1x unchanged at tol 0, Vulkan 2x against Metal 2x 679 px at tol 0 (from
+178985), the race scenes closer to the PPSSPP column.
+Merged: `git merge --no-ff` into batch/m2, 867cad6. E3 is complete on both backends.
+Notes: the brief's premise was half wrong (the blur radius already scaled; the glow's resolution did not), which the
+worker measured and said. Follow-ups recorded in docs/status.md: `ge_replay --scale` (the Vulkan lane replays at
+the recording's size; a relabelled copy was needed for the 2x figures); the frame write-back's copy grows with the
+scale (2 MB at 4x; the depth write-back's 8.4 MB is larger); no `PURE_NO_...` switch for the sizes; the Windows
+suite not run here. The first Verify attempt lost the frontend route to my bundle check's Finder launch ("window
+closed"); the second was clean.
