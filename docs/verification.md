@@ -87,16 +87,20 @@ the modules).
 
 ```
 tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]]
-                       [--env KEY=VAL ...] [--allow-parallel]
+                       [--window-scenes | --all-scenes] [--paced-from N | --paced] [--env KEY=VAL ...]
+                       [--allow-parallel]
 ```
 
 One command that checks the port still renders the known screens like PPSSPP (task 020; thirteen scenes added by
 task 035). By default (task 034) it runs headless on the Metal backend (`--shell headless --backend metal`): no
 window, unpaced, the scenes the backend's own 480x272 pictures, about 25 s in all. `--shell metal --backend metal`
 runs the same backend in the Metal shell's window (the macOS default for players since D-008) and `--shell vulkan
---backend vulkan` the Vulkan path; in a window each run is paced to real time: the Vulkan path took 19m 47s for the
-18 scenes in task 040, and the Metal window's time for the 18 is unverified (it took 7 minutes for the first five,
-as the Vulkan path did). Which path to run for which change: "Which path for which change" below.
+--backend vulkan` the Vulkan path. In a window (task 069) the suite captures the seven window scenes, the five race
+scenes and `title` and `main_menu`, and each run is unpaced until 300 flips before its route's first scene and paced
+to real time from there: 5m 10s on the Metal path and 5m 11s on the Vulkan path, where the 18 scenes paced from boot
+took 19m 48s on each ("The window checks paced from the scene" below). `--all-scenes` runs the 18 in a window
+(7m 46s on each), `--paced` paces each run from boot as before. Which path to run for which change: "Which path
+for which change" below.
 The race HUD check ("The race HUD check" below) covers the race after the suite's last race scene. The suite boots
 the game once per route (seven routes), captures each scene of the route, and compares each capture with its
 reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL per scene and writes the same text
@@ -109,28 +113,31 @@ build, game or reference, or another PureNative running (below).
 | `title` | `frontend.txt` | 1750 | `ref/title.png` | 24 | 0.05 | 0.030 | 0.0002 |
 | `profile` | `frontend.txt` | 2100 | `ref/profile.png` | 24 | 0.07 | 0.054 | 0.0000 |
 | `main_menu` | `main_menu.txt` | 4700 | `ref/main_menu.png` | 24 | 0.05 | 0.033 | 0.0106 |
-| `race_hud` | `main_menu.txt` + `single_race.txt` | 6016 | `ref/vineta_k_start.png` (7155) | 32 | 0.10 | 0.067 | 0.0149 |
+| `race_hud` | `main_menu.txt` + `single_race.txt` | 6016 | `ref/vineta_k_start.png` (7155) | 32 | 0.10 | 0.047 | 0.0149 |
 | `single_player` | `main_menu.txt` + `single_race.txt` | 4765 | `ref/single_player.png` (5850) | 24 | 0.05 | 0.025 | 0.0000 |
 | `class_select` | the same | 4990 | `ref/class_select.png` (6050) | 24 | 0.07 | 0.045 | 0.0000 |
 | `league_select` | the same | 5185 | `ref/league_select.png` (6250) | 24 | 0.08 | 0.062 | 0.0000 |
 | `track_select` | the same | 5390 | `ref/track_select.png` (6450) | 24 | 0.06 | 0.041 | 0.0000 |
 | `team_select` | the same | 5600 | `ref/team_select.png` (6690) | 24 | 0.06 | 0.042 | 0.0000 |
 | `tt_track_select` | `main_menu.txt` + `time_trial.txt` | 5375 | `ref/tt_track_select.png` (6650) | 24 | 0.06 | 0.040 | 0.0000 |
-| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7340) | 32 | 0.12 | 0.096 | 0.0112 |
+| `tt_hud` | the same | 5890 | `ref/tt_hud.png` (7340) | 32 | 0.12 | 0.049 | 0.0112 |
 | `fp_track_select` | `main_menu.txt` + `free_play.txt` | 5375 | `ref/fp_track_select.png` (6650) | 24 | 0.06 | 0.041 | 0.0000 |
-| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7340) | 32 | 0.11 | 0.095 | 0.0116 |
+| `fp_hud` | the same | 5890 | `ref/fp_hud.png` (7340) | 32 | 0.11 | 0.048 | 0.0116 |
 | `tournament_select` | `main_menu.txt` + `tournament.txt` | 5185 | `ref/tournament_select.png` (6450) | 24 | 0.08 | 0.063 | 0.0000 |
 | `zone_track_select` | `main_menu.txt` + `zone.txt` | 4975 | `ref/zone_track_select.png` (6250) | 24 | 0.05 | 0.033 | 0.0000 |
-| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6694) | 32 | 0.09 | 0.065 | 0.0121 |
-| `zone_change` | the same | 5679 | `ref/zone_change.png` (7528) | 32 | 0.10 | 0.082 | 0.0353 |
+| `zone_hud` | the same | 5260 | `ref/zone_hud.png` (6694) | 32 | 0.09 | 0.045 | 0.0121 |
+| `zone_change` | the same | 5679 | `ref/zone_change.png` (7528) | 32 | 0.10 | 0.052 | 0.0353 |
 
 The table lives at the top of the script (`SCENES`), with a measured column per backend and the source of each value
-as a comment; the one above is the script's as of 2026-10-07 (task 040's re-baseline of the Metal column; task 056's
-viewport fix, 2026-10-08, moved race_hud, tt_hud and fp_hud by under 0.001 and left the Vulkan column as it was). A scene's
+as a comment; the one above is the script's as of 2026-10-10 (task 040's re-baseline of the Metal column; task 056's
+viewport fix, 2026-10-08, moved race_hud, tt_hud and fp_hud by under 0.001; the Vulkan column's five race scenes are
+task 069's, the median of three runs in the Vulkan window on this Mac, paced from the scene, which scored the same to
+the pixel each time, where tasks 056 to 060 had measured them on Windows). A scene's
 fraction is the share of pixels that differ by more than Tol in any channel, with both frames at 480x272 (a window's
 window capture (960x544 under the Vulkan shell; the Metal shell's drawable, 1920x1088 on a Retina Mac since task 065) is reduced by nearest neighbour; a headless capture is 480x272 already). The scene passes at or below
 Limit, which is shared by both backends. The Metal column serves the Metal window and the headless shell alike: the
-headless captures equal the Metal window's reduced to 480x272, pixel for pixel (task 034).
+headless captures equal the Metal window's reduced to 480x272, pixel for pixel (task 034), and task 069's three Metal
+window runs paced from the scene scored the headless values on all seven window scenes.
 
 - On the Vulkan path the 2D scenes score 0.025 to 0.063 because of one-pixel edges of lines and glyphs, which the
   2x-to-1x reduction moves. The Metal backend draws at 480x272 and its shell scales by exactly 2x with nearest
@@ -154,7 +161,23 @@ How the runs are made:
 - `race_hud` uses the same presses as `~/dev/pure-recomp/out/race/route.txt`, the route that measured it. Those are
   `main_menu.txt` followed by `single_race.txt`. Its Cross hold at 6100 comes after the run ends.
 - Each run goes to its last shot plus 30 flips (`--frames`): 2130 (`frontend.txt`), 4730 (`main_menu.txt`), 6046
-  (Single Race), 5920 (Time Trial and Free Play), 5215 (Tournament) and 5709 (Zone).
+  (Single Race), 5920 (Time Trial and Free Play), 5215 (Tournament) and 5709 (Zone). With the window scenes the
+  frontend run ends at 1780 and the Tournament route is not run.
+- The scenes (task 069): headless, all 18. In a window on macOS, the window scenes (`WINDOW_SCENES` in the script):
+  the five race scenes, and `title` and `main_menu` as a smoke test of the two menu routes. A window capture of a menu
+  scene is the backend's own picture scaled by a whole number, pixel for pixel (task 065: 0 of 2088960 pixels on 14
+  scenes), so the other eleven menu scenes are left to the headless suite. `--all-scenes` runs the 18 in a window,
+  `--window-scenes` the seven headless, and `--only` picks from the whole table either way. On Windows, where nothing
+  draws headless, the default stays all 18. The summary's `scenes:` line names the set and the scenes not run, and
+  the verdict says `the window scenes` when it is that set.
+- The pace (task 069): headless, unpaced. In a window each run sets `PURE_PACED_FROM` to its route's first scene's
+  flip minus 300 (`PACE_MARGIN`): the menus before it go at the display's rate, and the last 300 flips before the
+  first capture (10 s of 30-fps menus) are paced, so the shell's first presents after the switch are over by then.
+  With the window scenes that is 1450 (`frontend.txt`), 4400 (`main_menu.txt`), 5716 (Single Race), 5590 (Time Trial
+  and Free Play) and 4960 (Zone); with `--all-scenes` 390, 4400, 4465, 5075, 5075, 4885 (Tournament) and 4675.
+  `--paced-from N` sets N for every run, `--paced` sets nothing (the shell's pace: from boot in a window, as before
+  task 069), and a `PURE_PACED_FROM` of the caller's (the environment, or `--env`) wins over all three. The summary's
+  `pacing:` line and each run's line say which.
 - Every run starts from an empty memory stick in `<out>/game`, where `EBOOT.ELF` and `disc.iso` are links to
   `game/`. `main_menu.txt` creates and saves a profile, and a profile left on the stick would change the next boot.
   The checkout's `game/ms0` is never touched.
@@ -223,8 +246,10 @@ check covers the race itself.
 - It prints the shots as `FLIP:H` (both labels), `h` (one) or `-` (none), then `hud_check: N of M shots have the
   HUD`, and exits 0 when all 61 shots were taken and have it. `<out>/summary.txt` holds the yellow counts per label.
 - `--shell metal` (the default, kept by task 034: the check tests the window) checks the Metal shell's window
-  shots, about 4 minutes paced to real time; `--shell vulkan` the Vulkan shell's, with the Vulkan backend; `--shell
-  headless` the Metal backend's own 480x272 captures (`capture_frame`), unpaced, about 15 s. The run is silent and
+  shots; `--shell vulkan` the Vulkan shell's, with the Vulkan backend; in a window the run is unpaced until flip 5900,
+  300 flips before the first shot, and paced to real time from there (task 069; `PURE_PACED_FROM`, which the caller's
+  environment or `--env` overrides): 82 s, where paced from boot it took 227 s. `--shell headless` checks the Metal
+  backend's own 480x272 captures (`capture_frame`), unpaced, about 15 s. The run is silent and
   uses the data directory `out/data/hud_check` (task 034). `--backend` names another backend. Outputs go to `--out`,
   by default `out/hud/<shell>` (the route, the run's log, the shots and the summary), removed first.
 
@@ -238,9 +263,9 @@ data directory:
 
 | Tool | Shell by default | Pacing | Sound | Data directory |
 |---|---|---|---|---|
-| `tools/frame_regress.sh` | headless, Metal backend | unpaced (the headless shell) | off | `out/data/frame_regress` |
+| `tools/frame_regress.sh` | headless, Metal backend | unpaced (the headless shell); in a window `PURE_PACED_FROM=<the route's first scene - 300>` (task 069) | off | `out/data/frame_regress` |
 | `tools/campaign_sweep.py` | headless, Metal backend | `PURE_PACED_FROM=<the mode's Cross-hold flip>`: menus unpaced, the race paced | off; `--sound` turns it on and paces the whole run | `out/data/campaign_sweep` |
-| `tools/hud_check.sh` | the Metal window (it tests the window) | paced (the window) | off | `out/data/hud_check` |
+| `tools/hud_check.sh` | the Metal window (it tests the window) | `PURE_PACED_FROM=5900` in a window: the menus unpaced, the race paced (task 069) | off | `out/data/hud_check` |
 | `tools/save_roundtrip.sh` | the Metal window | paced | off | `out/data/save_roundtrip` |
 | `tools/run_boot.py` | headless unless `--window`, `--shell`, `--script` or `--shots` | the shell's | off; `--sound` | `out/data/run_boot` (`--data-dir`) |
 
@@ -269,10 +294,37 @@ Since task 050 the Python tools share one runner, `tools/purelib` ("The shared r
 starts sets `PURE_NO_BUSY_CLOCK=1`, so a run does not depend on the machine's load. The wall times before and after
 task 034: [Fast, silent test runs](history/verification.md#fast-silent-test-runs-task-034-2026-10-06).
 
-The window columns wobble on the race scenes: a paced window run's race frames differ from the headless ones in
-content (the camera and the ship have moved by the frame's timing), so a window run of `zone_change` scores anywhere
-from 0.002 to 0.042 (task 065 measured three runs: 0.0024, 0.0148, 0.0423) and the suite's "moved more than 0.03"
-line fires at random there; the Metal column is the headless value and is not re-baselined from a window run.
+The window columns wobble on the race scenes, now and then: a window run's race can be another race than the
+headless one, so a window run of `zone_change` has scored anywhere from 0.002 to 0.042 (task 065 measured three runs:
+0.0024, 0.0148, 0.0423) and the suite's "moved more than 0.03" line can fire there; the Metal column is the headless
+value and is not re-baselined from a window run. What task 069 measured, for the record (its cause was not chased):
+the Metal window scored the headless values on all five race scenes, pixel for pixel, in one run paced from boot,
+three paced from the scene, and race_hud in three more Single Race runs (two paced from flip 4465); the Vulkan window drew its race scenes the
+same to the pixel in one run paced from boot and four paced from the scene; the HUD check's 61 shots paced from flip
+5900 equalled, shot for shot, the main checkout's run of the same commit paced from boot. Two runs drew another
+race: the Metal window's `--all-scenes` run (Single Race paced from 4465), whose AI ships loaded in another order
+(race_hud 0.0158 against 0.0148), and a HUD check paced from boot, whose first load took 601 ms of game time where
+the others' took 584 (its fourth 367 against 351), which loaded other AI ships and billboards and differed from the
+others in all 61 shots. So the race's seed (docs/fidelity.md, difference 13) moved in 2 of these 16 window runs, one
+paced from boot and one from before TEAM SELECTION; with the window scenes every race route is paced from after it.
+
+## The window checks paced from the scene (task 069, 2026-10-10)
+
+Wall times on this Mac (Apple M4 Pro, its 120 Hz panel), before (the tools of 76f9143) and after, the suite's and the
+check's own times (not the wait for another worktree's game to end):
+
+| Run | Before: paced from boot | After: paced from the scene |
+|---|---|---|
+| `tools/frame_regress.sh --shell metal --backend metal` | 19m 48s, 18/18 (frontend 72 s, main_menu 158 s, the race routes 174 to 198 s) | 5m 10s, 7/7 (the window scenes: 24, 48, 55, 58, 58 and 67 s; three runs, the same to the second); `--all-scenes` 7m 46s, 18/18 (62, 48, 86, 71, 71, 52 and 75 s; race_hud 0.0158, another grid (below)) |
+| `tools/frame_regress.sh --shell vulkan --backend vulkan` | 19m 48s, 18/18 (71 s, 157 s, 174 to 198 s) | 5m 11s, 7/7 (23, 48, 54, 59, 58 and 67 s; three runs); `--all-scenes` 7m 46s, 18/18 |
+| `tools/hud_check.sh` | 227 s, 61 of 61 | 82 s, 61 of 61 |
+
+- A window run still presents every flip at the display's rate when unpaced (both shells present at vsync): 120
+  flips a second here, four times the 30 a second of the paced menus. A route
+  costs its first scene's flip over 120 s plus its paced flips over 30 s, and the 300-flip margin costs 7.5 s a route
+  over an unpaced one (45 s of the window suite's 5 minutes). On a 60 Hz display the unpaced part takes twice as long.
+- The captures: every window scene's capture paced from the scene equals the one paced from boot, pixel for pixel, in
+  both shells (and in the Metal window the headless capture scaled). A Metal frame trace (`PURE_METAL_TRACE`) of the Single Race and Zone routes shows the switch settling at once: before it the pictures reach the screen every 8.3 ms (unpaced, 120 Hz), from the first paced flip every 33.3 ms (the 30-fps menus; one picture a vsync late a dozen flips on), and the flips before each scene keep their rate (race_hud's last 87 flips 16.7 ms each, the longest 20.4 ms at the capture's own flip; zone_hud's and zone_change's last 60 at 33.3 ms, one picture shown at 41.7 ms). No hitch reaches a scene.
 
 ## Which path for which change
 
@@ -282,7 +334,10 @@ line fires at random there; the Metal column is the headless value and is not re
 | the Metal backend (`src/gpu/`), shaders, the GE side of the HLE, a vendor patch under the GE | `tools/frame_regress.sh` while working; before merging `--shell metal --backend metal` and `--shell vulkan --backend vulkan` (D-008: both paths) and `tools/hud_check.sh` |
 | the Metal shell (`src/host/metal_shell.mm`), presenting, the window, the interface | `--shell metal --backend metal` and `tools/hud_check.sh`: the headless default never draws through a shell |
 | the Vulkan backend or shell (vendor renderer patches) | `--shell vulkan --backend vulkan` and `tools/hud_check.sh --shell vulkan` |
-| pacing, the kernel's clock, the input script, the follower | the headless suite, one window path (`--shell metal`), and a sweep cell (`campaign_sweep.py single_race vineta_k --no-damage`) |
+| pacing, the kernel's clock, the input script, the follower | the headless suite, one window path (`--shell metal --paced`, paced from boot), and a sweep cell (`campaign_sweep.py single_race vineta_k --no-damage`) |
+
+The window paths capture the seven window scenes (task 069); a change that could move a menu in a window alone, such
+as the shell's scaling, runs `--all-scenes` once.
 
 # Test hooks
 

@@ -4,10 +4,12 @@
 # Exit 0 only when every scene passes. Every renderer change runs this before merging, on both paths (D-008). Three
 # bounded runs, one per route, each on an empty memory stick of its own (<out>/game, EBOOT.ELF and disc.iso linked
 # to game/), because main_menu.txt creates and saves a profile. By default (task 034) they run headless on the Metal
-# backend: no window, unpaced, the scenes the backend's own 480x272 pictures, under a minute in all; in a window
-# (--shell metal or vulkan) each run is paced to real time and the suite takes about 7 minutes.
+# backend: no window, unpaced, the scenes the backend's own 480x272 pictures, under a minute in all. In a window
+# (--shell metal or vulkan; task 069) the suite captures the window scenes (WINDOW_SCENES below) and each run is
+# unpaced until PACE_MARGIN flips before its route's first scene and paced from there: about 5 minutes at 120 Hz.
 #   tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR]
-#                          [--only SCENE[,SCENE...]] [--env KEY=VAL ...] [--allow-parallel]
+#                          [--only SCENE[,SCENE...]] [--window-scenes | --all-scenes] [--paced-from N | --paced]
+#                          [--env KEY=VAL ...] [--allow-parallel]
 #   --backend  sets PURE_GE_BACKEND for the runs, records it in the summary and picks the table's measured column
 #              (default metal, the macOS default since D-008; vulkan is the bootstrap path through MoltenVK).
 #   --shell    sets PURE_SHELL for the runs and records it in the summary beside the backend (default headless): the
@@ -17,7 +19,16 @@
 #   --out      captures (<out>/shots/<scene>.png), run logs, diff images of failing scenes (<out>/<scene>.diff.png:
 #              the capture dimmed, differing pixels red) and summary.txt; default out/regress. The suite's files
 #              from an earlier run there are removed first.
-#   --only     these scenes only, and only the runs they need (in a window --only race_hud takes about 3.5 minutes).
+#   --only     these scenes only (any of the table, whatever the scene set), and only the runs they need.
+#   --window-scenes  the scenes a window can change, WINDOW_SCENES below: the five race scenes, and title and main_menu
+#              as a smoke test of the menu routes (task 069). The default in a window shell on macOS.
+#   --all-scenes  every scene of the table: the default headless, and on Windows, where nothing draws headless.
+#   --paced-from N  every run held to real time from flip N (PURE_PACED_FROM=N), in any shell. By default a window
+#              run is unpaced until PACE_MARGIN flips before its route's first scene and paced from there, and a
+#              headless run is unpaced throughout (task 069).
+#   --paced    the pace left to the shell, as before task 069: a window run paced to real time from boot (the
+#              18 scenes took 19m 48s), a headless one unpaced. The caller's PURE_PACED_FROM (the
+#              environment's, or an --env) wins over all three, and the summary says so.
 #   --env      extra environment for every run (tools/run_boot.py --env), e.g. a deliberate regression:
 #              tools/frame_regress.sh --shell vulkan --backend vulkan --only race_hud --env PURE_NO_STENCIL_BUFFER=1
 #              (race_hud FAILs)
@@ -41,40 +52,54 @@ ROOT=$PWD
 # suite adds `FRAME:shot SCENE` for each scene of the route and runs to the route's last shot + EXTRA_FLIPS. Scenes on
 # the same route share one run. The measured values per backend (and where they come from) stay beside the limits.
 # The metal column serves the Metal window and the headless shell alike: the headless captures equal the window's,
-# reduced to 480x272, pixel for pixel in all five scenes, and three headless runs scored within 0.001 of it (task 034).
+# reduced to 480x272, pixel for pixel in all five scenes, and three headless runs scored within 0.001 of it (task 034);
+# three Metal window runs paced from the scene scored the headless values on the seven window scenes (task 069).
 #  scene      route                          frame  reference               tol  limit  vulkan  metal
 SCENES='
    lang       frontend.txt                   690    ref/frontend.png        24   0.07   0.054   0.0002  # vulkan task 006: one-pixel edges of lines and glyphs from the 2x-to-1x downscale; metal task 023: 22 px, the blinking cursor after ENGLISH
    title      frontend.txt                   1750   ref/title.png           24   0.05   0.030   0.0002  # vulkan tasks 006, 009, 010, 011: 0.0302 each time; metal task 023: 31 px, the blinking cursor after PRESS START BUTTON
    profile    frontend.txt                   2100   ref/profile.png         24   0.07   0.054   0.0000  # vulkan task 006: downscale edges, as lang; metal task 023: 0 px
    main_menu  main_menu.txt                  4700   ref/main_menu.png       24   0.05   0.033   0.0106  # vulkan task 006: help text caught mid-typing; metal task 023
-   race_hud   main_menu.txt+single_race.txt  6016   ref/vineta_k_start.png  32   0.10   0.053   0.0149  # vulkan re-baselined after tasks 056-060 (Windows RTX 3080, median of three runs, 0.040-0.054); first full-HUD frame, bloom and shadows on (task 011: the AI grid varies); metal task 025
+   race_hud   main_menu.txt+single_race.txt  6016   ref/vineta_k_start.png  32   0.10   0.047   0.0149  # vulkan 0.0465 (task 069: the Vulkan window on this Mac, paced from the scene, three runs, the same to the pixel each time); Windows RTX 3080 after tasks 056-060: median 0.053 of 0.040-0.054; first full-HUD frame, bloom and shadows on (task 011: the AI grid varies); metal task 025
    single_player      main_menu.txt+single_race.txt  4765  ref/single_player.png      24  0.05   0.025   0.0000  # task 035: SINGLE PLAYER (SINGLE RACE highlighted); PPSSPP frame 5850 of frontend.txt+vineta_k_start.txt; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
    class_select       main_menu.txt+single_race.txt  4990  ref/class_select.png       24  0.07   0.045   0.0000  # task 035: CLASS SELECTION (VECTOR); PPSSPP 6050; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
    league_select      main_menu.txt+single_race.txt  5185  ref/league_select.png      24  0.08   0.062   0.0000  # task 035: LEAGUE SELECTION (ALPHA); PPSSPP 6250; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
    track_select       main_menu.txt+single_race.txt  5390  ref/track_select.png       24  0.06   0.041   0.0000  # task 035: TRACK SELECTION (VINETA K, length and records); PPSSPP 6450; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
    team_select        main_menu.txt+single_race.txt  5600  ref/team_select.png        24  0.06   0.042   0.0000  # task 035: TEAM SELECTION (FEISAR, the wireframe ship); PPSSPP 6690; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
    tt_track_select    main_menu.txt+time_trial.txt   5375  ref/tt_track_select.png    24  0.06   0.040   0.0000  # task 035 (metal re-baselined after task 036): the Time Trial TRACK SELECTION (records, bronze/silver/gold); PPSSPP 6650 of time_trial_start.txt; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
-   tt_hud             main_menu.txt+time_trial.txt   5890  ref/tt_hud.png             32  0.12   0.048   0.0112  # task 035: the Time Trial first full-HUD frame on Vineta K (CURRENT, BEST, BRONZE TIME); PPSSPP vblank 7340 (the file f07302 of burst C); metal: three headless runs, the same each time; vulkan: re-baselined after tasks 056-060 (Windows RTX 3080, median of three runs, 0.047-0.048)
+   tt_hud             main_menu.txt+time_trial.txt   5890  ref/tt_hud.png             32  0.12   0.049   0.0112  # task 035: the Time Trial first full-HUD frame on Vineta K (CURRENT, BEST, BRONZE TIME); PPSSPP vblank 7340 (the file f07302 of burst C); metal: three headless runs, the same each time; vulkan: 0.0493 (task 069: the Vulkan window on this Mac, paced from the scene, three runs, the same to the pixel each time); Windows RTX 3080 after tasks 056-060: 0.047-0.048
    fp_track_select    main_menu.txt+free_play.txt    5375  ref/fp_track_select.png    24  0.06   0.041   0.0000  # task 035: the Free Play TRACK SELECTION (records, length, height); PPSSPP 6650 of free_play_start.txt; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
-   fp_hud             main_menu.txt+free_play.txt    5890  ref/fp_hud.png             32  0.11   0.056   0.0116  # task 035: the Free Play first full-HUD frame on Vineta K; PPSSPP vblank 7340 (the file f07302 of burst E); metal: three headless runs, the same each time; vulkan: re-baselined after tasks 056-060 (Windows RTX 3080, median of three runs, 0.046-0.057)
+   fp_hud             main_menu.txt+free_play.txt    5890  ref/fp_hud.png             32  0.11   0.048   0.0116  # task 035: the Free Play first full-HUD frame on Vineta K; PPSSPP vblank 7340 (the file f07302 of burst E); metal: three headless runs, the same each time; vulkan: 0.0475 (task 069: the Vulkan window on this Mac, paced from the scene, three runs, the same to the pixel each time); Windows RTX 3080 after tasks 056-060: median 0.056 of 0.046-0.057
    tournament_select  main_menu.txt+tournament.txt   5185  ref/tournament_select.png  24  0.08   0.063   0.0000  # task 035: TOURNAMENT SELECTION (ALPHA, its four tracks); PPSSPP 6450 of tournament_start.txt; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
    zone_track_select  main_menu.txt+zone.txt         4975  ref/zone_track_select.png  24  0.05   0.033   0.0000  # task 035: the Zone TRACK SELECTION (PRO TOZO, targets); PPSSPP 6250 of zone_start.txt; metal: three headless runs, the same each time; vulkan: one windowed run (task 035)
-   zone_hud           main_menu.txt+zone.txt         5260  ref/zone_hud.png           32  0.09   0.048   0.0121  # task 035: the Zone 1 first frame with the HUD (SCORE, ZONE 0); PPSSPP vblank 6694 (the file f06668 of burst H); metal: three headless runs, the same each time; vulkan: re-baselined after tasks 056-060 (Windows RTX 3080, median of three runs, 0.046-0.048)
-   zone_change        main_menu.txt+zone.txt         5679  ref/zone_change.png        32  0.10   0.048   0.0353  # task 035: the first zone change of Zone 1, the first frame with ZONE 2 and SCORE 800 (the ship stopped at the first barrier, Cross held); PPSSPP vblank 7528 of zone_start.txt; metal: three headless runs, the same each time; vulkan: re-baselined after tasks 056-060 (Windows RTX 3080, median of three runs, 0.045-0.085: the widest wobble of the suite)
+   zone_hud           main_menu.txt+zone.txt         5260  ref/zone_hud.png           32  0.09   0.045   0.0121  # task 035: the Zone 1 first frame with the HUD (SCORE, ZONE 0); PPSSPP vblank 6694 (the file f06668 of burst H); metal: three headless runs, the same each time; vulkan: 0.0452 (task 069: the Vulkan window on this Mac, paced from the scene, three runs, the same to the pixel each time); Windows RTX 3080 after tasks 056-060: 0.046-0.048
+   zone_change        main_menu.txt+zone.txt         5679  ref/zone_change.png        32  0.10   0.052   0.0353  # task 035: the first zone change of Zone 1, the first frame with ZONE 2 and SCORE 800 (the ship stopped at the first barrier, Cross held); PPSSPP vblank 7528 of zone_start.txt; metal: three headless runs, the same each time; vulkan: 0.0522 (task 069: the Vulkan window on this Mac, paced from the scene, three runs, the same to the pixel each time); Windows RTX 3080 after tasks 056-060: median 0.048 of 0.045-0.085, the widest wobble of the suite
 '
 EXTRA_FLIPS=30
+# The scenes a window run captures unless --all-scenes or --only (task 069): the five race scenes, whose pictures move
+# with the race's seed and the shell's pacing, and one menu scene of each menu route as a smoke test. A window
+# capture of a menu scene is the backend's own 480x272 picture scaled, pixel for pixel (task 065: 0 of 2088960
+# pixels on 14 scenes), so the other menu scenes are left to the headless suite; the Tournament route, which has no
+# race scene, is not run.
+WINDOW_SCENES='title main_menu race_hud tt_hud fp_hud zone_hud zone_change'
+# A window run is unpaced until this many flips before its route's first scene and paced from there (task 069): the
+# margin covers the shell's first presents after the switch, so the scenes are captured paced as a player sees them.
+PACE_MARGIN=300
 
 OUT=out/regress
 BACKEND=metal
 SHELL_NAME=headless
 ONLY=
+SET=
+WINDOW_SET=window
+PACING=scene
 ENVS=()
 PARALLEL=no
-# Windows (task 055): the Vulkan backend draws only in the Vulkan shell's window, so the suite defaults to it there.
-case "$(uname -s)" in MINGW*|MSYS*) BACKEND=vulkan; SHELL_NAME=vulkan ;; esac
+# Windows (task 055): the Vulkan backend draws only in the Vulkan shell's window, so the suite defaults to it there,
+# with every scene (task 069: no headless run checks the menus there).
+case "$(uname -s)" in MINGW*|MSYS*) BACKEND=vulkan; SHELL_NAME=vulkan; WINDOW_SET=all ;; esac
 usage() {
-  echo "usage: tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]] [--env KEY=VAL ...] [--allow-parallel]"
+  echo "usage: tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]] [--window-scenes | --all-scenes] [--paced-from N | --paced] [--env KEY=VAL ...] [--allow-parallel]"
   exit 2
 }
 while [ $# -gt 0 ]; do
@@ -83,6 +108,10 @@ while [ $# -gt 0 ]; do
     --shell) [ $# -ge 2 ] || usage; SHELL_NAME=$2; shift 2 ;;
     --out) [ $# -ge 2 ] || usage; OUT=$2; shift 2 ;;
     --only) [ $# -ge 2 ] || usage; ONLY=$2; shift 2 ;;
+    --window-scenes) SET=window; shift ;;
+    --all-scenes) SET=all; shift ;;
+    --paced-from) [ $# -ge 2 ] || usage; case $2 in ''|*[!0-9]*) usage ;; esac; PACING=$2; shift 2 ;;
+    --paced) PACING=shell; shift ;;
     --env) [ $# -ge 2 ] || usage; case $2 in *=*) ;; *) usage ;; esac; ENVS+=(--env "$2"); shift 2 ;;
     --allow-parallel) PARALLEL=yes; shift ;;
     -h|--help) usage ;;
@@ -91,6 +120,10 @@ while [ $# -gt 0 ]; do
 done
 case $BACKEND in vulkan|metal) ;; *) echo "frame_regress: --backend is vulkan or metal, not $BACKEND"; exit 2 ;; esac
 case $SHELL_NAME in vulkan|metal|headless) ;; *) echo "frame_regress: --shell is vulkan, metal or headless, not $SHELL_NAME"; exit 2 ;; esac
+[ -n "$SET" ] || { if [ "$SHELL_NAME" = headless ]; then SET=all; else SET=$WINDOW_SET; fi; }
+# The caller's PURE_PACED_FROM, from the environment or an --env (the last one wins, as in tools/run_boot.py).
+GIVEN=${PURE_PACED_FROM:-}
+for e in ${ENVS[@]+"${ENVS[@]}"}; do case $e in PURE_PACED_FROM=*) GIVEN=${e#*=} ;; esac; done
 
 # The build directory is the preset's: arm64 on macOS, win-x64 on Windows (task 054; purelib.port knows).
 EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
@@ -111,15 +144,26 @@ print("\n".join(f"  pid {p}: {c}" for p, c in run_boot.other_games()))')
 fi
 DATA=out/data/frame_regress
 
-# The table without comments and blank lines, filtered by --only.
+# The table without comments and blank lines, filtered by --only, else by the scene set.
 TABLE=$(printf '%s\n' "$SCENES" | sed 's/#.*//' | awk 'NF >= 8')
+FULL=$TABLE
+SET_NOTE=
 if [ -n "$ONLY" ]; then
   for s in $(echo "$ONLY" | tr ',' ' '); do
     printf '%s\n' "$TABLE" | awk -v s="$s" '$1 == s { found = 1 } END { exit !found }' ||
       { echo "frame_regress: no scene $s (scenes: $(printf '%s\n' "$TABLE" | awk '{ printf "%s ", $1 }'))"; exit 2; }
   done
   TABLE=$(printf '%s\n' "$TABLE" | awk -v only=",$ONLY," 'index(only, "," $1 ",") > 0')
+  SCENE_NOTE="--only $ONLY"
+elif [ "$SET" = window ]; then
+  TABLE=$(printf '%s\n' "$TABLE" | awk -v keep=" $WINDOW_SCENES " 'index(keep, " " $1 " ") > 0')
+  SCENE_NOTE="the window scenes (--all-scenes runs every one)"
+  SET_NOTE=", the window scenes"
+else
+  SCENE_NOTE="all"
 fi
+LEFT=$(printf '%s\n' "$FULL" | awk -v ran=" $(printf '%s\n' "$TABLE" | awk '{ printf "%s ", $1 }')" \
+  'index(ran, " " $1 " ") == 0 { printf "%s%s", (n++ ? " " : ""), $1 }')
 while read -r scene route frame ref tol limit measured_vulkan measured_metal; do
   [ -f "$ref" ] || { echo "$ref missing (PPSSPP captures are git-ignored: copy them from the main checkout's ref/)"; exit 2; }
 done <<< "$TABLE"
@@ -143,6 +187,21 @@ note "frame regression $(date '+%Y-%m-%d %H:%M'), commit $commit, shell $SHELL_N
 extra=$(printf '%s ' ${ENVS[@]+"${ENVS[@]}"} | sed 's/--env //g; s/ *$//')
 note "extra environment: ${extra:-none}"
 note "data directory: ${PURE_DATA_DIR:-$DATA}"
+note "scenes: $SCENE_NOTE, $(printf '%s\n' "$TABLE" | awk 'END { print NR }') of $(printf '%s\n' "$FULL" | awk 'END { print NR }')${LEFT:+; not run: $LEFT}"
+# The pace of each run (task 069): the caller's PURE_PACED_FROM; else --paced-from N; else --paced (none set: the
+# shell's own, paced from boot in a window); else, in a window, from PACE_MARGIN flips before the route's first
+# scene; headless, unpaced.
+if [ -n "$GIVEN" ]; then
+  note "pacing: PURE_PACED_FROM=$GIVEN, the caller's"
+elif [ "$PACING" = shell ]; then
+  note "pacing: the shell's (--paced): $([ "$SHELL_NAME" = headless ] && echo unpaced || echo 'paced to real time from boot')"
+elif [ "$PACING" != scene ]; then
+  note "pacing: PURE_PACED_FROM=$PACING (--paced-from): unpaced until flip $PACING, paced to real time from it"
+elif [ "$SHELL_NAME" = headless ]; then
+  note "pacing: unpaced (the headless shell)"
+else
+  note "pacing: each run unpaced until $PACE_MARGIN flips before its route's first scene (PURE_PACED_FROM), paced to real time from there"
+fi
 
 # One run per route, in table order, on an empty memory stick.
 ROUTES=$(printf '%s\n' "$TABLE" | awk '!seen[$2]++ { print $2 }')
@@ -151,6 +210,20 @@ for route in $ROUTES; do
   script="$OUT/$name.route.txt"
   last=$(printf '%s\n' "$TABLE" | awk -v r="$route" '$2 == r { print $3 }' | sort -n | tail -1)
   frames=$((last + EXTRA_FLIPS))
+  first=$(printf '%s\n' "$TABLE" | awk -v r="$route" '$2 == r { print $3 }' | sort -n | head -1)
+  pace=()
+  if [ -n "$GIVEN" ]; then
+    paced="paced from flip $GIVEN (the caller's)"
+  elif [ "$PACING" = shell ]; then
+    paced="the shell's pace"
+  elif [ "$PACING" != scene ]; then
+    pace=(--env "PURE_PACED_FROM=$PACING"); paced="paced from flip $PACING"
+  elif [ "$SHELL_NAME" = headless ]; then
+    paced="unpaced"
+  else
+    from=$((first > PACE_MARGIN ? first - PACE_MARGIN : 0))
+    pace=(--env "PURE_PACED_FROM=$from"); paced="paced from flip $from"
+  fi
   # The shots go first, so at a frame shared with a press (the input script sorts stably) they capture before it.
   printf '%s\n' "$TABLE" | awk -v r="$route" '$2 == r { print $3 ":shot " $1 }' > "$script"
   for part in $(echo "$route" | tr '+' ' '); do
@@ -158,15 +231,16 @@ for route in $ROUTES; do
   done
   rm -rf "$OUT/game/ms0"
   mkdir -p "$OUT/game/ms0/PSP/SAVEDATA"
-  echo "run $name: $frames flips ..."
+  echo "run $name: $frames flips, $paced ..."
   t0=$SECONDS
   python3 tools/run_boot.py --script "$script" --shots "$OUT/shots" --frames "$frames" --data-dir "$DATA" \
-    --env PURE_GAME_DIR="$OUT/game" --env PURE_GE_BACKEND="$BACKEND" --env PURE_SHELL="$SHELL_NAME" ${ENVS[@]+"${ENVS[@]}"} \
+    --env PURE_GAME_DIR="$OUT/game" --env PURE_GE_BACKEND="$BACKEND" --env PURE_SHELL="$SHELL_NAME" ${pace[@]+"${pace[@]}"} \
+    ${ENVS[@]+"${ENVS[@]}"} \
     "$OUT/$name.log" > "$OUT/$name.stdout" 2>&1
   rc=$?
   reached=no
   grep -q "^\[pure\] exit at frame $frames" "$OUT/$name.log" && reached=yes
-  note "run $name: run_boot exit $rc, frame $frames reached: $reached, $((SECONDS - t0)) s, log $OUT/$name.log"
+  note "run $name: run_boot exit $rc, frame $frames reached: $reached, $((SECONDS - t0)) s, $paced, log $OUT/$name.log"
 done
 
 # Compare each capture with its reference.
@@ -208,6 +282,6 @@ note ""
 [ -n "$DRIFT" ] && note "moved more than 0.03 from the $BACKEND measured value:$DRIFT (something changed; docs/verification.md)"
 verdict=FAIL
 [ $PASSED -eq $TOTAL ] && verdict=PASS
-note "frame regression: $verdict, $PASSED/$TOTAL scenes pass, shell $SHELL_NAME, backend $BACKEND ($(( (SECONDS - START) / 60 ))m $(( (SECONDS - START) % 60 ))s)"
+note "frame regression: $verdict, $PASSED/$TOTAL scenes pass$SET_NOTE, shell $SHELL_NAME, backend $BACKEND ($(( (SECONDS - START) / 60 ))m $(( (SECONDS - START) % 60 ))s)"
 printf '%s\n' "${SUMMARY[@]}" > "$OUT/summary.txt"
 [ "$verdict" = PASS ]

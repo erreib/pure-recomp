@@ -16,8 +16,10 @@
 # shot every 25 flips from 6200 to 7700 (61 shots; the race goes at about 6250) and the run ending at flip 7710.
 # The shots are read by tools/hud_check.py: the yellow of the CURRENT label (PSP pixels x 2, y 2, 52 x 10) and of
 # the LAP label (x 2, y 232, 26 x 10), red > 180, green > 130, blue < 90. Prints `hud_check: N of M shots have the
-# HUD` (also in <out>/summary.txt) and exits 0 when every shot of the route was taken and has it. About 4 minutes in
-# a window (the run is paced to real time).
+# HUD` (also in <out>/summary.txt) and exits 0 when every shot of the route was taken and has it. In a window the run
+# is unpaced until PACE_MARGIN flips before the first shot (PURE_PACED_FROM=5900, task 069) and paced to real time
+# from there, so the race's frames are a player's: about 80 s in all (227 s paced from boot); headless
+# it is unpaced throughout. The caller's PURE_PACED_FROM (the environment's, or an --env) wins.
 set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
@@ -28,6 +30,7 @@ FIRST=6200
 STEP=25
 LAST=7700
 END=7710
+PACE_MARGIN=300
 
 SHELL_NAME=metal
 BACKEND=
@@ -72,11 +75,23 @@ ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/
 } > "$OUT/route.txt"
 shots=$(( (LAST - FIRST) / STEP + 1 ))
 
-echo "hud_check: shell $SHELL_NAME, backend $BACKEND, $shots shots from flip $FIRST to $LAST, out $OUT"
+# The pace (task 069): in a window, unpaced until PACE_MARGIN flips before the first shot, paced from there.
+# The caller's PURE_PACED_FROM (the environment's, or an --env, the last one winning as in tools/run_boot.py) wins.
+given=${PURE_PACED_FROM:-}
+for e in ${ENVS[@]+"${ENVS[@]}"}; do case $e in PURE_PACED_FROM=*) given=${e#*=} ;; esac; done
+pace=()
+paced=unpaced
+if [ -n "$given" ]; then
+  paced="paced from flip $given (the caller's)"
+elif [ "$SHELL_NAME" != headless ]; then
+  pace=(--env "PURE_PACED_FROM=$((FIRST - PACE_MARGIN))"); paced="paced from flip $((FIRST - PACE_MARGIN))"
+fi
+echo "hud_check: shell $SHELL_NAME, backend $BACKEND, $shots shots from flip $FIRST to $LAST, $paced, out $OUT"
 t0=$SECONDS
 python3 tools/run_boot.py --script "$OUT/route.txt" --shots "$OUT/shots" --frames $END --shell "$SHELL_NAME" \
   --data-dir out/data/hud_check \
-  --backend "$BACKEND" --env PURE_GAME_DIR="$OUT/game" ${ENVS[@]+"${ENVS[@]}"} "$OUT/run.log" > "$OUT/run.stdout" 2>&1
+  --backend "$BACKEND" --env PURE_GAME_DIR="$OUT/game" ${pace[@]+"${pace[@]}"} ${ENVS[@]+"${ENVS[@]}"} \
+  "$OUT/run.log" > "$OUT/run.stdout" 2>&1
 rc=$?
 reached=no
 grep -q "^\[pure\] exit at frame $END" "$OUT/run.log" && reached=yes
