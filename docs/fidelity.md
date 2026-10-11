@@ -95,7 +95,7 @@ That enhancement exists since task 070 (E6, D-016): the menu's Flashes row, Smoo
 in Single Race and Tournament (docs/timing.md, "E6"); every check runs with it off (Original, `PURE_SMOOTH_FLASHES=0`),
 so what this page measures is the PSP's pacing, and `tools/flash_check.sh` is the check that runs it on.
 Time Trial, Free Play and Zone run at two vblanks a frame throughout on the PSP (their race managers set the frame
-object's `+0x116c` back to 0), so they have no stretch to show. Since task 072 (E4, D-017) the menu's Frame rate row,
+object's `+0x116c` back to 0), so they have no stretch to show. Since task 072 (E4, D-017) the menu's 30 fps modes row,
 60 fps by default, lifts that lock while the race backend lives (docs/timing.md, "E4"); every check runs with it off
 too (Original, `PURE_SIXTY_FPS=0`), and `tools/framerate_check.sh` is the check that runs it on.
 

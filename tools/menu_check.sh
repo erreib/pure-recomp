@@ -16,10 +16,10 @@
 # texture pack rows (the Vulkan renderer's), no Frame rate, Lower when behind or Performance, no F3 row, no Touch
 # screen rows, "Metal on". Vulkan: all of those, "Vulkan on". Aspect ratio offers Original and Stretch in both: Fill needs a game that widens its view
 # (GameProfile::view_aspect_frame), which this one does not. Both: the Video tab ends with the game's own options
-# (patch 0019-game-option-rows, task 070) in the option table's order: Frame rate (task 072; game.sixty_fps, locked by
+# (patch 0019-game-option-rows, task 070) in the option table's order: 30 fps modes (task 072; game.sixty_fps, locked by
 # the run's PURE_SIXTY_FPS=0) and Flashes (game.smooth_flashes; locked by the run's PURE_SMOOTH_FLASHES=0), both
-# tools/purelib/port.py's pin. Under the Vulkan shell the Video tab so has two rows named Frame rate: the renderer's
-# (the frame-rate cap) and the game's. A `*` in a list matches any text (the device's name).
+# tools/purelib/port.py's pin (the game's row is not called Frame rate: under the Vulkan shell that is the renderer's
+# frame-rate cap). A `*` in a list matches any text (the device's name).
 # Waits up to 600 s while another PureNative runs (one game at a time). Prints `menu_check: PASS` or each tab's
 # differences and `menu_check: FAIL`; exit 0 only on PASS.
 set -u
@@ -87,7 +87,7 @@ expected = {
              + ([] if metal else ["Texture filter", "Texture pack", "[texture pack rows]"]) + ["Vsync"]
              + ([] if metal else ["Frame rate", "Lower when behind"]) + ["Game speed", "Fast loading"]
              + ([] if metal else ["Performance"])
-             + ["[font rows]", "Restore video defaults", "Frame rate", "Flashes"],
+             + ["[font rows]", "Restore video defaults", "30 fps modes", "Flashes"],
     "Audio": ["Volume", "Mute", "Device", "Restore audio defaults"],
     "Controls": ["Connected", "Confirm button", "Stick dead zone", "Trigger point", "Right stick (D-pad / Off)",
                  "Right stick D-pad point", "When the game asks for a name", "Pilot name"] + bindings

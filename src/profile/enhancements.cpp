@@ -10,7 +10,7 @@
 namespace portablekit::enhancements {
 namespace {
 
-// --- E4: Frame rate (D-017, task 072) --------------------------------------------------------------------------------
+// --- E4: 30 fps modes (D-017, task 072) --------------------------------------------------------------------------------
 // The end-of-frame routine FUN_0886511c waits two vblanks a frame while the frame object's byte at +0x116c is 0
 // (docs/timing.md, step 5). The race backend's constructor (BackendRoot_cpp__0880c068) sets it to 1 and the race
 // managers of Free Play, Time Trial and Zone (LinkObj_etc__08818d80, LinkObj_etc__08819a0c, LinkObj_etc__0881bc8c) set
@@ -35,7 +35,7 @@ const char *const kFlashChoices[] = {"Original", "Smooth"};
 
 const GameOption kOptions[] = {
     {.key = "sixty_fps",
-     .label = "Frame rate",
+     .label = "30 fps modes",
      .choices = kFrameRateChoices,
      .description = "Time Trial, Free Play and Zone run at 30 fps on the PSP. 60 fps runs them at the display's rate, "
                     "as Single Race and Tournament already do. The game's speed is the same either way (it measures "
@@ -48,7 +48,7 @@ const GameOption kOptions[] = {
      .description = "The PSP halves the frame rate while a full-screen flash plays: the race-start fade, a weapon "
                     "going off near you, your ship put back on the track. Smooth keeps the race's frame rate through "
                     "them. The game's speed is the same either way (it measures time). Time Trial, Free Play and Zone "
-                    "run at 30 fps unless Frame rate says 60 fps.",
+                    "run at 30 fps unless the 30 fps modes row says 60 fps.",
      .default_choice = 1u,
      .tab = MenuTab::Video},
 };

@@ -165,10 +165,10 @@ PURE_..." beside it.
    defaults" puts every binding and every row of the tab back (rows an environment variable decides excepted).
 
 The Video tab ends with a Game section (since task 070, patch 0019-game-option-rows: the options our profile lists in
-`GameProfile::options`, `src/profile/enhancements.cpp`). It holds two rows. Frame rate (since task 072): 60 fps (the
+`GameProfile::options`, `src/profile/enhancements.cpp`). It holds two rows. 30 fps modes (since task 072): 60 fps (the
 default) runs Time Trial, Free Play and Zone at the display's rate, as Single Race and Tournament already run;
 Original keeps them at 30 fps, as the PSP does (E4, D-017; docs/timing.md, "E4"). The menus run at 30 fps either way.
-Under the Vulkan shell the tab also has the renderer's own Frame rate row (its frame-rate cap), higher up. Flashes:
+(The row is not called Frame rate: under the Vulkan shell that is the renderer's frame-rate cap, higher up.) Flashes:
 Smooth (the default) keeps the race's frame rate through the full-screen flashes (the race-start fade, a weapon going
 off near the ship, the ship put back on the track), Original halves it while they play, as the PSP does (E6, D-016;
 docs/timing.md, "E6"). "Restore video defaults" puts both back to their defaults; `PURE_SIXTY_FPS` and
@@ -220,7 +220,7 @@ The other input keys are those of the tuning table, `input.trigger_profile` (`st
 `input.invert_camera_y`, `input.analog_camera`, `input.camera_speed`, `input.aim_speed` (no effect without a camera
 driver), the name's `input.name_entry` and `input.name`, and the touch controls' `input.touch_*`.
 
-The game's own options are `game.<key>=<index>`, the index of the row's choice: `game.sixty_fps=1` (Frame rate:
+The game's own options are `game.<key>=<index>`, the index of the row's choice: `game.sixty_fps=1` (30 fps modes:
 60 fps, the default) or `0` (Original), and `game.smooth_flashes=1` (Flashes: Smooth, the default) or `0` (Original).
 An index out of range is ignored with `[settings] ignoring KEY=VALUE` and reads as the default, and a `game.` key
 this port has no option for is dropped when the file is next written.

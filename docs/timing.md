@@ -72,7 +72,7 @@ code changes.
   allows; the follower's laps vary by more than that from lap to lap).
 
 ## E4: the 30-fps modes free-running (task 072)
-D-017: the Esc menu's Frame rate row (Video tab, Game section, before Flashes; `game.sixty_fps`, `PURE_SIXTY_FPS`;
+D-017: the Esc menu's 30 fps modes row (Video tab, Game section, before Flashes; `game.sixty_fps`, `PURE_SIXTY_FPS`;
 patch 0019-game-option-rows), 60 fps by default. In E6's `sceGeDrawSync` wrap and before E6's clear,
 `src/profile/enhancements.cpp` stores 1 to the frame object's `+0x116c` when it reads 0 there while the race backend
 lives (`DAT_08a8c5f4`, 0x08A8C5F4, and the frame object pointer both in user RAM). Time Trial, Free Play and Zone then

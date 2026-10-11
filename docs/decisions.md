@@ -18,7 +18,7 @@
 | D-014 | 2026-10-10 | The Esc menu shows only what this game and this shell can do; enhancements are open (D-009's condition met) | accepted (Erik) |
 | D-015 | 2026-10-10 | E3 opens: the Metal shell draws at the display's pixels and the Metal backend draws at an internal scale, effects buffers at 1x | accepted (Erik) |
 | D-016 | 2026-10-11 | E6: the race keeps its frame rate through the full-screen flashes (the game's two-vblank lock cleared in the 60-fps modes), a game option row in the Esc menu, on by default; the checks run with it off | accepted (Erik) |
-| D-017 | 2026-10-11 | E4: Time Trial, Free Play and Zone free-running at the display's rate (the frame object's lock byte set while the race backend lives), a Frame rate row in the Esc menu, 60 fps by default; the checks run with it off; the frontend stays at 30 | accepted (Erik) |
+| D-017 | 2026-10-11 | E4: Time Trial, Free Play and Zone free-running at the display's rate (the frame object's lock byte set while the race backend lives), a "30 fps modes" row in the Esc menu, 60 fps by default; the checks run with it off; the frontend stays at 30 | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -315,7 +315,8 @@ Decision (Erik): the port offers those modes free-running, as the enhancement E4
 2. The hook is the port's, in `src/profile/enhancements.cpp`, in the same `sceGeDrawSync` wrap as E6 and before it,
    so a Smooth flash in a free-running Time Trial takes E6's path too; with Flashes Original a flash frame still
    waits two vblanks there, as it does in Single Race. No generated code is changed.
-3. The player's switch is a game option row (patch 0019-game-option-rows): "Frame rate", choices "Original" (the
+3. The player's switch is a game option row (patch 0019-game-option-rows): "30 fps modes" (named "Frame rate" in
+   the brief; renamed at the merge, since the Vulkan shell's Video tab has the renderer's row of that name), choices "Original" (the
    PSP's 30 fps in those modes) and "60 fps", default 60 fps (`game.sixty_fps=1`, `PURE_SIXTY_FPS`), on the Video
    tab before Flashes.
 4. The checks measure the PSP's behaviour: every tool run has `PURE_SIXTY_FPS=0` through `tools/purelib/port.py`

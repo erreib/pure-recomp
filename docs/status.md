@@ -200,7 +200,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   forced to 1 while the backend lives (`DAT_08a8c5f4`) a paced Time Trial ran at 59.95 flips a race-clock second
   with the same standing start and game-clock rate, the ghost samples by time (0.05 s), Zone's zone timer and shield
   drain follow the race clock. No per-frame logic found; the cheat's double speed is not the port's. Task 072 (in
-  flight): the hook in the E6 wrap, a Frame rate row (Original / 60 fps, default 60 fps, `game.sixty_fps`,
+  flight): the hook in the E6 wrap, a 30 fps modes row (Original / 60 fps, default 60 fps, `game.sixty_fps`,
   `PURE_SIXTY_FPS`), the pin beside `PURE_SMOOTH_FLASHES`, a check `framerate_check.sh` beside flash_check. The frontend stays at 30
   (not audited; a follow-up).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel

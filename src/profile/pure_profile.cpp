@@ -198,7 +198,7 @@ const GameProfile &game() {
         .default_internal_scale = 0u,
 
         // Single Race and Tournament run free up to the vblank rate; the other modes lock to two vblanks
-        // (docs/timing.md) unless E4's Frame rate row frees them. 1 keeps the renderer's frame-rate menu honest for the
+        // (docs/timing.md) unless E4's 30 fps modes row frees them. 1 keeps the renderer's frame-rate menu honest for the
         // fast modes.
         .frame_vblanks = 1u,
 
@@ -211,7 +211,7 @@ const GameProfile &game() {
         .features = {.adhoc = false, .right_stick_camera = false, .mouse_camera = false},
 
         // The enhancements, each a row of the menu's Game section (patch 0019-game-option-rows; enhancements.cpp): E4,
-        // Frame rate (D-017, task 072), game.sixty_fps, default 60 fps; E6, Flashes (D-016, task 070),
+        // the 30 fps modes row (D-017, task 072), game.sixty_fps, default 60 fps; E6, Flashes (D-016, task 070),
         // game.smooth_flashes, default Smooth.
         .options = enhancements::options(),
     };
