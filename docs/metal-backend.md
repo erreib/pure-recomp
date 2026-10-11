@@ -79,7 +79,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `src/gpu/metal_backend.hpp` | the class: its members grouped under a heading per concern that names the file defining them, its data members (50, among them one struct each for the switches, the trace and the pre-warm: `switches_`, `trace_`, `prewarm_`), and the eight helpers more than one file uses (`unpack_color`, `not_emulated`, `to_compare`, `stored_reference`, `stencil_alpha`, `alpha_follows_stencil`, `format_name`, `texture_bits`), each with the file that defines it |
 | `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, the guest's 480x272, `kMaxScale`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target` (with `bytes()` and `contains(address)`, the guest memory a target covers, which every scan of the targets uses, and since task 066 its internal `scale`, `width()` and `height()`), `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm`; and the three structs the class holds once each (task 062): `Switches` (`switches_`, filled by `initialize`), `TraceState` (`trace_`, metal_trace.mm's) and `PrewarmState` (`prewarm_`, metal_pipelines.mm's) |
 | `src/gpu/metal_targets.mm` | "Targets" and "Guest memory": the target cache (`target_for`, `latest_target_at`, the guest-word snapshot), a texture bind found in a target (`find_framebuffer_texture`, the rule of task 009) and the copy a draw samples of the target it draws into; `block_transfer`, `read_back_framebuffer`, `write_back_frame`, `write_back_depth` and the stores into guest memory; `upload_frame` |
-| `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule |
+| `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule; the sprite upscale's dump and its texture pack (`dump_sprite`, "Sprite upscale") |
 | `src/gpu/metal_pipelines.mm` | "The pipeline key" and "The pre-warm list": the fragment-function variants, `render_pipeline` and `depth_state` (made on first use or taken from the pre-warm), the GE-to-Metal compare and stencil tables, the list's text form and parser, `start_prewarm`, the pipelines' exit line and `PURE_METAL_PIPELINES_OUT`; the pre-warm's state and the keys the draws used are `prewarm_` (`PrewarmState`) |
 | `src/gpu/metal_effects.mm` | "The stencil and the alpha": what a draw leaves in its target's alpha, `resolve_stencil_alpha`, the blend checks for dual-source blending and for that copy; the blend of a 16-bit target in the shader (task 040). The bloom chain has no code of its own: targets drawn into and sampled ("The bloom chain") |
 | `src/gpu/metal_draw.mm` | "How a draw is drawn": `draw`, from the `DrawCall` to the encoder, with the primitives expanded on the CPU (`expand`, transformed sprites), the blend factors (`translate_blend`), the lighting block, the texture mapping mode, and its parts in the order it calls them: the pipeline key with the fragment uniforms of the tests and the blend (`set_pipeline_key`), the GE viewport folded into clip space (`fold_viewport`), then the encoder's state set when it changed (`bind_state`) and what the shaders read (`bind_inputs`); and `PURE_METAL_LOG`'s line |
@@ -494,7 +494,8 @@ antialiased in 16 alpha levels), the art atlases CLUT8 256x128 in VRAM (logos, t
 menus' bars, the ship pictures of TEAM SELECTION), the HUD's CLUT4 512x256 and 256x128. An internal scale above 1
 ("Internal scale") magnifies their texels and adds no detail. With the menu's Text and sprites row at Upscaled
 (`game.sprite_upscale=1`, the default; `PURE_SPRITE_UPSCALE`), the backend redraws each such texture four times finer
-at decode, whatever the internal scale. The Vulkan renderer draws the originals; the row says so in its help.
+at decode, whatever the internal scale. The Vulkan renderer draws the originals; the row says so in its help. It draws
+the same upscaled art from a texture pack the dump switch writes (task 074, "The texture pack" below).
 
 ### Which textures
 
@@ -557,8 +558,72 @@ gives blocks.
 - **The log.** `[pure] sprite upscale: off` at start when the option is off; `[pure] sprite upscale: on
   (game.sprite_upscale)` at the first upscale.
 - **The dump.** `PURE_SPRITE_DUMP=DIR` writes each upscaled texture once, `DIR/<key>.src.png` (the decoded input) and
-  `DIR/<key>.png` (the output), the cache key in 16 hex digits, with the stb_image_write the framework vendors. The
-  pictures are the game's: the folder stays under `out/` and is never committed.
+  `DIR/<key>.png` (the output), the cache key in 16 hex digits, with the stb_image_write the framework vendors; and,
+  since task 074, the output as an entry of the texture pack `DIR/pack` ("The texture pack" below). The pictures are
+  the game's: the folder stays under `out/` and is never committed.
+
+### The texture pack (task 074)
+
+D-018's point 4: the Vulkan renderer (Windows, and the Vulkan window on the Mac) has no scaler, but it loads HD texture
+packs in PPSSPP's format (the framework's `host/gpu/texture_pack.cpp`: a `textures.ini` and PNGs keyed by a hash of the
+texture's contents, installed at `textures/<disc id>/` in the data directory or used where it is, managed by the Esc
+menu's Video tab). The dump switch writes the upscaled art as such a pack, so the Vulkan renderer draws what the Metal
+backend draws. The pack is the base an AI pass can replace atlas by atlas later.
+
+- **The entries.** `dump_sprite` (metal_textures.mm), for each upscaled texture once: the key from the framework's own
+  `compute_texture_pack_key(memory, state, 0, options, ...)` and `format_texture_pack_key`, with the options `hash`
+  xxh64 and `ignoreAddress` true and the rest the format's defaults; the 4x output as `DIR/pack/<key>.png`; and the line
+  `<key> = <key>.png` appended under textures.ini's `[hashes]`. The key is 24 hex digits: 16 of cache key (the
+  address left out, so zero in its top half; the dimension word, log2 height << 8 | log2 width, XORed with the
+  palette's hash: the CLUT bytes the last load read and the CLUT format word) and 8 of the texels' hash, the low 32 bits
+  of xxh64. The port's guest addresses differ from PPSSPP's and may differ between runs, so the address is left out:
+  the texels and the palette identify the art. The same picture at another address (the menus keep up to twelve copies
+  of an art atlas in VRAM over a route) is one key.
+- **textures.ini.** Written when `DIR/pack` is first used and has none: a comment, `[options]` (`version = 1`,
+  `hash = xxh64`, `ignoreAddress = true`), `[games]` naming `UCUS98612`, and `[hashes]`, to which each entry's line is
+  appended. A key already in the folder (this run's, or a PNG an earlier run into the same `DIR` wrote) is skipped, so
+  runs collect into one pack. A texture the key function refuses (it returns false: a format without a hash size, or
+  memory it cannot read) is said once, `[metal] sprite pack: no pack key for texture ...`, and left out; none was in
+  the routes below.
+- **The keys are the loader's.** The Vulkan renderer's own dump (`PURE_TEXTURE_DUMP=DIR`, every texture it decodes,
+  the originals, keyed with the same options) on the main menu route wrote the same names for all 11 pictures the
+  Metal backend upscales there, the two fonts (CLUT4 256x128 `0000000038d957c250811edd`, CLUT4 256x256
+  `0000000032e401a19c4925fa`) and the art atlas (CLUT8 256x128 `00000000d2df1e257fb392ca`) among them, and its
+  pictures equal the Metal backend's decoded inputs pixel for pixel.
+- **One difference from the loader.** A texture 512 texels tall that a through-mode draw samples is hashed by the
+  Vulkan renderer only down to the lowest row its draws read (the format's rule); the dump hashes the whole texture.
+  The menus' and the HUD's 2D draws are orthographic transformed draws, which the loader also hashes whole (the one
+  512x512 picture the menus upscale included, whose key matched); through mode reaches only the three small textures
+  task 073 found in the frontend route.
+- **How the Vulkan renderer draws it.** The loader decodes a PNG on a thread of its own and the renderer uploads it
+  with mips the first time a draw samples the texture; until then the original is drawn. A replacement is sampled with
+  the draw's normalised coordinates, so the 4x picture lands where the original was, linear (nearest with the Video
+  tab's Texture filter at Sharp).
+
+`tools/sprite_pack.sh` builds the pack and checks it. The build runs, headless on Metal with `PURE_SPRITE_UPSCALE=1` and
+`PURE_SPRITE_DUMP=DIR/dump`, the frame regression suite's 18 scenes' routes (`tools/frame_regress.sh --out`: 44 keys)
+and the Single Race and the Time Trial on Vineta K on to their results screens (`tools/campaign_sweep.py --no-damage`,
+the race paced, about 3.5 minutes each: 2 keys each), then moves `DIR/dump/pack` to `DIR/pack` (default
+`out/sprite_pack/pack`). On 2026-10-11: 48 keys, 3.5 MB, the build 7m 43s. A Zone run to its end panel added no key
+and is not run. Twelve of the keys are one CLUT4 32x16 picture (texels hash `cd0aa2c1`) under palettes the game
+animates: which of them a run meets varies from run to run, the other 36 are the same each time.
+
+`--check` installs the pack in a scratch data directory of its own (`DIR/check/data/textures/UCUS98612`) and captures
+main_menu and race_hud in the Vulkan window (`tools/frame_regress.sh --shell vulkan --backend vulkan`, paced from the
+scene) with `PURE_TEXTURE_PACK=0` and with it on and `PURE_TRACE_TEXTURE_PACK=1`. The window's captures are its pixels,
+960x544, reduced to 480x272 by the centre pixel of each 2 x 2 block for the comparison with the reference. On
+2026-10-11:
+
+| Scene | With the pack against without (at least 1%) | Without, reduced (limit) | With, reduced (limit) | HUD |
+|---|---|---|---|---|
+| main_menu | 0.0232 | 0.0401 (0.05) | 0.0446 (0.05) | - |
+| race_hud | 0.0116 | 0.0647 (0.10) | 0.0638 (0.10) | found |
+
+The renderer opened the pack (`[texpack] 48 textures from ...`) in both runs and uploaded 33 of its pictures for the
+draws that sampled them. The reduced figures without the pack are above the suite's Vulkan column (0.033, 0.047)
+because the suite reduces by the top-left pixel of each block (`tools/imgdiff.py`'s nearest neighbour) and this check
+by the centre one, as `tools/sprite_check.sh` does. On Windows the script builds nothing; `--check --pack DIR` checks a
+pack copied from the Mac (docs/windows.md).
 
 ### The checks
 
