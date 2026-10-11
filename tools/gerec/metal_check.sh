@@ -121,7 +121,8 @@ record() {
 replay() {
   local log=$1
   shift
-  "$BIN" --replay "$@" > "$log" 2>&1
+  # Task 073: the sprite upscale off (the PSP's texels, as tools/purelib/port.py pins every other run), not settings.ini's.
+  PURE_SPRITE_UPSCALE=0 "$BIN" --replay "$@" > "$log" 2>&1
   rc=$?
   grep -E '^\[replay\]|^  [a-z]' "$log"
 }

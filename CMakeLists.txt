@@ -11,8 +11,8 @@ if(APPLE)
     # The Metal GE backend's files, by concern (docs/metal-backend.md, "Files"; task 049).
     set(metal_backend_sources src/gpu/metal_backend.mm src/gpu/metal_targets.mm src/gpu/metal_textures.mm
         src/gpu/metal_pipelines.mm src/gpu/metal_effects.mm src/gpu/metal_trace.mm src/gpu/metal_draw.mm)
-    set(platform_sources ${metal_backend_sources} src/gpu/metal_device.mm src/gpu/metal_shell.cpp
-        src/host/metal_shell.mm third_party/imgui_metal/imgui_impl_metal.mm)
+    set(platform_sources ${metal_backend_sources} src/gpu/sprite_upscale.cpp src/gpu/metal_device.mm
+        src/gpu/metal_shell.cpp src/host/metal_shell.mm third_party/imgui_metal/imgui_impl_metal.mm)
 else()
     set(platform_sources)
 endif()

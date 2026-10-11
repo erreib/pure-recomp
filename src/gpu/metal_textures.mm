@@ -1,14 +1,21 @@
-// The Metal backend's textures from guest memory (docs/metal-backend.md, "Textures" and "Mipmaps"): the mip levels
-// a draw samples, the content key (address, layout, every texel and the palette entries they reach), hashed once
-// per display list, the decode with the framework's decode_texture() into a cache of kMaxTextures, and the GE's
+// The Metal backend's textures from guest memory (docs/metal-backend.md, "Textures", "Mipmaps" and "Sprite
+// upscale"): the mip levels a draw samples, the content key (address, layout, every texel and the palette entries
+// they reach), hashed once per display list, the decode with the framework's decode_texture() into a cache of
+// kMaxTextures, the sprite upscale of a 2D draw's texture (task 073, sprite_upscale.cpp), and the GE's
 // level rule. Textures that lie in a target are metal_targets.mm's.
 #include "metal_backend.hpp"
 #include "gpu/texture_decode.hpp"
+#include "settings/settings.hpp"
+#include "sprite_upscale.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <iterator>
+#include <system_error>
 
 namespace pure::gpu::metal_backend {
 namespace {
@@ -35,6 +42,10 @@ std::uint64_t hash_value(std::uint64_t hash, std::uint64_t value) {
     hash = (hash ^ value) * 0x9E3779B97F4A7C15ull;
     return hash ^ (hash >> 31u);
 }
+
+// Hashed into the content key of an upscaled texture (task 073): the same texels cached plainly for a 3D draw and
+// upscaled for a 2D one are two textures.
+constexpr std::uint64_t kUpscaledKey = 0x5350524954453478ull;  // "SPRITE4x"
 
 // `size` bytes of guest memory from `address` into the hash: one run of host memory when they are one,
 // word by word otherwise.
@@ -174,10 +185,42 @@ std::uint64_t MetalGeBackend::content_key(const GuestMemory &memory, const Textu
     return key;
 }
 
+// The formats whose textures a 2D draw has upscaled (task 073, D-018): the palette ones and the 16-bit
+// ones, the menus' fonts, icons and art. Not 8888 (the movie and TV pictures), not DXT.
+bool MetalGeBackend::upscalable(TextureFormat format) {
+    return indexed(format) || format == TextureFormat::Rgba5650 || format == TextureFormat::Rgba5551 ||
+           format == TextureFormat::Rgba4444;
+}
+
+// The menu's Text and sprites row (game.sprite_upscale, PURE_SPRITE_UPSCALE): 1, Upscaled, the default. Read at start
+// and at each frame (begin_frame()), never per draw; at start, `[pure] sprite upscale: off` when it is off.
+void MetalGeBackend::read_sprite_upscale(bool at_start) {
+    sprite_upscale_ = portablekit::settings::game_option("sprite_upscale") == 1u;
+    if (at_start && !sprite_upscale_) std::cout << "[pure] sprite upscale: off\n";
+}
+
+// PURE_SPRITE_DUMP=DIR: an upscaled texture's decoded input as DIR/<key>.src.png and its output (upscaled_) as
+// DIR/<key>.png, the cache key in 16 hex digits, once per key. pixels_ holds the input.
+void MetalGeBackend::dump_sprite(std::uint64_t key, const TextureState &state) {
+    if (!sprites_dumped_.insert(key).second) return;
+    char name[24];
+    std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(key));
+    const std::filesystem::path base = std::filesystem::path(switches_.sprite_dump) / name;
+    const bool written =
+        pure::gpu::write_png(base.string() + ".src.png", reinterpret_cast<const std::uint8_t *>(pixels_.data()),
+                             state.width, state.height) &&
+        pure::gpu::write_png(base.string() + ".png", upscaled_.data(), state.width * kSpriteScale,
+                             state.height * kSpriteScale);
+    if (!written) std::cout << "[metal] sprite dump: cannot write " << base.string() << ".png\n";
+}
+
 // The texture with its first `levels` levels (mip_levels()), each decoded from its own address with the
-// framework's decoder; with more than one it is a mipmapped texture.
+// framework's decoder; with more than one it is a mipmapped texture. With `upscale` (a 2D draw's texture of one
+// level in a palette or 16-bit format, the option on: metal_draw.mm decides) level 0 is upscaled 4x by
+// upscale_sprite() and cached under a key of its own: a texture of 4W x 4H texels that the draw's normalised
+// coordinates sample in place.
 id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const TextureState &state,
-                                               std::uint32_t levels) {
+                                               std::uint32_t levels, bool upscale) {
     const TraceClock clock(trace_.file != nullptr, trace_.times.texture);
     std::uint64_t places = 0u;
     for (std::uint32_t n = 1u; n < levels; ++n) {
@@ -202,6 +245,7 @@ id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const 
         key = content_key(memory, state, levels);
         list_keys_.emplace(identity, key);
     }
+    if (upscale) key = hash_value(key, kUpscaledKey);
     if (const auto found = textures_.find(key); found != textures_.end()) {
         found->second.last_used = ++texture_clock_;
         return found->second.texture;
@@ -216,20 +260,37 @@ id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const 
             if (it->second.last_used < oldest->second.last_used) oldest = it;
         textures_.erase(oldest);  // a command buffer that uses it keeps it alive
     }
+    // The upscale (task 073): level 0's texels, 4x along each axis. A texture of more than one level is never upscaled.
+    upscale = upscale && levels == 1u && pixels_.size() == static_cast<std::size_t>(state.width) * state.height;
+    if (upscale) {
+        const auto start = std::chrono::steady_clock::now();
+        upscale_sprite(reinterpret_cast<const std::uint8_t *>(pixels_.data()), state.width, state.height, upscaled_);
+        stats_.upscale_ms +=
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        ++stats_.upscaled;
+        if (!sprite_upscale_said_) {
+            sprite_upscale_said_ = true;
+            std::cout << "[pure] sprite upscale: on (game.sprite_upscale)\n";
+        }
+        if (!switches_.sprite_dump.empty()) dump_sprite(key, state);
+    }
+    const std::uint32_t width = upscale ? state.width * kSpriteScale : state.width;
+    const std::uint32_t height = upscale ? state.height * kSpriteScale : state.height;
     MTLTextureDescriptor *descriptor =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                           width:state.width
-                                                          height:state.height
+                                                           width:width
+                                                          height:height
                                                        mipmapped:levels > 1u];
     descriptor.mipmapLevelCount = levels;
     descriptor.storageMode = MTLStorageModeShared;
     descriptor.usage = MTLTextureUsageShaderRead;
     id<MTLTexture> texture = [device_ newTextureWithDescriptor:descriptor];
-    [texture replaceRegion:MTLRegionMake2D(0, 0, state.width, state.height)
+    [texture replaceRegion:MTLRegionMake2D(0, 0, width, height)
                mipmapLevel:0
-                 withBytes:pixels_.data()
-               bytesPerRow:static_cast<NSUInteger>(state.width) * 4u];
-    std::uint64_t bytes = static_cast<std::uint64_t>(state.width) * state.height * 4u;
+                 withBytes:upscale ? static_cast<const void *>(upscaled_.data())
+                                   : static_cast<const void *>(pixels_.data())
+               bytesPerRow:static_cast<NSUInteger>(width) * 4u];
+    std::uint64_t bytes = static_cast<std::uint64_t>(width) * height * 4u;
     for (std::uint32_t n = 1u; n < levels; ++n) {
         // mip_levels() checked the level's size and memory, and a level is no larger than level 0, which
         // decoded: the decoder does not refuse it.

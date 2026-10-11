@@ -1,8 +1,10 @@
 // The enhancements: what the port offers beyond the PSP's game, each a player's option in the Esc menu
 // (GameProfile::options, patch 0019-game-option-rows) and a hook of the profile's that reads it. E4 (D-017, task 072):
 // the 30 fps modes row, game.sixty_fps, PURE_SIXTY_FPS. E6 (D-016, task 070): Flashes, game.smooth_flashes, PURE_SMOOTH_FLASHES.
+// E7 (D-018, task 073): Text and sprites, game.sprite_upscale, PURE_SPRITE_UPSCALE, which the Metal backend reads itself.
 // Every tool run has them off unless it names them (tools/purelib/port.py), so the checks measure the PSP's game;
-// tools/framerate_check.sh is the check with E4 on, tools/flash_check.sh the one with E6 on.
+// tools/framerate_check.sh is the check with E4 on, tools/flash_check.sh the one with E6 on, tools/sprite_check.sh
+// the one with E7 on.
 #pragma once
 
 #include "hle/hle_common.hpp"

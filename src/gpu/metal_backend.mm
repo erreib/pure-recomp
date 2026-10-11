@@ -17,7 +17,9 @@
 //              in the frame; anything else is decoded from guest memory with the framework's
 //              decode_texture() and cached by its contents (texels and the palette entries it can reach);
 //              a texture with mip levels (task 037) is a mipmapped texture, each level decoded from its own
-//              address, sampled at the level the GE's rule (TEXLEVEL) picks.
+//              address, sampled at the level the GE's rule (TEXLEVEL) picks. A 2D draw's texture (through
+//              mode, or orthographic and unlit) in a palette or 16-bit format is upscaled 4x at decode (task
+//              073, the menu's Text and sprites row: sprite_upscale.cpp) and sampled linear.
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
 //              blend, the write masks, the alpha test, the colour test, the depth test and the stencil; clears;
 //              scissor; the GE viewport folded into clip space; back-face culling. A draw into a 5650, 5551 or
@@ -62,7 +64,9 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <system_error>
 
 namespace pure::gpu::metal_backend {
 namespace {
@@ -211,6 +215,14 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         // alpha, and per depth write-back.
         trace_.stencil_copy = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
         trace_.depth = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
+        // Ours (task 073): the menu's Text and sprites row, read again at every frame; and PURE_SPRITE_DUMP=DIR,
+        // each upscaled texture written there once (metal_textures.mm).
+        read_sprite_upscale(true);
+        if (const char *dump = portablekit::env("SPRITE_DUMP"); dump != nullptr && *dump != '\0') {
+            std::error_code ignored;
+            std::filesystem::create_directories(dump, ignored);
+            switches_.sprite_dump = dump;
+        }
         trace_.started = std::chrono::steady_clock::now();
         trace_.report_start = trace_.started;
         ready_ = true;
@@ -245,7 +257,8 @@ void MetalGeBackend::shutdown() {
                   << " mip levels decoded after the first), "
                   << stats_.copies << " target copies, " << stats_.uploads
                   << " uploads, " << targets_.size() << " targets, " << stats_.waits << " GPU waits ("
-                  << stats_.wait_ms << " ms) in " << seconds << " s\n";
+                  << stats_.wait_ms << " ms) in " << seconds << " s; " << stats_.upscaled
+                  << " textures upscaled (" << stats_.upscale_ms << " ms)\n";
         report_guest_writes();
         report_pipelines();
         close_trace();
@@ -288,7 +301,11 @@ void MetalGeBackend::shutdown() {
 
 // After each flip: a scale the menu changed while the frame was drawn (the menu over the running game), or Auto's
 // when the drawable's height crossed a multiple of 272 (a resize, full screen and back), takes effect here.
-void MetalGeBackend::begin_frame() { apply_scale(); }
+// The Text and sprites row is read here too (task 073), so a change in the menu applies from the next frame.
+void MetalGeBackend::begin_frame() {
+    apply_scale();
+    if (ready_) read_sprite_upscale(false);
+}
 
 // The menu's Resolution row (task 067). Between two frames, with nothing drawn since the flip (the paused menu runs
 // there), the scale changes now; otherwise at the next begin_frame(), so that no frame is drawn at two scales.
