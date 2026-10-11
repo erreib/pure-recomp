@@ -60,6 +60,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0015-vulkan-fb-texture-wrap | (task 063) | Fidelity | candidate | A render target sampled as a texture takes the GE's wrap mode: the texture's own coordinates wrapped per axis (REPEAT modulo 1, CLAMP between the centres of the edge texels) in `ge.frag`, then placed in the target's copy, as the Metal backend does; the billboards' adverts show instead of their first row stretched into bars |
 | 0016-menu-rows-by-capability | (task 064) | Behaviour, tooling | candidate | The Esc menu draws a row only when its feature exists: `GameProfile::features` (`MenuFeatures`: ad hoc play, the right-stick camera, the mouse camera) and five `Shell` answers (frame interpolation, the performance overlay, each aspect, touch controls, the API's name), every default today's; `<prefix>_MENU_DUMP` prints each tab's rows when the menu opens |
 | 0017-internal-scale-by-backend | (task 067) | Behaviour | candidate | The menu's Resolution row asks the GE backend, not the Vulkan renderer: `GeBackend::supports_internal_scale()`, `set_internal_scale()` and `target_size()` (defaults: no, nothing, 480x272), the Vulkan backend forwarding to its renderer as the menu did; `gpu::running_backend()` for the menu; `GameProfile::default_internal_scale`, the scale a new player starts with (unset: the framework's 2) |
+| 0018-vulkan-effects-at-1x | (task 068) | Fidelity | candidate, behind a profile switch | Each Vulkan target the size its stride gives (D-015, as the Metal backend draws): the internal resolution for a buffer at least 480 pixels wide, 480x272 for a narrower one (the bloom's buffers, the billboards'), so the bloom's blur and glow stay the PSP's at any scale; every pass, viewport, scissor, copy, blit and read-back takes the target's own size, and guest memory gets the centre pixel of each block |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -388,3 +389,31 @@ true and forwards both to its renderer, which is what the menu called before, so
 (`std::optional`, unset by default) is the scale a new player starts with: `settings::defaults_for` applies it, so it
 is also what "Restore video defaults" restores; a value in settings.ini or `<prefix>_INTERNAL_SCALE` still decides.
 Our profile sets 0 (Auto).
+
+### 0018-vulkan-effects-at-1x
+Task 068 (D-015, E3 step 4, for the Windows build). Every target was `target_extent`, the internal resolution, so above
+1x the bloom's buffers (8888, stride 256) and the billboards' target (565, stride 128) were drawn at the scale too,
+where the Metal backend draws them at 1x since task 066 (PPSSPP's "lower resolution for effects" for this game). The
+blur's taps are through-mode positions, which scale with the target, so its radius was the PSP's already; what moved
+was the detail the downsample kept and every pixel of the glow by a level or two (race_1x.gerec frame 6016 at 2x: the
+glow region's mean luminance +0.54% from 1x before, +0.41% after, as Metal's at 2x; Vulkan against Metal at 2x, 33
+pixels over tol 24 before, 14 after). Now each `Target` has an `extent`, set when it is made
+from the stride of the draw that makes it (`extent_for`: `target_extent` at 480 or more, 480x272 below; a target made
+without a draw, `upload_frame`'s, is a screen). The pass's render area, the viewport, the scissor's scale, a 16-bit
+target's pixel scale for the dither, the auto mip rule's 16 x log2 of the scale (`drawn_extent`), the stencil copy's
+quad, the copy a draw samples of a target (`framebuffer_descriptor`: the copy has the target's size, and the placement
+is relative to it, so a 1x buffer sampled into a scaled screen, the composite, and the reverse, the downsample, go
+through the same `uv_remap`), `hold_frame`, `upload_frame`'s blit, the display blit (`record_game_blit` and
+`submit_and_present` take the source's size), `capture_frame`, `display_image`, the frame interpolation's picture copy
+and replay, and the depth write-back take the target's own size; `resize_targets` makes each target again at the size
+its stride gives at the new resolution. The frame write-back and `read_back_framebuffer` give the guest the centre
+pixel of each S x S block, (x S + S/2, y S + S/2), as the depth write-back already did and the Metal backend does
+(`centre_texel`, shared with the depth): the target's row at the centre of each PSP row is copied whole into the
+slot's buffer (272 copy regions, one at 1x) and `take_writeback` picks the column at the centre of each PSP pixel.
+Before, a linear blit scaled the target into a 480x272 image, which at an even scale averages each block's four middle
+pixels; that image is gone, and each slot's buffer is made when the slot first writes a frame back and again when a
+wider target needs more (272 rows of the target's width: 2.1 MB at 4x, where the depth write-back copies 8.4 MB).
+At internal scale 1 every target is 480x272 as before and the pictures are the same (race_1x.gerec frame 6016: 0
+pixels differ). A target keeps the size it was made at when a later draw gives its address a stride on the other side
+of 480 (no recording has one: each address keeps one stride) until the next change of scale makes it again. The tile
+clamp that 0015 notes as lost above 1x is left as it is.

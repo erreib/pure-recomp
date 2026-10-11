@@ -976,10 +976,9 @@ as before and named once; the game never draws one.
 
 ## Where it differs from the Vulkan backend on purpose
 
-- Native 480x272 (D-002) headless and in every check, at the settings' internal scale in a window (task 066), with
-  the bloom's and the billboards' targets at 480x272 at any scale; the Vulkan backend draws every target at 2x by
-  default, which is where its 0.054 on `lang` and `profile` comes from (one-pixel edges moved by the 2x-to-1x
-  reduction).
+- Native 480x272 (D-002) headless and in every check, at the settings' internal scale in a window (task 066); the
+  Vulkan backend's checks draw the screens at 2x (its settings' scale in the suite's 960x544 window), which is where
+  its 0.054 on `lang` and `profile` comes from (one-pixel edges moved by the 2x-to-1x reduction).
 - The GE's texture filter bits are honoured (the Vulkan backend samples everything bilinear).
 - Through-mode draws are depth-tested when the GE enables the test (the Vulkan backend never tests them).
 - TCC and the ADD texture function are honoured; the alpha test reads its mask.
