@@ -186,8 +186,11 @@ simplification task, then the enhancements. The session-by-session resume notes 
   from a `sceGeDrawSync` wrap in the profile, behind a Flashes row (Original / Smooth, Smooth by default) drawn by a
   generic game-option patch (0019-game-option-rows: `GameProfile::options`, `game.<key>` in settings.ini,
   `PURE_<KEY>`); every tool run pinned to `PURE_SMOOTH_FLASHES=0` through tools/purelib/port.py so the measured
-  scenes stay; `tools/flash_check.sh` (the fade's 57 two-vblank flips to at most 2; a swept race with 0 stretches
-  and lap times within 5%) is the check with it on.
+  scenes stay; `tools/flash_check.sh` (the fade's 57 two-vblank flips to 0; a swept race with 0 stretches and lap
+  times within 5%) is the check with it on. **Task 070 merged 68803cd (2026-10-11): E6 complete.** Gate: verify
+  PASS, both menu dumps, suite 18/18 to the digit, HUD 61/61 (out/070_gate.log). Follow-ups: the `--race` lap bound
+  is coarse (two different races; widen to 10% or compare the race clock's advance), the Flashes row's place after
+  the Restore button when more rows come.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

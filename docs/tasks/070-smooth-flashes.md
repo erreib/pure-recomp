@@ -1,6 +1,6 @@
 # 070: A steady frame rate through the full-screen flashes (E6)
 
-Milestone: E6 (Erik, 2026-10-11; D-016) | Branch: task/070-smooth-flashes | Status: OPEN
+Milestone: E6 (Erik, 2026-10-11; D-016) | Branch: task/070-smooth-flashes | Status: MERGED (68803cd, 2026-10-11)
 
 ## Goal
 Every race drops to 30 fps for 0.4 to 1.9 s at a time: at the race-start fade, when a weapon goes off near the
@@ -246,4 +246,31 @@ Open questions:
 5. The acceptance's `--pad` is not a run_boot flag; the frontend runs used `--script ... --shell headless`.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (main checkout, after the merge and `git -C vendor/portablekit apply` of 0019, `tools/build.sh profile`;
+out/070_gate.log): `verify 070: PASS`. Its parts: `ok: 19 patch(es) reproduce vendor/portablekit at 8b0c3fe`;
+`flash_check: PASS (fade 57 flips off, 0 on; the race and its HUD in both)` (the fade flips 5708-5764, 1.90 s; the
+race clock 10.04 s after the fade's first flip with 0, 10.02 s with 1); `flash_check: PASS (race: stretches 2 off, 0
+on; mean lap -4.1% on against off)` (off: laps 72.9, 55.2, 62.7 s with a 31-flip put-back at 157 m of lap 1 and a
+22-flip weapon flash in lap 3; on: 61.0, 58.9, 63.1 s, no stretch); `menu_check: PASS` on both shells;
+`frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 21s)` with the measured fractions to
+the digit (race_hud 0.0149, zone_change 0.0353); `docs_check: 33 files, 0 findings: PASS`. Then
+`hud_check: 61 of 61 shots have the HUD`.
+Spot-read: src/profile/enhancements.cpp (the wrap writes only when the frame object is in user RAM and `+0x116c` is
+1; one line at the first clear; the option read each call through `settings::game_option`, one strcmp),
+src/profile/pure_profile.cpp (installed after the flip counter, before the test hooks), the patch (generic:
+`GameOption`/`MenuTab`/`GameProfile::options`; `Settings::game_options` by index; `all_fields()` adds `game.<key>`
+with the variable `<KEY>`; an index out of range ignored with a line; stale `game.` keys dropped on save;
+`game_rows` at the end of each tab and `restore_game_rows` on each Restore button, which skips a row a variable
+sets), tools/purelib/port.py (`original_pacing` from `silence` and `steady_clock`; the scratch settings), run_boot
+(`--env` wins), flash_check.sh (the audit's rule imported, not copied), menu_check.sh (Flashes last in Video). No
+file outside May touch; docs/status.md untouched by the branch.
+Merged: 68803cd (`--no-ff` into batch/m2, 2026-10-11); worktree removed.
+Notes: (1) The Flashes row sits after "Restore video defaults" (the Game section ends the tab); fine for one row,
+revisit the placement when E4/E5 add more. (2) The `--race` lap-time bound is coarse: the two cells are different
+races (the AI's weapons and a put-back differ run to run; this gate's off-run had a 72.9 s first lap), so a 5%
+difference is within the follower's own spread and a FAIL there would need a second look before it is believed; a
+2x speed error would show as -50%. The fade check's race-clock figure (10.04 s against 10.02 s to the same point)
+is the tighter speed check. Follow-up: widen the bound to 10% or compare the race clock's advance per flip instead.
+(3) The load's flips 5701-5706 keep two vblanks with the option on (not step 5's wait; the load itself); not
+chased. (4) The brief's `--pad` should have read `--script`; the acceptance's "by flip 6100" should have read "by
+the run's end" (the race clock starts at about 6250): the check does the right thing.
