@@ -155,9 +155,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   its Windows pass before workers run in parallel here. Task 062 (2026-10-09, merged 1589688) did the simplification task from task
   049's list, proven by `tools/refactor_check.sh`; the organisation work is complete. Next: the enhancements (D-009).
 - **The app.** Repacked 2026-10-11 from 012631c (`tools/bundle.sh --zip`, then `tools/bundle.sh --check out/repack-070`:
-  8 checks PASS; out/repack-070.log): Wipeout Pure 0.1.0-012631c at out/release-macos/stage, the zip in
-  out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix and E6 (the Flashes
-  row, Smooth by default; a settings.ini an earlier build wrote lacks the key and so reads the default).
+  8 checks PASS; out/repack-070.log), then again from 36464ad (`--check out/repack-072` PASS; out/repack-072.log):
+  Wipeout Pure 0.1.0-36464ad at out/release-macos/stage, the zip in out/release-macos/dist. It has E3 (Auto
+  resolution), the trimmed Esc menu, the billboard fix, E6 (the Flashes row, Smooth by default) and E4 (the 30 fps
+  modes row, 60 fps by default; a settings.ini an earlier build wrote lacks the keys and so reads the defaults).
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
