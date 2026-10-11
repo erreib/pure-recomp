@@ -16,7 +16,7 @@ it differs from the Vulkan backend on purpose".
 The backend was built by tasks 023 (the 2D frontend), 024 (3D: lighting, fog, sprites, culling), 025 (the effects),
 027 (the Metal shell), 031 (one command queue), 033 (frame times, the pre-warm), 036 (texture mapping), 037 (mipmaps),
 040 (the colour test, 16-bit writes, the depth clamp), 042 (the pre-warm list over the campaign), 049 (the split
-into files by concern) and 066 (the internal scale). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
+into files by concern), 066 (the internal scale) and 073 (the sprite upscale). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
 
 ## Quick start
 
@@ -54,6 +54,8 @@ tools/refactor_check.sh                                   # after it: 0 differin
 | `PURE_NO_COLOR_TEST=1`, `PURE_NO_DITHER=1`, `PURE_NO_DEPTH_CLAMP=1` | (task 040) each restores what the backend drew before task 040: every fragment kept; 5650, 5551 and 4444 targets blended by the pipeline at 8 bits a channel, never dithered; every transformed draw clipped at both ends of the depth range, MINZ/MAXZ unread. With all three the pictures are those of the build before the task ("The colour test, 16-bit writes and the depth clamp") |
 | `PURE_METAL_SHOW_TARGET=ADDR` | (task 040) each flip presents the target drawn last at ADDR instead of the display: a target the game never shows, such as the race's 565 billboard target (`0x04154000`), in a capture or a `ge_replay --cut ... --out` picture |
 | `PURE_INTERNAL_SCALE=N` | (task 066) the framework's `video.internal_scale` for the run: the backend draws its screen-wide targets at N (1 to 6; 0 Auto), read at start ("Internal scale"). Without a window the backend draws at 1 unless this is set |
+| `PURE_SPRITE_UPSCALE=0\|1` | (task 073) the menu's Text and sprites row, `game.sprite_upscale`, for the run: `1` (the player's default) upscales the 2D draws' textures 4x at decode, `0` draws the PSP's texels; every tool run has `0` unless it names it ("Sprite upscale") |
+| `PURE_SPRITE_DUMP=DIR` | (task 073) each upscaled texture written once as `DIR/<key>.src.png` (the decoded input) and `DIR/<key>.png` (the output), for `tools/sprite_proto_check.py`; the textures are the game's, so DIR belongs under `out/` ("Sprite upscale") |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -84,6 +86,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `src/gpu/metal_trace.mm` | "Frame times": `PURE_METAL_TRACE`'s rows, the line every 600 frames, the exit lines of the stencil, guest memory, the colour test, 16-bit targets and the depth clamp; their state is `trace_` (`TraceState`), which also holds the framework's stencil-copy and depth traces' switches |
 | `src/gpu/shaders/ge.metal` | the shaders, plain MSL: `ge_vertex`, `ge_fragment`, `ge_fragment_dual`, `ge_fragment_16`; ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036), the mip level (task 037), and the colour test, the 16-bit writes and the depth clamp (task 040) are ours, from PPSSPP's hardware notes |
 | `src/gpu/shaders/embed.cmake` | the build step that turns `ge.metal` into `build/<preset>/generated_metal/ge_metal.hpp`: the file's text byte for byte as a raw string, `pure::metal::kShaderSource`, which `initialize` compiles. Rerun by the build whenever `ge.metal` changes |
+| `src/gpu/sprite_upscale.hpp`, `.cpp` | (task 073) `upscale_sprite`, the 4x resample of a W x H RGBA8 texture ("Sprite upscale"), and `write_png` for `PURE_SPRITE_DUMP` (the framework's vendored stb_image_write); plain C++, no Metal |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `tools/scale_check.sh` | (task 066) the backend at internal scale S against 1: the suite's 18 scenes headless at both, compared after reducing the S captures to 480x272 by their blocks' centre pixels, plus the race scenes' bloom region ("Internal scale") |
@@ -93,7 +96,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `config/metal_pipelines.txt` | the render pipelines and depth-stencil states made at start (task 033, "The pre-warm list"); since task 042 it covers the campaign and the app carries a copy in `Contents/Resources` |
 | `tools/frame_times.py` | the frame trace's summary (task 033, "Frame times") |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
-| `CMakeLists.txt` | the backend's seven files in `metal_backend_sources`, the sources in `portablekit_add_game(... SOURCES ...)`, every `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, the shader embedding step and its directory on the include path, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
+| `CMakeLists.txt` | the backend's seven files in `metal_backend_sources` (and `src/gpu/sprite_upscale.cpp` beside them in `platform_sources`), the sources in `portablekit_add_game(... SOURCES ...)`, every `.mm` compiled with `LANGUAGE CXX` and `-x objective-c++ -fobjc-arc`, the shader embedding step and its directory on the include path, `third_party/imgui_metal` on the include path, and `-framework Metal`, `Foundation`, `QuartzCore` and (for the shell's sRGB colour space) `CoreGraphics` linked |
 
 Built without Xcode, in the shape of the Bouncer's backend (`~/dev/bouncer-recomp/docs/metal-backend.md`): the
 `.mm` files go through the same `/usr/bin/clang++` and ccache as every other source of `tools/build.sh profile`, and
@@ -188,7 +191,8 @@ internal scale S above 1 (task 066, "Internal scale"; until then internal scale 
   hashed once. Up to 1024 textures are kept, the least recently used dropped first (a command buffer that still
   uses one keeps it alive). A texture that cannot be decoded is drawn white and logged once. A texture with mip
   levels (task 037) is one mipmapped texture, its key covering every level's address, size, row length and texels
-  ("Mipmaps").
+  ("Mipmaps"). Since task 073 a 2D draw's palette or 16-bit texture is upscaled 4x at decode and cached under a key
+  of its own ("Sprite upscale").
 
 The wrap of a target sampled as a texture (task 063). A texture of its own is wrapped by its sampler (REPEAT or clamp
 to edge, per axis, from the GE's wrap register). A target's texture covers part of a 480x272 image, so its sampler
@@ -481,6 +485,125 @@ from 0.77 ms at 1 to 0.94 ms at 4 and 1.24 ms at 6. Runs with the window off the
 app's full-screen Space, or the screen locked: two at Auto, one each at 6 and 1) are not in the table; their backend
 figures were alike (means 16.68 to 17.22 ms), and their only frames over 25 ms waited for a drawable macOS held back
 while the window was hidden (up to 1.1 s), not a player's case.
+
+## Sprite upscale (task 073)
+
+Task 073 (E7, D-018, 2026-10-11): the menus' text and art and the race HUD are bitmap atlases drawn at about one texel
+a pixel of the 480x272 picture: the fonts CLUT4 256x128 and 256x256 in main memory (glyphs about 15 texels tall,
+antialiased in 16 alpha levels), the art atlases CLUT8 256x128 in VRAM (logos, the katakana "wipeout" strip, the
+menus' bars, the ship pictures of TEAM SELECTION), the HUD's CLUT4 512x256 and 256x128. An internal scale above 1
+("Internal scale") magnifies their texels and adds no detail. With the menu's Text and sprites row at Upscaled
+(`game.sprite_upscale=1`, the default; `PURE_SPRITE_UPSCALE`), the backend redraws each such texture four times finer
+at decode, whatever the internal scale. The Vulkan renderer draws the originals; the row says so in its help.
+
+### Which textures
+
+A texture from guest memory (not a target's: "Textures") is upscaled when all of these hold (`draw` in metal_draw.mm
+decides, `decoded_texture` does it):
+
+| Condition | Why |
+|---|---|
+| the draw is a 2D draw: through mode, or transformed under an orthographic projection (the projection matrix's w row, `projection[3]`, `[7]` and `[11]`, all 0) with lighting off | the game draws its 2D layers as transformed draws under an orthographic projection, not in through mode. In the main menu's frame (flip 4700, 32 draws) the clear is the only through-mode draw; the text is transformed sprites and the art transformed strips, as in PPSSPP's dump (`ref/main_menu.ppdmp`), and the race HUD likewise (`ref/vineta_k_start.ppdmp`, draws 839-866). Through mode alone reaches three small textures in the whole frontend route, none in a checked scene (task 073's first run). The 3D scenes are perspective; the lighting test keeps a lit orthographic model plain (no frontend draw is lit, so it leaves out nothing today) |
+| the format is a palette one (CLUT4, CLUT8, CLUT16, CLUT32) or 16-bit (5650, 5551, 4444) | 8888 is the movie and TV pictures, full-colour already; DXT is not used by these layers |
+| the draw samples one level (`mip_levels` is 1) | a texture with levels is a 3D one |
+| the option is on | `game_option("sprite_upscale")`, read at start and at each frame (`begin_frame`), never per draw: a change in the menu applies from the next frame |
+
+What it takes: 14 textures by flip 2200 of the frontend route, 25 in the main menu route (the two fonts, the art
+atlases, the TEAM SELECTION ship picture, the icons), 49 in each race route (the menus' and the HUD's). In the race
+only the HUD changes: race_hud's capture with the option on differs from the one with it off in 1.6% of its pixels,
+every one of them in the HUD.
+
+### The method
+
+`upscale_sprite` (src/gpu/sprite_upscale.cpp), the planning session's prototype (`out/fe_tex/upscale_proto.py` on the
+Mac) in C++, from a W x H RGBA8 texture to 4W x 4H:
+
+1. Each texel's colour premultiplied by its coverage, the alpha over the texture's peak alpha (the largest in it).
+2. Separable Catmull-Rom at 4x, rows first: four taps with the weights (-t^3 + 2t^2 - t)/2, (3t^3 - 5t^2 + 2)/2,
+   (-3t^3 + 4t^2 + t)/2 and (t^3 - t^2)/2 at the fraction t of the sample centre (o + 0.5)/4 - 0.5, clamped at the
+   edges.
+3. The coverage clamped to 0..1 and the colour divided by it (0 where it is at most 0.001), clamped to 0..255: flat
+   colours stay flat up to an edge.
+4. A mask-like texture (at least 60% of its texels at alpha 0 or within 1 of the peak; every texture the menus draw
+   is) takes its coverage through a smoothstep of half-width 0.22 about 0.5, `t = clamp((a - 0.28) / 0.44, 0, 1)`,
+   `a = t*t*(3 - 2t)`: crisp antialiased outlines. Any other texture keeps the resampled coverage.
+5. The alpha is the coverage times the peak; each channel rounded to the nearest level.
+
+It runs in double precision with the prototype's operations in its order and fused multiply-add off (`#pragma clang
+fp contract(off)`), so its output is the prototype's to the level: `tools/sprite_proto_check.py` on the 25 textures
+the main menu route dumps finds a largest difference of 0, the prototype's three inputs (font2, vram_a2 and strip2 of
+out/fe_tex/, the same pixels as three of the dumped inputs) included, and the prototype file itself run on those
+inputs gives the same bytes. One departure, for a case the menus do not draw: a texture whose alpha is 0 everywhere
+keeps its colour (resampled as if every texel covered) and alpha 0, where the prototype would turn it black. Hairline
+strokes thin out, as the prototype showed; the glyphs and logos come out crisp and smooth where nearest neighbour
+gives blocks.
+
+### In the backend
+
+- **The key.** `decoded_texture(memory, state, levels, upscale)` hashes a constant into the content key of an
+  upscaled texture, so the same texels drawn by a 3D draw are cached plainly beside it.
+- **The texture.** 4W x 4H RGBA8, one level, counted in the decoded bytes at that size: 2 MB for a 256x128 atlas,
+  16 MB for the one 512x512 CLUT8 picture the menus upscale. A draw's coordinates are normalised by the GE's size
+  (through mode: `uv_transform` divides by W and H) or by its texture scale (transformed), so the larger texture
+  samples in place and no uniform changes; `FragmentUniforms::level` is not set (one level). The shader is unchanged.
+- **The sampler.** Linear for magnification and minification whatever the GE's filter bits say (they were for one
+  texel a pixel), with the GE's wrap. At internal scale 4 a texel drawn one to a pixel covers 4 x 4 drawn pixels, each
+  sampling an output texel at its centre; at scale 1 a pixel samples between two output texels and the filter's blend
+  comes close to the original texel.
+- **The counts.** The line every 600 frames gains `..., D decoded, U upscaled (T ms)`; the exit line ends with
+  `...; U textures upscaled (T ms)` (after `in S s`, since `tools/purelib/logs.py` reads the line's counts up to
+  there): the textures upscaled and the time the scaler took for them. `PURE_METAL_TRACE`'s `texture_ms` includes the
+  scaler's time.
+- **The log.** `[pure] sprite upscale: off` at start when the option is off; `[pure] sprite upscale: on
+  (game.sprite_upscale)` at the first upscale.
+- **The dump.** `PURE_SPRITE_DUMP=DIR` writes each upscaled texture once, `DIR/<key>.src.png` (the decoded input) and
+  `DIR/<key>.png` (the output), the cache key in 16 hex digits, with the stb_image_write the framework vendors. The
+  pictures are the game's: the folder stays under `out/` and is never committed.
+
+### The checks
+
+Every tool run has the option off (`PURE_SPRITE_UPSCALE=0`, `tools/purelib/port.py`'s `original_pacing`, and
+`game.sprite_upscale=0` in a new scratch settings.ini), so the suite, the scale check and the HUD check measure the
+PSP's texels; `tools/gerec/metal_check.sh` sets it for its replays too, which run outside port.py (with the option on,
+its TEAM frames would differ from Vulkan's in 5.9% of pixels, over its 2% bar). `tools/sprite_check.sh` is the check
+with it on: title, main_menu, class_select, team_select, race_hud, tt_hud and fp_hud headless at internal scale 4 with
+the option off and on (`tools/frame_regress.sh --only`). Each capture with it on must be 1920x1088; reduced to 480x272
+by its blocks' centre pixels (scale_check's rule), within the scene's own limit of its reference at the scene's tol
+(the picture is the same picture); different from the capture with it off in at least 1% of its pixels at tol 24 (the
+detail is there); for the three race scenes, with the HUD found by `tools/hud_check.py` (not zone_hud, whose HUD has no
+CURRENT or LAP label); and the main menu run's exit line must count at least 2 upscaled textures in under 2000 ms.
+On 2026-10-11 (the task's build):
+
+| Scene | Reduced against the reference (limit) | Against the capture with it off |
+|---|---|---|
+| title | 0.0198 (0.05) | 0.0213 |
+| main_menu | 0.0411 (0.05) | 0.0359 |
+| class_select | 0.0621 (0.07) | 0.0583 |
+| team_select | 0.0585 (0.06) | 0.0689 |
+| race_hud | 0.0414 (0.10) | 0.0156 |
+| tt_hud | 0.0411 (0.12) | 0.0213 |
+| fp_hud | 0.0413 (0.11) | 0.0203 |
+
+The HUD was found in the three race scenes, and the main menu route upscaled 25 textures in 70 ms. The reduced
+pictures move towards their limits because the upscaled glyph is not the PSP's texel: a smooth edge where the
+reference has a stepped one. team_select is the closest (0.0585 of 0.06); with its ship picture at its plain value it
+would be about 0.054 (the ship's rectangle holds 1221 of its 7643 differing pixels with the option on, 574 with it
+off). At internal scale 1 with the option on the suite still passes 18/18 (main_menu 0.0392, class_select 0.0596,
+team_select 0.0544, the five race scenes within 0.011 of their measured values), though nine menu scenes move more than
+0.03 from theirs.
+
+### The cost
+
+The scaler at -O2 (the profile's build) on this Mac (M4 Pro), best of ten: 64x64 0.24 ms, 128x128 1.05 ms, 256x256
+4.45 ms, 512x512 18.2 ms. A route's total (headless): the frontend to flip 2200 14 textures in 46 to 53 ms, the main
+menu route 25 in 70 ms, a race route 49 in 123 to 129 ms. Each texture is upscaled once, when it is first decoded,
+and found in the cache after.
+
+A windowed race at internal scale 4 with the option on (`main_menu.txt` + `single_race.txt` without their shots on an
+empty memory stick, `PURE_PACED_FROM=6000`, to flip 9850, `PURE_METAL_TRACE`, read from flip 6250 for 60 s as in "The
+cost" above): 3601 frames in 60.1 s, mean 16.68 ms, 99th percentile 18.57 ms, longest 20.88 ms, none over 25 ms; on
+the screen 3601 pictures, interval mean 16.68 ms, longest 25.00 ms, none over. The race holds 60 fps; 51 textures
+were upscaled over the run, in 219 ms in all.
 
 ## The Metal shell
 
@@ -959,7 +1082,8 @@ clamp](history/metal-backend.md#the-colour-test-16-bit-writes-and-the-depth-clam
 
 - What the Metal shell leaves out ("The Metal shell"): frame interpolation, the Fill aspect, the touch controls, the
   performance overlay, and the menu's texture filter and texture-pack rows.
-- Texture packs, the Vulkan renderer's today: an enhancement, after fidelity (D-009). Drawing above 480x272 came
+- Texture packs, the Vulkan renderer's today: an enhancement, after fidelity (D-009); the next step of D-018 (task
+  074) writes the sprite upscale's output as one. Drawing above 480x272 came
   with task 066 ("Internal scale"), the menu's Resolution row for it and the Auto default with task 067.
 
 The race exercises neither `read_back_framebuffer` nor a block transfer from a target (its transfers come from

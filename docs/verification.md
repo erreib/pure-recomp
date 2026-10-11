@@ -10,6 +10,7 @@ the runs and before-and-after tables: [docs/history/verification.md](history/ver
 | frame regression | `tools/frame_regress.sh` | 18 scenes against PPSSPP, headless on Metal in about 25 s; the merge gate for renderer changes | "Frame regression suite" |
 | race HUD | `tools/hud_check.sh` | the race's HUD in 61 shots of the Metal window | "The race HUD check" |
 | flashes (E6) | `tools/flash_check.sh [--race]` | the enhancement E6 (task 070, D-016), the one check run with it on: the race-start fade at two vblanks for 57 flips with `PURE_SMOOTH_FLASHES=0` and none with 1, the race and its HUD in both (about 15 s headless); `--race` a swept Vineta K race with each, no two-vblank stretch with 1 and lap times within 5% (about 8 minutes) | docs/timing.md, "E6"; "Fast, silent test runs" |
+| sprite upscale (E7) | `tools/sprite_check.sh` | the enhancement E7 (task 073, D-018), the one check run with it on: seven scenes headless at internal scale 4 with `PURE_SPRITE_UPSCALE=0` and 1, each capture with 1 reduced to 480x272 within its scene's limit of the reference, different from the capture with 0 in at least 1% of its pixels, the HUD found in the three race scenes, the main menu's upscales under 2 s (about 40 s); `tools/sprite_proto_check.py DUMP` the scaler against its prototype on `PURE_SPRITE_DUMP`'s textures | docs/metal-backend.md, "Sprite upscale"; "Fast, silent test runs" |
 | frame rate (E4) | `tools/framerate_check.sh [--race]` | the enhancement E4 (task 072, D-017), the one check run with it on: the Time Trial route with `PURE_SIXTY_FPS=0` and 1, the frontend at two vblanks in both, the race at two vblanks and 30 flips a race-clock second with 0, one vblank and 60 with 1, the `[pure] sixty fps: on` line only from the race load, the HUD drawn (about 15 s headless); `--race` a swept Vineta K Time Trial with each: 30 against 60 flips a second, both game clocks within 1% of real time, the standing start within 5% or 10 km/h (about 7 minutes) | docs/timing.md, "E4"; "Fast, silent test runs" |
 | billboards | `tools/billboard_check.sh` | an advert screen shows the advert, not bars (task 063): headless on Metal in about 10 s, or `--backend vulkan --shell vulkan` | docs/fidelity.md, difference 15 |
 | Metal against Vulkan | `tools/gerec/metal_check.sh` | the two backends on the TEAM screen and the race, through ge_replay | docs/metal-backend.md, "The 3D check" |
@@ -23,7 +24,7 @@ the runs and before-and-after tables: [docs/history/verification.md](history/ver
 | trajectories, race clock pinned | `tools/ai_seed_check.sh` | the scorecard's trajectories on PPSSPP's race clock | docs/fidelity.md, difference 13 |
 | VFPU rounding | `tools/vfpu_probe.py`, `tools/vfpu_model.py` | the port's VFPU results against PPSSPP's and the PSP's rule | "The VFPU dot-product check" |
 | controls | `tools/controls_check.py` | docs/controls.md's tables against the framework's sources | docs/controls.md |
-| the Esc menu | `tools/menu_check.sh [--shell vulkan]` | the menu's rows (`PURE_MENU_DUMP`) against what this game and the shell have (task 064): no Network tab, no camera or mouse rows, Resolution first in both shells (task 067: the GE backend's scale), and in the Metal shell no frame-rate cap, performance, touch or texture rows and "Metal on"; the game's own rows (30 fps modes, Flashes) at the Video tab's end in both; about 25 s in the window | docs/controls.md, "Rows the menu leaves out" |
+| the Esc menu | `tools/menu_check.sh [--shell vulkan]` | the menu's rows (`PURE_MENU_DUMP`) against what this game and the shell have (task 064): no Network tab, no camera or mouse rows, Resolution first in both shells (task 067: the GE backend's scale), and in the Metal shell no frame-rate cap, performance, touch or texture rows and "Metal on"; the game's own rows (30 fps modes, Flashes, Text and sprites) at the Video tab's end in both; about 25 s in the window | docs/controls.md, "Rows the menu leaves out" |
 | the app | `tools/bundle.sh --check DIR` | the app bundle: signature, libraries, no game data, setup and a run | docs/release.md |
 | the Windows zip | `tools/bundle_windows.sh --check DIR` | the release folder: its files, its DLLs, no game data, setup and a run | docs/release.md, "Windows" |
 | the docs | `tools/docs_check.py` | every path, link, patch and task file the docs name exists | "The docs check" |
@@ -285,14 +286,17 @@ data directory:
   settings.ini holding `ui.menu_hint_seen=1` (the menu hint would sit over a window's first 12 s) and kept between
   runs, so pipeline caches persist. The game comes from `PURE_GAME_DIR` as before (`game/`, or the suite's and the
   sweep's own memory sticks). A suite and a sweep cell left the player's directory's mtimes unchanged.
-- The enhancements off (task 070, D-016; task 072, D-017): every run through `tools/run_boot.py` or
-  `tools/campaign_sweep.py` (so every tool's) has `PURE_SIXTY_FPS=0` and `PURE_SMOOTH_FLASHES=0` unless its caller
-  names the variable (`port.original_pacing`, called by `port.silence` and `port.steady_clock`; a new scratch data
-  directory's settings.ini also says `game.sixty_fps=0` and `game.smooth_flashes=0`), as the Metal runs are pinned to
-  internal scale 1: Time Trial, Free Play and Zone and the full-screen flashes keep the PSP's two vblanks a frame, so
-  the suites' scenes, the HUD check, the sweep and the audit measure the game as it was measured. `--env
-  PURE_SIXTY_FPS=1` or `--env PURE_SMOOTH_FLASHES=1` (run_boot) or the variable in a sweep's environment wins;
-  `tools/framerate_check.sh` and `tools/flash_check.sh` are the checks that run them on.
+- The enhancements off (task 070, D-016; task 072, D-017; task 073, D-018): every run through `tools/run_boot.py` or
+  `tools/campaign_sweep.py` (so every tool's) has `PURE_SIXTY_FPS=0`, `PURE_SMOOTH_FLASHES=0` and
+  `PURE_SPRITE_UPSCALE=0` unless its caller names the variable (`port.original_pacing`, over `port.ENHANCEMENTS_OFF`,
+  called by `port.silence` and `port.steady_clock`; a new scratch data directory's settings.ini also says
+  `game.sixty_fps=0`, `game.smooth_flashes=0` and `game.sprite_upscale=0`), as the Metal runs are pinned to internal
+  scale 1: Time Trial, Free Play and Zone and the full-screen flashes keep the PSP's two vblanks a frame and the Metal
+  backend draws the menus' and the HUD's bitmaps as the PSP's texels, so the suites' scenes, the HUD check, the sweep
+  and the audit measure the game as it was measured. `tools/gerec/metal_check.sh`, whose replays run outside the
+  runner, sets `PURE_SPRITE_UPSCALE=0` for them itself. `--env PURE_SIXTY_FPS=1`, `--env PURE_SMOOTH_FLASHES=1` or
+  `--env PURE_SPRITE_UPSCALE=1` (run_boot) or the variable in a sweep's environment wins; `tools/framerate_check.sh`,
+  `tools/flash_check.sh` and `tools/sprite_check.sh` are the checks that run them on.
 - One game at a time: the suite and the sweep refuse to start while another PureNative runs (task 032 saw a headless
   recording beside a windowed cell delay the cell's boot and break its menu route), naming the process, unless
   `--allow-parallel` is given. No tool passes it on its own; the headless suite's own results do not depend on timing
@@ -345,7 +349,8 @@ check's own times (not the wait for another worktree's game to end):
 | the Metal shell (`src/host/metal_shell.mm`), presenting, the window, the interface | `--shell metal --backend metal` and `tools/hud_check.sh`: the headless default never draws through a shell |
 | the Vulkan backend or shell (vendor renderer patches) | `--shell vulkan --backend vulkan` and `tools/hud_check.sh --shell vulkan` |
 | pacing, the kernel's clock, the input script, the follower | the headless suite, one window path (`--shell metal --paced`, paced from boot), and a sweep cell (`campaign_sweep.py single_race vineta_k --no-damage`) |
-| an enhancement (`src/profile/enhancements.cpp`, a game option of patch 0019-game-option-rows) | the headless suite (with the option off, as every tool runs), `tools/menu_check.sh` on both shells, and the option's own check with it on (E4: `tools/framerate_check.sh` and `--race`; E6: `tools/flash_check.sh` and `--race`) |
+| an enhancement (`src/profile/enhancements.cpp`, a game option of patch 0019-game-option-rows) | the headless suite (with the option off, as every tool runs), `tools/menu_check.sh` on both shells, and the option's own check with it on (E4: `tools/framerate_check.sh` and `--race`; E6: `tools/flash_check.sh` and `--race`; E7: `tools/sprite_check.sh`) |
+| the sprite upscale (`src/gpu/sprite_upscale.cpp`, its rule in metal_draw.mm) | `tools/sprite_check.sh`, `tools/sprite_proto_check.py` on a `PURE_SPRITE_DUMP` of the main menu route, the headless suite and `tools/scale_check.sh` (the option off: unchanged), and `tools/gerec/metal_check.sh` |
 
 The window paths capture the seven window scenes (task 069); a change that could move a menu in a window alone, such
 as the shell's scaling, runs `--all-scenes` once.
@@ -740,9 +745,9 @@ Every headless port run the runner starts has `PURE_NO_BUSY_CLOCK=1` (`port.stea
 the framework's busy-time charge made a headless run depend on the machine's load) unless its environment names the
 switch: `run_boot.py` without a window and without `--sound` (so the headless suite, `hud_check.sh --shell headless`
 and the scorecard's runs), the sweep's headless cells (the audit's too) and `--record-line`; a window or `--sound`
-keeps the charge, as a player has it. Every run, headless or not, has `PURE_SIXTY_FPS=0` and `PURE_SMOOTH_FLASHES=0`
-(`port.original_pacing`, tasks 072 and 070) unless its environment names them: the enhancements E4 and E6 off, so the
-runs pace the race as the PSP does.
+keeps the charge, as a player has it. Every run, headless or not, has `PURE_SIXTY_FPS=0`, `PURE_SMOOTH_FLASHES=0`
+and `PURE_SPRITE_UPSCALE=0` (`port.original_pacing`, tasks 072, 070 and 073) unless its environment names them: the
+enhancements E4, E6 and E7 off, so the runs pace the race and draw the bitmaps as the PSP does.
 
 The tools' own rules moved as they were; the module holds each of them, it did not merge them:
 - The environment. `run_boot.py` and the sweep start from the whole environment (the sweep keeps `PURE_SHELL`,
