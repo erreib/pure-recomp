@@ -100,3 +100,118 @@ also the base an AI pass can replace atlas by atlas later.
 - the Vulkan renderer draws a replacement at the wrong place or size (the reduced capture fails its limit while
   the no-pack one passes): report the scene and stop
 - a vendor change would be needed; a build takes over 5 minutes
+
+## Result
+
+Status: DONE
+
+The branch has four commits plus this Result: 12cce3e (the pack dump), c3c4a15 (`tools/sprite_pack.sh`), 1a9818a
+and 19b4f13 (the docs; 19b4f13 corrects figures after the Verify run and touches only the docs).
+
+- **The pack dump** (metal_textures.mm). `dump_sprite` now takes the guest memory. It keeps task 073's
+  `<key>.src.png` and `<key>.png`, and also writes `DIR/pack/<key>.png` with the line `<key> = <key>.png` under
+  `[hashes]`. The key is the framework's `compute_texture_pack_key(memory, state, 0, options, ...)`, formatted by
+  `format_texture_pack_key`, with `hash` xxh64 and `ignoreAddress` true. textures.ini is written when the folder is
+  first used: a comment, `[options]` (version, hash, ignoreAddress), `[games]` `UCUS98612 = true`, then `[hashes]`. A key
+  already present, from this run or an earlier PNG in the same folder, is skipped. A key the function refuses is logged
+  once and left out; none were refused on these routes. The dump still runs only when the switch is set.
+- **The keys match the Vulkan renderer's** (acceptance 2). The main menu route ran under the Vulkan renderer with
+  `PURE_TEXTURE_DUMP` (no pack loaded, so `kDumpOptions`: xxh64, ignoreAddress). That dump wrote 316 originals. All 11
+  pack keys the Metal backend writes on the same route are among them:
+  - font CLUT4 256x128 (task 073's `font2`): `0000000038d957c250811edd`
+  - font CLUT4 256x256: `0000000032e401a19c4925fa`
+  - art atlas CLUT8 256x128 (`vram_a2`): `00000000d2df1e257fb392ca`
+  - the 512x512 CLUT8 picture and the 256x32 strip (`strip2`) also match.
+
+  The Vulkan dump's PNGs of the three named textures equal the Metal backend's decoded inputs exactly (imgdiff tol 0).
+  The 25 textures the Metal backend upscales on the main menu route reduce to 11 pack keys. The menus keep up to twelve
+  identical copies of the art atlas at different VRAM addresses, and with ignoreAddress they share one key. The input
+  PNGs are identical, so the collapse is correct.
+- **`tools/sprite_pack.sh [--out DIR] [--check] [--pack DIR] [--wait SECONDS]`**. The build runs the suite's 18 scenes'
+  routes (44 keys), then the Single Race and the Time Trial on Vineta K to their results screens (`campaign_sweep.py
+  --no-damage`, about 3.5 minutes each, 2 keys each). The result is 48 keys, 3.5 MB, in `out/sprite_pack/pack`. A Zone
+  cell to its end panel added no key, so it is not run. Free Play's session end and the Tournament standings are not
+  run. `--check` installs the pack in `DIR/check/data/textures/UCUS98612`, a fresh scratch data directory. It then
+  runs `frame_regress.sh --shell vulkan --backend vulkan --only main_menu,race_hud` twice: with `PURE_TEXTURE_PACK=0`,
+  and with `=1` plus `PURE_TRACE_TEXTURE_PACK=1`. To confirm the pack opened, the check reads the trace log rather than
+  adding a mode to the port (the brief offered both). The Vulkan window captures at 960x544 and the check reduces by
+  the centre pixel of each 2x2 block. `--pack DIR` checks without building and is the only mode on Windows.
+  The figures (identical in two check runs):
+
+  | scene | with vs without the pack | without, reduced | with, reduced | limit | HUD |
+  |---|---|---|---|---|---|
+  | main_menu | 0.0232 | 0.0401 | 0.0446 | 0.05 | - |
+  | race_hud | 0.0116 | 0.0647 | 0.0638 | 0.10 | found |
+
+  In both runs the renderer logged `48 textures from .../textures/UCUS98612`, uploaded 33 distinct pack pictures for
+  draws, and replaced 129795 draws. Every picture sits in the right place at the right size (checked by eye in the two
+  captures).
+- **Acceptance 3.** `tools/sprite_check.sh` and the headless `tools/frame_regress.sh` give the same figures as task 073
+  and the suite's measured column (Verify, below). `tools/menu_check.sh` and `--shell vulkan` both PASS. The plain
+  Vulkan window main_menu scored 0.0331 against its measured 0.033.
+- **Acceptance 4.** `git status` is clean. Every PNG is under out/ and none is committed.
+
+Changed:
+- src/gpu/metal_textures.mm, src/gpu/metal_backend.hpp
+- tools/sprite_pack.sh (new)
+- docs/metal-backend.md ("The texture pack (task 074)", the Files row, the dump bullet), docs/windows.md (the rig
+  checklist's pack bullet), docs/release.md ("The texture pack (task 074)"), docs/verification.md ("Which path" row),
+  README.md (the tools row, `PURE_SPRITE_UPSCALE` and `PURE_SPRITE_DUMP` rows), docs/tasks/074-sprite-pack.md (this
+  Result)
+
+Verify output (`tools/verify_task.sh 074`, at 1a9818a, log out/074_verify.log, last 20 lines):
+```
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 21s)
+docs_check: 33 files, 0 findings: PASS
+verify 074: PASS
+```
+The same run's sprite_pack and sprite_check lines:
+```
+the pack: 48 keys (at least 40), hash xxh64, 0 named files missing: PASS
+drawn: 33 distinct images of the pack uploaded for draws (at least 10), 33 decoded, 129795 draws replaced in the traced 60-frame windows: PASS
+main_menu    960x544    0.0232    0.0401   0.0446   0.05   24    -  PASS
+race_hud     960x544    0.0116    0.0647   0.0638    0.1   32  yes  PASS
+sprite_pack: PASS
+main_menu run: 25 textures upscaled in 64.3 ms (at least 2, under 2000 ms): PASS
+sprite_check: PASS
+```
+
+Open questions:
+1. Verify took about 10 minutes: sprite_pack 8m 17s, of which the two paced sweep races were about 7 minutes and
+   added 4 small keys. That is past the 10-minute limit of a single foreground tool call, so Verify ran in the
+   background with nothing else running and was waited on. The earlier pieces each ran in the foreground. The window
+   runs took 10 to 15 s each in Verify but 48 to 55 s in an earlier check run, so the tool's time varies. If the race
+   cells are not worth 7 minutes, they could move behind an option.
+2. race_hud's change with the pack is 0.0116, just over the 1% bar. At 960x544 and internal scale 2 only the HUD
+   differs. It matched to four decimals in two runs, but there is little margin.
+3. Twelve of the 48 keys are one CLUT4 32x16 picture (texels hash `cd0aa2c1`) under palettes the game animates. Which
+   twelve a build catches varies; the other 36 were the same in three builds. The Vulkan run drew 2 of the twelve.
+   Without them the pack would hold 36 keys, under the 40 the check asks for.
+4. Seen by eye in the Vulkan capture: the main menu's top-right logo loses its thin white inner stripes, and the small
+   "V5.0 //2197" text thins. This is the scaler's hairline thinning that task 073 noted, now visible at 2x. It is not
+   a pack issue, but Erik may want to look before an AI pass.
+5. Not tested: the app's own `PURE_SPRITE_DUMP` (docs/release.md says so), and the script's Windows path handling
+   (`cygpath -m` for paths given to Python and the game; frame_regress's `--env` arguments rely on Git Bash's argument
+   conversion, as the other tools do).
+6. The Text and sprites row's help in src/profile/enhancements.cpp, outside this task's files, still says the Vulkan
+   renderer draws the originals "until a texture pack exists". It could now point to the Texture pack row.
+7. For a 512-tall texture drawn in through mode, the loader hashes only the rows its draws use, and the dump hashes the
+   whole texture. Task 073 found that through mode reaches only three small textures in the frontend route, so this
+   should not matter here, but it was not checked texture by texture (docs/metal-backend.md).

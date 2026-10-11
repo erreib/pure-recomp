@@ -146,6 +146,28 @@ sink sets the device's gain to 0). The setting has no environment variable, so t
 reach the app through `open` as well. The check does not use `PURE_NO_AUDIO`, which would leave the audio device
 closed; with Mute the app opens it as a player's app does. The setup run opens no audio device.
 
+## The texture pack (task 074)
+
+The Metal backend upscales the menus' and the HUD's bitmap art at decode (E7, docs/metal-backend.md "Sprite upscale");
+the Vulkan renderer, the Windows release's and the Vulkan path's from the app, draws the same art from a texture pack in
+PPSSPP's format instead. The pack holds the game's art, so it is in neither the app nor the zip: the player makes it
+from their own disc, on a Mac, since the scaler is the Metal backend's.
+
+- **Making it** (macOS, a checkout of this repository with the game set up by `tools/setup_game.sh`):
+  `tools/sprite_pack.sh` (about 8 minutes, headless; docs/metal-backend.md "The texture pack") writes
+  `out/sprite_pack/pack`, `textures.ini` and 48 PNGs, 3.5 MB; `tools/sprite_pack.sh --check` also checks it in the
+  Vulkan window. The app reads the same switch the tool uses, `PURE_SPRITE_DUMP=DIR` with Text and sprites at
+  Upscaled (`DIR/pack` collects the art of every screen played), but that was not tried with the app.
+- **Installing it**: the folder goes into the data directory as `textures/UCUS98612`
+  (`~/Library/Application Support/pure-recomp/PureNative/textures/UCUS98612/`, on Windows
+  `%APPDATA%\pure-recomp\PureNative\textures\UCUS98612\`), or in the game under the Vulkan shell: Esc, Video, Import
+  texture pack…, and the folder chosen; the screen finds the pack in it, checks it and copies it there, keeping a pack
+  it replaces in `textures/.backup/`. Open the textures folder (the same tab) shows where packs go.
+- **Using it**: the Video tab's Texture pack row (`video.texture_pack`, on by default) turns it on and off and notes
+  what is loaded (`48 textures, ...`). The Text and sprites row does nothing under the Vulkan renderer (its help says
+  so); the Texture pack row is the switch there. Under the Metal shell neither the Texture pack row nor the import is
+  offered: the Metal backend upscales by itself and draws no pack.
+
 ## Limits
 
 - The app is signed ad hoc and not notarized: on another Mac Gatekeeper asks the player to allow it once (Privacy &

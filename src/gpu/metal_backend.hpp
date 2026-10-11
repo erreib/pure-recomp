@@ -110,7 +110,7 @@ private:
     void read_sprite_upscale(bool at_start);
     id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state, std::uint32_t levels,
                                    bool upscale);
-    void dump_sprite(std::uint64_t key, const TextureState &state);
+    void dump_sprite(const GuestMemory &memory, std::uint64_t key, const TextureState &state);
     static void set_level_rule(const TextureState &state, std::uint32_t levels, FragmentUniforms &fragment);
 
     // Pipelines: fragment-function variants, render and depth-stencil states, the pre-warm list (metal_pipelines.mm)
@@ -242,11 +242,15 @@ private:
     std::uint64_t texture_clock_{};
     std::vector<std::uint32_t> pixels_;
     // The sprite upscale (task 073): game.sprite_upscale as read at the last frame (read_sprite_upscale()), whether its
-    // `on` line was said, the last upscaled texture's texels, and the keys PURE_SPRITE_DUMP has written.
+    // `on` line was said, the last upscaled texture's texels, and the keys PURE_SPRITE_DUMP has written; with it the
+    // texture pack of task 074 in its pack/ folder, keyed as the framework's pack loader keys a texture (the folder and
+    // its textures.ini made at the first entry).
     bool sprite_upscale_{};
     bool sprite_upscale_said_{};
     std::vector<std::uint8_t> upscaled_;
     std::set<std::uint64_t> sprites_dumped_;
+    std::set<std::string> pack_keys_;
+    bool pack_ready_{};
     std::vector<GpuVertex> vertices_;
     std::vector<GpuVertex> sprite_sources_;
     std::size_t sprite_corners_{};  // of a transformed sprite draw: vertices_ holds its sources after them
