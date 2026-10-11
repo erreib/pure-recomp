@@ -151,17 +151,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   measured Vulkan column unchanged (largest delta +0.0172). Steps 2 to 4 are worker tasks to brief; `tools/worktree_init.sh` needs
   its Windows pass before workers run in parallel here. Task 062 (2026-10-09, merged 1589688) did the simplification task from task
   049's list, proven by `tools/refactor_check.sh`; the organisation work is complete. Next: the enhancements (D-009).
-- **The app.** Repacked 2026-10-10 from 4521003 (`tools/bundle.sh`, then `tools/bundle.sh --check out/repack-1009`:
-  PASS, all checks): out/release-macos/stage/Wipeout Pure.app, 0.1.0-4521003, 88 MB, with the reverb, the
-  PSP-format saves, the VFPU rounding and tasks 049 to 062. The build Erik played on 2026-10-09 was the 2026-10-07
-  pack (task 042's). His two observations from it: frame dips at the race start and at a bomb (the game's own
-  two-vblank flash rule, docs/fidelity.md; a traced play would tell a pre-warm miss or the depth wait from it), and
-  the advert screens showing flat colour with bars instead of an advert: a real difference (2026-10-10; my first
-  check compared the pillar strips, which PPSSPP draws as bars too, not the big screens, where PPSSPP and a video
-  show the advert's picture). Cause found: both backends clamp a target-texture's coordinate where the GE's REPEAT
-  wraps it, so the screens showed the advert's first row stretched. Fixed by task 063 (merged 08b57e2, 2026-10-10) in both
-  backends (the Metal shader; patch 0015-vulkan-fb-texture-wrap), checked by the new `tools/billboard_check.sh`
-  (docs/verification.md); docs/fidelity.md difference 15. The app is not repacked with it yet.
+- **The app.** Repacked 2026-10-11 from 012631c (`tools/bundle.sh --zip`, then `tools/bundle.sh --check out/repack-070`:
+  8 checks PASS; out/repack-070.log): Wipeout Pure 0.1.0-012631c at out/release-macos/stage, the zip in
+  out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix and E6 (the Flashes
+  row, Smooth by default; a settings.ini an earlier build wrote lacks the key and so reads the default).
 - **The Esc menu** (D-014, task 064, merged b92537a 2026-10-10): rows gated by the game's features and the
   shell's (patch 0016-menu-rows-by-capability); four tabs, no camera, mouse-camera, touch (Metal) or network rows;
   `tools/menu_check.sh` keeps the lists. Follow-ups: the bindings list's framework labels ("Move forward", four
