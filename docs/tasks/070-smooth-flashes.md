@@ -1,0 +1,159 @@
+# 070: A steady frame rate through the full-screen flashes (E6)
+
+Milestone: E6 (Erik, 2026-10-11; D-016) | Branch: task/070-smooth-flashes | Status: OPEN
+
+## Goal
+Every race drops to 30 fps for 0.4 to 1.9 s at a time: at the race-start fade, when a weapon goes off near the
+camera (a bomb, a mine, a missile), when the ship is put back on the track. That is the game's own rule, not the
+port's (docs/fidelity.md "The two-vblank stretches: the game's own rule"; docs/timing.md step 5): the full-screen
+flash object FxScreen (`FUN_0882da04`) stores 2 to the frame object's countdown at `+0x117c` on every frame its
+effect runs, and the end-of-frame routine `FUN_0886511c` waits two vblanks a frame while that countdown is not 0 or
+the mode's lock byte at `+0x116c` is 0. The game's simulation integrates a measured dt (`FUN_08804390`, from
+`sceKernelGetSystemTimeWide`, capped at 0.067 s), so the wait does not set the race's speed. After this task the
+port clears that countdown each frame in the free-running modes (`+0x116c` is 1: Single Race, Tournament), behind an
+Esc-menu row that is on by default, and the checks run with it off so every measured scene stays where it was.
+
+## Read first
+- CLAUDE.md, docs/decisions.md (D-014, D-015, D-016: the decision this task carries out), docs/timing.md (step 5,
+  "The two lock fields", "The game's clock in a race"), docs/fidelity.md ("The two-vblank stretches"),
+  docs/history/fidelity.md ("What writes the two fields": the frame object is the one `DAT_08a8e960` points to;
+  every writer of the two fields), README.md (the switches tables: `PURE_INTERNAL_SCALE`, `PURE_PACED_FROM`,
+  `PURE_TRACE_CALLS`, `PURE_WATCH_SHIP`)
+- src/profile/pure_profile.cpp (`wrap_flip_counter`: the pattern for wrapping a bound HLE call; `register_pure_hle`:
+  the order things are bound in), src/profile/test_hooks.cpp (`wrap_call_traces`, `find_player_ship`: reading guest
+  memory from a hook; `load32`, `load8`, `store32` on `rt.memory()`)
+- patches/README.md, patches/0016-menu-rows-by-capability.patch and patches/0017-internal-scale-by-backend.patch
+  (how a game-facing menu row and its setting were added), docs/upstream.md, `tools/patches.sh` (export, check)
+- vendor/portablekit/host/profile.hpp (`GameProfile`, `MenuFeatures`), host/settings/settings.hpp and settings.cpp
+  (the `Settings` struct, the key table around `video.internal_scale`: parse, save, the `<prefix>_<NAME>` variable,
+  `overridden_by`, `defaults_for`), host/ui/menu.cpp (`Menu::video`, `section`, `choice_row`, `options_for`,
+  `cycle`, the `<prefix>_MENU_DUMP` lines), host/hle/hle_media.cpp (the `sceGeDrawSync` handler)
+- tools/menu_check.sh (the expected rows per tab), tools/purelib/port.py (`clean_env`, `steady_clock`,
+  `SCRATCH_SETTINGS`; every tool runs the game through it), tools/run_boot.py (the internal-scale pin and `--env`),
+  tools/frame_regress.sh (the race_hud row: `main_menu.txt+single_race.txt`, flip 6016), tools/fidelity_audit.py
+  (`scan_log`, `STRETCH_MIN`, `TWO_VBLANK_US`, `stretch_of`: the two-vblank stretch rule; `run_cell`),
+  tools/campaign_sweep.py (its usage: a Single Race cell, `--no-damage`, the follower fires pickups), tools/hud_check.py,
+  docs/verification.md ("Which path for which change"), docs/controls.md ("Rebinding", "In settings.ini": where the
+  menu's rows are documented)
+
+## Deliverable
+Two commits on the branch, in this order.
+
+**1. The framework patch `patches/0019-game-option-rows.patch`** (generic: nothing in it names this game).
+- `host/profile.hpp`: a `GameOption` (`key` as in settings.ini without the `game.` prefix, lower snake case; `label`,
+  the row's text; `choices`, a span of texts, the row cycles through them; `description`, the help text; `default`,
+  an index into choices; `tab`, which of the menu's tabs shows it) and `std::span<const GameOption> options` on
+  `GameProfile` (empty by default).
+- `host/settings/`: each option's value kept as an index (`std::uint32_t`), read and written in settings.ini as
+  `game.<key>=<index>` (an index out of range, or a key the game has no option for, reads as the default and is
+  dropped on save), the default from the option, a run-time variable `<prefix>_<KEY>` (the key upper-cased:
+  `PURE_SMOOTH_FLASHES`) that overrides it for the run as `<prefix>_INTERNAL_SCALE` does `video.internal_scale`
+  (`overridden_by("game.<key>")` names it, so the menu row shows "Set by ..." and is disabled), and an accessor
+  `settings::game_option(const char *key)` returning the current index (the default for an unknown key). Reading
+  the accessor each frame must be cheap (a lookup by key in a small table is fine).
+- `host/ui/menu.cpp`: at the end of each tab that has options, a `section("Game")` with one `choice_row` per
+  option (`options_for("game.<key>", description)`), saving on change. The dump lines list the rows as the others
+  are listed. No option, no section.
+- Exported with `tools/patches.sh export 0019-game-option-rows`; `tools/patches.sh check` says 19 patches reproduce
+  the vendor; patches/README.md gets its row; docs/upstream.md its candidate line.
+
+**2. The option, the hook, the pin, the check, the docs** (commit two).
+- `src/profile/pure_profile.cpp` (or a new `src/profile/enhancements.cpp` declared in a header and listed in the
+  build, if the profile file would grow past its purpose; the test hooks file is for test switches, not for this):
+  the option table for this game, one entry: key `smooth_flashes`, label `Flashes`, choices `Original`, `Smooth`,
+  default `Smooth` (index 1), tab Video, description along the lines of "The PSP halves the frame rate while a
+  full-screen flash plays: the race-start fade, a weapon going off near you, your ship put back on the track.
+  Smooth keeps the race's frame rate through them. The game's speed is the same either way (it measures time).
+  Time Trial, Free Play and Zone run at 30 fps on the PSP and still do."
+- The hook: wrap the bound `sceGe_user` `sceGeDrawSync` (NID 0xB287BD61; `hle.bound_function` then `hle.bind`, as
+  `wrap_flip_counter` does for the flip) so that, when `settings::game_option("smooth_flashes")` is 1, before the
+  original runs: read the frame object pointer at `0x08A8E960`; if it points into user RAM (0x08800000 to
+  0x0A000000) and `load8(obj + 0x116c) == 1`, `store32(obj + 0x117c, 0)`. Nothing else: when the byte is 0 (the
+  30-fps modes, the frontend) the field is left alone. Log once, at the first clear, `[pure] smooth flashes: on
+  (game.smooth_flashes)`, and once if the option is off at start `[pure] smooth flashes: off`.
+- Confirm the readers of `+0x117c`: the fidelity audit listed its writers; list every load of the field in
+  `generated/` (the offset 4476 on the frame object, as the audit found the stores) and name them in the Result.
+  If any reader other than `FUN_0886511c` acts on it, say what it does; if it would change behaviour, BLOCKED.
+- The pin: `tools/purelib/port.py` gets `original_pacing(env)` (or a name of your choice in the same style as
+  `steady_clock`): `env.setdefault("PURE_SMOOTH_FLASHES", "0")`, called wherever `steady_clock` or `silence` is
+  called so that every tool's run (run_boot, campaign_sweep, fidelity_audit, scorecard, the shell scripts that go
+  through run_boot) has it unless the caller sets the variable. `tools/run_boot.py --env PURE_SMOOTH_FLASHES=1`
+  must win over the pin (read `--env` first, as the internal-scale pin does). Also add `game.smooth_flashes=0` to
+  `SCRATCH_SETTINGS` so a scratch data directory's settings.ini says the same.
+- `tools/flash_check.sh [--race] [--shell S] [--backend B]`, in the shape of `tools/billboard_check.sh`:
+  - default: the race-start fade. Two headless runs of `main_menu.txt+single_race.txt` to flip 6100 with
+    `PURE_TRACE_CALLS=sceDisplay:0x289D82FE` (a `[call]` line per flip with `t=`) and `PURE_WATCH_SHIP=1`, one with
+    `--env PURE_SMOOTH_FLASHES=0` and one with `1`. For each, count the flips between 5600 and 6100 whose `t` is
+    more than `TWO_VBLANK_US` (fidelity_audit's constant; about 25 ms) after the previous flip's, and the longest
+    run of them. PASS when the run with 0 has a run of at least 50 such flips (the 57-flip fade; the fade's
+    start may move by a few flips) and the run with 1 has at most 2 in all between the fade's start and 6100, and
+    both runs print a `[pure] ship frame` line with `clock=` above 0 by flip 6100 (the race runs). Dump a frame at
+    6100 in the run with 1 and pass it through `tools/hud_check.py` (the HUD is drawn). Print the counts, the
+    longest runs and the wall time of the fade in both runs (with the option on, the fade should take about the
+    same seconds and about twice the flips).
+  - `--race`: two Single Race cells of Vineta K through `tools/campaign_sweep.py single_race vineta_k --no-damage`
+    (headless, the sweep's defaults), one with `PURE_SMOOTH_FLASHES=0` in the environment and one with `1`,
+    their logs scanned with fidelity_audit's rule (import `scan_log` from tools/fidelity_audit.py, as it imports
+    campaign_sweep; do not copy the rule): PASS when the run with 1 has 0 stretches, and the mean lap time of the
+    run with 1 is within 5% of the run with 0 (the race's speed unchanged; the follower drives the same table).
+    Print both runs' stretches and lap times. Record the two runs' figures in the task's Result.
+  - exit 0 on PASS; `flash_check: PASS ...`/`FAIL ...` as the last line.
+- `tools/menu_check.sh`: the expected Video rows of both shells gain `Flashes` where the row appears (the menu's
+  dump order); the check passes on both shells.
+- Docs: README.md (the switches table: `PURE_SMOOTH_FLASHES=0|1`, the tools table: `tools/flash_check.sh`),
+  docs/timing.md (a short section "E6: the flash lock cleared (task 070)" pointing at D-016 and the hook),
+  docs/fidelity.md (the two-vblank section's last sentence: the enhancement exists, task 070, off in the checks),
+  docs/controls.md (the Flashes row and `game.smooth_flashes` where the Video rows are described),
+  docs/verification.md (the pin: every tool run has the option off; `tools/flash_check.sh` is the check that has
+  it on), docs/release.md (settings.ini: `game.smooth_flashes`, default 1), patches/README.md and docs/upstream.md
+  (commit one). `python3 tools/docs_check.py` passes.
+
+## Acceptance criteria
+- [ ] `tools/patches.sh check` reports 19 patches reproducing vendor/portablekit at 8b0c3fe; the patch names no
+      game, no key, no label of this game
+- [ ] `tools/flash_check.sh` PASS: the fade's two-vblank flips at least 50 with the option off, at most 2 with it on,
+      the race runs and the HUD is drawn in both
+- [ ] `tools/flash_check.sh --race` PASS: 0 stretches with the option on, lap times within 5% of the run with it off
+- [ ] `tools/menu_check.sh` and `tools/menu_check.sh --shell vulkan` PASS with the Flashes row expected
+- [ ] `tools/frame_regress.sh` PASS 18/18 (headless, the pin on) and `tools/hud_check.sh` 61 of 61: unchanged
+- [ ] a 2200-flip frontend run (`tools/run_boot.py --frames 2200 --pad config/pad_scripts/main_menu.txt`) prints
+      `[pure] smooth flashes: off` and no `smooth flashes: on` line; the same with `--env PURE_SMOOTH_FLASHES=1`
+      prints `on` only once a race starts (the frontend's byte is 0), which `flash_check.sh` shows
+- [ ] every reader of `+0x117c` in `generated/` named in the Result
+- [ ] `python3 tools/docs_check.py` passes
+
+## Verify
+`tools/patches.sh check && tools/flash_check.sh && tools/flash_check.sh --race && tools/menu_check.sh && tools/menu_check.sh --shell vulkan && tools/frame_regress.sh && python3 tools/docs_check.py`
+
+## May touch
+- patches/0019-game-option-rows.patch (new, through `tools/patches.sh export`), patches/README.md, docs/upstream.md
+- vendor/portablekit/host/profile.hpp, host/settings/settings.hpp, host/settings/settings.cpp, host/ui/menu.cpp
+  (only through the patch; `tools/patches.sh check` must pass)
+- src/profile/pure_profile.cpp, src/profile/pure_profile.hpp if present, a new src/profile/enhancements.{cpp,hpp}
+  and the CMake list that builds src/profile
+- tools/flash_check.sh (new), tools/menu_check.sh, tools/purelib/port.py, tools/run_boot.py
+- README.md, docs/timing.md, docs/fidelity.md, docs/controls.md, docs/verification.md, docs/release.md,
+  docs/tasks/070-smooth-flashes.md (the Result)
+
+## Must not touch
+- include/psprecomp/, generated/, config/, src/gpu/, src/host/, src/profile/test_hooks.*, the other patches,
+  tools/fidelity_audit.py, tools/campaign_sweep.py, tools/frame_regress.sh, tools/hud_check.sh, ref/, docs/decisions.md,
+  docs/status.md, anything not listed above
+
+## Estimated turns
+60
+
+## Escalate when
+- `sceGeDrawSync` is not called once per frame before the pacing step (the trace shows otherwise), or clearing the
+  field at that point does not take the free path (the fade keeps its two-vblank flips with the option on)
+- a reader of `+0x117c` other than the end-of-frame routine acts on it
+- the lap times with the option on are not within 5% of the run with it off (the game's speed moved: stop, report
+  the figures, do not tune)
+- the settings code has no place for a per-game key without reworking its table (report the shape you would need)
+- a build takes over 5 minutes, or the change needs include/psprecomp/ or generated code
+
+## Result
+(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+
+## Review
+(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

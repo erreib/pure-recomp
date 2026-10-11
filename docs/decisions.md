@@ -17,6 +17,7 @@
 | D-013 | 2026-10-07 | VFPU dot products round as the real PSP does (pspautotests' truncating rule); PPSSPP's fused chain is a test-only mode for the scorecard's comparisons | accepted (Fable; Erik informed) |
 | D-014 | 2026-10-10 | The Esc menu shows only what this game and this shell can do; enhancements are open (D-009's condition met) | accepted (Erik) |
 | D-015 | 2026-10-10 | E3 opens: the Metal shell draws at the display's pixels and the Metal backend draws at an internal scale, effects buffers at 1x | accepted (Erik) |
+| D-016 | 2026-10-11 | E6: the race keeps its frame rate through the full-screen flashes (the game's two-vblank lock cleared in the 60-fps modes), a game option row in the Esc menu, on by default; the checks run with it off | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -245,3 +246,36 @@ to 480x272 differs from the S = 1 capture by at most 5% of pixels at tol 24, the
 race holds 60 fps at S = 4 on this Mac.
 Status: accepted (Erik).
 
+## D-016  2026-10-11  E6: a steady frame rate through the full-screen flashes
+Context: Erik's playtest: the frame rate dips at the start of a race and in effects-heavy moments, a bomb going off
+for one. The fidelity audit traced both to the game's own rule (docs/fidelity.md "The two-vblank stretches",
+docs/timing.md step 5): the full-screen flash object FxScreen sets the frame object's countdown (`+0x117c`) to 2 on
+every frame it runs, and the end-of-frame routine then waits two vblanks a frame. The race-start fade, a weapon
+going off near the camera and the ship being put back on the track are flashes, so the race runs at 30 fps for 0.4
+to 1.9 s each time, on the PSP and in PPSSPP too. The game's physics, camera and timers integrate a measured dt
+(FUN_08804390, from the system clock, capped at 0.067 s), so the race's speed does not depend on the wait; the wait
+was there for the PSP's fill rate.
+Decision (Erik): the port offers the race without that lock, as the enhancement E6, before the other enhancements:
+1. In the free-running modes (the frame object's `+0x116c` is 1: Single Race and Tournament) the countdown is cleared
+   each frame before the end-of-frame routine reads it, so a flash frame waits for the GE and the vblank like any
+   other. The 30-fps modes (`+0x116c` 0: Time Trial, Free Play, Zone) are untouched: their 60 fps is E4's question
+   (per-frame logic), not this one.
+2. The hook is the port's, in the profile, at an HLE call the end-of-frame routine makes before its pacing step
+   (`sceGeDrawSync`, step 1), reading and writing the two fields in guest memory: no generated code is changed, no
+   game bytes are kept.
+3. The player's switch is a row in the Esc menu, through a generic framework patch (the pattern of
+   0016-menu-rows-by-capability and 0017-internal-scale-by-backend): a game lists its options in `GameProfile`
+   (key, row label, choices, help, default, tab), the framework stores each as `game.<key>` in settings.ini with a
+   `<prefix>_<KEY>` variable for the tools, and the menu draws them in a "Game" section of the tab the option names.
+   E4 and E5 will use the same rows. For this game the row is "Flashes", choices "Original" (the PSP's half rate)
+   and "Smooth", default Smooth (`game.smooth_flashes=1`, `PURE_SMOOTH_FLASHES`).
+4. The checks measure the PSP's behaviour: every tool run through `tools/purelib/port.py` sets
+   `PURE_SMOOTH_FLASHES=0` unless the caller names it (as the Metal runs are pinned to internal scale 1), so the
+   scene flips of the suites, the HUD check and the sweep stay where they were measured. `tools/flash_check.sh`
+   is the one check that runs with the option on.
+Consequences: task 070. The exit: on the Vineta K start route the race-start fade's 57 two-vblank flips become at
+most 2 with the option on and stay at 57 with it off; a swept Single Race with the option on has no two-vblank
+stretch, and its lap times are within 5% of the same race with it off (the game's speed unchanged); the menu dumps
+of both shells show the row; the headless suite, the HUD check and a 2200-flip frontend run are unchanged with the
+option off.
+Status: accepted (Erik).
