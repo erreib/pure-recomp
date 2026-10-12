@@ -64,6 +64,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0019-game-option-rows | (task 070) | Missing feature | candidate | A game's own settings as menu rows: `GameProfile::options` (`GameOption`: key, label, choices, help, default, tab), each kept as an index in settings.ini (`game.<key>`), `<prefix>_<KEY>` deciding it for a run, `settings::game_option(key)` for the port, and a Game section at the end of the tab it names; no option, no section |
 | 0020-vulkan-texture-detail | (task 076) | Fidelity, enhancement | candidate, behind a profile field | Texture detail at the internal scale in the Vulkan renderer, as the Metal backend draws it: with the game option `GameProfile::texture_detail_option` names at 1, a draw that samples a texture with mip levels and is not a 2D draw has the GE's D lowered by 16 x log2 of its target's scale whatever the rule, and `ge.frag` samples that level through the coordinates' own gradients (`textureGrad`, `texture_params.x` bit 21) with an anisotropic sampler (`samplerAnisotropy`, at most 16 taps); no option named, or the option at 0, draws as before |
 | 0021-vulkan-async-readback | (task 077) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
+| 0022-vulkan-cached-window-capture | (task 078) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -480,3 +481,12 @@ one frame that needs a bigger buffer than the first's drains as before. The conv
 `store_depth`, the copy `record_depth_copy`, both shared with the synchronous path, which `<prefix>_SYNC_READBACK=1`
 restores exactly. The start-up line says which (`a frame late` or `synchronous`). Upstream: a candidate; the one-frame
 lag is what a game's CPU depth test sees, so a framework would want it per game or documented.
+
+### 0022-vulkan-cached-window-capture
+Task 078. The input script's `shot` (a window capture, `write_capture`) copied the swapchain image into a buffer from
+`find_memory_type(HOST_VISIBLE | HOST_COHERENT)`, the first such type, which on NVIDIA is uncached, and `write_bmp`
+then read it a byte at a time: 110 to 160 ms a capture on the rig, a long frame at every scripted shot (the "first-use
+present hitches" task 078 was opened for). The buffer now comes from a HOST_VISIBLE | HOST_COHERENT | HOST_CACHED type
+when the device has one (type 4 on the RTX 3080), else as before; no invalidate is needed since the type is coherent.
+Measured: fence wait 1.5 to 3.3 ms, read, convert and write 1.6 to 2.5 ms. The BMP is the same bytes. Upstream: a
+candidate; any discrete GPU's captures.
