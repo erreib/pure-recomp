@@ -63,6 +63,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0018-vulkan-effects-at-1x | (task 068) | Fidelity | candidate, behind a profile switch | Each Vulkan target the size its stride gives (D-015, as the Metal backend draws): the internal resolution for a buffer at least 480 pixels wide, 480x272 for a narrower one (the bloom's buffers, the billboards'), so the bloom's blur and glow stay the PSP's at any scale; every pass, viewport, scissor, copy, blit and read-back takes the target's own size, and guest memory gets the centre pixel of each block |
 | 0019-game-option-rows | (task 070) | Missing feature | candidate | A game's own settings as menu rows: `GameProfile::options` (`GameOption`: key, label, choices, help, default, tab), each kept as an index in settings.ini (`game.<key>`), `<prefix>_<KEY>` deciding it for a run, `settings::game_option(key)` for the port, and a Game section at the end of the tab it names; no option, no section |
 | 0020-vulkan-texture-detail | (task 076) | Fidelity, enhancement | candidate, behind a profile field | Texture detail at the internal scale in the Vulkan renderer, as the Metal backend draws it: with the game option `GameProfile::texture_detail_option` names at 1, a draw that samples a texture with mip levels and is not a 2D draw has the GE's D lowered by 16 x log2 of its target's scale whatever the rule, and `ge.frag` samples that level through the coordinates' own gradients (`textureGrad`, `texture_params.x` bit 21) with an anisotropic sampler (`samplerAnisotropy`, at most 16 taps); no option named, or the option at 0, draws as before |
+| 0021-content-packs | (task 078) | Missing feature | candidate | Content packs among a game's save folders: `SaveFolder::content_pack` marks a folder the game loads as content (a download pack) and `GameProfile::content_packs_label` names the System tab's section for them, after Saves: how many the memory stick holds, each pack Installed or Not installed, and "Install <label>…", which opens Import's folder browser (`ui::open_import()`); Export and Back up saves leave content packs out; Import skips a content pack's SAVEDATA_FILE_LIST entry that is not a printable name; nothing marked and no label, nothing changes |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -465,3 +466,24 @@ rewritten with the other on a Texture filter change and freed with it; the descr
 texture sets when the game names the option. `[render] texture detail: on` at the first enhanced draw. Without the
 option, or with it at 0, the draws, the samplers and the pictures are as before (the Vulkan window suite's seven scenes
 to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`).
+
+### 0021-content-packs
+Task 078 (D-005; docs/dlc.md, "In the menu (task 078)"). A game's download packs are save folders the game loads as
+content, and the framework had them only as save folders: listed among the saves, copied by Back up saves, and checked
+on Import as saves, where seven of Wipeout Pure's twelve US packs were refused ("NAME is missing.": the first entry of
+their PARAM.SFO's SAVEDATA_FILE_LIST is four bytes of a PSP address, 0x08xxxxxx, then zeros, and TEST.BIN, the file
+they hold, is the second). `host/profile.hpp`: `SaveFolder::content_pack` (false by default) marks such a folder, and
+`GameProfile::content_packs_label` (null by default) names the section that shows them. `host/save_data/`:
+`names_of_save_folders`, which the export's names and `saves_to_back_up` (the backup, its conflicts and the backup
+screen's text) read, skips content packs, so Export and Back up saves leave them out whatever `exported` says;
+`is_game_save_name` and `save_label` still take them, so Import does; `check_save_folder` skips, for a content pack
+only, a file list entry whose name up to its first NUL holds a byte outside printable ASCII (an empty name was already
+skipped for every folder), and checks the rest as before; `content_packs(memory_stick)` lists the profile's content
+packs in its order, each installed when its folder holds a PARAM.SFO (as `saves_to_back_up` counts a save; none while
+the memory stick is unknown). `host/ui/menu.cpp`: when the label is set, `Menu::system` draws after the Saves section
+`section(label)`, an `info_row(label, "N of M installed")` (the dump adds the count in parentheses), a
+`[content pack rows]` dump entry and one widgets `info_row` a pack (its description, "Installed" or "Not installed"),
+and a `button_row("Install " + the label in lower case + "…")` whose help says what to pick and which calls
+`ui::open_import()` (`host/ui/save_screen.{hpp,cpp}`: Import save…'s `open_browser(Stage::ChooseImport)`, on Android its
+picker), disabled while the memory stick is unknown. A game that marks nothing and names no label gets no section, the
+same exports, backups and import checks. Our profile marks the twelve US packs and names "Download packs".
