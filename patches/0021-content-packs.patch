@@ -1,0 +1,206 @@
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 4e8748f..dc7740a 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -35,6 +35,12 @@ struct SaveFolder {
+     const char *name;        // SAVEDATA_DIRECTORY, e.g. "ULJM05800QST"
+     const char *description; // shown in the save screen, e.g. "Downloaded quests"
+     bool exported;           // included when the player exports or backs up
++    // A folder the game loads as content, such as a download pack, rather
++    // than a save of the player's: shown in the System tab's section for
++    // them (GameProfile::content_packs_label), not among the saves; left out
++    // of exports and backups whatever `exported` says; and its PARAM.SFO's
++    // file list may hold entries that are not file names, which Import skips.
++    bool content_pack = false;
+ };
+ 
+ // A choice of what LT/RT (L2/R2) press past the trigger point, beside the
+@@ -216,6 +222,12 @@ struct GameProfile {
+     // --- Save data ---------------------------------------------------------
+     const char *save_game_name;             // the main folder, e.g. "ULJM05800"
+     std::span<const SaveFolder> save_folders;
++    // The title of the System tab's section for the game's content packs
++    // (SaveFolder::content_pack), e.g. "Download packs": how many of them the
++    // memory stick holds, each by name with whether it is installed, and a
++    // row that opens Import's folder browser to install them. Null: the game
++    // has none, and there is no section.
++    const char *content_packs_label = nullptr;
+ 
+     // --- What the player is called -----------------------------------------
+     // How the interface names the name the game asks for: "Hunter name".
+diff --git a/host/save_data/save_transfer.cpp b/host/save_data/save_transfer.cpp
+index c2cc015..c4c9748 100644
+--- a/host/save_data/save_transfer.cpp
++++ b/host/save_data/save_transfer.cpp
+@@ -27,13 +27,14 @@ constexpr std::size_t kFileListEntrySize = 32u;
+ constexpr std::size_t kFileListNameSize = 13u;
+ // The folders an export carries. A profile marks the ones worth carrying:
+ // a cache the game rebuilds is left out, being several times the size of the
+-// rest.
++// rest. Neither an export nor a backup carries a content pack
++// (SaveFolder::content_pack): it is the game's content, not the player's save.
+ std::string_view game_name_view() { return portablekit::game().save_game_name; }
+ 
+ std::vector<std::string_view> names_of_save_folders(bool exported_only) {
+     std::vector<std::string_view> names;
+     for (const SaveFolder &folder : portablekit::game().save_folders)
+-        if (!exported_only || folder.exported) names.emplace_back(folder.name);
++        if (!folder.content_pack && (!exported_only || folder.exported)) names.emplace_back(folder.name);
+     return names;
+ }
+ 
+@@ -47,6 +48,21 @@ bool is_exported_save_name(std::string_view name) {
+     return true;
+ }
+ 
++bool is_content_pack_name(std::string_view name) {
++    for (const SaveFolder &folder : portablekit::game().save_folders)
++        if (name == folder.name) return folder.content_pack;
++    return false;
++}
++
++// A file list entry's name, up to its first NUL, that could name a file:
++// printable ASCII only.
++bool plausible_file_name(std::string_view name) {
++    return std::all_of(name.begin(), name.end(), [](char c) {
++        const auto byte = static_cast<unsigned char>(c);
++        return byte >= 0x20u && byte <= 0x7Eu;
++    });
++}
++
+ struct Session {
+     std::mutex mutex;
+     std::optional<Block> key;
+@@ -254,12 +270,22 @@ SaveCheck check_save_folder(const fs::path &folder, const std::optional<Block> &
+     }
+ 
+     std::vector<std::pair<std::string, Block>> listed;
++    const bool content_pack = is_content_pack_name(check.name);
+     if (const auto *list = sfo->binary("SAVEDATA_FILE_LIST"); list != nullptr) {
+         for (std::size_t offset = 0; offset + kFileListEntrySize <= list->size(); offset += kFileListEntrySize) {
+             std::string name;
+             for (std::size_t i = 0; i < kFileListNameSize && (*list)[offset + i] != 0u; ++i)
+                 name.push_back(static_cast<char>((*list)[offset + i]));
+             if (name.empty()) continue;
++            // Task 078: a content pack's list may hold an entry that names no
++            // file. Seven of Wipeout Pure's twelve US download packs list
++            // first a word that reads as a PSP address (0x08xxxxxx, bytes
++            // outside printable ASCII) and then zeros, and second TEST.BIN,
++            // the file the folder holds; they came from consoles, and the
++            // game reads neither the list nor TEST.BIN. For a content pack
++            // such an entry is skipped; for every other folder each entry is
++            // a file the folder must hold, as before.
++            if (content_pack && !plausible_file_name(name)) continue;
+             Block hash{};
+             std::copy_n(list->begin() + static_cast<std::ptrdiff_t>(offset + kFileListNameSize), hash.size(),
+                         hash.begin());
+@@ -470,6 +496,16 @@ std::vector<std::string> saves_to_back_up(const fs::path &memory_stick) {
+     return names;
+ }
+ 
++std::vector<ContentPack> content_packs(const fs::path &memory_stick) {
++    std::vector<ContentPack> packs;
++    const fs::path root = memory_stick / "PSP" / "SAVEDATA";
++    for (const SaveFolder &folder : portablekit::game().save_folders)
++        if (folder.content_pack)
++            packs.push_back({folder.name, folder.description,
++                             !memory_stick.empty() && has_param_sfo(root / folder.name)});
++    return packs;
++}
++
+ fs::path backup_folder(const fs::path &target, std::optional<std::chrono::system_clock::time_point> time) {
+     return time ? unused_path(target, timestamp_for_path(*time)) : target;
+ }
+diff --git a/host/save_data/save_transfer.hpp b/host/save_data/save_transfer.hpp
+index 28d5069..13012a0 100644
+--- a/host/save_data/save_transfer.hpp
++++ b/host/save_data/save_transfer.hpp
+@@ -106,9 +106,21 @@ ExportResult export_saves(const std::filesystem::path &memory_stick, const std::
+                           std::chrono::system_clock::time_point time);
+ 
+ // The folders a backup holds: every folder of this game on the memory stick,
+-// the install data included.
++// the install data included, the content packs (SaveFolder::content_pack)
++// not.
+ [[nodiscard]] std::vector<std::string> saves_to_back_up(const std::filesystem::path &memory_stick);
+ 
++// The game's content packs (SaveFolder::content_pack), in the profile's
++// order, each with whether the memory stick holds it: its folder with a
++// PARAM.SFO, as a backup counts a save. None is installed while the memory
++// stick is unknown.
++struct ContentPack {
++    std::string name;         // SAVEDATA_DIRECTORY
++    std::string description;  // SaveFolder::description
++    bool installed{};
++};
++[[nodiscard]] std::vector<ContentPack> content_packs(const std::filesystem::path &memory_stick);
++
+ // Where a backup goes. With a time, a new folder named by it:
+ // <target>/2026-09-19_19-05-12/<save folder>, ... ("-2" and so on when taken).
+ // Without, the save folders go straight into <target>.
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index b9bba38..ffa25c6 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -1469,6 +1469,33 @@ void Menu::system() {
+     dump_row("[save rows]");
+     save_rows();
+ 
++    // The game's content packs (GameProfile::content_packs_label,
++    // SaveFolder::content_pack): how many the memory stick holds, each by
++    // name, and the import that installs them. The saves rows above leave
++    // them out.
++    if (const char *label = portablekit::game().content_packs_label; label != nullptr) {
++        const std::vector<savedata::ContentPack> packs = savedata::content_packs(savedata::memory_stick());
++        const auto installed = std::count_if(packs.begin(), packs.end(),
++                                             [](const savedata::ContentPack &pack) { return pack.installed; });
++        section(label);
++        const std::string count = std::to_string(installed) + " of " + std::to_string(packs.size()) + " installed";
++        info_row(label, count);
++        dump_detail(count);
++        dump_row("[content pack rows]");
++        ImGui::PushID("##content packs");
++        for (const savedata::ContentPack &pack : packs)
++            ui::info_row(pack.description.c_str(), pack.installed ? "Installed" : "Not installed");
++        ImGui::PopID();
++        std::string lower = label;
++        for (char &c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++        if (button_row(("Install " + lower + "…").c_str(),
++                       {savedata::memory_stick().empty(), {},
++                        "Copy " + lower + " into " + portablekit::game().project_name +
++                            ": choose one's folder, a folder that holds them or a memory stick's PSP/SAVEDATA. "
++                            "Each is checked first; one it replaces is kept, not deleted."}))
++            open_import();
++    }
++
+     section("About");
+     info_row(portablekit::game().project_name, std::string(kBuildVersion));
+     if (*kBuildLabel != '\0') info_row("Build", kBuildLabel);
+diff --git a/host/ui/save_screen.cpp b/host/ui/save_screen.cpp
+index 57c2b04..d1712da 100644
+--- a/host/ui/save_screen.cpp
++++ b/host/ui/save_screen.cpp
+@@ -629,6 +629,8 @@ void save_rows() {
+ #endif
+ }
+ 
++void open_import() { open_browser(Stage::ChooseImport); }
++
+ bool save_screen_open() { return state().stage != Stage::Closed; }
+ 
+ bool save_screen(bool back) {
+diff --git a/host/ui/save_screen.hpp b/host/ui/save_screen.hpp
+index fba0276..92e4580 100644
+--- a/host/ui/save_screen.hpp
++++ b/host/ui/save_screen.hpp
+@@ -11,6 +11,10 @@ namespace portablekit::ui {
+ // buttons that open the saves and backups folders.
+ void save_rows();
+ 
++// Opens Import save…'s folder browser (on Android the system's picker), as
++// that row does, for a row elsewhere: the content packs' install row.
++void open_import();
++
+ // Shows a folder in the file manager, creating it first. False when it could
+ // not be opened.
+ bool open_folder(const std::filesystem::path &folder);
