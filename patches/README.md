@@ -471,7 +471,7 @@ to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/
 Task 077. On a discrete GPU (the rig's RTX 3080) a race lost 9 to 16 ms a frame to `perf::Stall::Readback`: not the
 block-transfer readback the stall's name suggests (`read_back_framebuffer` never runs in Wipeout Pure's race; its block
 transfers are all main RAM to VRAM), but `write_back_depth`, which at every GE SIGNAL with a screen-wide depth buffer
-(once per race frame: the lens flare's CPU depth test, patch 0003) submitted the half-recorded frame and waited for its
+(once per race frame: the lens flare's CPU depth test, patch 0003-vulkan-renderer-fixes) submitted the half-recorded frame and waited for its
 fence. Now each `FrameSlot` has its own depth buffer (`depth`, `depth_in_flight`, `depth_frame`, `depth_recorded`): the
 SIGNAL records the copy into the frame without submitting, and stores in guest memory the newest copy an earlier frame
 recorded (`begun_frames` tells this frame's from those), waiting for that frame's fence (`Stall::Fence`, long signalled

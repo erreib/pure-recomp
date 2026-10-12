@@ -151,6 +151,12 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
      environmental. Everything internal passes every run — flips a race-clock second 29.94 to 29.97 off and 59.66 to
      59.78 on, laps, contacts, the standing start within 5% — so E4's claim holds on this rig; the wall-clock bound
      is coarse here the way the E6 lap bound is (docs/status.md E4's follow-ups).
+   - (task 077, added after this checklist was written) `tools/stutter_check.sh` [`stutter_check: PASS (...)`;
+     one swept race in the Vulkan window with sound, about 6 minutes]. The stall in the 2026-10-12 findings was the
+     depth write-back at the lens flare's SIGNAL, not a block-transfer readback; patch 0021-vulkan-async-readback
+     stores the frame before's depth instead of draining the queue (readback 7.38 ms a frame to 0.00), and
+     `PURE_SYNC_READBACK=1` restores the drain. See docs/tasks/077-vulkan-readback-stutter.md's Result for what
+     still makes slow frames (the sweep's live-file reads every 10 flips and the pacer's waits after them).
 5. **Package:** `tools/bundle_windows.sh --zip` (rebuilds the Release binary when stale: 15 to 25 minutes cold), then
    `tools/bundle_windows.sh --check out/repack-win-070` [`bundle check: PASS`]. Done 2026-10-11: the zip
    pure-recomp-0.1.0-6393b67-windows-x64.zip, seven checks PASS (out/repack-071.log on the rig); then task 071 added
