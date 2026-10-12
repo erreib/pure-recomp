@@ -1,6 +1,6 @@
 # 077: The download packs installed and checked (DLC)
 
-Milestone: DLC (Erik, 2026-10-12; docs/dlc.md) | Branch: task/077-download-packs | Status: OPEN
+Milestone: DLC (Erik, 2026-10-12; docs/dlc.md) | Branch: task/077-download-packs | Status: MERGED (the merge commit after a39b198, 2026-10-12)
 
 ## Goal
 The planning session put the twelve US download packs on a scratch stick and the game loaded them unchanged
@@ -290,3 +290,17 @@ Open questions:
    references by 0.062 and 0.042 without packs. docs/windows.md says this.
 9. **No PPSSPP references with the packs.** `ref/` has no PPSSPP capture taken with the packs, so the check compares
    against the screens without packs. The main menu shows a DOWNLOAD entry, which nobody has opened.
+
+## Review
+Fable, 2026-10-12. Diff within May touch; the profile's list grows by the twelve folders with `exported` false and
+nothing else reads it; the tools never write into the packs folder. Merged `--no-ff` into batch/m2, built, and from
+the main checkout: `tools/dlc_check.sh --packs "$HOME/dlc-packs"` PASS (12 of 12 folders, 164 opens; league_select
+0.0130 and team_select 0.0047 off their references; Gamma, Delta and Classic 2 races with the HUD in 6 of 6 shots and
+their Track Allocated lines, TRACK SELECTION 0.11 to 0.13 off Alpha's; boot 2.4 s against 2.2 s; no `[hle-stub]`),
+`tools/frame_regress.sh` 18/18, `tools/save_roundtrip.sh` PASS (five runs), docs_check (out/077_gate.log). The
+Result's correction of the spike's route (the WARNING was the spike's full stick, not the packs) is accepted and
+recorded in docs/status.md and D-005; the out-of-scope docs (verification.md's purelib and "Which path" rows,
+D-005's section, the status bullet) were done at merge (2792559). The refused seven, the content section, the backup
+and the players' saves rows go to task 078 (briefed at merge). Open from the Result: the pack-aware profile's size
+and its loading without the packs (D-012); PROFILE > DELETE listing packs; a PPSSPP reference with packs; the rig.
+
