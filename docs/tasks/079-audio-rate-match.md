@@ -91,3 +91,87 @@ proven stage; the characterization commit comes before any fix.
 - SDL_SetAudioStreamFrequencyRatio is absent from the vendored SDL or behaves per-put rather than persistently
   (report what the header says; a sink-side resampler is a bigger task, not this one)
 - flash_check's race figures move beyond their bounds with the controller on
+
+## Result
+Status: BLOCKED. This is the brief's first escalation condition: the resync rate does not match a drift. The
+characterization is committed (6ea021f, patch 0023 with the counter only). No controller was built.
+
+**The characterization run.** I ran `PURE_TRACE_AUDIO=1 PURE_PERF=log tools/campaign_sweep.py single_race vineta_k
+--no-damage --shell vulkan --sound` on the rig. The cell passed: 3 laps, 193.5 s race clock, 424 s real. The log is in
+the worktree's out/079-char/.
+- Summary: `[audio] total frames=18499509 silent=220530 dropped=0 resyncs=1121 resynced=15033659`
+- By phase (the [audio] seconds, next to the [perf] `speed`, which is virtual ms over wall ms):
+
+| phase | seconds | resyncs | rate | frames per event | mean speed |
+|---|---|---|---|---|---|
+| menus, 1-189 s | 189 | 10 | 0.05/s | 1.24 M | 100.4% (183 s at 99-101%) |
+| load, 190-202 s | 13 | 10 | 0.77/s | 50 k | 95.6% |
+| race, 203-405 s | 202 | 1047 | 5.18/s, in 188 of 202 s | 1959 | 88.5% |
+| results | 14 | 50 | 3.6/s | 1980 | 94% |
+
+- Of the 9 menu seconds with a resync, 8 are channels restarting after idle (85 k to 6.4 M frames skipped: the
+  channel was silent, so nothing is heard). Only one (63 s, 2163 frames) looks like a lead running out. A 1% fast
+  device would eat the 1536-frame lead every 3.5 s per continuous channel, which is tens of resyncs in 189 s. That
+  did not happen.
+- In the race the resyncs run at 5 to 10 times the prediction, about 1959 frames (44 ms) each. That is a cursor
+  caught right at the device, not one trimmed by a slow drift. Frames skipped in the race: 10,152 a second. The
+  producer's shortfall at 88.5% speed is 5,070 frames a second per continuous channel, so two channels come to
+  about 10,140. The skips track the guest's lost real time: a slow, bursty producer, not a fast device.
+
+**The "1% fast device" premise looks like an artefact.** `host/perf/frame_stats.cpp:463-517` starts each `[perf]`
+window at the first frame after 1000 ms (`s.window_start = now`) and carries no remainder. So each `[perf]` line
+covers 1 s plus about half a frame: about 0.8% at 60 fps and 1.6% at 30 fps. Counting `[audio]` lines against
+`[perf]` lines gives 1.0089 and 1.0110 in Erik's logs and 418/415 = 1.0072 in this run, whatever the device does.
+Measured by its frames instead, this run's device played 18,499,509 / 44100 = 419.5 s inside a 424 s cell
+(boot included), so it is not 1% fast.
+
+**Erik's play logs agree with this reading.** Their mean speed is 99.24% (100 Hz) and 98.11% (60 Hz), mostly at
+100%, with about 50 seconds dipping to 63-95%. The skips would cluster in those dips. A ±2% ratio cannot absorb a
+second at 63%, and pitch-shifting through it would be audible. Rate-matching is the wrong cure.
+
+**What a follow-up task should decide** (outside this brief):
+1. Why the windowed sweep's race runs at 88.5% of real time on the rig. Task 077 measured 66 fps; this run shows
+   fps 52-56 and guest 10-11 ms a frame. It may be the sweep's stdout into the pty (task 078) or the traces.
+2. What the sink should do with a producer that falls behind. Options: a larger lead or resync threshold (512 and
+   2048 frames, 12 and 46 ms, are tight for race frame-time jitter); not jumping a continuous channel but letting
+   the ring play silence, which is then counted as `silent`; or the kernel's paced clock catching up instead of
+   losing time. This touches the kernel or HLE audio, which this brief rules out.
+3. Erik's stutter in play is probably those dips (seconds at 63-95% speed), not a steady drift. A play log with
+   this counter would show whether resyncs cluster in the slow seconds.
+
+Changed: patches/0023-audio-rate-match.patch (new: the resync, resynced and lead counter only), patches/README.md
+(the table row and the paragraph, upstream candidate), README.md (the `PURE_TRACE_AUDIO` fields),
+docs/tasks/079-audio-rate-match.md (this Result). There is no fix, so docs/windows.md is unchanged and there is no
+`PURE_NO_RATE_MATCH`.
+
+Verify output (last 20 lines, git's whitespace warnings from `patches.sh check` left out):
+```
+team_select   5600    0.0416   0.06   24     0.042 -0.0004  PASS
+tt_track_select   5375    0.0400   0.06   24     0.040 +0.0000  PASS
+tt_hud       5890    0.0603   0.12   32     0.049 +0.0113  PASS
+fp_track_select   5375    0.0409   0.06   24     0.041 -0.0001  PASS
+fp_hud       5890    0.0475   0.11   32     0.048 -0.0005  PASS
+tournament_select   5185    0.0622   0.08   24     0.063 -0.0008  PASS
+zone_track_select   4975    0.0333   0.05   24     0.033 +0.0003  PASS
+zone_hud     5260    0.0526   0.09   32     0.045 +0.0076  PASS
+zone_change   5679    0.0461   0.10   32     0.052 -0.0059  PASS
+frame regression: PASS, 18/18 scenes pass, shell vulkan, backend vulkan (12m 12s)
+flash_check: fade, shell vulkan, backend vulkan, out .../out/flash_check/fade-vulkan-vulkan
+flash_check: PURE_SMOOTH_FLASHES=0: run_boot exit 0, frame 6400 reached: yes, 117 s, log .../0/run.log
+  hud_check: 1 of 1 shots have the HUD
+flash_check: PURE_SMOOTH_FLASHES=1: run_boot exit 0, frame 6400 reached: yes, 123 s, log .../1/run.log
+  hud_check: 1 of 1 shots have the HUD
+PURE_SMOOTH_FLASHES=0: flips 5600-6100: 164 at two vblanks, longest run 105; 105 before the race's first one-vblank flip (5705); the fade: flips 5709-5765, 57 flips, 1.90 s; the race clock starts at flip 6254, 546 flips and 10.04 s from the fade's first
+PURE_SMOOTH_FLASHES=1: flips 5600-6100: 107 at two vblanks, longest run 102; 102 before the race's first one-vblank flip (5702); from the fade's first flip (5709) to 6100: 1 at two vblanks (5894-5894); the fade's 1.90 s span flips 5709-5823, 115 flips; the race clock starts at flip 6308, 600 flips and 10.43 s from the fade's first; '[pure] smooth flashes: on (game.smooth_flashes)' after flip 5700
+flash_check: PASS (fade 57 flips off, 1 on; the race and its HUD in both)
+ok: 23 patch(es) reproduce vendor/portablekit at 8b0c3fe
+docs_check: 33 files, 0 findings: PASS
+```
+
+Open questions:
+- Keep patch 0023's slug, or rename it (for example 0023-audio-resync-counter)? It holds only the counter, and its
+  README row says so.
+- The task 077/078 race figures are "66 fps". This windowed sweep with sound and traces showed fps 52-56 and speed
+  88.5%. Is that the harness's cost (pty stdout) or a regression? It decides whether the sweep can stand in for
+  Erik's play.
+- docs/status.md (not mine to touch) still states the fast-device premise for 079.
