@@ -1,0 +1,460 @@
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index d6b1e33..0a98bc5 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1233,8 +1233,26 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     Staging depth_readback{};
+     VkDeviceSize depth_readback_size{};
+     bool depth_readback_coherent{true};
+-    bool create_depth_readback(VkDeviceSize bytes, std::string &error);
+-    void destroy_depth_readback();
++    bool create_depth_readback(Staging &staging, VkDeviceSize &size, VkDeviceSize bytes, std::string &error);
++    void destroy_depth_readback(Staging &staging, VkDeviceSize &size);
++    void destroy_depth_readback();  // the shared buffer and every slot's
++    // What a slot's depth copy holds (patch 0021-vulkan-async-readback).
++    struct DepthRecorded {
++        std::uint32_t color_address{};
++        std::uint32_t depth_address{};
++        std::uint32_t depth_stride{};
++        VkExtent2D extent{};
++        VkFormat format{};
++        std::uint32_t texel_bytes{};
++    };
++    // Frames begun (begin_frame()): tells a depth copy recorded in the frame
++    // being recorded, not submitted yet, from one an earlier frame submitted.
++    std::uint64_t begun_frames{};
++    // Records the copy of a target's depth into `buffer` (outside a pass).
++    void record_depth_copy(Target &target, VkBuffer buffer);
++    // The depth texels of `recorded` into guest memory as the GE's 16 bits.
++    void store_depth(GuestMemory &memory, const std::uint8_t *texels, const DepthRecorded &recorded,
++                     std::uint32_t &lowest, std::uint32_t &highest) const;
+ 
+     // Frames in flight. With two (the default) the CPU records a frame while
+     // the GPU still draws the one before, so their times overlap instead of
+@@ -1262,6 +1280,15 @@ struct VulkanRenderer::Impl : host::SdlPad {
+         std::uint32_t writeback_width{};
+         bool writeback_in_flight{};
+         WritebackFrame writeback_recorded{};
++        // The depth write-back recorded in this slot's frame at a SIGNAL
++        // (write_back_depth(), patch 0021): stored in guest memory at the
++        // next frame's, after this frame's fence, instead of draining the
++        // queue mid-frame. `depth_frame` is begun_frames when recorded.
++        Staging depth{};
++        VkDeviceSize depth_size{};
++        bool depth_in_flight{};
++        std::uint64_t depth_frame{};
++        DepthRecorded depth_recorded{};
+         // A frame the game wrote itself (upload_frame()).
+         Staging movie{};
+         std::uint32_t gpu_timer_pending{};  // queries the frame wrote, read after its fence
+@@ -5870,6 +5897,7 @@ void VulkanRenderer::begin_frame() {
+     if (!impl.ready || impl.recording) return;
+     // The next slot: its fence is the frame slot_count frames back.
+     impl.slot = (impl.slot + 1u) % impl.slot_count;
++    ++impl.begun_frames;
+     Impl::FrameSlot &frame = impl.slots[impl.slot];
+     impl.command_buffer = frame.commands;
+     impl.frame_fence = frame.fence;
+@@ -7278,15 +7306,16 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+                   << " back for a block transfer\n";
+ }
+ 
+-bool VulkanRenderer::Impl::create_depth_readback(VkDeviceSize bytes, std::string &error) {
++bool VulkanRenderer::Impl::create_depth_readback(Staging &staging, VkDeviceSize &size, VkDeviceSize bytes,
++                                                 std::string &error) {
+     VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+     buffer_info.size = bytes;
+     buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+-    if (!check(vkCreateBuffer(device, &buffer_info, nullptr, &depth_readback.buffer), "vkCreateBuffer", error))
++    if (!check(vkCreateBuffer(device, &buffer_info, nullptr, &staging.buffer), "vkCreateBuffer", error))
+         return false;
+     VkMemoryRequirements requirements{};
+-    vkGetBufferMemoryRequirements(device, depth_readback.buffer, &requirements);
++    vkGetBufferMemoryRequirements(device, staging.buffer, &requirements);
+     // The CPU reads it, so cached memory first, as for the frame write-back.
+     VkPhysicalDeviceMemoryProperties memory_properties{};
+     vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+@@ -7310,22 +7339,77 @@ bool VulkanRenderer::Impl::create_depth_readback(VkDeviceSize bytes, std::string
+     VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+     allocate.allocationSize = requirements.size;
+     allocate.memoryTypeIndex = static_cast<std::uint32_t>(chosen);
+-    if (!check(vkAllocateMemory(device, &allocate, nullptr, &depth_readback.memory), "vkAllocateMemory", error))
++    if (!check(vkAllocateMemory(device, &allocate, nullptr, &staging.memory), "vkAllocateMemory", error))
+         return false;
+-    vkBindBufferMemory(device, depth_readback.buffer, depth_readback.memory, 0u);
+-    if (!check(vkMapMemory(device, depth_readback.memory, 0u, bytes, 0u, &depth_readback.mapped), "vkMapMemory",
+-               error))
++    vkBindBufferMemory(device, staging.buffer, staging.memory, 0u);
++    if (!check(vkMapMemory(device, staging.memory, 0u, bytes, 0u, &staging.mapped), "vkMapMemory", error))
+         return false;
+-    depth_readback_size = bytes;
++    size = bytes;
+     return true;
+ }
+ 
++void VulkanRenderer::Impl::destroy_depth_readback(Staging &staging, VkDeviceSize &size) {
++    if (staging.mapped != nullptr) vkUnmapMemory(device, staging.memory);
++    vkDestroyBuffer(device, staging.buffer, nullptr);
++    vkFreeMemory(device, staging.memory, nullptr);
++    staging = Staging{};
++    size = 0u;
++}
++
+ void VulkanRenderer::Impl::destroy_depth_readback() {
+-    if (depth_readback.mapped != nullptr) vkUnmapMemory(device, depth_readback.memory);
+-    vkDestroyBuffer(device, depth_readback.buffer, nullptr);
+-    vkFreeMemory(device, depth_readback.memory, nullptr);
+-    depth_readback = Staging{};
+-    depth_readback_size = 0u;
++    destroy_depth_readback(depth_readback, depth_readback_size);
++    for (FrameSlot &frame : slots) {
++        destroy_depth_readback(frame.depth, frame.depth_size);
++        frame.depth_in_flight = false;
++    }
++}
++
++// The GE's 16-bit z of each PSP pixel, from the texel at its centre
++// (centre_texel). The GE's z reaches the depth image as z / 65535 (the
++// vertex shader and the Vulkan viewport's depth range), so it is the
++// texel times 65535.
++void VulkanRenderer::Impl::store_depth(GuestMemory &memory, const std::uint8_t *texels,
++                                       const DepthRecorded &recorded, std::uint32_t &lowest,
++                                       std::uint32_t &highest) const {
++    const VkExtent2D extent = recorded.extent;
++    const std::uint32_t texel_bytes = recorded.texel_bytes;
++    const std::uint32_t depth_stride = recorded.depth_stride;
++    const std::size_t guest_bytes = static_cast<std::size_t>(depth_stride) * kPspHeight * 2u;
++    std::uint8_t *out = memory.raw_pointer(recorded.depth_address, guest_bytes);
++    if (out == nullptr) return;
++    std::array<std::uint32_t, kPspWidth> columns{};
++    for (std::uint32_t x = 0; x < kPspWidth; ++x) columns[x] = centre_texel(x, kPspWidth, extent.width);
++    const VkFormat format = recorded.format;
++    std::array<std::uint16_t, kPspWidth> row_values{};
++    for (std::uint32_t y = 0; y < kPspHeight; ++y) {
++        const std::uint8_t *row =
++            texels + static_cast<std::size_t>(centre_texel(y, kPspHeight, extent.height)) * extent.width * texel_bytes;
++        for (std::uint32_t x = 0; x < kPspWidth; ++x) {
++            const std::uint8_t *texel = row + static_cast<std::size_t>(columns[x]) * texel_bytes;
++            std::uint32_t z = 0u;
++            if (format == VK_FORMAT_D16_UNORM) {
++                std::uint16_t value{};
++                std::memcpy(&value, texel, 2u);
++                z = value;
++            } else if (format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
++                float value{};
++                std::memcpy(&value, texel, 4u);
++                z = static_cast<std::uint32_t>(std::clamp(value, 0.0f, 1.0f) * 65535.0f + 0.5f);
++            } else {
++                std::uint32_t value{};
++                std::memcpy(&value, texel, 4u);
++                z = static_cast<std::uint32_t>(
++                    (static_cast<std::uint64_t>(value & 0x00FFFFFFu) * 65535u + 0x7FFFFFu) / 0xFFFFFFu);
++            }
++            lowest = std::min(lowest, z);
++            highest = std::max(highest, z);
++            row_values[x] = static_cast<std::uint16_t>(z);
++        }
++        // Guest memory is little-endian, as every host this runs on.
++        static_assert(std::endian::native == std::endian::little);
++        std::memcpy(out + static_cast<std::size_t>(y) * depth_stride * 2u, row_values.data(),
++                    static_cast<std::size_t>(kPspWidth) * 2u);
++    }
+ }
+ 
+ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t depth_address,
+@@ -7341,8 +7425,7 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+     depth_address = 0x04000000u | (depth_address & 0x001FFFF0u);
+     if (depth_stride < kPspWidth) return false;
+     const std::size_t guest_bytes = static_cast<std::size_t>(depth_stride) * kPspHeight * 2u;
+-    std::uint8_t *out = memory.raw_pointer(depth_address, guest_bytes);
+-    if (out == nullptr) return false;
++    if (memory.raw_pointer(depth_address, guest_bytes) == nullptr) return false;
+     // Bytes per texel of the depth aspect copied into a buffer.
+     std::uint32_t texel_bytes = 4u;
+     switch (impl.depth_format) {
+@@ -7359,128 +7442,175 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+     Impl::Target &target = found->second;
+     const VkExtent2D extent = target.extent;  // the target's own (patch 0018)
+     const VkDeviceSize bytes = static_cast<VkDeviceSize>(extent.width) * extent.height * texel_bytes;
+-    if (impl.depth_readback_size < bytes) {
+-        impl.destroy_depth_readback();
+-        std::string error;
+-        if (!impl.create_depth_readback(bytes, error)) {
+-            static bool reported = false;
+-            if (!std::exchange(reported, true))
+-                std::cout << "[render] cannot write depth back to guest memory: " << error << "\n";
+-            impl.destroy_depth_readback();
+-            return false;
++    const Impl::DepthRecorded recorded{color_address, depth_address, depth_stride, extent, impl.depth_format,
++                                       texel_bytes};
++
++    // Patch 0021-vulkan-async-readback: the copy is recorded into the frame
++    // and not waited for; the guest gets the depth the frame before recorded
++    // at its SIGNAL, finished by now (its fence), so the game's CPU test reads
++    // depth one frame old instead of the queue draining here, every race
++    // frame (9 to 16 ms on a discrete GPU). <prefix>_SYNC_READBACK=1 drains
++    // and stores this frame's depth, as before. A second SIGNAL in the same
++    // frame that needs a bigger buffer than the first one's drains too: the
++    // buffer is in the commands recorded already.
++    static const bool sync = portablekit::env("SYNC_READBACK") != nullptr;
++    Impl::FrameSlot &frame = impl.slots[impl.slot];
++    const bool recorded_now = frame.depth_in_flight && frame.depth_frame == impl.begun_frames;
++    perf::Clock::duration waited{};
++    std::uint32_t lowest = 0xFFFFu;
++    std::uint32_t highest = 0u;
++    bool wrote = true;
++    const Impl::DepthRecorded *shown = &recorded;
++    if (sync || (recorded_now && frame.depth_size < bytes)) {
++        if (impl.depth_readback_size < bytes) {
++            impl.destroy_depth_readback(impl.depth_readback, impl.depth_readback_size);
++            std::string error;
++            if (!impl.create_depth_readback(impl.depth_readback, impl.depth_readback_size, bytes, error)) {
++                static bool reported = false;
++                if (!std::exchange(reported, true))
++                    std::cout << "[render] cannot write depth back to guest memory: " << error << "\n";
++                impl.destroy_depth_readback(impl.depth_readback, impl.depth_readback_size);
++                return false;
++            }
++        }
++        impl.record_depth_copy(target, impl.depth_readback.buffer);
++
++        // Run everything recorded so far and carry on recording afterwards, as
++        // read_back_framebuffer() does.
++        impl.end_gpu_segment(impl.command_buffer);
++        vkEndCommandBuffer(impl.command_buffer);
++        std::array<VkCommandBuffer, 2> batch{};
++        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
++        submit.commandBufferCount = impl.frame_batch(impl.command_buffer, batch);
++        submit.pCommandBuffers = batch.data();
++        const perf::Clock::time_point wait_start = perf::Clock::now();
++        vkQueueSubmit(impl.queue, 1u, &submit, impl.frame_fence);
++        impl.wait_fence(impl.frame_fence, "a depth write-back");
++        waited = perf::Clock::now() - wait_start;
++        perf::add_wait_time(waited, perf::Stall::Readback);
++        vkResetFences(impl.device, 1u, &impl.frame_fence);
++        // Uploads and evictions recorded so far have finished with the frame.
++        impl.release_frame_uploads(impl.slot);
++        vkResetCommandBuffer(impl.command_buffer, 0u);
++        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++        vkBeginCommandBuffer(impl.command_buffer, &begin);
++        impl.breadcrumb(impl.command_buffer, "frame goes on after a depth write-back");
++        impl.begin_gpu_segment(impl.command_buffer);
++        // A frame recorded for drawing again keeps what it wrote so far.
++        if (!impl.interpolating) impl.enter_region(impl.frame_region);
++        impl.environment_version = 0u;
++        impl.object_valid = false;
++        impl.raw_valid = false;
++        impl.forget_bindings();
++
++        if (!impl.depth_readback_coherent) {
++            VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
++            range.memory = impl.depth_readback.memory;
++            range.offset = 0u;
++            range.size = VK_WHOLE_SIZE;
++            vkInvalidateMappedMemoryRanges(impl.device, 1u, &range);
++        }
++        impl.store_depth(memory, static_cast<const std::uint8_t *>(impl.depth_readback.mapped), recorded, lowest,
++                         highest);
++        perf::note_stall(perf::Stall::Readback, perf::Clock::now() - start);
++    } else {
++        // The newest copy an earlier frame recorded: the frame before's, or,
++        // with one frame in flight, this slot's own, whose fence begin_frame()
++        // waited for. Older ones are dropped.
++        Impl::FrameSlot *ready = nullptr;
++        for (std::uint32_t other = 0; other < impl.slot_count; ++other) {
++            Impl::FrameSlot &candidate = impl.slots[other];
++            if (!candidate.depth_in_flight || candidate.depth_frame == impl.begun_frames) continue;
++            if (ready == nullptr || candidate.depth_frame > ready->depth_frame) ready = &candidate;
++        }
++        wrote = ready != nullptr;
++        if (ready != nullptr) {
++            if (ready != &frame) {
++                const perf::Clock::time_point wait_start = perf::Clock::now();
++                impl.wait_fence(ready->fence, "the depth write-back of the frame before");
++                waited = perf::Clock::now() - wait_start;
++                perf::add_wait_time(waited, perf::Stall::Fence);
++            }
++            if (!impl.depth_readback_coherent) {
++                VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
++                range.memory = ready->depth.memory;
++                range.offset = 0u;
++                range.size = VK_WHOLE_SIZE;
++                vkInvalidateMappedMemoryRanges(impl.device, 1u, &range);
++            }
++            const perf::Clock::time_point store_start = perf::Clock::now();
++            impl.store_depth(memory, static_cast<const std::uint8_t *>(ready->depth.mapped), ready->depth_recorded,
++                             lowest, highest);
++            perf::note_stall(perf::Stall::Store, perf::Clock::now() - store_start);
++            shown = &ready->depth_recorded;
++        }
++        for (std::uint32_t other = 0; other < impl.slot_count; ++other)
++            if (impl.slots[other].depth_frame != impl.begun_frames) impl.slots[other].depth_in_flight = false;
++        // This frame's copy, for the next frame's SIGNAL. The slot's frame
++        // two back has finished with its buffer (begin_frame() waited for it),
++        // and a copy recorded earlier in this frame fits (checked above).
++        bool recordable = true;
++        if (frame.depth.buffer == VK_NULL_HANDLE || frame.depth_size < bytes) {
++            impl.destroy_depth_readback(frame.depth, frame.depth_size);
++            std::string error;
++            if (!impl.create_depth_readback(frame.depth, frame.depth_size, bytes, error)) {
++                static bool reported = false;
++                if (!std::exchange(reported, true))
++                    std::cout << "[render] cannot write depth back to guest memory: " << error << "\n";
++                impl.destroy_depth_readback(frame.depth, frame.depth_size);
++                frame.depth_in_flight = false;
++                recordable = false;
++            }
++        }
++        if (recordable) {
++            impl.record_depth_copy(target, frame.depth.buffer);
++            frame.depth_in_flight = true;
++            frame.depth_frame = impl.begun_frames;
++            frame.depth_recorded = recorded;
+         }
+     }
+-    impl.transition(impl.command_buffer, target.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+-                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, impl.depth_aspect());
++    static bool announced = false;
++    if (wrote && !std::exchange(announced, true))
++        std::cout << "[render] depth written back to guest memory at 0x" << std::hex << shown->depth_address
++                  << std::dec << " for " << why << " (" << portablekit::env_name("NO_DEPTH_READBACK")
++                  << " turns it off; " << (sync ? "synchronous, " : "a frame late, ")
++                  << portablekit::env_name("SYNC_READBACK") << (sync ? " set)\n" : " waits for it)\n");
++    static const bool trace = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
++    if (trace && wrote) {
++        const double total_ms = std::chrono::duration<double, std::milli>(perf::Clock::now() - start).count();
++        const double wait_ms = std::chrono::duration<double, std::milli>(waited).count();
++        std::cout << "[render] frame " << impl.frames << " " << why << ": depth of 0x" << std::hex
++                  << shown->color_address << " written back to 0x" << shown->depth_address << std::dec << " stride "
++                  << shown->depth_stride << ", z " << lowest << "-" << highest << ", " << total_ms << " ms (GPU wait "
++                  << wait_ms << " ms" << (shown == &recorded ? "" : ", the frame before's") << ")\n";
++    }
++    return wrote;
++}
++
++// The depth aspect of `target` into `buffer`, whole, made visible to the
++// host after the fence of the commands it is recorded in.
++void VulkanRenderer::Impl::record_depth_copy(Target &target, VkBuffer buffer) {
++    const VkExtent2D extent = target.extent;
++    transition(command_buffer, target.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, depth_aspect());
+     VkBufferImageCopy copy{};
+     copy.imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 0u, 1u};
+     copy.imageExtent = {extent.width, extent.height, 1u};
+-    vkCmdCopyImageToBuffer(impl.command_buffer, target.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+-                           impl.depth_readback.buffer, 1u, &copy);
++    vkCmdCopyImageToBuffer(command_buffer, target.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1u, &copy);
+     VkBufferMemoryBarrier to_host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+     to_host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+     to_host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+     to_host.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+     to_host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+-    to_host.buffer = impl.depth_readback.buffer;
++    to_host.buffer = buffer;
+     to_host.offset = 0u;
+     to_host.size = VK_WHOLE_SIZE;
+-    vkCmdPipelineBarrier(impl.command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0u, 0u,
+-                         nullptr, 1u, &to_host, 0u, nullptr);
+-    impl.transition(impl.command_buffer, target.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, impl.depth_aspect());
++    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0u, 0u, nullptr,
++                         1u, &to_host, 0u, nullptr);
++    transition(command_buffer, target.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, depth_aspect());
+     perf::count_target_copy();
+-
+-    // Run everything recorded so far and carry on recording afterwards, as
+-    // read_back_framebuffer() does.
+-    impl.end_gpu_segment(impl.command_buffer);
+-    vkEndCommandBuffer(impl.command_buffer);
+-    std::array<VkCommandBuffer, 2> batch{};
+-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+-    submit.commandBufferCount = impl.frame_batch(impl.command_buffer, batch);
+-    submit.pCommandBuffers = batch.data();
+-    const perf::Clock::time_point wait_start = perf::Clock::now();
+-    vkQueueSubmit(impl.queue, 1u, &submit, impl.frame_fence);
+-    impl.wait_fence(impl.frame_fence, "a depth write-back");
+-    const perf::Clock::duration waited = perf::Clock::now() - wait_start;
+-    perf::add_wait_time(waited, perf::Stall::Readback);
+-    vkResetFences(impl.device, 1u, &impl.frame_fence);
+-    // Uploads and evictions recorded so far have finished with the frame.
+-    impl.release_frame_uploads(impl.slot);
+-    vkResetCommandBuffer(impl.command_buffer, 0u);
+-    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+-    vkBeginCommandBuffer(impl.command_buffer, &begin);
+-    impl.breadcrumb(impl.command_buffer, "frame goes on after a depth write-back");
+-    impl.begin_gpu_segment(impl.command_buffer);
+-    // A frame recorded for drawing again keeps what it wrote so far.
+-    if (!impl.interpolating) impl.enter_region(impl.frame_region);
+-    impl.environment_version = 0u;
+-    impl.object_valid = false;
+-    impl.raw_valid = false;
+-    impl.forget_bindings();
+-
+-    // The GE's 16-bit z of each PSP pixel, from the texel at its centre
+-    // (centre_texel). The GE's z reaches the depth image as z / 65535 (the
+-    // vertex shader and the Vulkan viewport's depth range), so it is the
+-    // texel times 65535.
+-    if (!impl.depth_readback_coherent) {
+-        VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
+-        range.memory = impl.depth_readback.memory;
+-        range.offset = 0u;
+-        range.size = VK_WHOLE_SIZE;
+-        vkInvalidateMappedMemoryRanges(impl.device, 1u, &range);
+-    }
+-    const auto *texels = static_cast<const std::uint8_t *>(impl.depth_readback.mapped);
+-    std::array<std::uint32_t, kPspWidth> columns{};
+-    for (std::uint32_t x = 0; x < kPspWidth; ++x) columns[x] = centre_texel(x, kPspWidth, extent.width);
+-    const VkFormat format = impl.depth_format;
+-    std::uint32_t lowest = 0xFFFFu;
+-    std::uint32_t highest = 0u;
+-    std::array<std::uint16_t, kPspWidth> row_values{};
+-    for (std::uint32_t y = 0; y < kPspHeight; ++y) {
+-        const std::uint8_t *row =
+-            texels + static_cast<std::size_t>(centre_texel(y, kPspHeight, extent.height)) * extent.width * texel_bytes;
+-        for (std::uint32_t x = 0; x < kPspWidth; ++x) {
+-            const std::uint8_t *texel = row + static_cast<std::size_t>(columns[x]) * texel_bytes;
+-            std::uint32_t z = 0u;
+-            if (format == VK_FORMAT_D16_UNORM) {
+-                std::uint16_t value{};
+-                std::memcpy(&value, texel, 2u);
+-                z = value;
+-            } else if (format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
+-                float value{};
+-                std::memcpy(&value, texel, 4u);
+-                z = static_cast<std::uint32_t>(std::clamp(value, 0.0f, 1.0f) * 65535.0f + 0.5f);
+-            } else {
+-                std::uint32_t value{};
+-                std::memcpy(&value, texel, 4u);
+-                z = static_cast<std::uint32_t>(
+-                    (static_cast<std::uint64_t>(value & 0x00FFFFFFu) * 65535u + 0x7FFFFFu) / 0xFFFFFFu);
+-            }
+-            lowest = std::min(lowest, z);
+-            highest = std::max(highest, z);
+-            row_values[x] = static_cast<std::uint16_t>(z);
+-        }
+-        // Guest memory is little-endian, as every host this runs on.
+-        static_assert(std::endian::native == std::endian::little);
+-        std::memcpy(out + static_cast<std::size_t>(y) * depth_stride * 2u, row_values.data(),
+-                    static_cast<std::size_t>(kPspWidth) * 2u);
+-    }
+-    perf::note_stall(perf::Stall::Readback, perf::Clock::now() - start);
+-    static bool announced = false;
+-    if (!std::exchange(announced, true))
+-        std::cout << "[render] depth written back to guest memory at 0x" << std::hex << depth_address << std::dec
+-                  << " for " << why << " (" << portablekit::env_name("NO_DEPTH_READBACK") << " turns it off)\n";
+-    static const bool trace = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
+-    if (trace) {
+-        const double total_ms = std::chrono::duration<double, std::milli>(perf::Clock::now() - start).count();
+-        const double wait_ms = std::chrono::duration<double, std::milli>(waited).count();
+-        std::cout << "[render] frame " << impl.frames << " " << why << ": depth of 0x" << std::hex << color_address
+-                  << " written back to 0x" << depth_address << std::dec << " stride " << depth_stride << ", z "
+-                  << lowest << "-" << highest << ", " << total_ms << " ms (GPU wait " << wait_ms << " ms)\n";
+-    }
+-    return true;
+ }
+ 
+ namespace {

@@ -63,6 +63,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0018-vulkan-effects-at-1x | (task 068) | Fidelity | candidate, behind a profile switch | Each Vulkan target the size its stride gives (D-015, as the Metal backend draws): the internal resolution for a buffer at least 480 pixels wide, 480x272 for a narrower one (the bloom's buffers, the billboards'), so the bloom's blur and glow stay the PSP's at any scale; every pass, viewport, scissor, copy, blit and read-back takes the target's own size, and guest memory gets the centre pixel of each block |
 | 0019-game-option-rows | (task 070) | Missing feature | candidate | A game's own settings as menu rows: `GameProfile::options` (`GameOption`: key, label, choices, help, default, tab), each kept as an index in settings.ini (`game.<key>`), `<prefix>_<KEY>` deciding it for a run, `settings::game_option(key)` for the port, and a Game section at the end of the tab it names; no option, no section |
 | 0020-vulkan-texture-detail | (task 076) | Fidelity, enhancement | candidate, behind a profile field | Texture detail at the internal scale in the Vulkan renderer, as the Metal backend draws it: with the game option `GameProfile::texture_detail_option` names at 1, a draw that samples a texture with mip levels and is not a 2D draw has the GE's D lowered by 16 x log2 of its target's scale whatever the rule, and `ge.frag` samples that level through the coordinates' own gradients (`textureGrad`, `texture_params.x` bit 21) with an anisotropic sampler (`samplerAnisotropy`, at most 16 taps); no option named, or the option at 0, draws as before |
+| 0021-vulkan-async-readback | (task 077) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -465,3 +466,17 @@ rewritten with the other on a Texture filter change and freed with it; the descr
 texture sets when the game names the option. `[render] texture detail: on` at the first enhanced draw. Without the
 option, or with it at 0, the draws, the samplers and the pictures are as before (the Vulkan window suite's seven scenes
 to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`).
+
+### 0021-vulkan-async-readback
+Task 077. On a discrete GPU (the rig's RTX 3080) a race lost 9 to 16 ms a frame to `perf::Stall::Readback`: not the
+block-transfer readback the stall's name suggests (`read_back_framebuffer` never runs in Wipeout Pure's race; its block
+transfers are all main RAM to VRAM), but `write_back_depth`, which at every GE SIGNAL with a screen-wide depth buffer
+(once per race frame: the lens flare's CPU depth test, patch 0003-vulkan-renderer-fixes) submitted the half-recorded frame and waited for its
+fence. Now each `FrameSlot` has its own depth buffer (`depth`, `depth_in_flight`, `depth_frame`, `depth_recorded`): the
+SIGNAL records the copy into the frame without submitting, and stores in guest memory the newest copy an earlier frame
+recorded (`begun_frames` tells this frame's from those), waiting for that frame's fence (`Stall::Fence`, long signalled
+in practice); older ones are dropped. The first SIGNAL stores nothing (guest memory keeps its bytes). A second SIGNAL in
+one frame that needs a bigger buffer than the first's drains as before. The conversion to the GE's 16 bits is
+`store_depth`, the copy `record_depth_copy`, both shared with the synchronous path, which `<prefix>_SYNC_READBACK=1`
+restores exactly. The start-up line says which (`a frame late` or `synchronous`). Upstream: a candidate; the one-frame
+lag is what a game's CPU depth test sees, so a framework would want it per game or documented.
