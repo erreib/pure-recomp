@@ -2,7 +2,8 @@
 
 What the retail executable does with a download pack, read from the code on 2026-10-12 (the planning session;
 decompiles under out/dlc/ on the Mac), the plan for supporting them, and what the port does with the twelve US packs
-since task 077 ("In the port (task 077)" below: they load unchanged; an install tool and a check). The packs are the
+since task 077 ("In the port (task 077)" below: they load unchanged; an install tool and a check) and task 078 ("In
+the menu (task 078)": the Esc menu's Download packs section, and its Import taking all twelve). The packs are the
 game's data: they live on the player's stick, never in the repository or a release archive (CLAUDE.md), and no key
 leaves the executable.
 
@@ -87,9 +88,9 @@ leaves the executable.
   that reads as a PSP address (0x08xxxxxx) where a file name belongs, TEST.BIN being the second entry, and the
   framework takes every non-empty entry for a file the save must hold. The protection is not what fails: their
   PARAM.SFO hashes and TEST.BIN's hash verify with the console's keys (`tools/save_interchange.sh --check FOLDER
-  TEST.BIN` passes Gamma 1 and Classic 1 as it passes Jak X). Passing them (an entry that is no file name skipped) is a
-  vendor change for a task of its own; until then those seven go in with tools/dlc_install.sh or by hand. The game
-  itself reads neither TEST.BIN nor the list.
+  TEST.BIN` passes Gamma 1 and Classic 1 as it passes Jak X). Passing them (an entry that is no file name skipped) was
+  task 078's vendor change ("In the menu (task 078)" below): since then the menu imports all twelve. The game itself
+  reads neither TEST.BIN nor the list.
 - **The check: `tools/dlc_check.sh --packs PACKS [--out DIR] [--wait SECONDS]`** (README.md). Every run on a fresh
   stick of its own with the packs installed by tools/dlc_install.sh, headless on Metal: the selection run with
   `PURE_TRACE_IO` (PI.WAD opened in each of the twelve folders; league_select and team_select changed against the
@@ -106,6 +107,39 @@ leaves the executable.
   2.2 s without (the check's runs, twice each, 2026-10-12; the spike measured 3.2 s against 2.7 s): the frontend opens
   and checks every pack at start-up.
 
+## In the menu (task 078)
+
+- **The section.** The Esc menu's System tab has a Download packs section after Saves (patch 0021-content-packs: a
+  profile marks a save folder as a content pack, `SaveFolder::content_pack`, and names the section,
+  `GameProfile::content_packs_label`; src/profile/pure_profile.cpp marks the twelve and names it "Download packs").
+  It holds a "Download packs" row reading "N of 12 installed" (a pack counts when its folder on the stick holds a
+  PARAM.SFO, as a backup counts a save), a row for each of the twelve, its title and "Installed" or "Not installed",
+  and "Install download packs…", which opens Import's file browser; its help says what to pick (a pack's folder, a
+  folder that holds them, or a memory stick's PSP/SAVEDATA). The import is Import save…'s own: the screen names each
+  pack ("Gamma Pack 1 (UCUS98612DGAMMAPACK1)"), "Import these saves" copies them, a pack it replaces moves to
+  `.backup/`, and "Restart now" starts the game again (it opens the packs at start-up; an imported pack is a copy of
+  its source, file for file, as the tool's is). `PURE_MENU_DUMP` prints the section as
+  `Download packs (N of 12 installed), [content pack rows], Install download packs…` (docs/controls.md).
+- **Import takes all twelve.** `check_save_folder` (save_transfer.cpp) skips a SAVEDATA_FILE_LIST entry whose name, up
+  to its first NUL, holds a byte outside printable ASCII, for a content pack only. The seven packs' first entries are
+  four bytes and zeros: `a8 a2 6a 08` (Classic Pack 1), `18 99 6a 08` (Classic 2), `a8 a1 6a 08` (Delta 1), `98 98 6a
+  08` (Delta 2 and Gamma 3), `70 65 69 08` (Gamma 1, "pei" and 0x08), `20 65 69 08` (Gamma 2), each a word 0x08xxxxxx
+  whose top byte, 0x08, is not printable; they are skipped, and TEST.BIN, the second entry, is checked (its hash and
+  the PARAM.SFO's) as in the other five. Every other folder's list is read as before: each entry a file it must hold.
+- **Not among the saves.** Export save… and Back up saves… leave the content packs out (the framework's
+  `names_of_save_folders`, which the export's names and `saves_to_back_up` read, skips them; the backup screen's
+  "Copies ... to a folder" names the profiles alone). Import still takes them (`is_game_save_name`), so the Saves
+  section's Import save… installs a pack too. PROFILE > DELETE's list comes from the save-data HLE (`list_entries` in
+  hle_savedata.cpp), which task 078 did not change: by the code it still names every `UCUS98612*` folder.
+- **The check.** `tools/dlc_check.sh` gained a step (README.md): a window run on a stick holding the profile the
+  selection run saved and no pack, with HOME pointed at a folder whose PSP/SAVEDATA holds copies of the twelve (the
+  browser opens at HOME), drives the section's install and then Back up saves… through
+  `config/pad_scripts/install_packs.txt`, with `PURE_MENU_DUMP=1`. 2026-10-12, Metal window: 12 folders found, 12
+  `ok`, 12 `import ... done`, the stick then holding the twelve, each file as its source's; the section at "0 of 12
+  installed" when the menu opened and "12 of 12 installed" when it opened again; the backup
+  (`save-backups/<time>/`) holding `UCUS98612P0000` alone; 33 s. The check's other steps install the packs with
+  tools/dlc_install.sh, each on a stick of its own, as before.
+
 ## What the port needs
 
 Answered by the spike and task 077, with the twelve US packs:
@@ -116,9 +150,9 @@ Answered by the spike and task 077, with the twelve US packs:
    `[hle-stub]` line.
 3. Memory: a pack's track loads into the PSP's 32 MB as the disc's do.
 
-Still open: references of the pack screens from PPSSPP (the check compares against the screens without packs); the
-seven packs the menu's Import refuses (above); a profile saved with the packs loaded without them; ad hoc play with a
-pack's ship ("Downloaded ships not allowed"), which the port does not offer yet.
+Still open: references of the pack screens from PPSSPP (the check compares against the screens without packs); a
+profile saved with the packs loaded without them; ad hoc play with a pack's ship ("Downloaded ships not allowed"),
+which the port does not offer yet.
 
 ## The plan
 
@@ -132,8 +166,8 @@ pack's ship ("Downloaded ships not allowed"), which the port does not offer yet.
 2. **A spike on the port**: done 2026-10-12 (above); no HLE gap.
 3. **Task 077, the installer and the check**: done: tools/dlc_install.sh, tools/dlc_check.sh, the routes
    (config/pad_scripts/gamma_race.txt, delta_race.txt, classic2_race.txt) and the profile's pack folders, through
-   which the save screen's Import takes five of the twelve. Not done: an "Import download pack..." row of its own in
-   the Esc menu, the comparison with PPSSPP references, and the seven packs' import (a vendor change, above).
+   which the save screen's Import took five of the twelve. Task 078 added the Esc menu's Download packs section and
+   the seven packs' import (patch 0021-content-packs). Not done: the comparison with PPSSPP references.
 4. **D-005 can close** (the save layout is DLC-ready by construction: sibling folders, and the packs load from them);
    docs/decisions.md is the planning session's to update. D-012's loader entry waits for the expanded version as
    decided.

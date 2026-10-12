@@ -183,6 +183,16 @@ renderers draw it, the Metal backend since task 075 and the Vulkan renderer sinc
 `PURE_SIXTY_FPS`, `PURE_SMOOTH_FLASHES`, `PURE_SPRITE_UPSCALE` and `PURE_TEXTURE_DETAIL` lock them for a run ("Set by
 PURE_SIXTY_FPS"), as every tool run does.
 
+The System tab holds, in order: the Game section (Resume, Pause the game when the menu opens, Open the data folder,
+Set up game data again…, Quit game), Saves (Import save…, Export save…, Back up saves…, Open the saves folder, Open the
+backups folder), Download packs (since task 078, patch 0021-content-packs: the section our profile names for its content
+packs; docs/dlc.md, "In the menu (task 078)") and About. Download packs has a "Download packs" row, "N of 12
+installed" (a pack counts when its folder on the memory stick holds a PARAM.SFO), a row for each of the twelve US
+packs with its title and "Installed" or "Not installed", and "Install download packs…", which opens Import save…'s
+file browser: open a pack's folder, or a folder holding the packs (or its SAVEDATA or PSP/SAVEDATA) and "Import from
+this folder", then "Import these saves". The rows take the focus, so from Resume it is 23 Downs to Install download
+packs…. Export save… and Back up saves… leave the packs out.
+
 Checked under the Metal shell on 2026-10-06 (task 030): Cross rebound to Space / X from the menu, X then confirmed
 the game's language screen (`[pad] buttons 0x4000`), and settings.ini held `input.bind.cross=Space / X` until the
 second edit removed X again.

@@ -6,8 +6,8 @@
 #   --packs  the packs, as tools/dlc_install.sh takes them (a folder holding the twelve UCUS98612D<PACK> folders, or
 #            its SAVEDATA or PSP/SAVEDATA). Read only: the check copies from it and never writes there.
 #   --out    default out/dlc_check: the game directory and its stick (game/), a scratch data directory (data/), each
-#            run's log, route and output, the shots, and summary.txt (what is printed); an earlier check's are removed
-#            first, nothing else there.
+#            run's log, route and output, the shots, the import step's folder (import/), and summary.txt (what is
+#            printed); an earlier check's are removed first, nothing else there.
 #   --wait   how long to wait for another game to end before a run (default 600; 0 gives up at once): one game at a
 #            time.
 # Every run starts on a fresh stick (purelib.port.fresh_stick) with the packs installed by tools/dlc_install.sh, so
@@ -17,17 +17,27 @@
 #      folders (`[io] open ms0:/PSP/SAVEDATA/<folder>/PI.WAD ... -> <fd>`), league_select differs from
 #      ref/league_select.png in at least 1% of its pixels at tol 24 (CLASSIC 2, DELTA and GAMMA under ALPHA) and
 #      team_select from ref/team_select.png in at least 0.3% (ICARAS under HARIMAU).
-#   2. The races: main_menu.txt + gamma_race.txt, delta_race.txt and classic2_race.txt (the pack leagues' first tracks,
+#   2. The import through the Esc menu (task 078), in a window (the Metal shell; on Windows the Vulkan one, untried
+#      there): a fresh stick holding the profile the selection run saved and no pack; HOME (and USERPROFILE) pointed
+#      at import/home, whose PSP/SAVEDATA holds copies of the twelve, since the menu's file browser opens there;
+#      config/pad_scripts/install_packs.txt (Esc, System, "Install download packs…", "Import from this folder",
+#      "Import these saves"; then Back up saves… to the backups folder; then the menu closed and opened again) to
+#      flip 2300 with PURE_MENU_DUMP=1, shots in import/shots, the data directory import/data. PASS when the `[saves]`
+#      lines list twelve folders found and twelve `ok`, twelve `import ... done`, the stick then holds the twelve,
+#      each file as the source's; the System tab's dump reads "Download packs (0 of 12 installed)" when the menu
+#      opens and "(12 of 12 installed)" when it opens again; and the backup (`[saves] back up to DIR: done`) holds the
+#      profile alone. About 35 s. The other steps install the packs with tools/dlc_install.sh, each on its own stick.
+#   3. The races: main_menu.txt + gamma_race.txt, delta_race.txt and classic2_race.txt (the pack leagues' first tracks,
 #      Cross held from 6100), each to flip 7630 with shots every 100 flips from 7100 to 7600. PASS when
 #      tools/hud_check.py finds the race HUD in at least 4 of the 6 shots and the log has `[guest] Track Allocated`;
 #      and the league's TRACK SELECTION, shot at 5390 as the suite shoots Alpha's, differs from ref/track_select.png
 #      in at least 5% of its pixels at tol 24, so the race is the pack league's (not Vineta K's, which a route whose
 #      DOWN presses met no pack league would race).
-#   3. No `[hle-stub]` line in any run with the packs for a call a pack's loading could make: the file calls (sceIo*,
+#   4. No `[hle-stub]` line in any run with the packs for a call a pack's loading could make: the file calls (sceIo*,
 #      IoFileMgr*), the save-data utility (sceUtilitySavedata*), the console identity the binding check reads
 #      (sceOpenPSID*, sceWlan*), the save cipher and the kernel's hashes (sceChnnlsv*, sceKernelUtils*). Every
 #      `[hle-stub]` line is listed whatever its call, and every run must reach its last flip (no halt).
-#   4. The cost: a boot to MAIN MENU (main_menu.txt, 4700 flips, headless and without a picture, purelib.port.BLIND)
+#   5. The cost: a boot to MAIN MENU (main_menu.txt, 4700 flips, headless and without a picture, purelib.port.BLIND)
 #      without and with the packs, twice each, alternating; run_boot's wall time printed (no bar on it; each run must
 #      reach its last flip).
 # Prints a table, then `dlc_check: PASS` or `FAIL` last. Exit 0 only on PASS, 1 on FAIL, 2 when the packs folder is
@@ -61,7 +71,7 @@ export PURE_ROOT="$PWD"
 native() { case "$(uname -s)" in MINGW*|MSYS*) cygpath -m "$1" ;; *) echo "$1" ;; esac; }
 
 python3 - "$(native "$PACKS")" "$OUT" "$WAIT" <<'EOF'
-import os, re, shutil, subprocess, sys, time
+import filecmp, os, re, shutil, subprocess, sys, time
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
 from purelib import dlc, port  # noqa: E402  (tools/purelib)
@@ -80,6 +90,12 @@ RACE_FRAMES, MIN_HUD = 7630, 4
 SELECT_FRAMES = 5630
 COST_FRAMES = 4700
 PACE_MARGIN = 300               # a window run is held to real time from this many flips before its first shot
+# The import through the Esc menu (task 078): a window run, its route and its end, paced from the title as the menu
+# check is; the profile the selection run saved goes on its stick so that Back up saves has a save to copy.
+IMPORT_ROUTE, IMPORT_FRAMES, IMPORT_PACED = "config/pad_scripts/install_packs.txt", 2300, 2050
+IMPORT_WINDOW = ("vulkan", "vulkan") if port.WINDOWS else ("metal", "metal")
+PROFILE = "UCUS98612P0000"
+COUNT_RE = re.compile(r"Download packs \((\d+ of \d+ installed)\)")
 PACK_CALLS = re.compile(r"::(sceIo|sceUtilitySavedata|sceOpenPSID|sceWlan|sceChnnlsv|sceKernelUtils)|^IoFileMgr")
 OPEN_RE = re.compile(r"^\[io\] open ms0:/?PSP/SAVEDATA/(UCUS98612D\w+)/PI\.WAD .*-> 0x([0-9A-Fa-f]+)", re.I)
 STUB_RE = re.compile(r"^\[hle-stub\] (\S+)")
@@ -122,7 +138,7 @@ if not found:
     sys.exit(2)
 # What an earlier check left in --out, and only that (--out may name a folder holding other things).
 os.makedirs(out, exist_ok=True)
-for name in ["game", "data", "select"] + [race for race, _ in RACES]:
+for name in ["game", "data", "select", "import"] + [race for race, _ in RACES]:
     shutil.rmtree(os.path.join(out, name), ignore_errors=True)
 for name in os.listdir(out):
     if name == "summary.txt" or name.endswith((".log", ".stdout", ".route.txt", ".hud.txt")):
@@ -228,7 +244,70 @@ for frame, shot, ref, least in SELECT:
     fraction = compare(cap, ref)
     row(f"{shot} against {ref}", f"{fraction:.4f} of pixels at tol {TOL}", f">= {least:.3f}", fraction >= least)
 
-# --- 2. the races -----------------------------------------------------------------------------------------------
+# --- 2. the import through the Esc menu -------------------------------------------------------------------------
+say("the import: Esc, System, Install download packs…, Import from this folder, Import these saves; a backup ...")
+IMPORT = os.path.join(out, "import")
+home = os.path.join(IMPORT, "home")
+saved = os.path.join(GAME, "ms0", "PSP", "SAVEDATA", PROFILE)
+seed = os.path.join(IMPORT, "seed", PROFILE)
+if os.path.isdir(saved):
+    shutil.copytree(saved, seed)
+sources = [p for p in found if p.name in dlc.PACKS]
+for pack in sources:
+    shutil.copytree(pack, os.path.join(home, "PSP", "SAVEDATA", pack.name))
+if not port.wait_until(port.other_games, port.REFUSED, lambda m: print(f"dlc_check: {m}", flush=True), limit=wait):
+    give_up(f"another game kept running for {wait} s; try again later")
+port.fresh_stick(GAME)
+savedata = os.path.join(GAME, "ms0", "PSP", "SAVEDATA")
+if os.path.isdir(seed):
+    shutil.copytree(seed, os.path.join(savedata, PROFILE))
+import_data = port.scratch_data_dir({}, os.path.join(IMPORT, "data"))
+log = os.path.join(out, "import.log")
+sh, be = IMPORT_WINDOW
+r = port.headless_run(log, IMPORT_ROUTE, IMPORT_FRAMES, shell=sh, backend=be, paced_from=IMPORT_PACED,
+                      env={"PURE_MENU_DUMP": "1", "HOME": home, "USERPROFILE": home},
+                      shots=os.path.join(IMPORT, "shots"), game=GAME, data_dir=import_data, max_lines=200000,
+                      stdout=os.path.join(out, "import.stdout"))
+t = wall(log)
+say(f"  {len(sources)} packs in {home}; on the stick: "
+    f"{PROFILE if os.path.isdir(seed) else 'no profile (the selection run saved none)'}")
+say(f"  run_boot exit {r.code}, flip {r.frame} of {IMPORT_FRAMES}, {t if t is not None else '?'} s, log {log}")
+pack_logs.append(log)
+text = read(log)
+listed = next((int(m[1]) for m in (re.match(r"^\[saves\] (\d+) save folder\(s\) found in ", ln) for ln in text)
+               if m), None)
+checked = [m.groups() for m in (re.match(r"^\[saves\]   (\S+): (.*)$", ln) for ln in text) if m]
+ok = [name for name, verdict in checked if verdict == "ok"]
+refused = [f"{name}: {verdict}" for name, verdict in checked if verdict != "ok"]
+done = [m[1] for m in (re.match(r"^\[saves\] import (\S+) from .*: done$", ln) for ln in text) if m]
+row("import: the menu's Install download packs…",
+    f"{listed if listed is not None else 'none'} found, {len(ok)} ok, {len(done)} imported, flip {r.frame}"
+    + (f"; refused: {'; '.join(refused[:2])}{'; ...' if len(refused) > 2 else ''}" if refused else ""),
+    f"12, 12, 12, {IMPORT_FRAMES}",
+    listed == 12 and len(ok) == 12 and sorted(done) == sorted(dlc.PACKS) and r.reached)
+held, differ = [], []
+for pack in sources:
+    copy = os.path.join(savedata, pack.name)
+    if not os.path.isdir(copy):
+        continue
+    held.append(pack.name)
+    names = sorted(e.name for e in pack.iterdir() if e.is_file())
+    if sorted(os.listdir(copy)) != names or \
+            not all(filecmp.cmp(pack / n, os.path.join(copy, n), shallow=False) for n in names):
+        differ.append(pack.name)
+row("import: the stick holds the twelve", f"{len(held)} of 12, {len(held) - len(differ)} as their source"
+    + (f"; differ: {', '.join(differ[:3])}" if differ else ""), "12, 12",
+    len(held) == 12 and not differ and set(held) == set(dlc.PACKS))
+counts = [m[1] for m in (COUNT_RE.search(ln) for ln in text if ln.startswith("[menu] System: ")) if m]
+row("import: the Download packs row, opened twice", "; ".join(counts) or "no [menu] System line",
+    "0 of 12 installed; 12 of 12 installed", counts == ["0 of 12 installed", "12 of 12 installed"])
+backup = next((m[1] for m in (re.match(r"^\[saves\] back up to (.*): done$", ln) for ln in text) if m), None)
+copied = sorted(os.listdir(backup)) if backup and os.path.isdir(backup) else []
+row("import: Back up saves copies the profile alone", ", ".join(copied) or "no backup", PROFILE,
+    copied == [PROFILE])
+say(f"  backup {backup or '(none)'}: {', '.join(copied) or '(nothing)'}")
+
+# --- 3. the races -----------------------------------------------------------------------------------------------
 for race, league in RACES:
     say(f"the race: main_menu.txt + {race}_race.txt ({league}) ...")
     r, log, installed = run(race, ["main_menu.txt", f"{race}_race.txt"], RACE_FRAMES,
@@ -254,7 +333,7 @@ for race, league in RACES:
         "no capture" if fraction is None else f"{fraction:.4f} of pixels at tol {TOL}", f">= {TRACK_LEAST:.3f}",
         fraction is not None and fraction >= TRACK_LEAST)
 
-# --- 3. the cost ------------------------------------------------------------------------------------------------
+# --- 5. the cost ------------------------------------------------------------------------------------------------
 times = {False: [], True: []}
 for i, with_packs in enumerate((False, True, False, True)):
     name = f"boot{i + 1}_{'packs' if with_packs else 'none'}"

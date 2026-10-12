@@ -172,18 +172,23 @@ from their own disc, on a Mac, since the scaler is the Metal backend's.
 
 The game's download packs (docs/dlc.md: the twelve US packs, 62 MB) are the game's data, like the disc image: neither
 the app, the zip, the Windows folder nor this repository carries them, and the bundle checks' name and content
-rules would find a `PARAM.SFO` or a `.wad` in an archive. A player who has them puts the folders on the data
-directory's memory stick, beside the saves, where the game finds them at its next start:
+rules would find a `PARAM.SFO` or a `.wad` in an archive. A player who has them installs them on the data directory's
+memory stick, beside the saves, where the game finds them at its next start:
 
-- `~/Library/Application Support/pure-recomp/PureNative/ms0/PSP/SAVEDATA/UCUS98612D<PACK>/` on macOS,
-  `%APPDATA%\pure-recomp\PureNative\ms0\PSP\SAVEDATA\UCUS98612D<PACK>\` on Windows (or under `PURE_DATA_DIR`);
+- in the game (since task 078): Esc, System, and in the Download packs section "Install download packs…". The file
+  browser opens at the home folder: open a pack's folder, or go to the folder holding the packs (a PSP stick's root or
+  its `PSP/SAVEDATA` will do) and pick "Import from this folder"; the next screen names each pack it found ("Gamma
+  Pack 1 (UCUS98612DGAMMAPACK1)"); "Import these saves" copies them, and "Restart now" starts the game again with
+  them. The section counts the packs on the stick ("12 of 12 installed") and lists each, Installed or Not installed.
+  All twelve US packs import (docs/dlc.md, "In the menu (task 078)");
 - with `tools/dlc_install.sh PACKS` from a checkout (the app's data directory by default, `--data-dir DIR` for
   another; it checks each folder's name, PI.WAD and PARAM.SFO first, and skips a pack already there unless
   `--replace`);
-- or in the game: Esc, System, Import save…, and the folder holding the packs (a PSP stick's root or `PSP/SAVEDATA`
-  will do): the screen takes five of the twelve (Classic Pack 3, Daxter, Jak X, Socom 3, Socom FTB) and refuses the
-  other seven over a quirk of their PARAM.SFO (docs/dlc.md, "In the port (task 077)"), which go in by the tool or by
-  hand.
+- or by hand: the folders copied into `~/Library/Application Support/pure-recomp/PureNative/ms0/PSP/SAVEDATA/` on
+  macOS, `%APPDATA%\pure-recomp\PureNative\ms0\PSP\SAVEDATA\` on Windows (or under `PURE_DATA_DIR`), one
+  `UCUS98612D<PACK>` folder each.
+
+Export save… and Back up saves… leave the packs out: they are the game's data, not the player's saves.
 
 With the packs, LEAGUE SELECTION lists CLASSIC 2, DELTA and GAMMA under ALPHA and TEAM SELECTION adds ICARAS; the boot
 to MAIN MENU takes 0.2 to 0.4 s longer headless (the game opens every pack at start-up). `tools/dlc_check.sh --packs

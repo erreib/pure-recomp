@@ -156,11 +156,13 @@ PI.WAD at start-up, its leagues and its ship appear in the menus, and its tracks
 side:
 - **The profile grows** to 68874 bytes of data with the packs on the stick (`PROFILE.BIN` 68890 enciphered), against
   41570 without, presumably the records of the packs' tracks (the contents were not read).
-- **The profile lists the packs** (src/profile/pure_profile.cpp, `kSaveFolders`, each with its pack's title and
-  `exported` false), which only the save transfer and the Esc menu's save screen read (`save_transfer.cpp`): the
-  game's own save-data calls name their folders themselves, so nothing the game does changed (the frame regression
-  suite and the save round trip pass as before). Export leaves the packs out (they are the game's data, not the
-  player's save); Back up saves copies every folder of the list, so a backup holds the installed packs too.
+- **The profile lists the packs** (src/profile/pure_profile.cpp, `kSaveFolders`, each with its pack's title,
+  `exported` false and, since task 078, `content_pack`), which only the save transfer and the Esc menu read
+  (`save_transfer.cpp`, `save_screen.cpp`, `menu.cpp`): the game's own save-data calls name their folders themselves,
+  so nothing the game does changed (the frame regression suite and the save round trip pass as before). Export save…
+  and, since task 078 (patch 0021-content-packs), Back up saves… leave the packs out: they are the game's data, not
+  the player's save. The System tab's Download packs section shows them instead (docs/dlc.md, "In the menu (task
+  078)").
 
 `tools/dlc_install.sh` copies packs onto a stick (docs/release.md, "Download packs"). By the code (`list_entries` in
 `hle_savedata.cpp`; not tried in a run), PROFILE > DELETE's list (mode 7) names every `UCUS98612*` folder on the stick,
@@ -216,10 +218,14 @@ side is replaced by the copy: move it aside first if it is to be kept (the menu'
 hash covers that. `PPCD00001DLS001` (the online system's info) need not be copied: every side writes its own at first
 boot.
 
-Download packs move the same way, a folder each (`UCUS98612D<PACK>`), and since task 077 the menu's Import takes them
-by name (the profile lists the twelve). Its check (`check_save_folder`) passes five of the twelve US packs and
-refuses the other seven with "NAME is missing.", NAME garbage read from the first entry of their PARAM.SFO's file list
-(docs/dlc.md, "In the port (task 077)"); `tools/dlc_install.sh` installs all twelve. Export leaves packs out.
+Download packs move the same way, a folder each (`UCUS98612D<PACK>`). In the port they go in through the System tab's
+Download packs section (task 078): "Install download packs…" opens this same import, and its check
+(`check_save_folder`) passes all twelve US packs. Seven of them list first in their PARAM.SFO's file list an entry that
+is no file name (four bytes, a PSP address, then zeros); for a folder the profile marks as a content pack such an
+entry is skipped (patch 0021-content-packs), where before task 078 it was refused with "NAME is missing." (docs/dlc.md,
+"In the menu (task 078)"). Import save… takes them as well, and `tools/dlc_install.sh` installs them from a checkout.
+Export save… and Back up saves… leave packs out: a backup of a stick holding a profile and the twelve packs holds the
+profile alone (`tools/dlc_check.sh`'s import step).
 
 ## Running the check
 
