@@ -140,6 +140,33 @@ leaves the executable.
   (`save-backups/<time>/`) holding `UCUS98612P0000` alone; 33 s. The check's other steps install the packs with
   tools/dlc_install.sh, each on a stick of its own, as before.
 
+## What each pack adds (2026-10-12)
+
+Read off the port with one pack installed at a time on a fresh stick (the planning session; out/dlc/tr_*/ on the
+Mac): LEAGUE SELECTION, TRACK SELECTION of the pack's league, TEAM SELECTION. The packs are grouped by league, not
+listed by name: a pack league appears as soon as one of its packs is installed, its panel names all four tracks of
+the league whether or not their packs are there, and TRACK SELECTION lists only the tracks installed. The pack
+leagues are open on a new profile; nothing is unlocked by play. TEAM SELECTION scrolls past HARIMAU for the added
+ships.
+
+| Pack | League | Tracks | Ship |
+|---|---|---|---|
+| Classic Pack 1 | Classic 2 | Altima VII | Goteki 45 |
+| Classic Pack 2 | Classic 2 | Porto Kora, Odessa Keys | |
+| Classic Pack 3 | Classic 2 | Vohl Square | Icaras |
+| Delta Pack 1 | Delta | Iridia, Anulpha Pass | |
+| Delta Pack 2 | Delta | Koltiwa, Khara Descent | |
+| Gamma Pack 1 | Gamma | Staten Park | Tigron |
+| Gamma Pack 2 | Gamma | Exostra Run, Ubermall | |
+| Gamma Pack 3 | Gamma | Sebenco Peak | Van-Uber |
+| Daxter Pack | | | Daxtinator |
+| Jak X Pack | | | Havenzoomer |
+| Socom 3 Pack | | | Guardian |
+| Socom FTB Pack | | | Patriot |
+
+The base game's Classic league (Karbonis, Sagarmatha, Manor Top, Mandrashee; docs/tracks.md) is unchanged by the
+packs and stays locked on a new profile as before.
+
 ## What the port needs
 
 Answered by the spike and task 077, with the twelve US packs:
