@@ -126,7 +126,7 @@ patches/README.md, a new check, and the docs. Commits per proven stage.
 
 ## Result
 
-Status: (draft: characterization done, the fix in progress)
+Status: PARTIAL
 
 ### Characterization (2026-10-12, the rig, one swept race before any change)
 The defaults probe (`tools/campaign_sweep.py single_race vineta_k --no-damage --shell vulkan --backend vulkan`,
@@ -161,3 +161,74 @@ race: PASS, paced from flip 6100; 232 seconds, 11304 frames
 worst second: #228 after the paced flip, frame avg 31.5 max 216.8 ms
 stutter_check: FAIL (232 of 232 seconds over 25 ms, readback 7.38 ms a frame; 232 of 232 seconds have a frame over 25 ms (at most 10%); readback 7.38 ms a frame (at most 2))
 ```
+
+### Changed
+- patches/0021-vulkan-async-readback.patch (new; vendor/portablekit/host/gpu/vulkan_renderer.cpp only), patches/README.md
+  (the series row, upstream: candidate; the section)
+- tools/stutter_check.sh (new)
+- README.md (tools row, `PURE_SYNC_READBACK` row), docs/verification.md (table row, "Which path" Vulkan row),
+  docs/windows.md (the rig checklist item naming the real cause and the fix)
+
+### The fix (design 2, applied to the depth write-back)
+`write_back_depth` no longer submits and fence-waits mid-frame: each frame slot has its own depth buffer; the SIGNAL
+records the copy into the frame and stores the newest copy an earlier frame recorded (its fence waited, normally
+long signalled; counted as `fence`). The first SIGNAL stores nothing. `PURE_SYNC_READBACK=1` takes the old path
+exactly (the start-up line says `synchronous` or `a frame late`). `read_back_framebuffer` is untouched (it never runs
+in the race).
+
+### Figures
+- Readback stall, rig, `tools/stutter_check.sh` on the swept race: **7.38 ms a frame unfixed, 0.00 fixed**.
+  Race render rate ~66 fps (`[perf] fps 64.5 to 68.3 game 60.0`, `frame avg 14.6 to 15.5 ms`) against ~30 to 37
+  unfixed.
+- **stutter_check (a) still FAILs after the fix** (out/077/fixed1, re-read with the committed check):
+  `(a) seconds with a frame over 25 ms: 118 of 209 (56.5%); apart, the live-file flips (a multiple of 10) over it:
+  960, worst 187.2 ms` / `(b) readback: 0.00 ms a frame` / `stutter_check: FAIL (118 of 209 seconds over 25 ms,
+  readback 0.00 ms a frame; ...)`. What remains is not the readback: (1) every flip that is a multiple of 10 has
+  15 to 25 ms of render time in both runs (946 of 951 render spikes after flip 6300 fixed, 989 of 1014 unfixed): the
+  window input script's read of the sweep's live file (`PURE_INPUT_LIVE`, host/ui/input_script.cpp `s.frame % 10u`,
+  host/shell/script_steps.cpp `read_live` opens the file each time). A player has no live file; the check now
+  leaves those flips out and prints them apart. (2) the flip after each of those: 114 of the 146 other slow frames
+  are at flip%10 == 1 with `pacing 13 to 17 ms x5-6` (the pacer realigning after the long frame) — a knock-on of
+  (1), still counted by the check. (3) about 30 others over 209 s: pacing waits of 14 to 17 ms and four render
+  spikes of 110 to 176 ms (no stall named; compiles or loads). The stutter_check rerun was not repeated after the
+  check's edit: the fixed1 log was re-parsed instead.
+- `tools/frame_regress.sh --shell vulkan --backend vulkan` (it runs all 18 scenes on this shell): **17/18**, FAIL on
+  zone_change 0.1078 (limit 0.10, measured 0.052). Not reproducible: re-run alone on the async default 0.0475 PASS;
+  with `PURE_SYNC_READBACK=1` (zone_change, zone_hud, race_hud) 0.0254, 0.0541, 0.0467 PASS. So the windowed suite
+  on the rig moves by more than the depth lag between runs with either path (against out/071-suite.log: race_hud
+  0.0502 -> 0.0500, tt_hud 0.0481 -> 0.0469, fp_hud 0.0600 -> 0.0582, zone_hud 0.0480 -> 0.0461 fixed; race_hud
+  0.0467, zone_hud 0.0541 synchronous), and "unchanged to the digit" cannot be shown here in either direction.
+- `tools/flash_check.sh --shell vulkan`: PASS (fade 58 flips off, 0 on; the race and its HUD in both).
+- `tools/framerate_check.sh --shell vulkan`: PASS (frontend 33.4/33.4 ms, race 33.4/16.7 ms and 29.97/59.95 flips a
+  second, off/on; the HUD drawn at 60).
+- `tools/patches.sh check`: ok, 21 patches. `python3 tools/docs_check.py`: PASS.
+- Not run (turns): `tools/framerate_check.sh --shell vulkan --race` (the game-clock figure), `tools/frame_regress.sh
+  --all-scenes` headless (the patch is Vulkan-only; headless runs the Metal backend), and a stall probe with
+  `PURE_SYNC_READBACK=1` showing the readback return (the switch is proven only by the suite runs above taking it).
+
+### Verify output
+The Verify line stops at its first command (stutter_check FAIL, figures above). The rest run separately:
+```
+stutter_check: FAIL (118 of 209 seconds over 25 ms, readback 0.00 ms a frame; 118 of 209 seconds have a frame over 25 ms (at most 10%))
+zone_hud     5260    0.0461   0.09   32     0.045 +0.0011  PASS
+zone_change   5679    0.1078   0.10   32     0.052 +0.0558  FAIL
+frame regression: FAIL, 17/18 scenes pass, shell vulkan, backend vulkan (9m 0s)
+zone_change   5679    0.0475   0.10   32     0.052 -0.0045  PASS   (re-run alone)
+frame regression: PASS, 1/1 scenes pass, shell vulkan, backend vulkan (1m 9s)
+flash_check: PASS (fade 58 flips off, 0 on; the race and its HUD in both)
+framerate_check: PASS (frontend 33.4/33.4 ms, race 33.4/16.7 ms and 29.97/59.95 flips a second, off/on; the HUD drawn at 60)
+ok: 21 patch(es) reproduce vendor/portablekit at 8b0c3fe
+docs_check: 33 files, 0 findings: PASS
+```
+
+### Open questions
+1. The brief's premise was wrong: the stall is the depth write-back (lens flare, CPU-read), not a block-transfer
+   readback. The fix gives the game depth one frame old. Accept that for the flare (by eye in a race: does the flare
+   flicker when the sun passes behind scenery?), or keep it per game?
+2. stutter_check's (a) cannot pass on a swept race while the follower's live file costs a 15 to 25 ms frame every 10
+   flips plus the pacer's realign frame after it. Options: leave the realign flip out as well (then ~30 seconds of
+   209 remain, about 14%: still over 1 in 10), make `read_live` cheap (vendor/host/shell, outside this brief), or
+   bound (a) differently. The planner's call; the bound was not changed.
+3. The windowed Vulkan suite is not reproducible to the digit run to run on the rig (zone_change 0.025 to 0.108), so
+   the brief's "unchanged to the digit" criterion needs a different baseline (several runs, or headless replay).
+4. Still to run: framerate_check --race, the headless --all-scenes suite, and a stall probe with PURE_SYNC_READBACK=1.
