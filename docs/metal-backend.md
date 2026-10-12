@@ -7,7 +7,8 @@ beside it ("Files"), registered as `metal`. It draws everything the framework's 
 patch 0002-ge-state-commands): through-mode and transformed draws with the GE's lighting and fog, transformed sprites
 expanded on the screen, culling, the alpha and colour tests, blending with exact FIX colours, the stencil test and
 operations with the target's alpha kept as the PSP's stencil (the shadow volumes, the bloom's mask), the bloom chain
-over aliased VRAM, the texture mapping modes (the reflections), mip levels at the level the GE's rule picks, 16-bit
+over aliased VRAM, the texture mapping modes (the reflections), mip levels at the level the GE's rule picks (or,
+with the Texture detail row, the level for the pixels drawn, anisotropically: task 075), 16-bit
 targets with the GE's dither, CLIPENABLE's depth clamp, block transfers and read-backs into guest memory, and the
 frame and depth write-backs (the lens flare). The frame regression suite's 18 scenes pass on it against PPSSPP
 (docs/verification.md, "Frame regression suite"); where it draws differently from the Vulkan backend, and why: "Where
@@ -16,7 +17,7 @@ it differs from the Vulkan backend on purpose".
 The backend was built by tasks 023 (the 2D frontend), 024 (3D: lighting, fog, sprites, culling), 025 (the effects),
 027 (the Metal shell), 031 (one command queue), 033 (frame times, the pre-warm), 036 (texture mapping), 037 (mipmaps),
 040 (the colour test, 16-bit writes, the depth clamp), 042 (the pre-warm list over the campaign), 049 (the split
-into files by concern), 066 (the internal scale) and 073 (the sprite upscale). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
+into files by concern), 066 (the internal scale), 073 (the sprite upscale) and 075 (texture detail). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
 
 ## Quick start
 
@@ -56,6 +57,7 @@ tools/refactor_check.sh                                   # after it: 0 differin
 | `PURE_INTERNAL_SCALE=N` | (task 066) the framework's `video.internal_scale` for the run: the backend draws its screen-wide targets at N (1 to 6; 0 Auto), read at start ("Internal scale"). Without a window the backend draws at 1 unless this is set |
 | `PURE_SPRITE_UPSCALE=0\|1` | (task 073) the menu's Text and sprites row, `game.sprite_upscale`, for the run: `1` upscales the 2D draws' textures 4x at decode, `0` (the default since 2026-10-12) draws the PSP's texels; every tool run has `0` unless it names it ("Sprite upscale") |
 | `PURE_SPRITE_DUMP=DIR` | (task 073) each upscaled texture written once as `DIR/<key>.src.png` (the decoded input) and `DIR/<key>.png` (the output), for `tools/sprite_proto_check.py`; the textures are the game's, so DIR belongs under `out/` ("Sprite upscale") |
+| `PURE_TEXTURE_DETAIL=0\|1` | (task 075) the menu's Texture detail row, `game.texture_detail`, for the run: `1` (the default) draws the mipmapped textures at the level for the pixels drawn, 16 x log2(S) sixteenths finer than the GE's at internal scale S, and anisotropically; `0` at the GE's level for the PSP's 480x272 pixels, as before; every tool run has `0` unless it names it ("Texture detail") |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
@@ -79,12 +81,12 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `src/gpu/metal_backend.hpp` | the class: its members grouped under a heading per concern that names the file defining them, its data members (50, among them one struct each for the switches, the trace and the pre-warm: `switches_`, `trace_`, `prewarm_`), and the eight helpers more than one file uses (`unpack_color`, `not_emulated`, `to_compare`, `stored_reference`, `stencil_alpha`, `alpha_follows_stencil`, `format_name`, `texture_bits`), each with the file that defines it |
 | `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, the guest's 480x272, `kMaxScale`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target` (with `bytes()` and `contains(address)`, the guest memory a target covers, which every scan of the targets uses, and since task 066 its internal `scale`, `width()` and `height()`), `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm`; and the three structs the class holds once each (task 062): `Switches` (`switches_`, filled by `initialize`), `TraceState` (`trace_`, metal_trace.mm's) and `PrewarmState` (`prewarm_`, metal_pipelines.mm's) |
 | `src/gpu/metal_targets.mm` | "Targets" and "Guest memory": the target cache (`target_for`, `latest_target_at`, the guest-word snapshot), a texture bind found in a target (`find_framebuffer_texture`, the rule of task 009) and the copy a draw samples of the target it draws into; `block_transfer`, `read_back_framebuffer`, `write_back_frame`, `write_back_depth` and the stores into guest memory; `upload_frame` |
-| `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule; the sprite upscale's dump and its texture pack (`dump_sprite`, "Sprite upscale") |
+| `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule; the sprite upscale's dump and its texture pack (`dump_sprite`, "Sprite upscale"); the game options the backend reads itself, at start and once a frame (`read_game_options`: Text and sprites, Texture detail) |
 | `src/gpu/metal_pipelines.mm` | "The pipeline key" and "The pre-warm list": the fragment-function variants, `render_pipeline` and `depth_state` (made on first use or taken from the pre-warm), the GE-to-Metal compare and stencil tables, the list's text form and parser, `start_prewarm`, the pipelines' exit line and `PURE_METAL_PIPELINES_OUT`; the pre-warm's state and the keys the draws used are `prewarm_` (`PrewarmState`) |
 | `src/gpu/metal_effects.mm` | "The stencil and the alpha": what a draw leaves in its target's alpha, `resolve_stencil_alpha`, the blend checks for dual-source blending and for that copy; the blend of a 16-bit target in the shader (task 040). The bloom chain has no code of its own: targets drawn into and sampled ("The bloom chain") |
 | `src/gpu/metal_draw.mm` | "How a draw is drawn": `draw`, from the `DrawCall` to the encoder, with the primitives expanded on the CPU (`expand`, transformed sprites), the blend factors (`translate_blend`), the lighting block, the texture mapping mode, and its parts in the order it calls them: the pipeline key with the fragment uniforms of the tests and the blend (`set_pipeline_key`), the GE viewport folded into clip space (`fold_viewport`), then the encoder's state set when it changed (`bind_state`) and what the shaders read (`bind_inputs`); and `PURE_METAL_LOG`'s line |
 | `src/gpu/metal_trace.mm` | "Frame times": `PURE_METAL_TRACE`'s rows, the line every 600 frames, the exit lines of the stencil, guest memory, the colour test, 16-bit targets and the depth clamp; their state is `trace_` (`TraceState`), which also holds the framework's stencil-copy and depth traces' switches |
-| `src/gpu/shaders/ge.metal` | the shaders, plain MSL: `ge_vertex`, `ge_fragment`, `ge_fragment_dual`, `ge_fragment_16`; ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036), the mip level (task 037), and the colour test, the 16-bit writes and the depth clamp (task 040) are ours, from PPSSPP's hardware notes |
+| `src/gpu/shaders/ge.metal` | the shaders, plain MSL: `ge_vertex`, `ge_fragment`, `ge_fragment_dual`, `ge_fragment_16`; ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036), the mip level (task 037), and the colour test, the 16-bit writes and the depth clamp (task 040) are ours, from PPSSPP's hardware notes; the texture detail path in `sample_texture` (task 075, "Texture detail") too |
 | `src/gpu/shaders/embed.cmake` | the build step that turns `ge.metal` into `build/<preset>/generated_metal/ge_metal.hpp`: the file's text byte for byte as a raw string, `pure::metal::kShaderSource`, which `initialize` compiles. Rerun by the build whenever `ge.metal` changes |
 | `src/gpu/sprite_upscale.hpp`, `.cpp` | (task 073) `upscale_sprite`, the 4x resample of a W x H RGBA8 texture ("Sprite upscale"), and `write_png` for `PURE_SPRITE_DUMP` (the framework's vendored stb_image_write); plain C++, no Metal |
 | `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
@@ -347,7 +349,7 @@ check proves: 0 differing pixels on the 18 scenes and the same counts after each
 | Positions | through-mode positions (`ge_vertex`) and the folded GE viewport (`fold_viewport`) give clip space for the guest's 480x272 screen, and the Metal viewport is the target's own pixels, so the viewport transform scales every position by S: no uniform and no vertex changes for it. The depth (z / 65535 through the viewport's range, or the clamp's screen z) is untouched |
 | Scissor | the GE scissor's pixels times S, both ends included as before |
 | A target sampled as a texture | the texture's place in the target (`FragmentUniforms::uv_remap`) is relative: its size and first texel at the sampled target's scale over that target's own size. A 1x target sampled by a scaled draw (the bloom's composite reading the 256-stride buffer into the display) and a scaled target sampled by a 1x draw (the downsample reading the display into the 256-stride buffer) go through the same placement, and the sampler's bilinear does the rest. The GE's wrap is applied in the texture's own coordinates, as before (task 063) |
-| Mip levels | the auto rule's gradient is taken per PSP pixel: level 0's size in `FragmentUniforms::level` times S, so the GE picks the level it picks at 1x, as the Vulkan renderer does at its scale ("Mipmaps"). The slope and constant rules do not depend on the scale |
+| Mip levels | the auto rule's gradient is taken per PSP pixel: level 0's size in `FragmentUniforms::level` times S, so the GE picks the level it picks at 1x, as the Vulkan renderer does at its scale ("Mipmaps"). The slope and constant rules do not depend on the scale. That is the Texture detail row at Original, as every tool run has it; at Enhanced, the default since task 075, D is then lowered by 16 x log2(S) whatever the rule, the level for the pixels drawn, and sampled anisotropically ("Texture detail") |
 | The stencil copy | its quad over the guest's screen (`resolve_stencil_alpha`), the viewport and scissor at the target's size |
 | 16-bit targets | blended in the shader on the drawn pixel's own colour and dithered per drawn pixel (the matrix by the window's x & 3 and y & 3). Every 16-bit target of this game is the billboards', at 1x |
 | Points and lines | one pixel wide at any scale (Metal draws no wider line); none of the recordings (the frontend, the TEAM screen, the race at 1x and 2x) has a point or a line |
@@ -669,6 +671,99 @@ empty memory stick, `PURE_PACED_FROM=6000`, to flip 9850, `PURE_METAL_TRACE`, re
 cost" above): 3601 frames in 60.1 s, mean 16.68 ms, 99th percentile 18.57 ms, longest 20.88 ms, none over 25 ms; on
 the screen 3601 pictures, interval mean 16.68 ms, longest 25.00 ms, none over. The race holds 60 fps; 51 textures
 were upscaled over the run, in 219 ms in all.
+
+## Texture detail (task 075)
+
+Task 075 (E5, D-019, 2026-10-12): the backend picks a mipmapped draw's level as the GE does for the PSP's 480x272
+pixels ("Mipmaps"; at internal scale S the auto rule's gradient is taken per PSP pixel, "Internal scale"), so at S a
+surface is drawn from a level log2(S) coarser than the pixels could show, two levels at 4, and isotropically, so a
+wall at a grazing angle blurs along its length. In a race frame three of four textured draws have levels (D-019:
+the ships by the auto rule, the track and the scenery by the slope rule with a per-draw bias). With the menu's Texture
+detail row at Enhanced (`game.texture_detail=1`, `PURE_TEXTURE_DETAIL`; the default), the backend draws them at the
+level the GE would pick with S times the pixels each way and samples them anisotropically. Original (0) is the path
+as it was, to the pixel. The Vulkan renderer draws the PSP's levels until a task of its own (D-019 point 1); the row's
+help says so.
+
+### What it does
+
+| Part | Enhanced |
+|---|---|
+| The level | D, in 1/16 levels by the GE's rule ("The registers and the rule"), lowered by 16 x log2(S) whatever the rule, then clamped to 0..16 x (levels - 1) as before. The game's per-draw intent (the slope rule's slope and bias) is kept relative; a surface close by still draws level 0. For the auto rule the gradient stays scaled by S (level 0's size times S) and the shift removes it again: at S = 2 and 4 that is exactly the gradient per drawn pixel (`ge_log16` of a value times 2^n is the value's plus 16n), at 3, 5 and 6 within the logarithm's piecewise-linear step. At S = 1 the shift is 0 |
+| The sample | through `gradient2d` instead of `level()`: `dx = dfdx(uv)` and `dy = dfdy(uv)` of the normalised coordinates (after the divide by q), rho = max(|dx x size|, |dy x size|) in texels of level 0, k = 2^(D'/16 - log2 rho), and `sample(s, uv, gradient2d(dx k, dy k))`. The GPU's isotropic level is then D'/16, and the anisotropic sampler takes its taps along the footprint's long axis at the finer level its short axis allows |
+| The sampler | bit 6 of the sampler index (`kAnisotropic`, 64; the table in `initialize()` grew from 48 to 128 samplers) sets `maxAnisotropy` to 16 (`kMaxAnisotropy`), Metal's maximum: `MTLDevice` has no query for a lower limit |
+| Which draws | a texture with levels from guest memory (the `levels > 1` block of `draw` in metal_draw.mm), not a 2D draw (through mode, or orthographic and unlit). Never a texture of one level, a target sampled as a texture or an upscaled sprite, which have no levels. On the race_hud route 79 of 192857 mipmapped draws are 2D and are left alone |
+
+### In the backend
+
+- **The option.** `read_game_options` (metal_textures.mm) reads `game_option("texture_detail")` with the Text and
+  sprites row, at start and at every `begin_frame`, never per draw: a change in the menu applies from the next frame.
+- **The uniforms.** `FragmentUniforms::level_range.y` holds the shift, 16 x log2(S), and `level_range.z` 1 selects the
+  gradient path in `sample_texture`; both were unused, so the block keeps its 240 bytes. At Original both are 0 and the
+  shader takes the `level()` sample as before. The path is chosen by the uniform, not a pipeline:
+  `config/metal_pipelines.txt` is unchanged.
+- **The counts.** The exit line's mipmapped count gains the enhanced draws, `M mipmapped draws (E enhanced, L mip
+  levels decoded after the first)` (inside the parentheses, so `tools/purelib/logs.py` reads the line as before), and
+  the line every 600 frames ends `..., M mipmapped draws (E enhanced)`. The race_hud route with the option on: 192857
+  mipmapped draws, 192778 enhanced; the Zone route 41389 of 41389.
+- **The log.** `[pure] texture detail: off` at start when the option is off; `[pure] texture detail: on
+  (game.texture_detail)` at the first enhanced draw.
+
+### The checks
+
+Every tool run has the option off (`PURE_TEXTURE_DETAIL=0`, `tools/purelib/port.py`'s `original_pacing`, and
+`game.texture_detail=0` in a new scratch settings.ini; `tools/gerec/metal_check.sh` sets it for its replays), so the
+suite, the scale check, the sprite check and the HUD check measure the PSP's levels. The Original path is the old one
+to the pixel: `tools/refactor_check.sh` from the commit before the task, at internal scale 1, at 4 and at 4 with
+`PURE_SPRITE_UPSCALE=1`, found 0 differing pixels on all 18 scenes each time, and the same counts once the new
+`E enhanced` fields are taken out.
+
+`tools/texture_check.sh` is the check with it on: race_hud, tt_hud, fp_hud and zone_hud headless at internal scale 4
+with the option off and on (`tools/frame_regress.sh --only`). Each capture with it on must be 1920x1088 and, reduced
+to 480x272 by its blocks' centre pixels, within the scene's own limit of its reference at the scene's tol (the picture
+is the same picture). For race_hud, tt_hud and fp_hud it must also differ from the capture with it off in at least 1%
+of its pixels at tol 24 (the detail is there), hold more high-frequency energy (the mean absolute difference, per
+channel, between each pixel and its right and its lower neighbour over the whole picture: the ratio above 1.0), and
+show the HUD (`tools/hud_check.py`). The race_hud run's exit line must count at least 10000 enhanced draws, and a
+race_hud run at internal scale 1 with the option on (the shift 0, the anisotropy alone) must be within its limit of
+the reference. On 2026-10-12 (the task's build), about 40 s:
+
+| Scene | Reduced, on (limit) | Reduced, off | On against off | Energy off | Energy on | Ratio | HUD |
+|---|---|---|---|---|---|---|---|
+| race_hud | 0.0467 (0.10) | 0.0363 | 0.0218 | 3.5752 | 4.0681 | 1.1378 | found |
+| tt_hud | 0.0473 (0.12) | 0.0342 | 0.0244 | 3.5424 | 4.3499 | 1.2279 | found |
+| fp_hud | 0.0472 (0.11) | 0.0340 | 0.0244 | 3.5210 | 4.3300 | 1.2298 | found |
+| zone_hud | 0.0346 (0.09) | 0.0345 | (0.0002) | (2.2434) | (2.2444) | (1.0004) | - |
+
+race_hud at scale 1 with the option on scores 0.0162 against the reference (limit 0.10; 0.0148 off). The reduced
+pictures move towards their limits, by about 0.011 on the Vineta K scenes, because the reference is the PSP's coarser
+level: the finer texels are not the PSP's. zone_hud is held to the reduction alone (the replan of 2026-10-12): the
+Zone's mipmapped textures hold no detail between their levels where its frame draws them. Its frame has 243 draws with
+levels, all enhanced, but its track and walls come out the same to the pixel; level 0 everywhere (`PURE_NO_MIPMAPS=1`,
+the finest any level choice can sample) moves 0.0002 of its pixels at tol 24 from the Original capture, as Enhanced
+does, where it moves race_hud's 0.0224. zone_change, the route's other scene, moves 0.0000. zone_hud's HUD has no
+CURRENT or LAP label for `tools/hud_check.py`, as in the sprite check.
+
+Metal applies the anisotropy on the `gradient2d` path: with `maxAnisotropy` 1 in place of 16 (a build not committed),
+race_hud's capture with the option on differs from the committed one in 12.68% of its pixels at tol 0, 0.65% at tol 2
+and 0.04% at tol 24 (tt_hud 13.05%, 1.35%, 0.05%), on the track at grazing angles, the crowds and the far scenery.
+
+### The cost
+
+The race at internal scale 4 in the Metal window, as in "The cost" above (`main_menu.txt` + `single_race.txt` without
+their shots on an empty memory stick, `PURE_PACED_FROM=6000`, to flip 9850, `PURE_METAL_TRACE`, read from flip 6250),
+with the option off and on:
+
+| Option | Frames | Mean | 99th pct | Longest | Over 25 ms | On screen: longest, over 25 ms | GPU waits a frame | Submit a frame |
+|---|---|---|---|---|---|---|---|---|
+| off | 3601 in 60.1 s | 16.68 ms | 18.64 ms | 23.15 ms | 0 | 33.33 ms, 1 | 0.86 ms | 2.07 ms |
+| on, flips 7023-9850 | 2828 in 47.2 s | 16.68 ms | 18.52 ms | 21.32 ms | 0 | 25.00 ms, 0 | 0.86 ms | 2.03 ms |
+| on, flips 6250-6967 | 718 in 12.0 s | 16.68 ms | 18.49 ms | 22.06 ms | 0 | 37.50 ms, 1 | 0.94 ms | 2.45 ms |
+
+The run with the option on was split where the window was covered (flips 6968 to 7022: macOS held a drawable back
+for 0.97 s, the one frame over 25 ms of the minute, not a player's case). A second run with it on, the window off the
+screen throughout, gave 3601 frames in 60.1 s, mean 16.68 ms, longest 20.42 ms, none over 25 ms, 0.94 ms of GPU waits
+a frame. The race holds 60 fps; the anisotropic taps cost the GPU little at this scale (the waits a frame 0.86 to 0.94
+ms against 0.86 off, task 067's 0.94 at Auto), and Original costs nothing new, being the same code.
 
 ## The Metal shell
 
@@ -1005,6 +1100,10 @@ matrix's q, s and t are the coordinates times that q, so their `dfdx`/`dfdy` are
 the table's with the same float-bits log16; the texel is `sample(..., level(clamp(D, 0, range) / 16))`. A draw
 without levels samples as before, with Metal's own derivatives on a texture of one level.
 
+With the Texture detail row at Enhanced (task 075, the default) a draw's `level_range.z` is 1 and the same D is
+lowered by `level_range.y`, 16 x log2(S), then sampled through `gradient2d` with an anisotropic sampler instead of
+`level()` ("Texture detail"). At Original both are 0 and the texel is the `level()` sample above, to the pixel.
+
 Not done, as the game does not need them: the GE takes q once per 4-pixel span rather than per pixel; the auto mode's
 bias (the notes' formula has none, and the game's auto draws all have bias 0); the separate CLUT per level; and a
 minification filter without bit 2 (0 to 3) on a texture with levels samples level 0, as the SDK's names for it
@@ -1178,7 +1277,9 @@ as before and named once; the game never draws one.
 - Mip levels: both backends upload them and pick the level by the GE's rule (task 037 here, task 058 and patch
   0012-vulkan-mipmaps there). Drawing at 2x, the Vulkan backend adds 16 x log2 of its internal scale to the auto
   rule's D, so that g, the screen gradient, stays per PSP pixel; Metal takes g per PSP pixel the same way at its
-  internal scale (task 066: level 0's size times S).
+  internal scale (task 066: level 0's size times S). With the Texture detail row at Enhanced (task 075, the default)
+  Metal then lowers D by 16 x log2(S) and samples anisotropically; the Vulkan renderer draws the PSP's levels until a
+  task of its own gives it the same rule (D-019).
 - 16-bit targets keep the format's bits with the GE's dithering, the colour test and CLIPENABLE's depth clamp with
   MINZ/MAXZ are in both (task 040 here; tasks 059 and 060, patches 0013-vulkan-colortest-depthclamp and
   0014-vulkan-16bit-dither there). The Vulkan backend reads a 16-bit target's colour as an input attachment with a

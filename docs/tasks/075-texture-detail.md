@@ -84,7 +84,11 @@ One or two commits on the branch.
   last frame or at least 10000 over the run (whichever the line gives: say which). Also one run of `race_hud` at
   `PURE_INTERNAL_SCALE=1` with the option on, compared directly with the reference within the scene's limit (the
   shift is 0 there; only the anisotropy acts). Print a table; `texture_check: PASS` or `FAIL` last; exit 0 only on
-  PASS; captures and reductions under `--out` (default out/texture_check).
+  PASS; captures and reductions under `--out` (default out/texture_check). (Replan 2026-10-12, after the first run:
+  the 1% and energy bars apply to race_hud, tt_hud and fp_hud only, since the Zone's mipmapped textures hold no
+  detail between their levels where zone_hud's frame draws them (level 0 everywhere moves 0.0002 of its pixels at
+  tol 24, as Enhanced does), so zone_hud keeps the reduction and the stats; and the HUD bar is on those three
+  scenes, as in tools/sprite_check.sh, zone_hud's HUD having no CURRENT or LAP label.)
 - **Docs**: docs/metal-backend.md (a section "Texture detail (task 075)" after "Sprite upscale": the shift, the
   gradients, the sampler bit, the stats, the log lines, the cost; the "Internal scale" table's "Mip levels" row and
   "The level in the shader" updated), docs/controls.md (the row and `game.texture_detail`), docs/verification.md

@@ -18,10 +18,14 @@
 #   - reduced to 480x272 by the centre pixel of each 4 x 4 block (tools/scale_check.sh's rule and code, copied: the
 #     rule by which the backend feeds guest memory, D-015), it is within the scene's own limit of its PPSSPP reference
 #     at the scene's tol, both read from tools/frame_regress.sh's scene table (the picture is the same picture);
-#   - the full 1 capture differs from the full 0 capture in at least 1% of its pixels at tol 24 (the detail is there);
-#   - the full 1 capture holds more high-frequency energy than the full 0 one: the mean absolute difference, per
-#     channel, between each pixel and its right and its lower neighbour over the whole picture, the ratio of 1's to
-#     0's above 1.0;
+#   - for race_hud, tt_hud and fp_hud (DETAIL_SCENES), the full 1 capture differs from the full 0 capture in at least
+#     1% of its pixels at tol 24 (the detail is there), and holds more high-frequency energy than the full 0 one: the
+#     mean absolute difference, per channel, between each pixel and its right and its lower neighbour over the whole
+#     picture, the ratio of 1's to 0's above 1.0. Not for zone_hud (the replan of 2026-10-12): the Zone's mipmapped
+#     textures hold no detail between their levels where its frame draws them. Level 0 everywhere (PURE_NO_MIPMAPS=1,
+#     the finest any level choice can sample) differs from the 0 capture in 0.0002 of its pixels at tol 24, 314 pixels
+#     as the 1 capture does, so no level choice can reach 1% there; zone_hud keeps the reduction (the picture is the
+#     same picture), and its two figures are printed below the table for the record;
 #   - for race_hud, tt_hud and fp_hud, the 1 capture passes tools/hud_check.py (the HUD found; not zone_hud, whose HUD
 #     has no CURRENT or LAP label: its reference fails tools/hud_check.py too, as tools/sprite_check.sh notes);
 # and the race_hud run with 1: its exit line (`[metal] ... M mipmapped draws (E enhanced, ...)`, the counts over the
@@ -37,6 +41,9 @@ DIR=out/texture_check
 WAIT=600
 SCALE=4
 SCENES="race_hud tt_hud fp_hud zone_hud"
+# The scenes held to the two detail bars (1% against the 0 capture, the energy ratio above 1.0): not zone_hud, whose
+# level 0 everywhere moves 0.0002 of its pixels at tol 24 (the header says why).
+DETAIL_SCENES="race_hud tt_hud fp_hud"
 HUD_SCENES="race_hud tt_hud fp_hud"
 usage() {
   echo "usage: tools/texture_check.sh [--out DIR] [--wait SECONDS]"
@@ -93,15 +100,15 @@ capture 0 "$SCALE" 0 "$SCENES"
 capture 1 "$SCALE" 1 "$SCENES"
 capture s1 1 1 race_hud
 
-python3 - "$DIR" "$SCALE" "$SCENES" "$HUD_SCENES" "$((SECONDS - START))" <<'EOF'
+python3 - "$DIR" "$SCALE" "$SCENES" "$HUD_SCENES" "$DETAIL_SCENES" "$((SECONDS - START))" <<'EOF'
 import os, re, subprocess, sys
 from operator import sub
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
 import png  # noqa: E402  (tools/png.py)
 
-out, scale, scenes, hud_scenes, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3].split(), sys.argv[4].split(), \
-    sys.argv[5]
+out, scale, scenes, hud_scenes, detail_scenes, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3].split(), \
+    sys.argv[4].split(), sys.argv[5].split(), sys.argv[6]
 DIFF_TOL, MIN_DIFF = 24, 0.01           # the full captures: at least 1% of pixels over tol 24
 MIN_RATIO = 1.0                         # the high-frequency energy of 1 over 0's: above this
 MIN_ENHANCED = 10000                    # enhanced draws over the race_hud run with 1
@@ -178,10 +185,12 @@ note("")
 note(f"each PURE_TEXTURE_DETAIL=1 capture at scale {scale}: its size, by its blocks' centre pixels against the scene's "
      f"reference at the scene's tol and limit (tools/frame_regress.sh), the full capture against the "
      f"PURE_TEXTURE_DETAIL=0 one at tol {DIFF_TOL} (at least {MIN_DIFF:.0%}), the high-frequency energy of the 0 and 1 "
-     f"captures and their ratio (above {MIN_RATIO}), and the race HUD (tools/hud_check.py):")
+     f"captures and their ratio (above {MIN_RATIO}) for {', '.join(detail_scenes)}, and the race HUD "
+     f"(tools/hud_check.py) for {', '.join(hud_scenes)}:")
 note(f"{'scene':<10} {'size':>10} {'reduced':>8} {'limit':>6} {'tol':>4} {'vs 0':>8} {'energy 0':>9} {'energy 1':>9} "
      f"{'ratio':>7} {'HUD':>4}  result")
 passed = 0
+record = []      # a scene's detail figures where the bars do not apply
 for scene in scenes:
     route, frame, ref, tol, limit = table[scene]
     a, b = os.path.join(out, "1", "shots", scene + ".png"), os.path.join(out, "0", "shots", scene + ".png")
@@ -205,14 +214,19 @@ for scene in scenes:
         else:
             why.append(f"reduced over the limit, diff {diff}")
         full = compare(a, b, DIFF_TOL, 1.0)
-        vs0_text = f"{full['fraction']:.4f}"
-        if full["fraction"] < MIN_DIFF:
-            why.append(f"differs from the 0 capture in under {MIN_DIFF:.0%}")
         e0, e1 = energy(b), energy(a)
         ratio = e1 / e0 if e0 > 0 else float("inf")
-        e0_text, e1_text, ratio_text = f"{e0:.4f}", f"{e1:.4f}", f"{ratio:.4f}"
-        if not ratio > MIN_RATIO:
-            why.append(f"energy ratio not above {MIN_RATIO}")
+        if scene in detail_scenes:
+            vs0_text = f"{full['fraction']:.4f}"
+            e0_text, e1_text, ratio_text = f"{e0:.4f}", f"{e1:.4f}", f"{ratio:.4f}"
+            if full["fraction"] < MIN_DIFF:
+                why.append(f"differs from the 0 capture in under {MIN_DIFF:.0%}")
+            if not ratio > MIN_RATIO:
+                why.append(f"energy ratio not above {MIN_RATIO}")
+        else:
+            record.append(f"{scene}: against the 0 capture {full['fraction']:.4f} at tol {DIFF_TOL}, energy "
+                          f"{e0:.4f} -> {e1:.4f} (ratio {ratio:.4f}); not bars here: the scene's mipmapped textures "
+                          f"hold no detail between their levels (level 0 everywhere moves 0.0002 of its pixels)")
     hud_text = "-"
     if scene in hud_scenes:
         ok, last = hud(scene, a, frame)
@@ -223,6 +237,8 @@ for scene in scenes:
     note(f"{scene:<10} {f'{w}x{h}':>10} {reduced_text:>8} {limit:>6} {tol:>4} {vs0_text:>8} {e0_text:>9} {e1_text:>9} "
          f"{ratio_text:>7} {hud_text:>4}  " + ("PASS" if not why else "FAIL (" + "; ".join(why) + ")"))
 
+for line in record:
+    note(line)
 note("")
 route = table["race_hud"][0].replace(".txt", "")
 log = os.path.join(out, "1", route + ".log")
