@@ -13,7 +13,11 @@
 # ENHANCEMENTS_OFF): PURE_SIXTY_FPS=1, PURE_SMOOTH_FLASHES=1, PURE_TEXTURE_DETAIL=1 (the player's defaults) and
 # PURE_SPRITE_UPSCALE=0 (Original, the default since D-018 as amended). That is the planning session's probe of task
 # 077. About 6 minutes. The log is read from the race's first paced flip (`[pure] paced from frame N`) to its end:
-# PASS when (a) at most 1 in 10 of those seconds has a worst frame over SLOW_MS, and (b) the readback stall
+# PASS when (a) at most 1 in 10 of those seconds has a frame over SLOW_MS (its `[slow-frame]` lines between the
+# second's `[perf]` lines), the flips that are a multiple of 10 left out: the window's input script reads the sweep's
+# live file (PURE_INPUT_LIVE, the follower's steering) on those, which costs the rig 15 to 25 ms of render time
+# whatever the renderer does (946 of the 951 race frames with render over 12 ms in task 077's run), and a player has
+# no live file; they are counted and printed apart. And (b) the readback stall
 # (`[stalls]` readback, the GPU drains for a framebuffer or depth written back to guest memory) averages at most
 # MAX_READBACK_MS a frame over them, weighted by each line's frames. Prints both figures and the worst second either
 # way. The cell itself must PASS (the race reached its results screen). Waits up to 600 s while another PureNative
@@ -84,6 +88,8 @@ out = sys.argv[1]
 slow_ms, max_fraction, max_readback = float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
 PACED_RE = re.compile(r"^\[pure\] paced from frame (\d+)")
 PERF_RE = re.compile(r"^\[perf\] .*\| frame avg ([\d.]+) max ([\d.]+) ms")
+SLOW_RE = re.compile(r"^\[slow-frame\] (\d+) ([\d.]+) ms")
+POLL = 10  # the input script reads PURE_INPUT_LIVE on flips that are a multiple of this (host/ui/input_script.cpp)
 STALLS_RE = re.compile(r"^\[stalls\] ms per frame over (\d+) frames:")
 READBACK_RE = re.compile(r" readback ([\d.]+) max")
 
@@ -94,7 +100,7 @@ with open(os.path.join(out, "race.stdout"), errors="replace") as f:
         if m and m[1] == "single_race-vineta_k":
             outcome = m[2]
 log = os.path.join(out, "race", "single_race-vineta_k.log")
-paced, seconds, frames, readback = None, [], 0, 0.0
+paced, seconds, frames, readback, pending, polls = None, [], 0, 0.0, [], []
 if os.path.exists(log):
     with open(log, errors="replace") as f:
         for line in f:
@@ -103,9 +109,19 @@ if os.path.exists(log):
                 if m:
                     paced = int(m[1])
                 continue
+            m = SLOW_RE.match(line)
+            if m:
+                flip, ms = int(m[1]), float(m[2])
+                if flip % POLL == 0:
+                    polls.append(ms)
+                else:
+                    pending.append((ms, flip))
+                continue
             m = PERF_RE.match(line)
             if m:
-                seconds.append((len(seconds) + 1, float(m[1]), float(m[2])))
+                worst_slow = max(pending, default=None)
+                seconds.append((len(seconds) + 1, float(m[1]), float(m[2]), worst_slow))
+                pending = []
                 continue
             m = STALLS_RE.match(line)
             if m:
@@ -118,10 +134,10 @@ if outcome != "PASS":
     fails.append(f"the race cell {outcome or 'has no outcome'}")
 if paced is None:
     fails.append("no `[pure] paced from frame` line")
-slow = [s for s in seconds if s[2] > slow_ms]
+slow = [s for s in seconds if s[3] is not None and s[3][0] > slow_ms]
 fraction = len(slow) / len(seconds) if seconds else 1.0
 mean = readback / frames if frames else 0.0
-worst = max(seconds, key=lambda s: s[2]) if seconds else None
+worst = max(slow, key=lambda s: s[3][0]) if slow else None
 if not seconds:
     fails.append("no `[perf]` lines after the paced flip")
 elif fraction > max_fraction:
@@ -131,10 +147,14 @@ if not frames:
 elif mean > max_readback:
     fails.append(f"readback {mean:.2f} ms a frame (at most {max_readback:g})")
 print(f"race: {outcome or 'no outcome'}, paced from flip {paced}; {len(seconds)} seconds, {frames} frames")
-print(f"(a) seconds with a frame over {slow_ms:g} ms: {len(slow)} of {len(seconds)} ({fraction:.1%})")
+print(f"(a) seconds with a frame over {slow_ms:g} ms: {len(slow)} of {len(seconds)} ({fraction:.1%}); apart, the "
+      f"live-file flips (a multiple of {POLL}) over it: {len(polls)}, worst {max(polls, default=0.0):.1f} ms")
 print(f"(b) readback: {mean:.2f} ms a frame")
 if worst:
-    print(f"worst second: #{worst[0]} after the paced flip, frame avg {worst[1]:.1f} max {worst[2]:.1f} ms")
+    print(f"worst second: #{worst[0]} after the paced flip, frame avg {worst[1]:.1f} max {worst[2]:.1f} ms, "
+          f"flip {worst[3][1]} {worst[3][0]:.1f} ms")
+else:
+    print(f"worst second: none has a frame over {slow_ms:g} ms but the live-file flips")
 print(f"stutter_check: {'FAIL' if fails else 'PASS'} ({len(slow)} of {len(seconds)} seconds over {slow_ms:g} ms, "
       f"readback {mean:.2f} ms a frame{'; ' + '; '.join(fails) if fails else ''})")
 EOF
