@@ -151,3 +151,13 @@ over its 400000-line bound; the fbtex trace prints the transfers themselves. PAS
   the SIGNAL without submitting, and store the copy recorded in the previous frame (its fence is long signalled),
   so the flare's depth test sees depth one frame old. The guest-visible bytes change (one frame late), so the suite
   must hold to the digit (escalate otherwise). `read_back_framebuffer` is left as it is (it does not run here).
+
+### The check, unfixed (the FAIL path proven)
+`tools/stutter_check.sh --out out/077/unfixed` on the rig before the fix (303 s):
+```
+race: PASS, paced from flip 6100; 232 seconds, 11304 frames
+(a) seconds with a frame over 25 ms: 232 of 232 (100.0%)
+(b) readback: 7.38 ms a frame
+worst second: #228 after the paced flip, frame avg 31.5 max 216.8 ms
+stutter_check: FAIL (232 of 232 seconds over 25 ms, readback 7.38 ms a frame; 232 of 232 seconds have a frame over 25 ms (at most 10%); readback 7.38 ms a frame (at most 2))
+```
