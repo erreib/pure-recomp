@@ -221,8 +221,15 @@ simplification task, then the enhancements. The session-by-session resume notes 
   7/7, the scaler the prototype's to the bit, 25 textures in 66 ms on the main menu, a race at scale 4 at 60 fps
   with 0 frames over 25 ms), hud 61/61, metal_check, window suites 7/7 both shells (out/073_gate.log).
   Follow-ups: sprite_check's margin on team_select and class_select; a byte cap on the texture cache; the TEAM
-  ship sentence in docs/metal-backend.md. Task 074 (in flight): the dump as a PPSSPP-format texture pack for the
-  Vulkan renderer (Windows) and as the base for an AI pass. The frontend at 60 fps comes after.
+  ship sentence in docs/metal-backend.md. **Task 074 merged 0bbf621 (2026-10-11): E7 complete.** `PURE_SPRITE_DUMP`
+  also writes a PPSSPP-format texture pack keyed by the framework's own key function (xxh64, ignoreAddress), and
+  `tools/sprite_pack.sh [--check] [--pack DIR]` builds it from the suite's routes and two race cells (48 keys, 3.5 MB
+  under out/sprite_pack/pack, never committed) and checks it under the Vulkan renderer in a window (main_menu and
+  race_hud changed by 2.3% and 1.2%, within their limits reduced, the HUD found; out/074_gate.log). The rig installs
+  the folder as `textures/UCUS98612` in its data directory (docs/windows.md). Follow-ups: the race cells behind an
+  option (7 of the build's 8 minutes); the 40-key bar against the animated palette variants; the scaler's hairline
+  thinning and stair-stepped outlines to tune by eye; an AI pass on the art atlases as a replacement pack to
+  compare. The frontend at 60 fps and the menu-XML spike (new in-game options) are the next candidates.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

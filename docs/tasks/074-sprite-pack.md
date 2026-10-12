@@ -1,6 +1,6 @@
 # 074: The upscaled art as a texture pack (E7, the Vulkan renderer)
 
-Milestone: E7 (Erik, 2026-10-11; D-018 point 4) | Branch: task/074-sprite-pack | Status: OPEN
+Milestone: E7 (Erik, 2026-10-11; D-018 point 4) | Branch: task/074-sprite-pack | Status: MERGED (0bbf621, 2026-10-11)
 
 ## Goal
 Task 073 upscales the menus' and HUD's bitmap art in the Metal backend. The Vulkan renderer (Windows, and the
@@ -215,3 +215,21 @@ Open questions:
 7. For a 512-tall texture drawn in through mode, the loader hashes only the rows its draws use, and the dump hashes the
    whole texture. Task 073 found that through mode reaches only three small textures in the frontend route, so this
    should not matter here, but it was not checked texture by texture (docs/metal-backend.md).
+
+## Review
+Verify rerun: `tools/verify_task.sh 074` from the main checkout after the merge, 2026-10-11 19:50 to 19:59
+(out/074_gate.log): PASS. sprite_pack: 48 keys, 33 drawn, main_menu 0.0232 changed and 0.0446 of 0.05 reduced,
+race_hud 0.0116 and 0.0638 of 0.10 with the HUD, 8m 22s; sprite_check PASS; suite 18/18; docs_check; then
+menu_check PASS on both shells (the row's help text changed at the merge).
+Spot-read: the dump's key is the framework's own function with xxh64 and ignoreAddress, and textures.ini says the
+same, so the loader and the dump cannot disagree by construction; the Vulkan renderer's own dump of the same route
+gave the same keys for the fonts and the art (the Result names three); the check reads the renderer's trace rather
+than adding a mode to the port; no PNG under git.
+Merged: 0bbf621 into batch/m2; f718ada after it: the Text and sprites row's help now names the pack (the worker's
+open question 6).
+Notes, follow-ups: the two paced race cells add 7 minutes and 4 keys to a pack build (put them behind an option);
+the 40-key bar counts twelve palette variants of one 32x16 animated picture, so the bar is nearer 36 (lower it or
+count distinct texels); race_hud's change with the pack is 0.0116 against a 1% bar (little margin at 2x); seen in
+the captures, the scaler's hairline thinning and a slight stair-step on the katakana's outlines (the mask
+threshold's half-width, 0.22: a tuning follow-up, Erik's eye to judge); not tested: the app's own PURE_SPRITE_DUMP
+and the script's Windows path handling (the rig's run).
