@@ -1,7 +1,7 @@
 # 079: The audio sink clicks against a fast device clock
 
 Milestone: Windows fidelity (Erik, 2026-10-12: audio stutter through every race, every build, every setting) |
-Branch: task/079-audio-rate-match | Status: OPEN
+Branch: task/079-audio-rate-match | Status: MERGED (the merge before this commit, 2026-10-12; BLOCKED as briefed, the counter kept)
 
 ## Goal
 Erik hears audio stutter on the rig through whole races, on Friday's build as on today's, at every enhancement
@@ -36,7 +36,7 @@ run on the rig proves both the defect (the counter before the fix) and the cure 
 - README.md's switches table (where the new switch rows go), docs/verification.md
 
 ## Deliverable
-One vendor patch, `patches/0023-audio-rate-match.patch`, its rows in patches/README.md, and the docs. Commits per
+One vendor patch, `patches/0023-audio-resync-counter.patch`, its rows in patches/README.md, and the docs. Commits per
 proven stage; the characterization commit comes before any fix.
 - **Characterize first:** add the missing counter — the stalled-producer jump increments `resyncs` (and a
   `resynced` frame count), both on the `[audio]` trace line and in the shutdown total. One swept race with
@@ -74,8 +74,8 @@ proven stage; the characterization commit comes before any fix.
 
 ## May touch
 - vendor/portablekit/host/audio/audio_sink.cpp (and audio_sink.hpp if the counters need it): only through
-  `tools/patches.sh export 0023-audio-rate-match`; commit patches/, never vendor/
-- patches/0023-audio-rate-match.patch (new), patches/README.md
+  `tools/patches.sh export 0023-audio-resync-counter`; commit patches/, never vendor/
+- patches/0023-audio-resync-counter.patch (new), patches/README.md
 - README.md, docs/windows.md, docs/verification.md, docs/tasks/079-audio-rate-match.md (the Result)
 
 ## Must not touch
@@ -139,7 +139,7 @@ second at 63%, and pitch-shifting through it would be audible. Rate-matching is 
 3. Erik's stutter in play is probably those dips (seconds at 63-95% speed), not a steady drift. A play log with
    this counter would show whether resyncs cluster in the slow seconds.
 
-Changed: patches/0023-audio-rate-match.patch (new: the resync, resynced and lead counter only), patches/README.md
+Changed: patches/0023-audio-resync-counter.patch (new: the resync, resynced and lead counter only), patches/README.md
 (the table row and the paragraph, upstream candidate), README.md (the `PURE_TRACE_AUDIO` fields),
 docs/tasks/079-audio-rate-match.md (this Result). There is no fix, so docs/windows.md is unchanged and there is no
 `PURE_NO_RATE_MATCH`.
@@ -175,3 +175,16 @@ Open questions:
   88.5%. Is that the harness's cost (pty stdout) or a regression? It decides whether the sweep can stand in for
   Erik's play.
 - docs/status.md (not mine to touch) still states the fast-device premise for 079.
+
+## Review
+
+Merged 2026-10-12 as the counter it truthfully is (the patch renamed 0023-audio-resync-counter; no controller, no
+PURE_NO_RATE_MATCH). The block was correct and the characterization overturned the brief's premise with the primary
+measurement — the planning session's "1% fast device" was the perf trace's window arithmetic, not the DAC. What the
+figures actually say: the race's resyncs (5.18/s, ~1959 frames each) track the guest's lost real time, and Erik's
+play logs show the same shape — seconds at 63-95% speed whose guest time swells to 13-14 ms a frame at 60 fps.
+The audio clicks and the visible slowdowns are one defect: the guest thread over budget in effect storms. Two named
+follow-ups go to task 080: the depth write-back's CPU conversion runs on the guest thread at the full scaled size
+(a GPU downsample to 480x272 before the copy cuts it 16-fold at 4x), and the sink's stalled-producer branch should
+play counted silence rather than skip a continuous channel. The sweep's own speed figures (88.5% with sound and
+traces) are the harness's cost and cannot stand in for play; Erik's next traced play run carries the new counter.

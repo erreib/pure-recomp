@@ -65,7 +65,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0020-vulkan-texture-detail | (task 076) | Fidelity, enhancement | candidate, behind a profile field | Texture detail at the internal scale in the Vulkan renderer, as the Metal backend draws it: with the game option `GameProfile::texture_detail_option` names at 1, a draw that samples a texture with mip levels and is not a 2D draw has the GE's D lowered by 16 x log2 of its target's scale whatever the rule, and `ge.frag` samples that level through the coordinates' own gradients (`textureGrad`, `texture_params.x` bit 21) with an anisotropic sampler (`samplerAnisotropy`, at most 16 taps); no option named, or the option at 0, draws as before |
 | 0021-vulkan-async-readback | (task 077) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
 | 0022-vulkan-cached-window-capture | (task 078) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
-| 0023-audio-rate-match | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
+| 0023-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -492,7 +492,7 @@ when the device has one (type 4 on the RTX 3080), else as before; no invalidate 
 Measured: fence wait 1.5 to 3.3 ms, read, convert and write 1.6 to 2.5 ms. The BMP is the same bytes. Upstream: a
 candidate; any discrete GPU's captures.
 
-### 0023-audio-rate-match
+### 0023-audio-resync-counter
 Task 079, the characterization stage alone. `AudioSink::mix` snaps a producer's cursor that has fallen within 512
 frames of the device's read position (`kPrebufferFrames / 4`) forward to read position plus 2048. Each jump skips
 frames that the channel never wrote, so you hear a click, but the ring never runs dry, so `silent=` stays 0 and no

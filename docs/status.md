@@ -299,6 +299,18 @@ simplification task, then the enhancements. The session-by-session resume notes 
   probes' last ~10 ms on shot flips); Erik's in-play slowdowns match neither class, so the play-side test is his —
   the Performance overlay during a race, and the Esc menu's Vsync row Off (mailbox) against the 100 Hz display's
   one/two-vblank alternation under Vsync On, or the display at 60 Hz once.
+- **The stutter's true shape (task 079, merged 2026-10-12: the counter; the premise overturned).** The planning
+  session read a "1% fast device" out of Erik's traced play and briefed rate-matching; the worker blocked on the
+  brief's own escalation rule and was right — the ratio was the perf trace's window arithmetic (each `[perf]`
+  second runs about 1% long), and by its own frames the device is not fast. Patch 0023-audio-resync-counter makes
+  the sink's silent cursor-jump visible at last (`resyncs`/`resynced` on the `[audio]` line; the race showed
+  5.18/s of ~44 ms each, tracking the guest's lost real time). The real defect, one cause with two faces: in effect
+  storms at 60 fps the guest time swells to 13-14 ms of the 16.7 ms budget in Erik's own play (speed dips to
+  63-95%), the game loses real time — the visible slowdown — and the guest-clocked audio producer falls behind the
+  device, which the sink resolves by skipping a continuous channel: the click. Task 080 carries the two named
+  fixes: the depth write-back's CPU conversion runs on the guest thread at the full scaled size (a GPU downsample
+  to 480x272 before the copy cuts it 16-fold at 4x), and the sink's stalled-producer branch should play counted
+  silence rather than skip. The sweep's speed figures with sound and traces on are the harness's cost, not play's.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
