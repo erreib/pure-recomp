@@ -275,8 +275,8 @@ simplification task, then the enhancements. The session-by-session resume notes 
   frames over budget — unchanged by vsync mode (FIFO/mailbox), audio on/off and internal scale (the drain, not the
   bytes), invisible to every virtual-time check, and the source of E4's forgiven ~1% game-clock loss. The Metal
   backend shares the architecture but unified memory hides the wait. Task 077 (brief f918a4c) asks for the smallest
-  fix that holds 60 fps without moving a suite pixel, a `PURE_SYNC_READBACK` switch back, and `tools/stutter_check.sh`,
-  the wall-clock smoothness gate the suite never had; an upstream candidate.
+  fix that holds 60 fps without moving a suite pixel, a `PURE_SYNC_READBACK` switch back, and a stutter check (the
+  task's deliverable), the wall-clock smoothness gate the suite never had; an upstream candidate.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
