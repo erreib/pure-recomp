@@ -44,6 +44,20 @@ k32.TerminateProcess.argtypes = [w.HANDLE, w.UINT]
 k32.CloseHandle.argtypes = [w.HANDLE]
 
 PSEUDOCONSOLE = 0x00020016
+# The pseudoconsole's conhost reads the child's bytes in the OEM codepage (cp437 here; the child would have to call
+# SetConsoleOutputCP itself) and hands them on re-encoded as UTF-8 of those characters. The game prints UTF-8, so a
+# non-ASCII character arrives mojibake'd. Every OEM codepage maps all 256 bytes to distinct characters, so the damage
+# undoes losslessly: decode the pipe's UTF-8, encode back to the OEM codepage, and the child's bytes come back.
+OEM_CP = "cp%d" % ctypes.windll.kernel32.GetOEMCP()
+
+
+def undo_oem(raw):
+    """The child's original bytes from one pseudoconsole output line, or raw unchanged where the round trip fails
+    (pure ASCII round-trips to itself)."""
+    try:
+        return raw.decode("utf-8").encode(OEM_CP)
+    except UnicodeError:
+        return raw
 EXTENDED_STARTUPINFO_PRESENT, CREATE_UNICODE_ENVIRONMENT = 0x80000, 0x400
 # The console's output, token by token: a control sequence (CSI: parameters, final byte), an OSC string, other
 # escapes, a carriage return, or a run of text.

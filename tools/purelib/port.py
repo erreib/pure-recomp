@@ -14,7 +14,7 @@ if not WINDOWS:
     import pty, select, termios
 else:
     import threading
-    from purelib.conpty import ConPty, strip_vt
+    from purelib.conpty import ConPty, strip_vt, undo_oem
 
 from purelib.logs import FRAME_EXIT, exit_frame
 
@@ -251,7 +251,9 @@ class PtyRun:
             self.p = subprocess.Popen([str(EXE)], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=self.slave,
                                       stderr=self.slave)
         # newline="\n": the bash tools grep the logs with `$` anchors, which a Windows "\r\n" would defeat (task 055).
-        self.log = open(log_path, "w", buffering=1 if line_buffered else -1, newline="\n")
+        # encoding="utf-8": lines are decoded as UTF-8, and Windows' default cp1252 cannot write every character the
+        # game prints (the menu dump's U+0393 killed a run).
+        self.log = open(log_path, "w", buffering=1 if line_buffered else -1, newline="\n", encoding="utf-8")
         self.buf = b""
         self.last, self.repeat, self.written, self.max_lines = None, 0, 0, max_lines
         self.tail = []                      # the last 25 lines given to the log, folded and closing lines too
@@ -276,7 +278,7 @@ class PtyRun:
 
     def _take(self, raw, out):
         if WINDOWS:
-            raw = strip_vt(raw).replace(b"\r", b"")
+            raw = undo_oem(strip_vt(raw).replace(b"\r", b""))
         line = raw.decode("utf-8", "replace").rstrip("\r")
         if not self.frame_exit and line.startswith(FRAME_EXIT):
             self.frame_exit = True

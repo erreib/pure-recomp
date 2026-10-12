@@ -9,6 +9,9 @@ MINGW*|MSYS*)
   export PATH="$_vs/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin:$_vs/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja:/c/Program Files/LLVM/bin:$(cygpath -u "$LOCALAPPDATA")/Microsoft/WinGet/Packages/Ccache.Ccache_Microsoft.Winget.Source_8wekyb3d8bbwe/ccache-4.14.1-windows-x86_64:$PATH"
   unset _vs
   export VULKAN_SDK="${VULKAN_SDK:-C:/VulkanSDK/1.4.363.0}"
+  # Python writes files and stdout in the locale encoding, cp1252 here, which cannot hold every character the game
+  # prints (the menu dump's U+0393, the Controls tab's U+25B3). The Mac is UTF-8 everywhere; make Python match.
+  export PYTHONUTF8=1
   export CCACHE_DIR="${CCACHE_DIR:-H:/errei/Documents/dev-stuff/pure-recomp/.ccache}"   # the main checkout's, shared by every worktree
   ;;
 *)
