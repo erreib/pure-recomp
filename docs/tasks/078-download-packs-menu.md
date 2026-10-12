@@ -1,6 +1,6 @@
 # 078: A "Download packs" section in the Esc menu, and Import accepting every pack
 
-Milestone: DLC (Erik, 2026-10-12; docs/dlc.md, D-005) | Branch: task/078-download-packs-menu | Status: OPEN
+Milestone: DLC (Erik, 2026-10-12; docs/dlc.md, D-005) | Branch: task/078-download-packs-menu | Status: MERGED (the merge commit after 69ee3b9, 2026-10-12)
 
 ## Goal
 After task 077 a player installs packs with a tool or by copying folders, and the Esc menu's Import accepts five
@@ -227,3 +227,19 @@ Open questions:
    wording says saves.
 6. **Restart now was not run.** I did not run it after a menu import. The imported packs are byte-identical to their
    sources, and the check's races show that tool-installed packs load.
+
+## Review
+Fable, 2026-10-12. Diff within May touch; the vendor change only through patch 0021-content-packs (21 patches
+reproduce the pin), generic behind `SaveFolder::content_pack` and `GameProfile::content_packs_label`, the file-list
+rule confined to content packs, backups and exports excluding them through `names_of_save_folders`, Import's
+acceptance untouched. Merged `--no-ff` into batch/m2, vendor reset to the pin plus the series, built, and from the
+main checkout: `tools/dlc_check.sh --packs "$HOME/dlc-packs"` PASS with the import step (12 found, 12 ok, 12
+imported, the stick holding the twelve as their source, the row reading 0 of 12 then 12 of 12, Back up saves
+copying the profile alone), `tools/menu_check.sh` PASS on both shells (15 System rows), the headless suite 18/18,
+the Metal window suite 7/7 (5m 10s: a stall during the run, the figures unchanged), `tools/save_roundtrip.sh`
+PASS, docs_check (out/078_gate.log). Looked at the import step's shots: the section with a row per pack, the
+Install row's help, the review screen naming the packs by title. Verify as one command runs past the foreground
+limit (22 minutes, save_roundtrip 12.6 of them); the worker ran its parts, as the brief allowed, and the gate did
+the same. Follow-ups from the Result: the import screens' wording says saves; focus returns to Import save… after
+the screen closes; the rig's import step in the Vulkan window untried; Restart now after a menu import not run.
+
