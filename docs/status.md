@@ -155,11 +155,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   its Windows pass before workers run in parallel here. Task 062 (2026-10-09, merged 1589688) did the simplification task from task
   049's list, proven by `tools/refactor_check.sh`; the organisation work is complete. Next: the enhancements (D-009).
 - **The app.** Repacked 2026-10-11 from 012631c (`tools/bundle.sh --zip`, then `tools/bundle.sh --check out/repack-070`:
-  8 checks PASS; out/repack-070.log), then from 36464ad (out/repack-072.log) and from 6fbfdfb (`--check
-  out/repack-073` PASS; out/repack-073.log): Wipeout Pure 0.1.0-6fbfdfb at out/release-macos/stage, the zip in
-  out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix, E6 (the Flashes
-  row, Smooth by default), E4 (the 30 fps modes row, 60 fps by default) and E7's Metal half (the Text and sprites
-  row, Upscaled by default; a settings.ini an earlier build wrote lacks the keys and so reads the defaults).
+  8 checks PASS; out/repack-070.log), then from 36464ad (out/repack-072.log), from 6fbfdfb (out/repack-073.log) and on 2026-10-12 from 56673a2
+  (`--check out/074-bundle` PASS; out/repack-074.log): Wipeout Pure 0.1.0-56673a2 at out/release-macos/stage, the
+  zip in out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix, E6 (the
+  Flashes row, Smooth by default), E4 (the 30 fps modes row, 60 fps by default) and E7 (the Text and sprites row,
+  Upscaled by default, and the sprite dump that builds the texture pack; a settings.ini an earlier build wrote lacks
+  the keys and so reads the defaults).
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
