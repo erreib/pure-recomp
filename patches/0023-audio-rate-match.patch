@@ -1,0 +1,83 @@
+diff --git a/host/audio/audio_sink.cpp b/host/audio/audio_sink.cpp
+index 5f14ac7..cac7873 100644
+--- a/host/audio/audio_sink.cpp
++++ b/host/audio/audio_sink.cpp
+@@ -109,11 +109,18 @@ struct AudioSink::Impl {
+     std::uint64_t window_frames{};
+     std::uint64_t window_silent{};
+     std::uint64_t window_dropped{};
++    // A producer's cursor that fell behind the device and was snapped forward:
++    // the events and the frames skipped (an audible click each, the ring never
++    // dry, so `silent` misses it).
++    std::uint64_t window_resyncs{};
++    std::uint64_t window_resynced{};
+     std::int32_t window_peak{};
+     double window_energy{};
+     std::uint64_t total_frames{};
+     std::uint64_t total_silent{};
+     std::uint64_t total_dropped{};
++    std::uint64_t total_resyncs{};
++    std::uint64_t total_resynced{};
+     std::uint64_t seconds{};
+ 
+     float gain{1.0f};
+@@ -160,16 +167,23 @@ struct AudioSink::Impl {
+         ++seconds;
+         if (dump.active()) dump.flush();
+         if (trace) {
+-            std::printf("[audio] %llus frames=%llu peak=%d rms=%.1f silent=%llu dropped=%llu\n",
++            const std::uint64_t lead = write_end > read_position ? write_end - read_position : 0u;
++            std::printf("[audio] %llus frames=%llu peak=%d rms=%.1f silent=%llu dropped=%llu resyncs=%llu "
++                        "resynced=%llu lead=%llu\n",
+                         static_cast<unsigned long long>(seconds),
+                         static_cast<unsigned long long>(window_frames), window_peak, rms,
+                         static_cast<unsigned long long>(window_silent),
+-                        static_cast<unsigned long long>(window_dropped));
++                        static_cast<unsigned long long>(window_dropped),
++                        static_cast<unsigned long long>(window_resyncs),
++                        static_cast<unsigned long long>(window_resynced),
++                        static_cast<unsigned long long>(lead));
+             std::fflush(stdout);
+         }
+         window_frames = 0u;
+         window_silent = 0u;
+         window_dropped = 0u;
++        window_resyncs = 0u;
++        window_resynced = 0u;
+         window_peak = 0;
+         window_energy = 0.0;
+     }
+@@ -255,10 +269,12 @@ void AudioSink::shutdown() {
+     std::lock_guard<std::mutex> guard(impl.lock);
+     if (impl.dump.active()) impl.dump.close();
+     if (impl.trace) {
+-        std::printf("[audio] total frames=%llu silent=%llu dropped=%llu\n",
++        std::printf("[audio] total frames=%llu silent=%llu dropped=%llu resyncs=%llu resynced=%llu\n",
+                     static_cast<unsigned long long>(impl.total_frames),
+                     static_cast<unsigned long long>(impl.total_silent),
+-                    static_cast<unsigned long long>(impl.total_dropped));
++                    static_cast<unsigned long long>(impl.total_dropped),
++                    static_cast<unsigned long long>(impl.total_resyncs),
++                    static_cast<unsigned long long>(impl.total_resynced));
+         std::fflush(stdout);
+     }
+ }
+@@ -309,8 +325,16 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+     }
+ 
+     // A cursor behind the device belongs to a producer that stalled; restart it
+-    // at the write target rather than writing frames that already played.
+-    if (cursor < impl.read_position + kPrebufferFrames / 4u) cursor = impl.read_position + kPrebufferFrames;
++    // at the write target rather than writing frames that already played. Each
++    // jump is a click: counted, so a drifting device clock shows in the trace.
++    if (cursor < impl.read_position + kPrebufferFrames / 4u) {
++        const std::uint64_t target = impl.read_position + kPrebufferFrames;
++        ++impl.window_resyncs;
++        ++impl.total_resyncs;
++        impl.window_resynced += target - cursor;
++        impl.total_resynced += target - cursor;
++        cursor = target;
++    }
+ 
+     // The ring cannot hold what a runaway producer wants to write. Retire the
+     // oldest frames unplayed to make room: the device misses them, but the
