@@ -109,3 +109,27 @@ code and needs no patch. Commits per proven stage.
 - an interpreter fallback is found (name the function and BLOCK: the corpus is not this task's to regenerate)
 - B's stall survives both eager targets and an executed warm pass (report what the driver is doing with evidence)
 - any suite scene moves with the pins on
+
+## Findings
+
+### B: the "first-use present hitches" are the sweep's own window captures (2026-10-12, from the existing logs)
+Read from out/078-probe and out/stutter_check/vulkan-vulkan/race in the 077 worktree, no new run:
+- Every B flip is a `[script] frame N: shot slowM` line followed by `[render] window 960x544 -> .../slowM.bmp`:
+  7023 (slow7013), 7623 (slow7613), 10533 (slow10521) in 078-probe; 7023 (slow7015), 10863 (slow10851), 11463
+  (slow11451) in the run before. tools/campaign_sweep.py takes up to three `slow` shots a race, 600 flips apart,
+  when the ship drops under 30 km/h (line 1182: "what slowed the ship down"), so they repeat at nearly the same
+  flips run after run. That, not a driver's first use, is why they are deterministic.
+- Every other window capture costs the same, whatever was drawn before: `ref` (6920: 137.2 ms; 6910 in the other
+  run: 150.8 ms), the menu shot (5410: 116.1 / 127.5 ms) and all fourteen `fNNNNN` shots of the results screen every
+  30 flips from 17850 (115 to 165 ms each, both runs). 14 of 14 re-shots of a screen already drawn can not be a
+  first use.
+- The time is `render` in the `[slow-frame]` split (109.4 of 121.2 ms at 7023), and `[render-split]`'s `present`
+  (2.25 ms a frame in the second with the shot vs 0.19 a second later at 16843: 110 ms over 50 frames) because
+  VulkanRenderer::Impl::write_capture runs at the end of submit_and_present: it fence-waits the frame, then
+  write_bmp() reads the mapped capture buffer byte by byte. That buffer is allocated with
+  `find_memory_type(HOST_VISIBLE | HOST_COHERENT)`, the first such type, on NVIDIA the uncached (write-combined)
+  one, so each of the ~1.5 M byte loads is an uncached read; then a 1.5 MiB BMP is written synchronously.
+- A player never captures the window (only `<prefix>_INPUT_SCRIPT`'s `shot` does), so B is a measurement artifact
+  of the probe, not a slowdown in play. The prewarm, the 1x effect targets (patch 0018) and the shader cache are
+  not involved; the `PURE_NO_PIPELINE_PREWARM=1` and cleared-DXCache runs the brief proposes would only move a
+  first use, which this is not, so they were not run.
