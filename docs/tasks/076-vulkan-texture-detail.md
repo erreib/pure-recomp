@@ -1,6 +1,6 @@
 # 076: Texture detail at the internal scale (E5, the Vulkan renderer)
 
-Milestone: E5 (Erik, 2026-10-12; D-019) | Branch: task/076-vulkan-texture-detail | Status: OPEN
+Milestone: E5 (Erik, 2026-10-12; D-019) | Branch: task/076-vulkan-texture-detail | Status: MERGED (the merge commit after bf3ad8b, 2026-10-12)
 
 ## Goal
 Task 075 gave the Metal backend the "Texture detail" row (D-019): with Enhanced, every mipmapped draw's level D is
@@ -265,3 +265,16 @@ verify 076: PASS
 3. **One Verify run's suite scored zone_change 0.0546.** The Zone run took 68 s instead of the usual 28, cause not found (machine load or the window). An immediate rerun gave 0.0522, equal to the pixel to the base build, and so did the final Verify. The paced window race is sensitive to stalls.
 4. **Out-of-scope files still describe the Vulkan renderer's texture detail as missing.** docs/status.md and docs/decisions.md (D-019's consequences) still say it draws the PSP's levels (Must not touch). src/profile/enhancements.hpp's header comment still names only the Metal backend as reading the option (not in May touch).
 5. **The Vulkan renderer counts no enhanced draws**, so the `on` line stands in for the count. A count could go on the `[perf]` line if wanted.
+
+## Review
+Fable, 2026-10-12. Diff within May touch; the vendor change only through patch 0020 (`tools/patches.sh check`: 20
+patches reproduce the pin), the profile hook generic (null by default), the Original path the old expression. Merged
+`--no-ff` into batch/m2, vendor reset to the pin plus the series, built, and from the main checkout:
+`tools/verify_task.sh 076` PASS (Vulkan lane race_hud 0.0738 of 0.10 reduced, 0.0251 against Original, energy ratio
+1.0851; tt_hud 1.1386; fp_hud 1.1399; zone_hud reduced 0.0557 of 0.09; the on and off lines; Metal lane to the digit
+of task 075; Vulkan window suite 7/7 with the base figures; menus PASS; docs_check), the headless suite 18/18, the
+Metal window suite 7/7, hud_check 61 of 61 under Vulkan, metal_check PASS (out/076_gate.log). The out-of-scope
+sentences the Result named (D-019's consequences, docs/status.md, enhancements.hpp's header) and docs/upstream.md's
+row and section for 0020 were done at merge. Follow-ups: the rig's run of the Vulkan lane; the lane's rerun of its
+0 captures on any new pipeline (a stall threshold); a count of the enhanced draws on the renderer's perf line.
+

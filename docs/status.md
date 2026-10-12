@@ -244,8 +244,17 @@ simplification task, then the enhancements. The session-by-session resume notes 
   verify PASS (race_hud, tt_hud and fp_hud reduced within their limits at scale 4 with 14% to 23% more
   high-frequency energy, zone_hud unchanged since its textures hold no detail between their levels; a race at
   scale 4 at 60 fps with the option on; the Original path pixel-identical on all 18 scenes), window suites 7/7 both
-  shells, hud 61/61, metal_check (out/075_gate.log). Follow-ups: the Vulkan renderer's half (task 076);
-  `tools/refactor_check.sh`'s count strip since task 073; fresh recordings for metal_check.
+  shells, hud 61/61, metal_check (out/075_gate.log). **Task 076 merged (2026-10-12): E5 complete.** Patch
+  0020-vulkan-texture-detail gives the Vulkan renderer the same (the option named by
+  `GameProfile::texture_detail_option`, the level shift, `textureGrad` with an anisotropic sampler, a second
+  descriptor per texture for the enhanced draws); `tools/texture_check.sh --shell vulkan` proves it in the Vulkan
+  window (race_hud, tt_hud and fp_hud 8% to 14% more high-frequency energy at the window's 2x, within their limits
+  reduced, MoltenVK applying the anisotropy; a race at 60 fps on as off), the window suites 7/7 both shells, the
+  headless suite 18/18, hud 61/61 under Vulkan, metal_check (out/076_gate.log). Follow-ups: the rig runs
+  `tools/texture_check.sh --shell vulkan` and looks at a race with the row on and off (docs/windows.md);
+  `tools/refactor_check.sh`'s count strip since task 073; fresh recordings for metal_check; texture_check's Vulkan
+  lane reruns its 0 captures whenever a pipeline was made (a stall threshold would be quieter); a count of the
+  enhanced draws on the Vulkan renderer's perf line.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

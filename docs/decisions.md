@@ -427,8 +427,8 @@ Decision (Erik, from the recommendation):
    on the track, the HUD found, a race at scale 4 still at 60 fps in the window.
 Consequences: a visible gain on every 3D surface beyond a few ship lengths and on every angled one, from the
 texels the game already has; nothing invented, so none of E7's look. The frame costs anisotropic taps on three of
-four textured draws; the M4 Pro has the margin, the check measures it. The Vulkan renderer draws the PSP's levels
-until its task lands, so the rig shows the row without its effect. Not changed: the levels' texels, the GE's
+four textured draws; the M4 Pro has the margin, the check measures it. The Vulkan renderer does the same since task 076
+(patch 0020-vulkan-texture-detail, the option named by `GameProfile::texture_detail_option`), so the rig gets it too. Not changed: the levels' texels, the GE's
 filters, the lens flare and bloom chains at 1x (D-015).
 Alternatives: forcing level 0 everywhere (the shimmer of docs/fidelity.md difference 2 at distance, the game's
 blur-by-design on far scenery lost); a mip bias alone without anisotropy (the softness along a grazing wall stays);
