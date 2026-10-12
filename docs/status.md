@@ -161,8 +161,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   zip in out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix, E6 (the
   Flashes row, Smooth by default), E4 (the 30 fps modes row, 60 fps by default) and E7 (the Text and sprites row,
   Upscaled by default in that build, and the sprite dump that builds the texture pack; a settings.ini an earlier
-  build wrote lacks the keys and so reads the defaults). Repacked again 2026-10-12 from the task 075 merge (`--check out/075-bundle` PASS; out/repack-075.log): the Text and
-  sprites row defaults to Original and the Texture detail row (E5, Enhanced by default) is in.
+  build wrote lacks the keys and so reads the defaults). Repacked again 2026-10-12 from the task 075 merge (out/repack-075.log), the task 076 merge (out/repack-076.log) and
+  the task 078 merge (`--check out/078-bundle` PASS; out/repack-078.log): Wipeout Pure 0.1.0-16f16d1 at
+  out/release-macos/stage has the Text and sprites row at Original, the Texture detail row (E5, Enhanced by
+  default, both renderers) and the Download packs section of the System tab (task 078).
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
