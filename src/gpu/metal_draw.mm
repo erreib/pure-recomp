@@ -441,6 +441,20 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
                     fragment.level[2] *= static_cast<float>(target.scale);
                     fragment.level[3] *= static_cast<float>(target.scale);
                 }
+                // Texture detail (task 075, D-019), the menu's row on: D lowered by 16 x log2(S) whatever the rule,
+                // the level the GE would pick with S times the pixels (for the auto rule, the gradient per drawn
+                // pixel: ge_log16 of S times a value is the value's plus 16 log2 S at S a power of two), and the
+                // level sampled through gradients with the anisotropic sampler (shaders/ge.metal). Not a 2D draw's.
+                if (texture_detail_ && !flat) {
+                    fragment.level_range[1] = 16.0f * std::log2(static_cast<float>(target.scale));
+                    fragment.level_range[2] = 1.0f;
+                    sampler |= kAnisotropic;
+                    ++stats_.enhanced_draws;
+                    if (!texture_detail_said_) {
+                        texture_detail_said_ = true;
+                        std::cout << "[pure] texture detail: on (game.texture_detail)\n";
+                    }
+                }
                 ++stats_.mipmapped_draws;
             }
         }

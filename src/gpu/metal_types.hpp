@@ -112,7 +112,10 @@ struct FragmentUniforms {
     // The mip level the GE samples (task 037): x the rule (kLevelNone, kLevelAuto, kLevelConstant, kLevelSlope),
     // y the part of the level D (in 1/16 levels) that does not change across the draw, z and w level 0's size.
     std::array<float, 4> level{};
-    std::array<float, 4> level_range{};  // x: the highest D, 16 x (levels - 1)
+    // x: the highest D, 16 x (levels - 1). Texture detail (task 075, D-019), with the option on: y the shift
+    // subtracted from D, 16 x log2(S) at internal scale S, and z 1: the level through gradient2d, sampled
+    // anisotropically. Both 0 otherwise (Original: the level() sample as before).
+    std::array<float, 4> level_range{};
     std::array<std::uint32_t, 4> color_test{};  // the colour test (task 040): function, reference, mask
     // A draw into a 16-bit target (task 040), which blends in the shader: x 1 when blended, y and z the GE's source
     // and destination factors, w its equation; the FIX colours; the dither matrix's rows; x the target's format and
@@ -139,6 +142,9 @@ constexpr float kLevelSlope = 3.0f;
 // The sampler index's mip filter bits (the sampler table in initialize()).
 constexpr std::uint32_t kMipNearest = 16u;
 constexpr std::uint32_t kMipLinear = 32u;
+// The sampler index's anisotropy bit (task 075): maxAnisotropy kMaxAnisotropy, for a Texture detail draw.
+constexpr std::uint32_t kAnisotropic = 64u;
+constexpr NSUInteger kMaxAnisotropy = 16u;  // Metal's maximum; MTLDevice has no query for a lower one
 
 // A render target: (colour address, stride, pixel format), docs/ge-backend.md section 2.
 struct TargetKey {
@@ -261,6 +267,7 @@ struct Stats {
     std::uint64_t decoded{};
     std::uint64_t decoded_levels{};  // mip levels decoded after the first, in the decoded textures (task 037)
     std::uint64_t mipmapped_draws{}; // draws that sampled a texture with levels
+    std::uint64_t enhanced_draws{};  // of those, the ones Texture detail drew (task 075)
     std::uint64_t framebuffer_textures{};
     std::uint64_t texture_mapped{};  // draws whose texture coordinates came from the texture matrix or the normals
     std::uint64_t color_tested{};    // draws with the colour test (task 040)

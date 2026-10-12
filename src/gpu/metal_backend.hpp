@@ -102,12 +102,12 @@ private:
                 std::uint32_t stride);
 
     // Textures from guest memory: mip levels, the content key, the decode and cache, the sprite upscale (task 073), the
-    // level rule (metal_textures.mm)
+    // level rule, the game options the backend reads (tasks 073 and 075) (metal_textures.mm)
     std::uint32_t mip_levels(const GuestMemory &memory, const TextureState &state);
     const Target *target_holding(std::uint32_t address, std::size_t bytes) const;
     static std::uint64_t content_key(const GuestMemory &memory, const TextureState &state, std::uint32_t levels);
     static bool upscalable(TextureFormat format);
-    void read_sprite_upscale(bool at_start);
+    void read_game_options(bool at_start);
     id<MTLTexture> decoded_texture(const GuestMemory &memory, const TextureState &state, std::uint32_t levels,
                                    bool upscale);
     void dump_sprite(const GuestMemory &memory, std::uint64_t key, const TextureState &state);
@@ -200,7 +200,7 @@ private:
     id<MTLFunction> vertex_function_;
     // By kTextured | kAlphaTest << 1 | dual source << 2 | kColorTest << 3 | 16-bit target << 4 (fragment_function()).
     std::array<id<MTLFunction>, 32> fragment_functions_{};
-    std::array<id<MTLSamplerState>, 48> samplers_{};
+    std::array<id<MTLSamplerState>, 128> samplers_{};
     id<MTLTexture> white_;
     // Each holds the largest target, 480S x 272S at 4 bytes a pixel.
     id<MTLBuffer> readback_;          // the presented picture, read back (picture_)
@@ -241,12 +241,16 @@ private:
     std::map<TextureIdentity, std::uint64_t> list_keys_;  // this display list's binds, hashed once
     std::uint64_t texture_clock_{};
     std::vector<std::uint32_t> pixels_;
-    // The sprite upscale (task 073): game.sprite_upscale as read at the last frame (read_sprite_upscale()), whether its
+    // The sprite upscale (task 073): game.sprite_upscale as read at the last frame (read_game_options()), whether its
     // `on` line was said, the last upscaled texture's texels, and the keys PURE_SPRITE_DUMP has written; with it the
     // texture pack of task 074 in its pack/ folder, keyed as the framework's pack loader keys a texture (the folder and
     // its textures.ini made at the first entry).
     bool sprite_upscale_{};
     bool sprite_upscale_said_{};
+    // Texture detail (task 075): game.texture_detail as read at the last frame (read_game_options()), and whether its
+    // `on` line was said (at the first enhanced draw, metal_draw.mm).
+    bool texture_detail_{};
+    bool texture_detail_said_{};
     std::vector<std::uint8_t> upscaled_;
     std::set<std::uint64_t> sprites_dumped_;
     std::set<std::string> pack_keys_;
