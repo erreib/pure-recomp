@@ -1,0 +1,406 @@
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index 73f2e2a..dad06e9 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -58,7 +58,7 @@ layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput ta
+ layout(push_constant) uniform Push {
+     mat4 transform;
+     vec4 viewport;
+-    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q, +32 x mip rule, +128 linear mip, +256 x (mip constant + 2048), or +kPlaced without mip levels), y: texture function, z: alpha ref, w: alpha func
++    vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v, +8 mapped, +16 divide by q, +32 x mip rule, +128 linear mip, +256 x (mip constant + 2048), +kDetail with mip levels, or +kPlaced without them), y: texture function, z: alpha ref, w: alpha func
+     vec4 uv_transform;
+     vec4 view_z;
+ } push;
+@@ -66,6 +66,9 @@ layout(push_constant) uniform Push {
+ // texture_params.x: the texture is a render target, placed in its copy by
+ // frag_uv_rect (ge.vert).
+ const int kPlaced = 1 << 20;
++// texture_params.x: texture detail (patch 0020), a texture with mip levels
++// sampled at mip_lod's level through the coordinates' own gradients.
++const int kDetail = 1 << 21;
+ 
+ // Only the fog colour is read here; the block is described in ge.vert.
+ layout(set = 1, binding = 0) uniform Environment {
+@@ -178,7 +181,7 @@ float ge_log16(float x) {
+ // one blends level D >> 4 with the next by D & 15.
+ float mip_lod(int flags) {
+     int rule = (flags >> 5) & 3;
+-    float d = float((flags >> 8) - 2048);
++    float d = float(((flags >> 8) & 0xFFF) - 2048);
+     if (rule == 1) {
+         vec2 size = vec2(textureSize(guest_texture, 0));
+         vec2 st = frag_texcoord * gl_FragCoord.w;
+@@ -198,6 +201,16 @@ void main() {
+         // Texture map mode 1 (texture_params.x bit 4): s and t divided by q.
+         int flags = int(push.texture_params.x + 0.5);
+         vec2 uv = (flags & 16) != 0 ? frag_texcoord / frag_q : frag_texcoord;
++        // Texture detail (kDetail, set only with mip levels): the normalised
++        // coordinates' screen derivatives, after the divide by q and before
++        // any wrap, for textureGrad below.
++        bool detail = (flags & kDetail) != 0;
++        vec2 dx = vec2(0.0);
++        vec2 dy = vec2(0.0);
++        if (detail) {
++            dx = dFdx(uv);
++            dy = dFdy(uv);
++        }
+         bool placed = (flags & kPlaced) != 0;
+         if (!placed) uv = clamp(uv, frag_uv_rect.xy, frag_uv_rect.zw);
+         // A texture with mip levels (texture_params.x bits 5 and 6 the rule).
+@@ -222,7 +235,21 @@ void main() {
+             if ((flags & 2) != 0) uv.x = clamp(uv.x, half_texel.x, 1.0 - half_texel.x);
+             if ((flags & 4) != 0) uv.y = clamp(uv.y, half_texel.y, 1.0 - half_texel.y);
+         }
+-        vec4 texel = mipmapped ? textureLod(guest_texture, uv, lod) : texture(guest_texture, uv);
++        vec4 texel;
++        if (detail) {
++            // Texture detail (patch 0020): the level mip_lod picked (its
++            // constant already lowered by 16 x log2 of the internal scale)
++            // through the derivatives scaled by k so that the longer one is
++            // 2^lod texels of level 0. The GPU's isotropic level is then lod,
++            // and the anisotropic sampler takes its taps along the
++            // footprint's long axis at the finer level its short axis allows.
++            vec2 size = vec2(textureSize(guest_texture, 0));
++            float rho = max(length(dx * size), length(dy * size));
++            float k = exp2(lod - log2(max(rho, 1e-8)));
++            texel = textureGrad(guest_texture, uv, dx * k, dy * k);
++        } else {
++            texel = mipmapped ? textureLod(guest_texture, uv, lod) : texture(guest_texture, uv);
++        }
+         int function = int(push.texture_params.y + 0.5);
+         if (function == 0) {          // modulate
+             color *= texel;
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index d81df00..d6b1e33 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -129,7 +129,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
+ struct PushConstants {
+     std::array<float, 16> transform{};
+     std::array<float, 4> viewport{};        // x,y: target size; z: through flag; w: 1 fog + 2 lighting + 4 stencil
+-    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v + 8 mapped + 16 q (+ 2^20 placed), y: function, z: alpha ref, w: alpha func
++    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v + 8 mapped + 16 q (+ 2^20 placed, + 2^21 detail), y: function, z: alpha ref, w: alpha func
+     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
+     std::array<float, 4> view_z{};          // row of view * world that gives view-space z, for fog
+ };
+@@ -143,6 +143,11 @@ constexpr float kPushLighting = 2.0f;
+ // (ge.vert, ge.frag). A target has no mip levels, so the mip bits (5 to 19)
+ // are clear beside it.
+ constexpr float kPushPlaced = 1048576.0f;
++// texture_params.x: texture detail (patch 0020): a texture with mip levels
++// sampled at its level through the coordinates' own gradients (ge.frag),
++// with the anisotropic sampler. Never beside kPushPlaced. Both bits, and the
++// sum of every bit below them, are exact in a float (under 2^24).
++constexpr float kPushDetail = 2097152.0f;
+ // The fragment shader stores the stencil value in bits 3..10 of viewport.w as
+ // the target's alpha instead of the fragment's (stencil_alpha below).
+ constexpr float kPushStencilAlpha = 4.0f;
+@@ -730,6 +735,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
+         std::uint16_t max_seen_v{};
+         // Mip levels in the image (mip_levels()); 1 for a texture without.
+         std::uint32_t levels{1u};
++        // The same image through texture_sampler(levels, true), for a draw
++        // with texture detail (patch 0020): the sampler is part of a
++        // descriptor, and one texture can be drawn with and without it in a
++        // frame. Made at the first such draw (detail_descriptor()), freed
++        // with the texture.
++        VkDescriptorSet detail_descriptor{};
+     };
+ 
+     RendererConfig config;
+@@ -937,6 +948,14 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     std::array<std::uint32_t, 2> display_addresses{};
+     bool sharp_screen{};
+     bool sharp_textures{};
++    // Texture detail (patch 0020): GameProfile::texture_detail_option's
++    // choice is 1, read at start and once a frame in begin_frame(), never per
++    // draw; texture_detail_said once its first draw has said so.
++    bool texture_detail{};
++    bool texture_detail_said{};
++    // The samplerAnisotropy feature, on where the device has it, for
++    // mip_detail_sampler.
++    bool sampler_anisotropy{};
+     std::string device_name;
+ 
+     // Dear ImGui draws in its own render pass over the finished swapchain
+@@ -1375,6 +1394,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     // (textureLod) by the GE's rule and rounds it for the nearest mip filter.
+     VkSampler mip_sampler{};
+     VkSampler mip_sharp_sampler{};
++    // mip_sampler with anisotropic filtering (at most 16 taps, the device's
++    // limit if lower; isotropic without samplerAnisotropy), for a draw with
++    // texture detail (patch 0020): ge.frag samples it through gradients.
++    VkSampler mip_detail_sampler{};
+     std::map<PipelineKey, VkPipeline> pipelines;
+     // Pipelines compiled in earlier runs, kept in the data directory
+     // (pipeline_cache.bin) so that a new area does not compile its shaders
+@@ -1727,8 +1750,11 @@ struct VulkanRenderer::Impl : host::SdlPad {
+     void apply_texture_pack();
+     // `levels`: the mip levels wanted (mip_levels()) in, the levels of the
+     // image the descriptor samples out (1 for a replacement or white).
++    // `detail`: a draw with texture detail (patch 0020), which samples a
++    // texture with levels through its detail_descriptor.
+     [[nodiscard]] VkDescriptorSet texture_descriptor(const GuestMemory &memory, const DrawCall &call,
+-                                                     std::uint32_t &levels);
++                                                     std::uint32_t &levels, bool detail = false);
++    [[nodiscard]] VkDescriptorSet detail_descriptor(Texture &texture);
+     std::uint64_t texture_clock{};
+     // texture_key results for the display list being walked, by the state that
+     // feeds the key; cleared by begin_display_list().
+@@ -1911,8 +1937,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
+                              0u, nullptr, 0u, nullptr, 1u, &barrier);
+     }
+ 
+-    [[nodiscard]] VkSampler texture_sampler(std::uint32_t levels = 1u) const {
+-        if (levels > 1u) return sharp_textures ? mip_sharp_sampler : mip_sampler;
++    // `detail`: a draw with texture detail (patch 0020), whose texture with
++    // levels takes the anisotropic mip_detail_sampler. With the Sharp texture
++    // filter it keeps the nearest mip sampler, as every other draw does: the
++    // setting asks for the nearest texel, which anisotropy would blend.
++    [[nodiscard]] VkSampler texture_sampler(std::uint32_t levels = 1u, bool detail = false) const {
++        if (levels > 1u) return sharp_textures ? mip_sharp_sampler : detail ? mip_detail_sampler : mip_sampler;
+         return sharp_textures ? sharp_sampler : sampler;
+     }
+     [[nodiscard]] VkSampler framebuffer_sampler() const {
+@@ -2192,6 +2222,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     impl.aspect = usable_aspect(player.aspect);
+     impl.sharp_screen = player.sharp_screen;
+     impl.sharp_textures = player.sharp_textures;
++    // Texture detail (patch 0020): the game's option, if it names one; read
++    // again at every begin_frame().
++    if (const char *key = portablekit::game().texture_detail_option) {
++        impl.texture_detail = settings::game_option(key) == 1u;
++        if (!impl.texture_detail) std::cout << "[render] texture detail: off\n";
++    }
+     impl.trace_interpolation = portablekit::env("TRACE_INTERPOLATION") != nullptr;
+     if (const interpolation::CutThresholds *thresholds = portablekit::game().interpolation_thresholds)
+         impl.cut_thresholds = *thresholds;
+@@ -2357,6 +2393,13 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+         enabled_features.dualSrcBlend = VK_TRUE;
+         impl.dual_source = true;
+     }
++    // Texture detail's anisotropic sampler (patch 0020, mip_detail_sampler).
++    if (supported_features.samplerAnisotropy == VK_TRUE) {
++        enabled_features.samplerAnisotropy = VK_TRUE;
++        impl.sampler_anisotropy = true;
++    } else if (portablekit::game().texture_detail_option != nullptr) {
++        std::cout << "[render] texture detail samples isotropically: this device has no samplerAnisotropy\n";
++    }
+     // CLIPENABLE's depth clamp (patch 0013): the pipeline clamps instead of
+     // clipping at the depth range's ends (depthClampEnable) and the vertex
+     // shader clips at the near plane and MINZ/MAXZ (gl_ClipDistance).
+@@ -2578,16 +2621,20 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+         return false;
+ 
+     // Evicted textures keep their sets until their frame has finished, so
+-    // the pool has room for a second cache's worth.
++    // the pool has room for a second cache's worth; with a game's texture
++    // detail option (patch 0020) twice that, as a texture with levels may
++    // also have its detail_descriptor.
++    const std::size_t texture_sets =
++        (portablekit::game().texture_detail_option != nullptr ? 4u : 2u) * kMaxCachedTextures;
+     const std::array<VkDescriptorPoolSize, 3> pool_sizes{
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+-                             static_cast<std::uint32_t>(2u * kMaxCachedTextures + 1u + kMaxFramebufferTextureSets)},
++                             static_cast<std::uint32_t>(texture_sets + 1u + kMaxFramebufferTextureSets)},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 3u},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2u},
+     };
+     VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+-    pool_info.maxSets = static_cast<std::uint32_t>(2u * kMaxCachedTextures + 2u + kMaxFramebufferTextureSets);
++    pool_info.maxSets = static_cast<std::uint32_t>(texture_sets + 2u + kMaxFramebufferTextureSets);
+     pool_info.poolSizeCount = static_cast<std::uint32_t>(pool_sizes.size());
+     pool_info.pPoolSizes = pool_sizes.data();
+     if (!check(vkCreateDescriptorPool(impl.device, &pool_info, nullptr, &impl.descriptor_pool),
+@@ -2665,6 +2712,19 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     if (!check(vkCreateSampler(impl.device, &sampler_info, nullptr, &impl.mip_sharp_sampler), "vkCreateSampler",
+                error))
+         return false;
++    // Texture detail's (patch 0020): mip_sampler, anisotropic where the
++    // device can be, with 16 taps at most or the device's limit if lower.
++    sampler_info.magFilter = VK_FILTER_LINEAR;
++    sampler_info.minFilter = VK_FILTER_LINEAR;
++    if (impl.sampler_anisotropy) {
++        VkPhysicalDeviceProperties properties{};
++        vkGetPhysicalDeviceProperties(impl.physical_device, &properties);
++        sampler_info.anisotropyEnable = VK_TRUE;
++        sampler_info.maxAnisotropy = std::min(16.0f, properties.limits.maxSamplerAnisotropy);
++    }
++    if (!check(vkCreateSampler(impl.device, &sampler_info, nullptr, &impl.mip_detail_sampler), "vkCreateSampler",
++               error))
++        return false;
+ 
+     // Command buffer, synchronization and the vertex staging buffer.
+     VkCommandPoolCreateInfo command_pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+@@ -4113,6 +4173,8 @@ void VulkanRenderer::Impl::release_frame_uploads(std::uint32_t from) {
+ 
+ void VulkanRenderer::Impl::destroy_texture(Texture &texture) {
+     if (texture.descriptor != VK_NULL_HANDLE) vkFreeDescriptorSets(device, descriptor_pool, 1u, &texture.descriptor);
++    if (texture.detail_descriptor != VK_NULL_HANDLE)
++        vkFreeDescriptorSets(device, descriptor_pool, 1u, &texture.detail_descriptor);
+     if (texture.view != VK_NULL_HANDLE) vkDestroyImageView(device, texture.view, nullptr);
+     if (texture.image != VK_NULL_HANDLE) vkDestroyImage(device, texture.image, nullptr);
+     if (texture.memory != VK_NULL_HANDLE) vkFreeMemory(device, texture.memory, nullptr);
+@@ -4321,7 +4383,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+ }
+ 
+ VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memory, const DrawCall &call,
+-                                                         std::uint32_t &levels) {
++                                                         std::uint32_t &levels, bool detail) {
+     const perf::SplitScope split(perf::Split::Texture);
+     Texture &texture = texture_for(memory, call, levels);
+     if (texture.replacement && pack) {
+@@ -4333,9 +4395,33 @@ VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memo
+         }
+     }
+     levels = texture.levels;
++    if (detail && levels > 1u) return detail_descriptor(texture);
+     return texture.descriptor;
+ }
+ 
++VkDescriptorSet VulkanRenderer::Impl::detail_descriptor(Texture &texture) {
++    if (texture.detail_descriptor != VK_NULL_HANDLE) return texture.detail_descriptor;
++    VkDescriptorSetAllocateInfo descriptor_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
++    descriptor_info.descriptorPool = descriptor_pool;
++    descriptor_info.descriptorSetCount = 1u;
++    descriptor_info.pSetLayouts = &descriptor_layout;
++    // Without a set the draw samples through the texture's own sampler: the
++    // level and the gradients are the same, the taps isotropic.
++    if (vkAllocateDescriptorSets(device, &descriptor_info, &texture.detail_descriptor) != VK_SUCCESS) {
++        texture.detail_descriptor = VK_NULL_HANDLE;
++        return texture.descriptor;
++    }
++    VkDescriptorImageInfo image_info{texture_sampler(texture.levels, true), texture.view,
++                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
++    write.dstSet = texture.detail_descriptor;
++    write.descriptorCount = 1u;
++    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++    write.pImageInfo = &image_info;
++    vkUpdateDescriptorSets(device, 1u, &write, 0u, nullptr);
++    return texture.detail_descriptor;
++}
++
+ void VulkanRenderer::Impl::apply_texture_pack() {
+     const bool wanted = pack_wanted && !pack_held;
+     if (pack_applied == wanted && !pack_reload) return;
+@@ -5646,6 +5732,11 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
+         write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+         write.pImageInfo = &image_info;
+         vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
++        // Its texture detail set (patch 0020), when a draw has made one.
++        if (texture.detail_descriptor == VK_NULL_HANDLE) return;
++        image_info.sampler = impl.texture_sampler(texture.levels, true);
++        write.dstSet = texture.detail_descriptor;
++        vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
+     };
+     rewrite(impl.white_texture);
+     for (auto &[key, texture] : impl.textures) rewrite(texture);
+@@ -5795,6 +5886,10 @@ void VulkanRenderer::begin_frame() {
+     impl.collect_writeback(impl.slot, false);
+     impl.report_pipelines(false);
+     impl.apply_texture_pack();
++    // Texture detail (patch 0020): the game's option, once a frame, so a
++    // change in the menu applies from the next.
++    if (const char *key = portablekit::game().texture_detail_option)
++        impl.texture_detail = settings::game_option(key) == 1u;
+     impl.replacements.begin_frame(impl.frames);
+     if (texture_pack_trace() && impl.pack && impl.frames % 60u == 0u) {
+         std::cout << "[texpack] frame " << impl.frames << ": " << impl.replaced_draws << " draws replaced in 60 frames, "
+@@ -6786,6 +6881,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+ 
+     VkDescriptorSet texture_descriptor = impl.white_texture.descriptor;
+     std::uint32_t texture_levels = 1u;  // the mip levels the descriptor's image has
++    // Texture detail (patch 0020; GameProfile::texture_detail_option on):
++    // for a draw that is not a 2D one, neither through mode nor unlit under
++    // an orthographic projection (its w row, projection[3], [7] and [11], all
++    // 0), which is how a game draws menus and a HUD in 3D mode. It applies to
++    // the draw's texture if that has levels, below.
++    const bool orthographic = call.projection[3] == 0.0f && call.projection[7] == 0.0f && call.projection[11] == 0.0f;
++    const bool detail_wanted = impl.texture_detail && !call.through && !(orthographic && !call.lighting_enabled);
+     if (call.texture.enabled && !call.clear_mode) {
+         const Impl::FramebufferTexture &source = framebuffer_source;
+         const VkDescriptorSet copy =
+@@ -6802,9 +6904,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             push.texture_params[0] += kPushPlaced;
+         } else {
+             texture_levels = impl.mip_levels(memory, call.texture);
+-            texture_descriptor = impl.texture_descriptor(memory, call, texture_levels);
++            texture_descriptor = impl.texture_descriptor(memory, call, texture_levels, detail_wanted);
+         }
+     }
++    const bool detail = detail_wanted && texture_levels > 1u;
+     // Texture map modes 1 and 2 (texture_params.x bit 3): the vertex shader
+     // takes the coordinates from the object block; in mode 1 (bit 4) the
+     // fragment shader divides s and t by q.
+@@ -6822,6 +6925,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // part plus 2048. g is per PSP pixel: at an internal scale above 1 the
+     // auto rule's constant adds 16 x log2 of the scale of the target drawn
+     // into (none for a 480x272 one, patch 0018).
++    // Texture detail (patch 0020), the game's option on, a draw that is not
++    // a 2D one: the constant loses 16 x log2 of that scale S whatever the
++    // rule, so D is the level the GE would pick had the PSP S times the
++    // pixels each way, the game's per-draw intent (the slope rule's slope and
++    // bias) kept relative and D still clamped to the levels the texture has.
++    // The auto rule's addition is the same term, so its g is then per drawn
++    // pixel; at 1x the shift is 0. Bit 21 (kPushDetail) has ge.frag sample
++    // that level through the coordinates' own gradients with the anisotropic
++    // sampler.
+     if (texture_levels > 1u) {
+         std::int32_t rule = 1;
+         std::int32_t constant = 0;
+@@ -6836,12 +6948,23 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             break;
+         default: break;  // auto, and the undefined mode 3 as auto
+         }
+-        if (rule == 1 && drawn_extent.width > kPspWidth)
+-            constant += static_cast<std::int32_t>(std::lround(
+-                16.0 * std::log2(static_cast<double>(drawn_extent.width) / static_cast<double>(kPspWidth))));
++        const std::int32_t shift =
++            drawn_extent.width > kPspWidth
++                ? static_cast<std::int32_t>(std::lround(
++                      16.0 * std::log2(static_cast<double>(drawn_extent.width) / static_cast<double>(kPspWidth))))
++                : 0;
++        if (rule == 1) constant += shift;
++        if (detail) constant -= shift;
+         constant = std::clamp(constant, -2048, 2047);
+         push.texture_params[0] += static_cast<float>(32 * rule + ((call.texture.min_filter & 2u) != 0u ? 128 : 0) +
+                                                      256 * (constant + 2048));
++        if (detail) {
++            push.texture_params[0] += kPushDetail;
++            if (!impl.texture_detail_said) {
++                impl.texture_detail_said = true;
++                std::cout << "[render] texture detail: on\n";
++            }
++        }
+     }
+ 
+     if (!impl.pass_active || impl.current_target != call.target.color_address) {
+@@ -8676,6 +8799,7 @@ void VulkanRenderer::shutdown() {
+     vkDestroySampler(impl.device, impl.clamp_sharp_sampler, nullptr);
+     vkDestroySampler(impl.device, impl.mip_sampler, nullptr);
+     vkDestroySampler(impl.device, impl.mip_sharp_sampler, nullptr);
++    vkDestroySampler(impl.device, impl.mip_detail_sampler, nullptr);
+     // The targets first: destroy_target frees each copy descriptor set back to
+     // descriptor_pool, and freeing into a destroyed pool writes the driver's
+     // freed memory (MoltenVK's pool and set objects are heap allocations).
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 53cc773..4e8748f 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -305,6 +305,14 @@ struct GameProfile {
+     // The game's own settings, each a menu row (GameOption). Empty: none, and
+     // no tab has a Game section.
+     std::span<const GameOption> options = {};
++    // The key of the game option (one of `options`) whose choice 1 asks the
++    // Vulkan renderer for texture detail at its internal scale S: each draw
++    // that samples a texture with mip levels, other than a 2D draw (through
++    // mode, or orthographic and unlit), has the GE's level D lowered by
++    // 16 x log2(S) whatever the rule, and is sampled anisotropically at that
++    // level through explicit gradients. The renderer reads the option once a
++    // frame. Null, the default: the renderer draws the GE's levels as before.
++    const char *texture_detail_option = nullptr;
+ };
+ 
+ // Defined by the port, exactly once. Everything under host/ reads the game

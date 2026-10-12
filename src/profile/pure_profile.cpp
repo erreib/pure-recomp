@@ -214,6 +214,9 @@ const GameProfile &game() {
         // the 30 fps modes row (D-017, task 072), game.sixty_fps, default 60 fps; E6, Flashes (D-016, task 070),
         // game.smooth_flashes, default Smooth.
         .options = enhancements::options(),
+        // E5, Texture detail (D-019): the row the Vulkan renderer reads for the level shift and the anisotropic
+        // sampling (patch 0020-vulkan-texture-detail, task 076); the Metal backend reads it itself (task 075).
+        .texture_detail_option = "texture_detail",
     };
     return profile;
 }

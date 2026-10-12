@@ -62,6 +62,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0017-internal-scale-by-backend | (task 067) | Behaviour | candidate | The menu's Resolution row asks the GE backend, not the Vulkan renderer: `GeBackend::supports_internal_scale()`, `set_internal_scale()` and `target_size()` (defaults: no, nothing, 480x272), the Vulkan backend forwarding to its renderer as the menu did; `gpu::running_backend()` for the menu; `GameProfile::default_internal_scale`, the scale a new player starts with (unset: the framework's 2) |
 | 0018-vulkan-effects-at-1x | (task 068) | Fidelity | candidate, behind a profile switch | Each Vulkan target the size its stride gives (D-015, as the Metal backend draws): the internal resolution for a buffer at least 480 pixels wide, 480x272 for a narrower one (the bloom's buffers, the billboards'), so the bloom's blur and glow stay the PSP's at any scale; every pass, viewport, scissor, copy, blit and read-back takes the target's own size, and guest memory gets the centre pixel of each block |
 | 0019-game-option-rows | (task 070) | Missing feature | candidate | A game's own settings as menu rows: `GameProfile::options` (`GameOption`: key, label, choices, help, default, tab), each kept as an index in settings.ini (`game.<key>`), `<prefix>_<KEY>` deciding it for a run, `settings::game_option(key)` for the port, and a Game section at the end of the tab it names; no option, no section |
+| 0020-vulkan-texture-detail | (task 076) | Fidelity, enhancement | candidate, behind a profile field | Texture detail at the internal scale in the Vulkan renderer, as the Metal backend draws it: with the game option `GameProfile::texture_detail_option` names at 1, a draw that samples a texture with mip levels and is not a 2D draw has the GE's D lowered by 16 x log2 of its target's scale whatever the rule, and `ge.frag` samples that level through the coordinates' own gradients (`textureGrad`, `texture_params.x` bit 21) with an anisotropic sampler (`samplerAnisotropy`, at most 16 taps); no option named, or the option at 0, draws as before |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -437,3 +438,30 @@ row is locked with "Set by <variable>" when the environment decides it), saving 
 lines list the rows as the others; each tab's Restore button puts that tab's options back to their defaults (not one
 the environment decides). A game that lists no option gets no section and no key: every tab and settings.ini are as
 before. Our profile lists one, Flashes (`game.smooth_flashes`, `src/profile/enhancements.cpp`).
+
+### 0020-vulkan-texture-detail
+Task 076 (D-019, E5; the Metal backend's half was task 075). The renderer picked a mipmapped draw's level as the GE does
+for the PSP's 480x272 pixels (patch 0012-vulkan-mipmaps: the auto rule's gradient per PSP pixel, the slope rule by depth
+alone), so at internal scale S a surface was drawn from a level log2(S) coarser than the pixels could show, and
+isotropically. `GameProfile::texture_detail_option` (`host/profile.hpp`, null by default) names the game option (one of
+`options`, patch 0019-game-option-rows) whose choice 1 asks for texture detail; the renderer reads
+`settings::game_option(key) == 1u` at start (`[render] texture detail: off` when it is 0) and once a frame in
+`begin_frame`, never per draw. A draw is enhanced when the option is on, its texture has levels (from guest memory: not
+a target's, not a texture pack's replacement) and it is not a 2D draw (through mode, or unlit under an orthographic
+projection: `projection[3]`, `[7]` and `[11]` all 0, the Metal backend's rule). Then the level rule block's constant
+loses 16 x log2 of the drawn target's width over 480 (`shift`, the term the auto rule adds, so the auto rule's addition
+cancels and its gradient is per drawn pixel; the slope and constant rules lose it too; the clamp to -2048..2047 and the
+packing are as before), and `texture_params.x` gains `kPushDetail`, 2^21, above `kPushPlaced` (both exact in a float;
+`mip_lod` now masks the constant's twelve bits). In `ge.frag` such a draw takes `dFdx`/`dFdy` of the normalised
+coordinates after the divide by q and before the wraps, scales them by k = 2^(lod - log2 rho) (rho the longer in texels
+of level 0) and samples with `textureGrad`, so the GPU's isotropic level is the GE's shifted one and the anisotropic
+sampler takes its taps along the footprint's long axis; the clamp wrap's `half_texel` keeps using that level. The
+sampler: `samplerAnisotropy` is enabled where the device has it (a line when it does not and the game names the option),
+and `mip_detail_sampler` (`mip_sampler` with `maxAnisotropy` min(16, the device's limit); 16 under MoltenVK on the M4
+Pro) is what `texture_sampler(levels, true)` returns, except with the Sharp texture filter, which keeps the nearest mip
+sampler. The sampler is part of each texture's descriptor set, and one texture can be drawn in a frame both by an
+enhanced draw and by a 2D one, so `Texture` gains `detail_descriptor`, made at the texture's first enhanced draw,
+rewritten with the other on a Texture filter change and freed with it; the descriptor pool is sized for twice as many
+texture sets when the game names the option. `[render] texture detail: on` at the first enhanced draw. Without the
+option, or with it at 0, the draws, the samplers and the pictures are as before (the Vulkan window suite's seven scenes
+to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`).
