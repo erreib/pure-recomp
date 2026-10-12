@@ -681,8 +681,8 @@ wall at a grazing angle blurs along its length. In a race frame three of four te
 the ships by the auto rule, the track and the scenery by the slope rule with a per-draw bias). With the menu's Texture
 detail row at Enhanced (`game.texture_detail=1`, `PURE_TEXTURE_DETAIL`; the default), the backend draws them at the
 level the GE would pick with S times the pixels each way and samples them anisotropically. Original (0) is the path
-as it was, to the pixel. The Vulkan renderer draws the PSP's levels until a task of its own (D-019 point 1); the row's
-help says so.
+as it was, to the pixel. The Vulkan renderer does the same since task 076 (patch 0020-vulkan-texture-detail; "The
+Vulkan renderer" below).
 
 ### What it does
 
@@ -764,6 +764,67 @@ for 0.97 s, the one frame over 25 ms of the minute, not a player's case). A seco
 screen throughout, gave 3601 frames in 60.1 s, mean 16.68 ms, longest 20.42 ms, none over 25 ms, 0.94 ms of GPU waits
 a frame. The race holds 60 fps; the anisotropic taps cost the GPU little at this scale (the waits a frame 0.86 to 0.94
 ms against 0.86 off, task 067's 0.94 at Auto), and Original costs nothing new, being the same code.
+
+### The Vulkan renderer (task 076)
+
+Patch 0020-vulkan-texture-detail gives the Vulkan renderer, the Windows build's, the same rule. The framework does not
+know the row's key: our profile names it (`GameProfile::texture_detail_option = "texture_detail"`,
+`src/profile/pure_profile.cpp`), and the renderer reads `settings::game_option` of it at start and once a frame in
+`begin_frame`, never per draw. Which draws are enhanced is the rule above (a texture with levels from guest memory, not
+a 2D draw: through mode, or orthographic and unlit, from the draw's projection and lighting); the picture is the
+same rule, reached by other means:
+
+| Part | In the Vulkan renderer |
+|---|---|
+| The level | the shift, 16 x log2(S) with S the drawn target's width over 480, comes off the level rule's constant (`texture_params.x` bits 8 and up, packed in `submit`), where the auto rule already adds the same term for its per-PSP-pixel gradient (patch 0012-vulkan-mipmaps), so for the auto rule the two cancel and the gradient is per drawn pixel; the slope and constant rules lose it. Auto follows the window, so S is 2 in the default 960x544 window |
+| The sample | `ge.frag`: bit 21 of `texture_params.x` (`kPushDetail`, beside `kPushPlaced` at 2^20; both exact in a float) selects `textureGrad` with the derivatives of the coordinates after the divide by q, scaled by the same k as `gradient2d` here; without it the `textureLod` path is as it was (`mip_lod` now masks the constant's twelve bits) |
+| The sampler | `mip_detail_sampler`: `mip_sampler` with `maxAnisotropy` min(16, the device's `maxSamplerAnisotropy`), 16 under MoltenVK on the M4 Pro, with the `samplerAnisotropy` feature enabled where the device has it (`[render] texture detail samples isotropically: ...` where it does not). With the renderer's Sharp texture filter the nearest mip sampler stays |
+| The descriptor | the sampler is part of each cached texture's descriptor set, and a texture can be drawn in one frame by an enhanced draw and by a 2D one, so a texture with levels gets a second set, `detail_descriptor`, at its first enhanced draw (made, rewritten on a Texture filter change and freed with the texture); the descriptor pool has room for it when the game names the option. Nothing is made with the option off |
+| The log | `[render] texture detail: off` at start when the option is off; `[render] texture detail: on` at the first enhanced draw. The renderer has no count of its draws |
+
+`tools/texture_check.sh --shell vulkan` is its check: race_hud, tt_hud, fp_hud and zone_hud captured in the Vulkan
+window (`tools/frame_regress.sh --shell vulkan --backend vulkan`, paced from 300 flips before the scene) with the
+option off and on, each capture reduced by the centre pixel of its S x S blocks (S its width over 480), the same bars
+as the Metal lane, and the `on` and `off` lines in place of the count. On 2026-10-12 (the task's build, the default
+960x544 window, S = 2), about 2 minutes (up to 5 when the off runs are made again, below):
+
+| Scene | Reduced, on (limit) | Reduced, off | On against off | Energy off | Energy on | Ratio | HUD |
+|---|---|---|---|---|---|---|---|
+| race_hud | 0.0727 (0.10) | 0.0647 | 0.0194 | 6.3364 | 6.8594 | 1.0825 | found |
+| tt_hud | 0.0800 (0.12) | 0.0699 | 0.0188 | 6.3131 | 7.1880 | 1.1386 | found |
+| fp_hud | 0.0797 (0.11) | 0.0696 | 0.0188 | 6.2722 | 7.1494 | 1.1399 | found |
+| zone_hud | 0.0557 (0.09) | 0.0556 | (0.0002) | (4.0860) | (4.0869) | (1.0002) | - |
+
+The reductions take each 2 x 2 block's lower right pixel, the centre pick, where the suite's nearest-neighbour
+reduction takes the upper left, hence 0.0647 off where the suite scores race_hud 0.0465. The shift is one level at
+S = 2 against Metal's two at 4, and the energy ratios are lower with it (1.08 to 1.14). A first run in a fresh data
+directory, or after a change to the shaders, makes the pipelines while paced, and that stall can move the race
+(tt_hud's capture with the option off, after 26 new pipelines: 27% of its pixels off the suite's at tol 0); the check
+makes its off runs again while they make pipelines, three rounds at most, so the race is the suite's (from a fresh data
+directory the off captures of the last round equal the suite's to the pixel).
+
+MoltenVK applies the anisotropy through `textureGrad`: with `maxAnisotropy` 1 in place of the limit (a build not
+committed), race_hud's capture with the option on differs from the committed one in 15.49% of its pixels at tol 0,
+2.15% at tol 2 and 0.20% at tol 24 (tt_hud 22.33%, 5.22%, 0.25%), on the crowds, the buildings and the track's edges
+at grazing angles and the ships far ahead.
+
+With the option off the renderer draws as before: the Vulkan window suite's seven scenes equal the base build's
+(batch/m2 9a2e72d, patches to 0019) to the pixel, and score the base figures.
+
+The cost, the race in the Vulkan window (960x544, FIFO at 120 Hz; `main_menu.txt` + `single_race.txt` without their
+shots on an empty memory stick, `PURE_PACED_FROM=6000`, to flip 9850, `PURE_PERF=log`: the 63 one-second lines from
+the race's start, a warm pipeline cache):
+
+| Option | Scale | fps, mean (lowest) | Seconds under 59.5 | Frame, mean | Longest frame | GPU a frame, mean (largest) |
+|---|---|---|---|---|---|---|
+| off | Auto (2) | 59.70 (52.2) | 2 | 16.77 ms | 34.6 ms | 1.66 ms (9.3 ms) |
+| on | Auto (2) | 59.71 (48.4) | 2 | 16.78 ms | 34.3 ms | 1.66 ms (9.0 ms) |
+| off | 4 | 59.94 (59.8) | 0 | 16.70 ms | 21.4 ms | 2.05 ms (15.1 ms) |
+| on | 4 | 59.94 (59.8) | 0 | 16.70 ms | 19.3 ms | 2.37 ms (10.4 ms) |
+
+The two seconds under 59.5 at Auto are the last two of both runs, with the option off as on. The race holds 60 fps
+with the option on as it does off; at internal scale 4 (`PURE_INTERNAL_SCALE=4`, a 1920x1088 target) the anisotropic
+taps add about 0.3 ms of GPU time a frame.
 
 ## The Metal shell
 
@@ -1278,8 +1339,9 @@ as before and named once; the game never draws one.
   0012-vulkan-mipmaps there). Drawing at 2x, the Vulkan backend adds 16 x log2 of its internal scale to the auto
   rule's D, so that g, the screen gradient, stays per PSP pixel; Metal takes g per PSP pixel the same way at its
   internal scale (task 066: level 0's size times S). With the Texture detail row at Enhanced (task 075, the default)
-  Metal then lowers D by 16 x log2(S) and samples anisotropically; the Vulkan renderer draws the PSP's levels until a
-  task of its own gives it the same rule (D-019).
+  Metal then lowers D by 16 x log2(S) and samples anisotropically, and so does the Vulkan renderer since task 076
+  (patch 0020-vulkan-texture-detail: the shift taken off its level rule's constant, `textureGrad`, a second
+  descriptor set per texture for the anisotropic sampler; "Texture detail", "The Vulkan renderer").
 - 16-bit targets keep the format's bits with the GE's dithering, the colour test and CLIPENABLE's depth clamp with
   MINZ/MAXZ are in both (task 040 here; tasks 059 and 060, patches 0013-vulkan-colortest-depthclamp and
   0014-vulkan-16bit-dither there). The Vulkan backend reads a 16-bit target's colour as an input attachment with a

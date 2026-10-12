@@ -5,8 +5,17 @@
 # original_pacing) and with 1 (the player's default: D lowered by 16 x log2(S), the mipmapped draws sampled
 # anisotropically), and race_hud once more at PURE_INTERNAL_SCALE=1 with 1 (the shift is 0 there; only the anisotropy
 # acts).
-#   tools/texture_check.sh [--out DIR] [--wait SECONDS]
-#   --out      default out/texture_check: DIR/0, DIR/1 and DIR/s1 hold each run's captures and logs
+# With --shell vulkan (task 076, patch 0020-vulkan-texture-detail) the same four scenes are captured in the Vulkan
+# window instead (tools/frame_regress.sh --shell vulkan --backend vulkan: each run unpaced until 300 flips before its
+# scene, paced from there), at the window's own internal scale (Auto, as the suite runs: 960x544 in the default
+# window), with PURE_TEXTURE_DETAIL=0 and 1; S is the capture's width over 480 (tools/sprite_pack.sh's reduction). While
+# the 0 runs make pipelines (a cold pipeline cache: the stall moves the paced race), they are made again, up to three
+# times in all, and the last compared.
+#   tools/texture_check.sh [--shell headless|vulkan] [--out DIR] [--wait SECONDS]
+#   --shell    headless (the default): the Metal backend headless at PURE_INTERNAL_SCALE=4, as above; vulkan: the
+#              Vulkan renderer in its window, as above (needs the screen; about 2 minutes, up to 5).
+#   --out      default out/texture_check (out/texture_check/vulkan with --shell vulkan): DIR/0, DIR/1 and DIR/s1 hold
+#              each run's captures and logs
 #              (tools/frame_regress.sh --out), DIR/1/reduced the 1 captures reduced to 480x272, DIR/hud/<scene>/
 #              h<frame>.bmp the race scenes' 1 captures for tools/hud_check.py, DIR/<scene>.diff.png the differing
 #              pixels of a scene whose reduction fails (DIR/race_hud.s1.diff.png for the scale 1 run), DIR/summary.txt
@@ -14,10 +23,12 @@
 #   --wait     how long to wait for other games to end when the suite's one-game guard refuses to start (default 600;
 #              0 gives up at once), as tools/sprite_check.sh waits.
 # PASS when, for every scene:
-#   - the 1 capture is 1920x1088 (the display target at internal scale 4);
-#   - reduced to 480x272 by the centre pixel of each 4 x 4 block (tools/scale_check.sh's rule and code, copied: the
-#     rule by which the backend feeds guest memory, D-015), it is within the scene's own limit of its PPSSPP reference
-#     at the scene's tol, both read from tools/frame_regress.sh's scene table (the picture is the same picture);
+#   - the 1 capture is 1920x1088 (the display target at internal scale 4); with --shell vulkan, a multiple S of
+#     480x272 the size of the 0 capture (the window's pixels);
+#   - reduced to 480x272 by the centre pixel of each 4 x 4 block (S x S with --shell vulkan; tools/scale_check.sh's
+#     rule and code, copied: the rule by which the backend feeds guest memory, D-015), it is within the scene's own
+#     limit of its PPSSPP reference at the scene's tol, both read from tools/frame_regress.sh's scene table (the
+#     picture is the same picture);
 #   - for race_hud, tt_hud and fp_hud (DETAIL_SCENES), the full 1 capture differs from the full 0 capture in at least
 #     1% of its pixels at tol 24 (the detail is there), and holds more high-frequency energy than the full 0 one: the
 #     mean absolute difference, per channel, between each pixel and its right and its lower neighbour over the whole
@@ -30,14 +41,18 @@
 #     has no CURRENT or LAP label: its reference fails tools/hud_check.py too, as tools/sprite_check.sh notes);
 # and the race_hud run with 1: its exit line (`[metal] ... M mipmapped draws (E enhanced, ...)`, the counts over the
 # run) counts at least 10000 enhanced draws; its scale 1 capture is 480x272 and within the scene's limit of the
-# reference at its tol, compared directly. Prints the table and `texture_check: PASS` or `FAIL` last. Exit 0 PASS,
-# 1 FAIL, 2 cannot run (a suite refused for longer than --wait, no capture at all).
+# reference at its tol, compared directly. With --shell vulkan, which has no count of its draws and no scale 1 run
+# instead: the race_hud run with 1 logged `[render] texture detail: on` (an enhanced draw was drawn) and the one with 0
+# `[render] texture detail: off` and no `on` (the pin reached the renderer). Prints the table and the summary line,
+# which names the shell, then `texture_check: PASS` or `FAIL` last. Exit 0 PASS, 1 FAIL, 2 cannot run (a suite refused
+# for longer than --wait, no capture at all).
 set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
 
-DIR=out/texture_check
+DIR=
+LANE=headless
 WAIT=600
 SCALE=4
 SCENES="race_hud tt_hud fp_hud zone_hud"
@@ -46,11 +61,12 @@ SCENES="race_hud tt_hud fp_hud zone_hud"
 DETAIL_SCENES="race_hud tt_hud fp_hud"
 HUD_SCENES="race_hud tt_hud fp_hud"
 usage() {
-  echo "usage: tools/texture_check.sh [--out DIR] [--wait SECONDS]"
+  echo "usage: tools/texture_check.sh [--shell headless|vulkan] [--out DIR] [--wait SECONDS]"
   exit 2
 }
 while [ $# -gt 0 ]; do
   case $1 in
+    --shell) [ $# -ge 2 ] || usage; LANE=$2; shift 2 ;;
     --out) [ $# -ge 2 ] || usage; DIR=$2; shift 2 ;;
     --wait) [ $# -ge 2 ] || usage; WAIT=$2; shift 2 ;;
     -h|--help) usage ;;
@@ -58,20 +74,32 @@ while [ $# -gt 0 ]; do
   esac
 done
 case $WAIT in ''|*[!0-9]*) echo "texture_check: --wait takes seconds, not $WAIT"; exit 2 ;; esac
+case $LANE in headless|vulkan) ;; *) echo "texture_check: --shell takes headless or vulkan, not $LANE"; exit 2 ;; esac
+if [ -z "$DIR" ]; then
+  DIR=out/texture_check
+  [ $LANE = vulkan ] && DIR=out/texture_check/vulkan
+fi
 mkdir -p "$DIR"
 DIR=$(cd "$DIR" && pwd)
 START=$SECONDS
 
-# capture NAME SCALE V SCENES: the scenes headless on Metal at internal scale SCALE with PURE_TEXTURE_DETAIL=V, into
-# DIR/NAME, retried while the one-game guard refuses, for up to --wait seconds. The suite's own verdict (each capture
-# against its reference at its own size, by nearest neighbour) does not matter here.
+# capture NAME SCALE V SCENES: the scenes headless on Metal at internal scale SCALE (with --shell vulkan, in the Vulkan
+# window at its own scale; SCALE unused) with PURE_TEXTURE_DETAIL=V, into DIR/NAME, retried while the one-game guard
+# refuses, for up to --wait seconds. The suite's own verdict (each capture against its reference at its own size, by
+# nearest neighbour) does not matter here.
 capture() {
   local name=$1 scale=$2 v=$3 scenes=$4 where="$DIR/$1" waited=0 rc
+  local run=(--shell headless --backend metal --env "PURE_INTERNAL_SCALE=$scale") tag=pure label="scale $scale"
+  if [ $LANE = vulkan ]; then
+    run=(--shell vulkan --backend vulkan)
+    tag=render
+    label="the Vulkan window"
+  fi
   rm -rf "$where"
   mkdir -p "$where"
   while :; do
-    tools/frame_regress.sh --out "$where" --shell headless --backend metal --only "$(echo $scenes | tr ' ' ',')" \
-      --env "PURE_INTERNAL_SCALE=$scale" --env "PURE_TEXTURE_DETAIL=$v" > "$DIR/frame_regress.$name.stdout" 2>&1
+    tools/frame_regress.sh --out "$where" "${run[@]}" --only "$(echo $scenes | tr ' ' ',')" \
+      --env "PURE_TEXTURE_DETAIL=$v" > "$DIR/frame_regress.$name.stdout" 2>&1
     rc=$?
     grep -q '^frame_regress: another PureNative is running' "$DIR/frame_regress.$name.stdout" || break
     if [ $waited -ge "$WAIT" ]; then
@@ -89,26 +117,46 @@ capture() {
     echo "texture_check: tools/frame_regress.sh could not run"
     exit 2
   fi
-  grep -h '^\[pure\] texture detail' "$where"/*.log 2>/dev/null | sort | uniq -c |
-    sed "s/^ */  scale $scale, PURE_TEXTURE_DETAIL=$v: /"
+  grep -h "^\\[$tag\\] texture detail" "$where"/*.log 2>/dev/null | sort | uniq -c |
+    sed "s/^ */  $label, PURE_TEXTURE_DETAIL=$v: /"
 }
 
 rm -rf "$DIR"/*.diff.png "$DIR/summary.txt" "$DIR/hud"
-echo "texture check $(date '+%Y-%m-%d %H:%M'): $SCENES at internal scale $SCALE, PURE_TEXTURE_DETAIL 0 and 1, and" \
-  "race_hud at scale 1 with 1, headless on Metal, into $DIR"
-capture 0 "$SCALE" 0 "$SCENES"
-capture 1 "$SCALE" 1 "$SCENES"
-capture s1 1 1 race_hud
+if [ $LANE = vulkan ]; then
+  rm -rf "$DIR/s1"
+  echo "texture check $(date '+%Y-%m-%d %H:%M'): $SCENES in the Vulkan window at its own internal scale," \
+    "PURE_TEXTURE_DETAIL 0 and 1, into $DIR"
+  capture 0 - 0 "$SCENES"
+  # A run that makes pipelines (a fresh data directory, a changed shader) stalls in its paced stretch, and a stall
+  # moves the race (task 076: tt_hud's 0 capture 27% of its pixels off the suite's at tol 0 after 26 new pipelines).
+  # They are cached from then on, and the 1 runs use the same ones (texture detail is a push constant), so the 0 runs
+  # are made again while they make any, up to three times in all (from a fresh data directory a second round has
+  # still made 23 on the Time Trial route, and has made none), and the last are compared.
+  rounds=1
+  while [ $rounds -lt 3 ] && grep -q '^\[render\] [0-9]* new pipeline' "$DIR"/0/*.log 2>/dev/null; do
+    echo "  the 0 runs made pipelines, which moves a paced race: again, with the pipeline cache warmer"
+    capture 0 - 0 "$SCENES"
+    rounds=$((rounds + 1))
+  done
+  capture 1 - 1 "$SCENES"
+else
+  echo "texture check $(date '+%Y-%m-%d %H:%M'): $SCENES at internal scale $SCALE, PURE_TEXTURE_DETAIL 0 and 1, and" \
+    "race_hud at scale 1 with 1, headless on Metal, into $DIR"
+  capture 0 "$SCALE" 0 "$SCENES"
+  capture 1 "$SCALE" 1 "$SCENES"
+  capture s1 1 1 race_hud
+fi
 
-python3 - "$DIR" "$SCALE" "$SCENES" "$HUD_SCENES" "$DETAIL_SCENES" "$((SECONDS - START))" <<'EOF'
+python3 - "$DIR" "$SCALE" "$SCENES" "$HUD_SCENES" "$DETAIL_SCENES" "$((SECONDS - START))" "$LANE" <<'EOF'
 import os, re, subprocess, sys
 from operator import sub
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
 import png  # noqa: E402  (tools/png.py)
 
-out, scale, scenes, hud_scenes, detail_scenes, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3].split(), \
-    sys.argv[4].split(), sys.argv[5].split(), sys.argv[6]
+out, scale, scenes, hud_scenes, detail_scenes, seconds, lane = sys.argv[1], int(sys.argv[2]), sys.argv[3].split(), \
+    sys.argv[4].split(), sys.argv[5].split(), sys.argv[6], sys.argv[7]
+vulkan = lane == "vulkan"               # the Vulkan window: S is each capture's width over 480
 DIFF_TOL, MIN_DIFF = 24, 0.01           # the full captures: at least 1% of pixels over tol 24
 MIN_RATIO = 1.0                         # the high-frequency energy of 1 over 0's: above this
 MIN_ENHANCED = 10000                    # enhanced draws over the race_hud run with 1
@@ -133,7 +181,7 @@ def scene_table():
     return table
 
 
-def centres(path, reduced):
+def centres(path, reduced, scale):
     """The S capture at `path` reduced to 480x272 by each block's centre pixel, written to `reduced`. Copied from
     tools/scale_check.sh (task 066): (x S + S/2, y S + S/2), the backend's rule for guest memory."""
     w, h, rgb = imgdiff.load_rgb(path)
@@ -182,7 +230,8 @@ size = (480 * scale, 272 * scale)
 reduced_dir = os.path.join(out, "1", "reduced")
 os.makedirs(reduced_dir, exist_ok=True)
 note("")
-note(f"each PURE_TEXTURE_DETAIL=1 capture at scale {scale}: its size, by its blocks' centre pixels against the scene's "
+note(f"each PURE_TEXTURE_DETAIL=1 capture {'in the Vulkan window' if vulkan else f'at scale {scale}'}: its size, by "
+     f"its blocks' centre pixels against the scene's "
      f"reference at the scene's tol and limit (tools/frame_regress.sh), the full capture against the "
      f"PURE_TEXTURE_DETAIL=0 one at tol {DIFF_TOL} (at least {MIN_DIFF:.0%}), the high-frequency energy of the 0 and 1 "
      f"captures and their ratio (above {MIN_RATIO}) for {', '.join(detail_scenes)}, and the race HUD "
@@ -201,11 +250,18 @@ for scene in scenes:
     w, h, _ = imgdiff.load_rgb(a)
     why = []
     reduced_text = vs0_text = e0_text = e1_text = ratio_text = "-"
-    if (w, h) != size:
+    s = scale
+    if vulkan:
+        s = w // 480
+        if s < 1 or (w, h) != (480 * s, 272 * s):
+            why.append(f"{w}x{h} is not a multiple of 480x272")
+        elif imgdiff.load_rgb(b)[:2] != (w, h):
+            why.append("not the size of the 0 capture")
+    elif (w, h) != size:
         why.append(f"not {size[0]}x{size[1]}")
-    else:
+    if not why:
         reduced = os.path.join(reduced_dir, scene + ".png")
-        centres(a, reduced)
+        centres(a, reduced, s)
         diff = os.path.join(out, scene + ".diff.png")
         r = compare(reduced, ref, tol, limit, diff)
         reduced_text = f"{r['fraction']:.4f}"
@@ -243,23 +299,45 @@ note("")
 route = table["race_hud"][0].replace(".txt", "")
 log = os.path.join(out, "1", route + ".log")
 found = None
-if os.path.isfile(log):
-    with open(log, errors="replace") as f:
-        for line in f:
-            m = re.search(r"^\[metal\] \d+ frames, .* (\d+) mipmapped draws \((\d+) enhanced, ", line)
-            if m:
-                found = (int(m[1]), int(m[2]))
-if found is None:
-    stats_ok = False
-    note(f"race_hud run: no exit line with the enhanced count in {log}: FAIL")
+
+
+def detail_lines(path):
+    """The `[render] texture detail` lines of a run's log (none when the log is missing)."""
+    if not os.path.isfile(path):
+        return set()
+    with open(path, errors="replace") as f:
+        return {line.strip() for line in f if line.startswith("[render] texture detail")}
+
+
+if vulkan:
+    # The Vulkan renderer counts no draws of its own: the `on` line says an enhanced draw was drawn, the `off` line
+    # (and no `on`) that the pin reached the renderer.
+    on, off = detail_lines(log), detail_lines(os.path.join(out, "0", route + ".log"))
+    stats_ok = "[render] texture detail: on" in on and "[render] texture detail: off" in off and \
+        "[render] texture detail: on" not in off
+    note(f"race_hud run with 1: {', '.join(sorted(on)) or 'no texture detail line'}; with 0: "
+         f"{', '.join(sorted(off)) or 'no texture detail line'} (on with 1, off and not on with 0): "
+         f"{'PASS' if stats_ok else 'FAIL'}")
 else:
-    stats_ok = found[1] >= MIN_ENHANCED
-    note(f"race_hud run with 1 (exit line, over the run): {found[0]} mipmapped draws, {found[1]} enhanced (at least "
-         f"{MIN_ENHANCED}): {'PASS' if stats_ok else 'FAIL'}")
+    if os.path.isfile(log):
+        with open(log, errors="replace") as f:
+            for line in f:
+                m = re.search(r"^\[metal\] \d+ frames, .* (\d+) mipmapped draws \((\d+) enhanced, ", line)
+                if m:
+                    found = (int(m[1]), int(m[2]))
+    if found is None:
+        stats_ok = False
+        note(f"race_hud run: no exit line with the enhanced count in {log}: FAIL")
+    else:
+        stats_ok = found[1] >= MIN_ENHANCED
+        note(f"race_hud run with 1 (exit line, over the run): {found[0]} mipmapped draws, {found[1]} enhanced (at "
+             f"least {MIN_ENHANCED}): {'PASS' if stats_ok else 'FAIL'}")
 
 _, frame, ref, tol, limit = table["race_hud"]
 s1 = os.path.join(out, "s1", "shots", "race_hud.png")
-if not os.path.isfile(s1):
+if vulkan:
+    s1_ok = True     # no scale 1 run in the Vulkan window: its scale is the window's
+elif not os.path.isfile(s1):
     s1_ok = False
     note("race_hud at scale 1 with 1: no capture: FAIL")
 else:
@@ -278,8 +356,13 @@ else:
 
 verdict = "PASS" if passed == len(scenes) and stats_ok and s1_ok else "FAIL"
 note("")
-note(f"texture check: {passed}/{len(scenes)} scenes pass, the enhanced draws {'PASS' if stats_ok else 'FAIL'}, "
-     f"race_hud at scale 1 {'PASS' if s1_ok else 'FAIL'} ({int(seconds) // 60}m {int(seconds) % 60}s)")
+if vulkan:
+    note(f"texture check, shell vulkan: {passed}/{len(scenes)} scenes pass, the texture detail lines "
+         f"{'PASS' if stats_ok else 'FAIL'} ({int(seconds) // 60}m {int(seconds) % 60}s)")
+else:
+    note(f"texture check, shell headless: {passed}/{len(scenes)} scenes pass, the enhanced draws "
+         f"{'PASS' if stats_ok else 'FAIL'}, race_hud at scale 1 {'PASS' if s1_ok else 'FAIL'} "
+         f"({int(seconds) // 60}m {int(seconds) % 60}s)")
 note(f"texture_check: {verdict}")
 with open(os.path.join(out, "summary.txt"), "w") as f:
     f.write("\n".join(lines) + "\n")

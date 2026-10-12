@@ -116,6 +116,16 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
      To play with it, copy the folder into the rig's data directory as `textures/UCUS98612`
      (`%APPDATA%\pure-recomp\PureNative\textures\UCUS98612\textures.ini`), or install it from the game: Esc, Video,
      Import texture pack…, choose the folder; the Texture pack row (on by default) then notes `48 textures, ...`.
+   - **open** (task 076, E5's Vulkan half, patch 0020-vulkan-texture-detail; after `tools/patches.sh check`
+     [`ok: 20 patch(es) ...`] and `tools/build.sh profile` with it): `tools/texture_check.sh --shell vulkan`
+     [`texture_check: PASS`; race_hud, tt_hud and fp_hud at least 1% changed by the option with an energy ratio above
+     1.0, all four within their limits after the reduction, the HUD found, `[render] texture detail: on` and `off` in
+     the logs; 2 to 5 minutes. S is the capture's width over 480, so the rig's window size is fine as long as it is a
+     multiple of 480x272]. Then, by hand: a Single Race in a window, Esc, Video, Texture detail Original, then Enhanced:
+     with Enhanced the crowds, the far banners and the walls at a grazing angle resolve, the near track is the same, and
+     Performance shows the same frame rate both ways (on this Mac's M4 Pro, 60 fps either way, 0.3 ms more GPU time a
+     frame at internal scale 4). A device without `samplerAnisotropy` says so on a `[render]` line and samples
+     isotropically.
 5. **Package:** `tools/bundle_windows.sh --zip` (rebuilds the Release binary when stale: 15 to 25 minutes cold), then
    `tools/bundle_windows.sh --check out/repack-win-070` [`bundle check: PASS`]. Done 2026-10-11: the zip
    pure-recomp-0.1.0-6393b67-windows-x64.zip, seven checks PASS (out/repack-071.log on the rig); then task 071 added

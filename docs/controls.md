@@ -175,12 +175,13 @@ docs/timing.md, "E6"). Text and sprites (since task 073): Upscaled has the Metal
 menus' text and art and the race HUD, small bitmaps on the PSP, four times finer with smooth edges; Original draws the
 PSP's texels and is the default since 2026-10-12 (E7, D-018 as amended; docs/metal-backend.md, "Sprite upscale"). Under the Vulkan renderer the row is shown and does
 nothing until a texture pack exists, as its help says. Texture detail (since task 075): Enhanced (the default) has
-the Metal backend draw the mipmapped textures, the track ahead, the walls, the scenery and the ships, at the level of
+the renderer draw the mipmapped textures, the track ahead, the walls, the scenery and the ships, at the level of
 detail for the pixels drawn rather than the PSP's 480x272, and angled surfaces anisotropically; the difference shows
-above Resolution x1. Original picks the level as the PSP does (E5, D-019; docs/metal-backend.md, "Texture detail"). Under
-the Vulkan renderer the row is shown and draws the PSP's levels until its own task, as its help says. "Restore video
-defaults" puts all four back to their defaults; `PURE_SIXTY_FPS`, `PURE_SMOOTH_FLASHES`, `PURE_SPRITE_UPSCALE` and
-`PURE_TEXTURE_DETAIL` lock them for a run ("Set by PURE_SIXTY_FPS"), as every tool run does.
+above Resolution x1. Original picks the level as the PSP does (E5, D-019; docs/metal-backend.md, "Texture detail"). Both
+renderers draw it, the Metal backend since task 075 and the Vulkan renderer since task 076 (patch
+0020-vulkan-texture-detail), as its help says. "Restore video defaults" puts all four back to their defaults;
+`PURE_SIXTY_FPS`, `PURE_SMOOTH_FLASHES`, `PURE_SPRITE_UPSCALE` and `PURE_TEXTURE_DETAIL` lock them for a run ("Set by
+PURE_SIXTY_FPS"), as every tool run does.
 
 Checked under the Metal shell on 2026-10-06 (task 030): Cross rebound to Space / X from the menu, X then confirmed
 the game's language screen (`[pad] buttons 0x4000`), and settings.ini held `input.bind.cross=Space / X` until the
