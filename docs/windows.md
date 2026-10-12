@@ -126,6 +126,18 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
      Performance shows the same frame rate both ways (on this Mac's M4 Pro, 60 fps either way, 0.3 ms more GPU time a
      frame at internal scale 4). A device without `samplerAnisotropy` says so on a `[render]` line and samples
      isotropically.
+   - **open** (task 077, the download packs; docs/dlc.md): copy the twelve US pack folders (`UCUS98612D<PACK>`, 62 MB,
+     on the Mac in `$HOME/dlc-packs`; the game's data, never in the repository or the zip) to the rig, outside the
+     checkout, then `tools/dlc_check.sh --packs DIR` (DIR the copied folder) [`dlc_check: PASS`; PI.WAD opened in 12 of
+     12 folders, league_select and team_select changed, the HUD in at least 4 of 6 shots of each of the Gamma, Delta and
+     Classic 2 races and their TRACK SELECTION off Alpha's, no pack-related `[hle-stub]`, the boot cost printed]. On Windows its runs that take shots go
+     through the Vulkan window (`purelib.port.DRAWING`, as frame_regress does), unpaced until 300 flips before the
+     first shot and paced from there, so expect a few minutes; the cost runs stay headless. The two screen rows say
+     little there: the Vulkan window's league_select and team_select differ from the references by 0.062 and 0.042
+     without packs already (frame_regress's Vulkan column), above both bars; the opens and the races carry the
+     check. To play with them:
+     `tools/dlc_install.sh DIR` (into `%APPDATA%\pure-recomp\PureNative\ms0\PSP\SAVEDATA\`) [`dlc_install: 12
+     installed, ...; the stick holds 12 of the twelve US packs`], then Single Race shows CLASSIC 2, DELTA and GAMMA.
 5. **Package:** `tools/bundle_windows.sh --zip` (rebuilds the Release binary when stale: 15 to 25 minutes cold), then
    `tools/bundle_windows.sh --check out/repack-win-070` [`bundle check: PASS`]. Done 2026-10-11: the zip
    pure-recomp-0.1.0-6393b67-windows-x64.zip, seven checks PASS (out/repack-071.log on the rig); then task 071 added
