@@ -8,6 +8,8 @@ each used to carry.
                    [hle-stub] lines and the start-up list, the PURE_AUDIO_WAV files
   purelib.ppsspp   PPSSPP shared with other tasks: one instance at a time, its memory stick free of a profile and left
                    as it was found
+  purelib.dlc      (task 077) the download packs: the twelve US pack folders and their titles, the checks
+                   tools/dlc_install.sh makes on a folder, the app's data directory
 
 A tool puts tools/ on sys.path (as every tool does for tools/png.py) and imports `from purelib import port, logs`.
 Python 3 standard library only. docs/verification.md, "The shared runner".
