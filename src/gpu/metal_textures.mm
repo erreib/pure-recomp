@@ -2,7 +2,8 @@
 // upscale"): the mip levels a draw samples, the content key (address, layout, every texel and the palette entries
 // they reach), hashed once per display list, the decode with the framework's decode_texture() into a cache of
 // kMaxTextures, the sprite upscale of a 2D draw's texture (task 073, sprite_upscale.cpp) and its dump as a texture
-// pack (task 074), and the GE's level rule. Textures that lie in a target are metal_targets.mm's.
+// pack (task 074), the GE's level rule, and the game options the backend reads (Text and sprites, Texture detail).
+// Textures that lie in a target are metal_targets.mm's.
 #include "metal_backend.hpp"
 #include "gpu/texture_decode.hpp"
 #include "gpu/texture_pack.hpp"
@@ -208,11 +209,15 @@ bool MetalGeBackend::upscalable(TextureFormat format) {
            format == TextureFormat::Rgba4444;
 }
 
-// The menu's Text and sprites row (game.sprite_upscale, PURE_SPRITE_UPSCALE): 0, Original, the default since 2026-10-12. Read at start
-// and at each frame (begin_frame()), never per draw; at start, `[pure] sprite upscale: off` when it is off.
-void MetalGeBackend::read_sprite_upscale(bool at_start) {
+// The game options the backend reads itself, at start and at each frame (begin_frame()), never per draw. The menu's
+// Text and sprites row (game.sprite_upscale, PURE_SPRITE_UPSCALE): 0, Original, the default since 2026-10-12; at
+// start, `[pure] sprite upscale: off` when it is off. The Texture detail row (task 075, D-019; game.texture_detail,
+// PURE_TEXTURE_DETAIL): 1, Enhanced, the default; at start, `[pure] texture detail: off` when it is off.
+void MetalGeBackend::read_game_options(bool at_start) {
     sprite_upscale_ = portablekit::settings::game_option("sprite_upscale") == 1u;
+    texture_detail_ = portablekit::settings::game_option("texture_detail") == 1u;
     if (at_start && !sprite_upscale_) std::cout << "[pure] sprite upscale: off\n";
+    if (at_start && !texture_detail_) std::cout << "[pure] texture detail: off\n";
 }
 
 // PURE_SPRITE_DUMP=DIR: an upscaled texture's decoded input as DIR/<key>.src.png and its output (upscaled_) as

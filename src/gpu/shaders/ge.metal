@@ -90,7 +90,9 @@ struct FragmentUniforms {
     // The mip level (task 037): x the rule (0 none: level 0, Metal's own derivatives; 1 auto, 2 constant, 3 slope:
     // TEXLEVEL's modes), y the part of D (1/16 levels) that is the same across the draw, zw level 0's size.
     float4 level;
-    float4 level_range;   // x: the highest D, 16 x (levels - 1)
+    // x: the highest D, 16 x (levels - 1). Texture detail (task 075): y the shift subtracted from D, 16 x log2(S) at
+    // internal scale S, and z 1: the level through gradient2d with an anisotropic sampler; both 0 otherwise.
+    float4 level_range;
     uint4 color_test;     // the colour test (task 040): x the GE function (0 NEVER, 2 EQUAL, 3 NOTEQUAL; 1 ALWAYS is
                           // compiled out), y the reference, z the mask, both 0x00BBGGRR
     // A draw into a 16-bit target (ge_fragment_16, task 040), which blends in the shader:
@@ -311,6 +313,11 @@ float ge_log16(float x) {
 // gives as 1/w), times the texture matrix's q; s and t are the texture coordinates times q, whose screen
 // gradients g takes, in texels. D is clamped to the levels the texture has; the sampler's mip filter takes the
 // nearest level or blends the two around it.
+// Texture detail (task 075, D-019; u.level_range.z 1): D lowered by u.level_range.y, 16 x log2(S) at internal scale
+// S, so the level is the one the GE would pick with S times the pixels each way, and sampled through gradients: the
+// coordinates' own screen derivatives scaled by k so that their longer one is 2^(D'/16) texels of level 0. The
+// GPU's isotropic level is then D'/16, and the anisotropic sampler takes its taps along the footprint's long axis
+// at the finer level its short axis allows.
 // A target sampled as the texture (task 063): the GE's wrap in the texture's own coordinates, per axis, then the
 // texture's place in the target's 480x272 image (u.uv_remap), whose sampler clamps at the image's edges. REPEAT takes
 // the coordinate modulo 1 (a v scale of -1 shows the texture upside down: the billboards); CLAMP holds it between the
@@ -334,7 +341,15 @@ float4 sample_texture(Varyings in, constant FragmentUniforms &u, texture2d<float
         d += ge_log16(max(max(across.x, across.y), max(down.x, down.y)));
     }
     if (u.level.x != 2.0f) d -= ge_log16(q);
-    return image.sample(image_sampler, uv, level(clamp(d, 0.0f, u.level_range.x) / 16.0f));
+    if (u.level_range.z == 0.0f)
+        return image.sample(image_sampler, uv, level(clamp(d, 0.0f, u.level_range.x) / 16.0f));
+    const float lod = clamp(d - u.level_range.y, 0.0f, u.level_range.x) / 16.0f;
+    const float2 dx = dfdx(uv);
+    const float2 dy = dfdy(uv);
+    const float2 size = float2(image.get_width(), image.get_height());
+    const float rho = max(length(dx * size), length(dy * size));
+    const float k = exp2(lod - log2(max(rho, 1e-8f)));
+    return image.sample(image_sampler, uv, gradient2d(dx * k, dy * k));
 }
 
 // The fragment's colour and alpha as the GE computes them: texture function, separate specular, fog, alpha

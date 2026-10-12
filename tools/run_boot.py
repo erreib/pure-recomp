@@ -29,12 +29,13 @@ backend keeps the settings' scale (2), on which its columns were measured.
 The clock (task 050): a run without a window and without --sound gets PURE_NO_BUSY_CLOCK=1 (the framework's
 busy-time charge off, so the run does not depend on the machine's load), unless the environment (or --env) names
 it; a window or --sound keeps the framework's charge, as a player has it.
-The enhancements (task 070, D-016; task 072, D-017; task 073, D-018): every run has PURE_SIXTY_FPS=0,
-PURE_SMOOTH_FLASHES=0 and PURE_SPRITE_UPSCALE=0 (purelib.port.original_pacing: Time Trial, Free Play and Zone, and the
-full-screen flashes, at the PSP's two vblanks a frame, and the menus' and the HUD's bitmaps drawn as the PSP's texels,
-as the checks were measured) unless the environment (or --env) names them, so --env PURE_SIXTY_FPS=1 runs the 30-fps
-modes free, --env PURE_SMOOTH_FLASHES=1 the race through the flashes at the free-running rate and
---env PURE_SPRITE_UPSCALE=1 the Metal backend with the bitmaps upscaled.
+The enhancements (task 070, D-016; task 072, D-017; task 073, D-018; task 075, D-019): every run has PURE_SIXTY_FPS=0,
+PURE_SMOOTH_FLASHES=0, PURE_SPRITE_UPSCALE=0 and PURE_TEXTURE_DETAIL=0 (purelib.port.original_pacing: Time Trial,
+Free Play and Zone, and the full-screen flashes, at the PSP's two vblanks a frame, the menus' and the HUD's bitmaps
+drawn as the PSP's texels and the mipmapped textures at the PSP's levels, as the checks were measured) unless the
+environment (or --env) names them, so --env PURE_SIXTY_FPS=1 runs the 30-fps modes free, --env PURE_SMOOTH_FLASHES=1
+the race through the flashes at the free-running rate, --env PURE_SPRITE_UPSCALE=1 the Metal backend with the
+bitmaps upscaled and --env PURE_TEXTURE_DETAIL=1 the Metal backend with the texture detail of the internal scale.
 --frames N sets PURE_EXIT_AT_FRAME=N (the profile stops the runtime at that flip), raises the deadline to
 max(seconds, N/15) and exits 0 when the run ended there (`[pure] exit at frame` in the output).
 --script FILE joins the file's non-empty lines that do not start with `#` with `;` into PURE_INPUT_SCRIPT and

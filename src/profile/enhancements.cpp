@@ -42,6 +42,15 @@ const char *const kFlashChoices[] = {"Original", "Smooth"};
 // unlike the elements the rule leaves alone; a sharp menu is an asset job (redrawn atlases through the pack), not a filter.
 const char *const kSpriteChoices[] = {"Original", "Upscaled"};
 
+// --- E5: Texture detail (D-019, task 075) ----------------------------------------------------------------------------
+// The GE picks a mipmapped texture's level for the PSP's 480x272 pixels, and the Metal backend picks it the same way at
+// any internal scale (task 037, D-015), so at scale S the track ahead and the angled walls are drawn from a level
+// log2(S) coarser than the pixels could show, and isotropically. Enhanced has the backend lower the GE's D by
+// 16 x log2(S) and sample those draws anisotropically through explicit gradients (docs/metal-backend.md "Texture
+// detail"); the backend reads the option itself, once a frame, so there is no hook here. The Vulkan renderer draws the
+// PSP's levels until its own task lands.
+const char *const kTextureDetailChoices[] = {"Original", "Enhanced"};
+
 const GameOption kOptions[] = {
     {.key = "sixty_fps",
      .label = "30 fps modes",
@@ -68,6 +77,15 @@ const GameOption kOptions[] = {
                     "renderer draws the originals, or the same upscaled art from the texture pack tools/sprite_pack.sh "
                     "builds (the Texture pack row).",
      .default_choice = 0u,
+     .tab = MenuTab::Video},
+    {.key = "texture_detail",
+     .label = "Texture detail",
+     .choices = kTextureDetailChoices,
+     .description = "The PSP picks each texture's level of detail for its own 480x272 pixels, so above 1x the track "
+                    "ahead and angled walls stay as soft as on the PSP. Enhanced picks the level for the pixels drawn "
+                    "and samples angled surfaces anisotropically. Shows above 1x. Metal only for now: the Vulkan "
+                    "renderer draws the PSP's levels.",
+     .default_choice = 1u,
      .tab = MenuTab::Video},
 };
 

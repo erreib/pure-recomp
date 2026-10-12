@@ -17,9 +17,10 @@
 //              in the frame; anything else is decoded from guest memory with the framework's
 //              decode_texture() and cached by its contents (texels and the palette entries it can reach);
 //              a texture with mip levels (task 037) is a mipmapped texture, each level decoded from its own
-//              address, sampled at the level the GE's rule (TEXLEVEL) picks. A 2D draw's texture (through
-//              mode, or orthographic and unlit) in a palette or 16-bit format is upscaled 4x at decode (task
-//              073, the menu's Text and sprites row: sprite_upscale.cpp) and sampled linear.
+//              address, sampled at the level the GE's rule (TEXLEVEL) picks (with the menu's Texture detail
+//              row on, task 075: for the pixels drawn rather than the PSP's, and anisotropically). A 2D draw's
+//              texture (through mode, or orthographic and unlit) in a palette or 16-bit format is upscaled 4x
+//              at decode (task 073, the menu's Text and sprites row: sprite_upscale.cpp) and sampled linear.
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
 //              blend, the write masks, the alpha test, the colour test, the depth test and the stencil; clears;
 //              scissor; the GE viewport folded into clip space; back-face culling. A draw into a 5650, 5551 or
@@ -151,7 +152,8 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         }
         // Samplers by index: bit 0 linear magnification, bit 1 linear minification, bit 2 clamp u,
         // bit 3 clamp v; bits 4 and 5 between mip levels (task 037): 0 level 0 only, 1 the nearest level
-        // (kMipNearest), 2 linear between the two nearest (kMipLinear).
+        // (kMipNearest), 2 linear between the two nearest (kMipLinear); bit 6 (kAnisotropic, task 075) anisotropic,
+        // up to kMaxAnisotropy taps, for a Texture detail draw (sampled through gradients).
         for (std::uint32_t index = 0; index < samplers_.size(); ++index) {
             MTLSamplerDescriptor *sampler = [MTLSamplerDescriptor new];
             sampler.magFilter = (index & 1u) != 0u ? MTLSamplerMinMagFilterLinear : MTLSamplerMinMagFilterNearest;
@@ -162,6 +164,7 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
             sampler.mipFilter = mip == kMipLinear    ? MTLSamplerMipFilterLinear
                                 : mip == kMipNearest ? MTLSamplerMipFilterNearest
                                                      : MTLSamplerMipFilterNotMipmapped;
+            if ((index & kAnisotropic) != 0u) sampler.maxAnisotropy = kMaxAnisotropy;
             samplers_[index] = [device_ newSamplerStateWithDescriptor:sampler];
         }
         MTLTextureDescriptor *white = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
@@ -215,9 +218,9 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         // alpha, and per depth write-back.
         trace_.stencil_copy = portablekit::env("TRACE_STENCIL_COPY") != nullptr;
         trace_.depth = portablekit::env("TRACE_DEPTH_READBACK") != nullptr;
-        // Ours (task 073): the menu's Text and sprites row, read again at every frame; and PURE_SPRITE_DUMP=DIR,
-        // each upscaled texture written there once (metal_textures.mm).
-        read_sprite_upscale(true);
+        // Ours (tasks 073 and 075): the menu's Text and sprites and Texture detail rows, read again at every frame;
+        // and PURE_SPRITE_DUMP=DIR, each upscaled texture written there once (metal_textures.mm).
+        read_game_options(true);
         if (const char *dump = portablekit::env("SPRITE_DUMP"); dump != nullptr && *dump != '\0') {
             std::error_code ignored;
             std::filesystem::create_directories(dump, ignored);
@@ -253,8 +256,8 @@ void MetalGeBackend::shutdown() {
         std::cout << "[metal] " << frames_ << " frames, " << stats_.draws << " draws, " << stats_.passes
                   << " passes, " << stats_.decoded << " textures decoded, " << stats_.framebuffer_textures
                   << " framebuffer textures, " << stats_.texture_mapped << " texture-mapped draws, "
-                  << stats_.mipmapped_draws << " mipmapped draws (" << stats_.decoded_levels
-                  << " mip levels decoded after the first), "
+                  << stats_.mipmapped_draws << " mipmapped draws (" << stats_.enhanced_draws << " enhanced, "
+                  << stats_.decoded_levels << " mip levels decoded after the first), "
                   << stats_.copies << " target copies, " << stats_.uploads
                   << " uploads, " << targets_.size() << " targets, " << stats_.waits << " GPU waits ("
                   << stats_.wait_ms << " ms) in " << seconds << " s; " << stats_.upscaled
@@ -301,10 +304,11 @@ void MetalGeBackend::shutdown() {
 
 // After each flip: a scale the menu changed while the frame was drawn (the menu over the running game), or Auto's
 // when the drawable's height crossed a multiple of 272 (a resize, full screen and back), takes effect here.
-// The Text and sprites row is read here too (task 073), so a change in the menu applies from the next frame.
+// The Text and sprites and Texture detail rows are read here too (tasks 073 and 075), so a change in the menu applies
+// from the next frame.
 void MetalGeBackend::begin_frame() {
     apply_scale();
-    if (ready_) read_sprite_upscale(false);
+    if (ready_) read_game_options(false);
 }
 
 // The menu's Resolution row (task 067). Between two frames, with nothing drawn since the flip (the paused menu runs
