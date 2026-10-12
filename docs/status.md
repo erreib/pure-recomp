@@ -265,9 +265,13 @@ simplification task, then the enhancements. The session-by-session resume notes 
   packs onto the stick after checking them, `tools/dlc_check.sh --packs DIR` boots with the twelve (164 opens),
   sees the league and team screens change, races Gamma, Delta and Classic 2 tracks with the HUD (Exostra Run and
   the others, 5 to 8 MB allocated), and measures the boot cost (2.4 s against 2.2 s). Gate: dlc_check PASS, suite
-  18/18, save round trip PASS, docs (out/077_gate.log). Open: the menu's Import refuses seven packs whose file
-  list holds a non-name entry (task 078 relaxes it and adds a Download packs section); backups include installed
-  packs (62 MB); a pack-aware profile is 69 KB against 41 KB and its loading without the packs is untried; PROFILE
+  18/18, save round trip PASS, docs (out/077_gate.log). **Task 078 merged (2026-10-12): the Esc menu's Download packs section.** Patch
+  0021-content-packs: a profile marks content-pack folders and names their section; the System tab shows "Download
+  packs (N of 12 installed)", a row per pack and "Install download packs…", which opens Import's browser; Import
+  skips a file-list entry that is not a name for a content pack (all twelve import now), and backups and exports
+  leave packs out; the check drives the import in a Metal window (twelve found, twelve imported). Gate: dlc_check
+  PASS, menus PASS both shells (15 System rows), suite 18/18, Metal window suite 7/7, save round trip, 21 patches
+  (out/078_gate.log). Open: a pack-aware profile is 69 KB against 41 KB and its loading without the packs is untried; PROFILE
   > DELETE may list the packs; no PPSSPP reference with packs; the rig untested; the other regions' packs a later
   milestone (converter, hash hook, zlib).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
