@@ -123,3 +123,31 @@ patches/README.md, a new check, and the docs. Commits per proven stage.
 - the drain is not the dominant stall after all on a fresh probe (report the new [slow-frame] shape before changing
   anything)
 - a full rebuild or the corpus is needed (it should not be: this is renderer-only)
+
+## Result
+
+Status: (draft: characterization done, the fix in progress)
+
+### Characterization (2026-10-12, the rig, one swept race before any change)
+The defaults probe (`tools/campaign_sweep.py single_race vineta_k --no-damage --shell vulkan --backend vulkan`,
+`PURE_PERF=log PURE_TRACE_STALLS=1 PURE_TRACE_STALLS_MS=25 PURE_NO_AUDIO=0 PURE_SIXTY_FPS=1 PURE_SMOOTH_FLASHES=1
+PURE_TEXTURE_DETAIL=1`) with `PURE_TRACE_FB_TEXTURES=1` (it prints every GE block transfer, `[fbtex] block transfer
+SRC -> DST`, and every `read framebuffer ... back for a block transfer`) and `PSPRECOMP_TRACE_VRAM_READS=1` (guest
+CPU loads from VRAM by 64 KiB block). `PURE_TRACE_GE=1` was left off: it prints per draw and would have run the sweep
+over its 400000-line bound; the fbtex trace prints the transfers themselves. PASS (no damage), 3 laps, 374 s.
+- **The brief's premise does not hold: `read_back_framebuffer` never runs in the race.** 0 `read framebuffer` lines
+  in 33199. All 7319 block transfers in the run are main RAM to VRAM (texture uploads, e.g. `0x968a4b0 -> 0x41e68c0
+  32x64 x2`); none has a source in VRAM, so none reaches the readback (the source is in no render target).
+- **The `readback x2` stall is the depth write-back** (`write_back_depth`, the other user of `perf::Stall::Readback`;
+  it counts the fence wait with `add_wait_time` and the whole call with `note_stall`, hence `x2` for ONE call a
+  frame). The log names it: `[render] depth written back to guest memory at 0x4110000 for signal 0x200` (the lens
+  flare's CPU depth test, task 019), once per race frame at the GE SIGNAL, and the same submit-and-fence-wait drain
+  of the half-recorded frame. Shape unchanged from the planning probe: 2919 `[slow-frame]` lines over 25 ms after
+  flip 6200, typical `[slow-frame] 6204 28.6 ms | guest 18.0 render 5.2 wait 5.4 | ... readback 10.60 x2`; the
+  `[stalls]` lines' readback mean over the race 7.55 ms a frame (max 12.60).
+- **The consumer is the guest CPU**: `[vram] guest reads 0x4120000-0x4130000: 300 to 600 loads` a second through the
+  race (the depth buffer at 0x04110000, stride 512, runs to 0x04154000), i.e. a handful of depth samples a frame.
+- So design 1 (GE-only consumer) cannot apply. Design 2 applies, to the depth write-back: record the depth copy at
+  the SIGNAL without submitting, and store the copy recorded in the previous frame (its fence is long signalled),
+  so the flare's depth test sees depth one frame old. The guest-visible bytes change (one frame late), so the suite
+  must hold to the digit (escalate otherwise). `read_back_framebuffer` is left as it is (it does not run here).
