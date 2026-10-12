@@ -208,7 +208,7 @@ bool MetalGeBackend::upscalable(TextureFormat format) {
            format == TextureFormat::Rgba4444;
 }
 
-// The menu's Text and sprites row (game.sprite_upscale, PURE_SPRITE_UPSCALE): 1, Upscaled, the default. Read at start
+// The menu's Text and sprites row (game.sprite_upscale, PURE_SPRITE_UPSCALE): 0, Original, the default since 2026-10-12. Read at start
 // and at each frame (begin_frame()), never per draw; at start, `[pure] sprite upscale: off` when it is off.
 void MetalGeBackend::read_sprite_upscale(bool at_start) {
     sprite_upscale_ = portablekit::settings::game_option("sprite_upscale") == 1u;

@@ -19,7 +19,7 @@
 | D-015 | 2026-10-10 | E3 opens: the Metal shell draws at the display's pixels and the Metal backend draws at an internal scale, effects buffers at 1x | accepted (Erik) |
 | D-016 | 2026-10-11 | E6: the race keeps its frame rate through the full-screen flashes (the game's two-vblank lock cleared in the 60-fps modes), a game option row in the Esc menu, on by default; the checks run with it off | accepted (Erik) |
 | D-017 | 2026-10-11 | E4: Time Trial, Free Play and Zone free-running at the display's rate (the frame object's lock byte set while the race backend lives), a "30 fps modes" row in the Esc menu, 60 fps by default; the checks run with it off; the frontend stays at 30 | accepted (Erik) |
-| D-018 | 2026-10-11 | E7: the menus' and HUD's bitmap art upscaled 4x at decode in the Metal backend (through-mode draws' palette textures, an edge-preserving resample), a "Text and sprites" row in the Esc menu, on by default; the checks run with it off; a texture pack from the same scaler for the Vulkan renderer and as the base for an AI pass, second | accepted (Erik) |
+| D-018 | 2026-10-11 | E7: the menus' and HUD's bitmap art upscaled 4x at decode in the Metal backend (through-mode draws' palette textures, an edge-preserving resample), a "Text and sprites" row in the Esc menu, on by default then, off since 2026-10-12 (Erik's judgement of the picture); the checks run with it off; a texture pack from the same scaler for the Vulkan renderer and as the base for an AI pass, second | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -361,7 +361,8 @@ Decision (Erik, from the recommendation): the upscaler first, in the app; the pa
    by the GE's texture size, so a larger texture samples in place; an upscaled texture samples linear, since the
    GE's nearest filter was for one texel a pixel.
 2. The player's switch is a game option row (patch 0019-game-option-rows): "Text and sprites", choices "Original"
-   and "Upscaled", default Upscaled (`game.sprite_upscale=1`, `PURE_SPRITE_UPSCALE`), on the Video tab after the
+   and "Upscaled", default Upscaled at first, Original since 2026-10-12 (see the amendment below;
+   `game.sprite_upscale`, `PURE_SPRITE_UPSCALE`), on the Video tab after the
    30 fps modes and Flashes rows. It is the Metal backend's: under the Vulkan renderer the row is shown but does
    nothing until the pack exists (point 4), and says so in its help.
 3. The checks measure the PSP's picture: every tool run has `PURE_SPRITE_UPSCALE=0` through `tools/purelib/port.py`
@@ -381,4 +382,13 @@ Alternatives: a texture pack first (needs a local build step and the Metal pack 
 pixel-art scaler of the xBR family (GPL-3 for xBRZ, which would change the binary's licence; and its look suits
 pixel art more than antialiased type); vector fonts drawn by the port in place of the atlas (the text is drawn
 glyph by glyph from the atlas by the game, so the hook would be deep).
-Status: accepted (Erik).
+Status: accepted (Erik); amended 2026-10-12.
+
+Amendment (Erik, 2026-10-12, after playing the app at 0.1.0-56673a2): the row's default is Original. The resample
+reads soft, "AI upscaled", against the sharp 3D picture at the display's resolution, and the elements the rule leaves
+alone (32-bit, mipmapped and target textures) sit beside the upscaled ones at their own texels. Both are the method's
+limits, not a tuning: no filter puts into a 15-pixel glyph the detail a 4x display wants. The code, the row, the pack
+tools and the checks stay as they are (the one check with the option on names it, so nothing measured moves). A sharp
+frontend, if it is wanted later, is an asset job delivered through the texture pack (task 074's machinery): the fonts
+re-rendered from their typeface at 4x into the atlases' layout, the art redrawn, and a pack loader for the Metal
+backend, which has none. Not started; Erik chose other enhancements first.

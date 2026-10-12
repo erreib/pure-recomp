@@ -38,6 +38,8 @@ const char *const kFlashChoices[] = {"Original", "Smooth"};
 // unlit), so a higher internal scale only magnifies their texels. Upscaled has the Metal backend redraw such a
 // texture 4x finer at decode (src/gpu/sprite_upscale.cpp, docs/metal-backend.md "Sprite upscale"); the backend reads
 // the option itself, once a frame, so there is no hook here. The Vulkan renderer draws the originals either way.
+// Original is the default since 2026-10-12 (D-018, amended): Erik judged the resample soft against the sharp 3D and
+// unlike the elements the rule leaves alone; a sharp menu is an asset job (redrawn atlases through the pack), not a filter.
 const char *const kSpriteChoices[] = {"Original", "Upscaled"};
 
 const GameOption kOptions[] = {
@@ -62,9 +64,10 @@ const GameOption kOptions[] = {
      .label = "Text and sprites",
      .choices = kSpriteChoices,
      .description = "The menus' text and art and the race HUD are small bitmaps on the PSP. Upscaled redraws them four "
-                    "times finer with smooth edges. Metal only: the Vulkan renderer draws the originals, or the same "
-                    "upscaled art from the texture pack tools/sprite_pack.sh builds (the Texture pack row).",
-     .default_choice = 1u,
+                    "times finer with smooth edges, which reads soft beside the sharp 3D picture. Metal only: the Vulkan "
+                    "renderer draws the originals, or the same upscaled art from the texture pack tools/sprite_pack.sh "
+                    "builds (the Texture pack row).",
+     .default_choice = 0u,
      .tab = MenuTab::Video},
 };
 

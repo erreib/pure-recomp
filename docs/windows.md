@@ -101,7 +101,12 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
    - **open**, by hand: a Single Race in a window, Esc, Video, Performance on, and watch the frame time through the
      start fade and a bomb or mine near the ship: with Flashes Smooth no 33 ms frames; set Original and the same
      moments show them, as the PSP does. The row's choice is saved to settings.ini (`game.smooth_flashes`).
-   - **open** the upscaled art as a texture pack (task 074, E7; docs/metal-backend.md "The texture pack"). The pack is
+   - **not wanted** (2026-10-12): the upscaled art as a texture pack (task 074, E7; docs/metal-backend.md "The texture
+     pack"). Erik judged the upscale soft beside the sharp 3D and uneven against the elements it leaves alone, and the
+     Mac app's Text and sprites row now defaults to Original (D-018, amended). Do not install the pack on the rig: the
+     Texture pack row is on by default once a pack is installed, so the rig would show the look he rejected. The
+     check, `tools/sprite_pack.sh --check --pack DIR`, is still worth one run there when a texture pack is next wanted,
+     since it proves the Vulkan loader finds the framework's keys; the recipe stays below for that. The pack is
      made on the Mac, which has the Metal backend's scaler: `tools/sprite_pack.sh` there [`sprite_pack: built`; about
      8 minutes] writes `out/sprite_pack/pack` (textures.ini and 48 PNGs, 3.5 MB: the game's art, never committed nor
      put in the zip). Copy that folder to the rig, then: `tools/sprite_pack.sh --check --pack DIR` (DIR the copied

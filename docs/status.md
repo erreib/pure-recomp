@@ -159,8 +159,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   (`--check out/074-bundle` PASS; out/repack-074.log): Wipeout Pure 0.1.0-56673a2 at out/release-macos/stage, the
   zip in out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix, E6 (the
   Flashes row, Smooth by default), E4 (the 30 fps modes row, 60 fps by default) and E7 (the Text and sprites row,
-  Upscaled by default, and the sprite dump that builds the texture pack; a settings.ini an earlier build wrote lacks
-  the keys and so reads the defaults).
+  Upscaled by default in that build, and the sprite dump that builds the texture pack; a settings.ini an earlier
+  build wrote lacks the keys and so reads the defaults). Since 2026-10-12 the row's default is Original (below);
+  a repack carries it when the next change warrants one.
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
@@ -216,7 +217,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   atlases gave crisp text and logos. **Task 073 merged ddad728 (2026-10-11): the Metal half of E7 complete.** The
   Metal backend upscales the textures of 2D draws (through mode, or orthographic with lighting off: the brief's
   "through mode" was wrong, the worker's BLOCKED run found the menus are orthographic transformed draws) in a
-  palette or 16-bit format 4x at decode; a "Text and sprites" row (Original / Upscaled, default Upscaled,
+  palette or 16-bit format 4x at decode; a "Text and sprites" row (Original / Upscaled, default Upscaled then, Original since 2026-10-12,
   `game.sprite_upscale`, `PURE_SPRITE_UPSCALE`), the pin beside the other two (`ENHANCEMENTS_OFF` in port.py),
   `tools/sprite_check.sh`, `tools/sprite_proto_check.py`, `PURE_SPRITE_DUMP=DIR`. Gate: verify PASS (sprite_check
   7/7, the scaler the prototype's to the bit, 25 textures in 66 ms on the main menu, a race at scale 4 at 60 fps

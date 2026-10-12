@@ -54,7 +54,7 @@ tools/refactor_check.sh                                   # after it: 0 differin
 | `PURE_NO_COLOR_TEST=1`, `PURE_NO_DITHER=1`, `PURE_NO_DEPTH_CLAMP=1` | (task 040) each restores what the backend drew before task 040: every fragment kept; 5650, 5551 and 4444 targets blended by the pipeline at 8 bits a channel, never dithered; every transformed draw clipped at both ends of the depth range, MINZ/MAXZ unread. With all three the pictures are those of the build before the task ("The colour test, 16-bit writes and the depth clamp") |
 | `PURE_METAL_SHOW_TARGET=ADDR` | (task 040) each flip presents the target drawn last at ADDR instead of the display: a target the game never shows, such as the race's 565 billboard target (`0x04154000`), in a capture or a `ge_replay --cut ... --out` picture |
 | `PURE_INTERNAL_SCALE=N` | (task 066) the framework's `video.internal_scale` for the run: the backend draws its screen-wide targets at N (1 to 6; 0 Auto), read at start ("Internal scale"). Without a window the backend draws at 1 unless this is set |
-| `PURE_SPRITE_UPSCALE=0\|1` | (task 073) the menu's Text and sprites row, `game.sprite_upscale`, for the run: `1` (the player's default) upscales the 2D draws' textures 4x at decode, `0` draws the PSP's texels; every tool run has `0` unless it names it ("Sprite upscale") |
+| `PURE_SPRITE_UPSCALE=0\|1` | (task 073) the menu's Text and sprites row, `game.sprite_upscale`, for the run: `1` upscales the 2D draws' textures 4x at decode, `0` (the default since 2026-10-12) draws the PSP's texels; every tool run has `0` unless it names it ("Sprite upscale") |
 | `PURE_SPRITE_DUMP=DIR` | (task 073) each upscaled texture written once as `DIR/<key>.src.png` (the decoded input) and `DIR/<key>.png` (the output), for `tools/sprite_proto_check.py`; the textures are the game's, so DIR belongs under `out/` ("Sprite upscale") |
 | `PURE_NO_LIGHTING`, `PURE_NO_FOG`, `PURE_NO_CULL` | the framework's switches for bisecting 3D draws, read as the Vulkan backend reads them: lit draws drawn with their vertex colour (white without one) and no fog; no fog; nothing culled. ge_replay hands the environment to both backends, so to turn one off in Metal alone replay each backend on its own with `--out` and compare the pictures |
 
@@ -493,7 +493,7 @@ a pixel of the 480x272 picture: the fonts CLUT4 256x128 and 256x256 in main memo
 antialiased in 16 alpha levels), the art atlases CLUT8 256x128 in VRAM (logos, the katakana "wipeout" strip, the
 menus' bars, the ship pictures of TEAM SELECTION), the HUD's CLUT4 512x256 and 256x128. An internal scale above 1
 ("Internal scale") magnifies their texels and adds no detail. With the menu's Text and sprites row at Upscaled
-(`game.sprite_upscale=1`, the default; `PURE_SPRITE_UPSCALE`), the backend redraws each such texture four times finer
+(`game.sprite_upscale=1`; `PURE_SPRITE_UPSCALE`; Original, 0, is the default since 2026-10-12: D-018, amended), the backend redraws each such texture four times finer
 at decode, whatever the internal scale. The Vulkan renderer draws the originals; the row says so in its help. It draws
 the same upscaled art from a texture pack the dump switch writes (task 074, "The texture pack" below).
 
