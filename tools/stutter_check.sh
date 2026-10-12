@@ -14,7 +14,9 @@
 # PURE_SPRITE_UPSCALE=0 (Original, the default since D-018 as amended). That is the planning session's probe of task
 # 077. About 6 minutes. The log is read from the race's first paced flip (`[pure] paced from frame N`) to its end:
 # PASS when (a) at most 1 in 10 of those seconds has a frame over SLOW_MS (its `[slow-frame]` lines between the
-# second's `[perf]` lines), the flips that are a multiple of 10 left out: the window's input script reads the sweep's
+# second's `[perf]` lines) after the frame's own pacing sleeps are taken off (the pacer sleeps only when the game is
+# ahead of real time, so that part of a long frame is the schedule holding, not a stutter), the flips that are a
+# multiple of 10 left out: the window's input script reads the sweep's
 # live file (PURE_INPUT_LIVE, the follower's steering) on those, which costs the rig 15 to 25 ms of render time
 # whatever the renderer does (946 of the 951 race frames with render over 12 ms in task 077's run), and a player has
 # no live file; they are counted and printed apart. And (b) the readback stall
@@ -89,6 +91,11 @@ slow_ms, max_fraction, max_readback = float(sys.argv[2]), float(sys.argv[3]), fl
 PACED_RE = re.compile(r"^\[pure\] paced from frame (\d+)")
 PERF_RE = re.compile(r"^\[perf\] .*\| frame avg ([\d.]+) max ([\d.]+) ms")
 SLOW_RE = re.compile(r"^\[slow-frame\] (\d+) ([\d.]+) ms")
+# The frame's own pacing sleeps: the pacer sleeps only when the game is AHEAD
+# of real time, so that part of a long frame is the schedule holding, not a
+# stutter a player feels. (a) judges the frame without it (the review of task
+# 077: the realign frame after each live-file read was half the FAILs).
+PACING_RE = re.compile(r" pacing ([\d.]+) x\d")
 POLL = 10  # the input script reads PURE_INPUT_LIVE on flips that are a multiple of this (host/ui/input_script.cpp)
 STALLS_RE = re.compile(r"^\[stalls\] ms per frame over (\d+) frames:")
 READBACK_RE = re.compile(r" readback ([\d.]+) max")
@@ -112,6 +119,9 @@ if os.path.exists(log):
             m = SLOW_RE.match(line)
             if m:
                 flip, ms = int(m[1]), float(m[2])
+                p = PACING_RE.search(line)
+                if p:
+                    ms -= float(p[1])
                 if flip % POLL == 0:
                     polls.append(ms)
                 else:
