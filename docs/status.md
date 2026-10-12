@@ -286,6 +286,19 @@ simplification task, then the enhancements. The session-by-session resume notes 
   drain). Still Erik's by eye: flare flicker as the sun passes behind scenery (the depth is a frame old). For the
   Mac session: a windowed suite baseline sturdier than "to the digit" (zone_change swings 0.025 to 0.108 run to run
   on the rig, either path).
+- **The effect slowdowns (task 078, merged bef8bda 2026-10-12: the probes' spikes were the harness's).** Erik still
+  felt slowdowns after 077, worst with effects on screen, and the probes showed two classes — but both dissolve on
+  characterization: the deterministic 100-160 ms present hitches were the sweep's own window captures (patch
+  0022-vulkan-cached-window-capture takes the capture buffer from host-cached memory: 4 ms now, every windowed tool
+  capture benefits), and the guest-time clusters at explosions are the game thread blocked writing stdout into the
+  tools' pseudoconsole (up to 540 ms a line; conhost's processing, not tools/purelib's locking) — which a player's
+  console-less release build never pays. stutter_check PASS 11 of 211 with the worst second down from 175 to 39 ms.
+  The fade detector's first-run rule in tools/flash_check.sh fooled three runs (a one-vblank flip at 5708 splits the
+  race-start fade's 57-flip hold); it now takes the longest run, bounds unchanged. Follow-ups: a host-side
+  asynchronous or file logger so a sweep's stdout never stalls the game thread (vendor; it would also clean the
+  probes' last ~10 ms on shot flips); Erik's in-play slowdowns match neither class, so the play-side test is his —
+  the Performance overlay during a race, and the Esc menu's Vsync row Off (mailbox) against the 100 Hz display's
+  one/two-vblank alternation under Vsync On, or the display at 60 Hz once.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

@@ -221,7 +221,10 @@ runs = {v: read(v) for v in ("0", "1")}
 fails = []
 ts0 = runs["0"][0]
 race0 = next((n for n in range(first, min(shot, len(ts0)) + 1) if not slow(ts0, n)), None)
-fade = next(((a, b) for a, b in runs_in(ts0, race0 + 1, shot)), None) if race0 else None
+# The longest run, not the first: the race's first flips jitter (a one-vblank flip amid the two-vblank settle,
+# a cold cache's compile stall), and a 2-flip fragment before the real fade fooled the first-run rule three times
+# on the Windows rig (tasks 077 and 078). The 57-flip expectation below is unchanged.
+fade = max(runs_in(ts0, race0 + 1, shot), key=lambda r: r[1] - r[0], default=None) if race0 else None
 if fade is None:
     fails.append("no fade in the run with 0")
 fade_s = (ts0[fade[1] - 1] - ts0[fade[0] - 2]) / 1e6 if fade else 0.0

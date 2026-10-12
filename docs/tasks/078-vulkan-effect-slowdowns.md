@@ -1,7 +1,7 @@
 # 078: The race's effect slowdowns on the Vulkan renderer
 
 Milestone: Windows fidelity (Erik, 2026-10-12: still not on par with the Metal build; the slowdowns cluster where
-the screen fills with effects) | Branch: task/078-vulkan-effect-slowdowns | Status: OPEN
+the screen fills with effects) | Branch: task/078-vulkan-effect-slowdowns | Status: MERGED (bef8bda, 2026-10-12)
 
 ## Goal
 Task 077 removed the depth-readback drain and the race now passes `tools/stutter_check.sh` (8 of 222 seconds over
@@ -231,3 +231,27 @@ docs_check: 33 files, 0 findings: PASS
    on the branch's history: E4/E6 or the rig.
 4. The brief's PURE_NO_PIPELINE_PREWARM and cleared-DXCache runs were not made: B is not a first use, so they would
    test a cause that the logs rule out.
+
+## Review
+
+Merged bef8bda (2026-10-12). Both characterizations hold up and both overturn a premise, which is the second task in
+a row where characterizing first earned its place:
+- **B (the present hitches) was the sweep's window captures**, not a first use; the brief's prewarm designs and the
+  PURE_NO_PIPELINE_PREWARM / DXCache runs were rightly dropped as testing a ruled-out cause. Patch
+  0022-vulkan-cached-window-capture is small and right (the capture buffer from a HOST_CACHED type), and it
+  benefits every windowed capture the tools take: the shot flips fell from 118-160 ms to 26-31, the remainder being
+  A's stdout cost.
+- **A (the guest clusters) is the game thread blocked writing stdout into the tools' pseudoconsole** (a single line
+  up to 540 ms under instrumentation): the harness's, not the game's — the release build has no console, so a
+  player never pays it. The locking in tools/purelib/port.py is not the cause (the reader drains the pipe outside
+  the parse path), so the blockage is conhost's own processing; the fix is a host-side asynchronous or file logger
+  (a vendor follow-up, recorded in status) rather than a tools change.
+- **The Verify's flash_check FAIL was the fade detector's split artifact, not a regression**: the run's trace shows
+  the fade intact at flips 5709-5765 (57 two-vblank flips) with a single one-vblank flip at 5708 splitting the
+  detector's first-run rule. The review changed the rule to the longest run (tools/flash_check.sh; the 57-flip
+  bound untouched), re-judged the worker's three failing logs as PASS with the canonical line, and reran the check
+  fresh on the merged build. For the Mac session: the detector change is behaviour-neutral where runs are clean.
+- **What the task did not close, by design:** Erik's felt in-play slowdowns match neither class (both are
+  harness-only), so the play-side candidates are next — the 100 Hz FIFO presentation cadence (60 fps on a 100 Hz
+  display alternates one- and two-vblank holds under Vsync On; the Esc menu's Vsync row has Off (mailbox)), or
+  whatever the Performance overlay shows during his race. That is Erik's test to run, recorded in status.
