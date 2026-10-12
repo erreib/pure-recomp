@@ -108,3 +108,122 @@ patches/README.md, its notes in docs/upstream.md, and the changes outside vendor
   minutes (a host change rebuilds the host layer only)
 - Verify as a whole runs past the foreground limit: run its parts one by one in the foreground, then the full line
   once as the last step, as task 077 did
+
+## Result
+
+Status: DONE. Every part of Verify passes. Verify as one command takes about 22 minutes, and save_roundtrip alone takes
+12.6 minutes, so neither fits the 10-minute foreground limit. I ran the parts one by one in the foreground, with
+save_roundtrip split into two halves (details under the Verify output).
+
+Changed:
+- patches/0021-content-packs.patch (new). It covers six vendor files:
+  - host/profile.hpp: `SaveFolder::content_pack` (default false) and `GameProfile::content_packs_label` (default null),
+    each with a comment.
+  - host/save_data/save_transfer.cpp and .hpp:
+    - `names_of_save_folders` now skips content packs.
+    - `check_save_folder` skips, for a content pack only, a file-list entry whose name up to its first NUL holds a byte
+      outside 0x20..0x7E. The comment names task 078 and what the seven packs carry.
+    - New `content_packs(memory_stick)`: the profile's packs, each marked installed when its folder holds a PARAM.SFO.
+  - host/ui/menu.cpp: the section in `Menu::system`, after Saves and before About.
+  - host/ui/save_screen.cpp and .hpp: `open_import()`, which calls `open_browser(Stage::ChooseImport)`.
+- src/profile/pure_profile.cpp: the twelve packs are marked `content_pack`, `.content_packs_label = "Download packs"`,
+  and the comment on `kSaveFolders` is updated.
+- tools/dlc_check.sh: the import step, which is step 2. tools/menu_check.sh: the section's three System rows on both
+  shells. config/pad_scripts/install_packs.txt (new): the route for the import step.
+- patches/README.md: the row and the "0021-content-packs" section.
+- docs/upstream.md: the dependency row, the note and the offer order. I also moved 0020's note out from under "Ours
+  only", where task 076 had put it, so it sits with the other candidates.
+- docs/controls.md, docs/release.md (the menu first, the tool second, by hand third), docs/dlc.md (a new section "In
+  the menu (task 078)", the refusal marked resolved, the open list and the plan), docs/savedata.md, README.md (the
+  dlc_check row and the `PURE_MENU_DUMP` row).
+- Commits: d815c0e (patch and profile), e365e97 (check, route and docs), and this Result.
+
+Verify output. These are the last lines of each part, in Verify order. The full line was not run as one command (see
+above):
+```
+[hle-stub] for a pack-related call                         0 (0 [hle-stub] lines in all)                             0                                      PASS
+dlc_check: PASS
+System: ok (15)
+menu_check: PASS
+System: ok (15)
+menu_check: PASS
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 22s)
+run 1 NEW (main_menu.txt, empty stick): PASS: LISTSAVE wrote UCUS98612P0000 with PARAM.SFO, PROFILE.BIN (pilot NAME0000) and ICON0.PNG; MAIN MENU reached
+run 2 LOAD (profile_load.txt): PASS: LISTLOAD loaded UCUS98612P0000, MAIN MENU as in run 1, PROFILE > SAVE rewrote it, SET NAME shows NAME0000 (variance 1531; empty stick 0)
+run 3 DLC door (+ empty UCUS98612DGAMMAPACK1): PASS: seen by the SAVEDATA scan, its PI.WAD open fails (0x80010002, no such file) and the game moves on; profile loaded, saved and shown (variance 1531); last frame reached
+save round trip, half A (runs 1-3): PASS
+run 4 second profile (two_profiles.txt): PASS: the save list put NAME1111 in UCUS98612P0001, UCUS98612P0000 kept NAME0000; LOAD listed both and loaded UCUS98612P0000 by choice
+run 5 restart LOAD (profile_list_load.txt): PASS: the list showed both on the newest; UCUS98612P0001 (NAME1111) loaded and shown (variance 449); both folders hold their own pilots
+save round trip, half B (runs 4-5): PASS
+ok: 21 patch(es) reproduce vendor/portablekit at 8b0c3fe
+docs_check: 34 files, 0 findings: PASS
+```
+Run times:
+- dlc_check: 1 min 16 s in total. The import step's window run took 33.1 s.
+- menu_check: 25 s on each shell.
+- save_roundtrip: 7 min 5 s for half A and 5 min 30 s for half B.
+
+How save_roundtrip was split:
+- I generated two scripts from the committed tools/save_roundtrip.sh, kept in the scratchpad and not committed.
+- Half A holds the script's set-up and runs 1 to 3. Half B holds runs 4 and 5, on the same stick and the same out/014.
+- Each half keeps the script's own run and check code. Only three things changed: the `cd` line, half B skipping the
+  stick reset, and each half printing a summary of its own runs.
+- No other game ran during them.
+
+The import step's figures (out/dlc_check/import.log, Metal window, 2026-10-12):
+- `[saves] 12 save folder(s) found in out/dlc_check/import/home`, followed by twelve `ok` lines and no refusal.
+- Twelve `[saves] import UCUS98612D... from .../import/home/PSP/SAVEDATA/...: done` lines.
+- Afterwards the stick held the twelve packs, each file identical to its source (filecmp). It also held the seeded
+  profile UCUS98612P0000.
+- The run reached flip 2300 of 2300.
+- The check's row: `import: the menu's Install download packs…  12 found, 12 ok, 12 imported, flip 2300  PASS`.
+- The other steps install the packs with tools/dlc_install.sh, each on a stick of its own, as before. I did not run
+  them on the imported stick.
+
+The menu dumps (`[menu] System:` lines):
+- In the import run, when the menu opened, nothing was installed yet: `..., Quit game, [save rows], Download packs (0 of
+  12 installed), [content pack rows], Install download packs…, Wipeout Pure Native, Game, Data folder, Saves folder,
+  Graphics (Metal on Apple M4 Pro), Interface`.
+- In the same run, when the menu opened again after the import: `Download packs (12 of 12 installed)`, with the other
+  rows the same.
+- menu_check on both shells: `Download packs (0 of 12 installed)`. The checkout's game/ms0 holds no pack, and the list
+  accepts any count (`*`).
+- Fifteen System rows on both shells.
+
+Back up and Export on a stick holding a profile and the twelve packs:
+- The import step's backup: `[saves] back up to out/dlc_check/import/data/save-backups/2026-10-12_12-56-58: done`. The
+  backup folder holds UCUS98612P0000 only (ICON0.PNG, ICON1.PMF, PARAM.SFO, PIC1.PNG, PROFILE.BIN, SND0.AT3).
+- The backup screen read "Copies Profile 1 to a folder." (out/dlc_check/import/shots/backup_screen.png).
+- Export, a one-off window run on the same kind of stick (out/078/trial/export.log): `[saves] export to
+  .../exporthome: done`. Its `PSP/SAVEDATA` holds UCUS98612P0000 only, as before: the packs were already
+  `exported` false.
+
+Callers of the folder list (`names_of_save_folders`, which now skips content packs):
+- Changed through it:
+  - `exported_save_names`, used by `export_saves` (Export's names). There is no change for this profile.
+  - `all_save_names`, used by `saves_to_back_up`, and through that by `back_up_saves`, `backup_conflicts` and
+    save_screen.cpp's `backup_screen`, which names what it copies.
+- Left as they were:
+  - `is_game_save_name`: `check_save_folder` and Import still accept the packs.
+  - `save_label`: the import screen still names the packs.
+  - `is_exported_save_name`: the "lists no data file" rule, which never applied to packs.
+- New: `is_content_pack_name` (used by `check_save_folder`) and `content_packs()` (used by the menu).
+- Not in scope and not touched: the save-data HLE's `list_entries` (PROFILE > DELETE).
+
+Open questions:
+1. **Windows has not been tried.** The import step runs there in the Vulkan window with HOME and USERPROFILE set. The
+   browser uses USERPROFILE on Windows. I did not skip the step there. If the browser cannot be driven on the rig, the
+   step will fail there and should be skipped with a line. The header comment and README.md say it is untried.
+2. **Verify does not fit in one foreground command.** It takes about 22 minutes, and save_roundtrip is 12.6 minutes of
+   that. The halves above are the closest I could get without a background job. save_roundtrip has no single-run
+   option (status.md already notes this).
+3. **docs/verification.md is outside May touch.** Its download packs row and Esc menu row do not mention the import
+   step or the section yet.
+4. **Focus after the import screen closes.** Focus goes back to Import save…, the Saves section's first row
+   (`focus_row` is consumed in `save_rows`), not to Install download packs…. The route relies on this to reach Back up
+   saves…. Returning focus to the row that opened the screen would be a small follow-up.
+5. **The import screens use save wording.** The review and imported screens are Import save…'s generic screens: "Save
+   to import", "Import these saves", and "Restart now to load the imported save". They work for packs, but the
+   wording says saves.
+6. **Restart now was not run.** I did not run it after a menu import. The imported packs are byte-identical to their
+   sources, and the check's races show that tool-installed packs load.
