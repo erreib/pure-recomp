@@ -232,6 +232,15 @@ simplification task, then the enhancements. The session-by-session resume notes 
   option (7 of the build's 8 minutes); the 40-key bar against the animated palette variants; the scaler's hairline
   thinning and stair-stepped outlines to tune by eye; an AI pass on the art atlases as a replacement pack to
   compare. The frontend at 60 fps and the menu-XML spike (new in-game options) are the next candidates.
+- **E5, texture detail** (D-019, 2026-10-12; Erik's pick after the upscaled menus were rejected: "texture filtering").
+  A race frame at internal scale 4 is soft on its surfaces because both backends pick each mipmapped draw's level
+  for the PSP's 480x272 pixels (task 037, D-015): at 4x two levels coarser than the pixels can show, and isotropic
+  on angled walls. The planning session's recording of three race frames (out/e5/ on the Mac) found 74% of a
+  frame's textured draws mipmapped and trilinear, the ships by the auto rule and the track by the slope rule with
+  per-draw biases. Task 075 (the Metal backend): a "Texture detail" row (Original / Enhanced, default Enhanced,
+  `game.texture_detail`, `PURE_TEXTURE_DETAIL`) that shifts the GE's D down by 16 x log2(S) and samples the
+  mipmapped draws anisotropically through gradients scaled to that level; the pin beside the other three; a check
+  on the four race HUD scenes at scale 4. The Vulkan renderer's half follows as its own task.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

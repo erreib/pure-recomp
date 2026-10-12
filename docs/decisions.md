@@ -20,6 +20,7 @@
 | D-016 | 2026-10-11 | E6: the race keeps its frame rate through the full-screen flashes (the game's two-vblank lock cleared in the 60-fps modes), a game option row in the Esc menu, on by default; the checks run with it off | accepted (Erik) |
 | D-017 | 2026-10-11 | E4: Time Trial, Free Play and Zone free-running at the display's rate (the frame object's lock byte set while the race backend lives), a "30 fps modes" row in the Esc menu, 60 fps by default; the checks run with it off; the frontend stays at 30 | accepted (Erik) |
 | D-018 | 2026-10-11 | E7: the menus' and HUD's bitmap art upscaled 4x at decode in the Metal backend (through-mode draws' palette textures, an edge-preserving resample), a "Text and sprites" row in the Esc menu, on by default then, off since 2026-10-12 (Erik's judgement of the picture); the checks run with it off; a texture pack from the same scaler for the Vulkan renderer and as the base for an AI pass, second | accepted (Erik) |
+| D-019 | 2026-10-12 | E5: texture detail at the internal scale: the mip level picked for the pixels drawn rather than the PSP's, anisotropic sampling on the mipmapped draws, a "Texture detail" row in the Esc menu, on by default; the checks run with it off; Metal first, the Vulkan renderer second | accepted (Erik) |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -392,3 +393,44 @@ tools and the checks stay as they are (the one check with the option on names it
 frontend, if it is wanted later, is an asset job delivered through the texture pack (task 074's machinery): the fonts
 re-rendered from their typeface at 4x into the atlases' layout, the art redrawn, and a pack loader for the Metal
 backend, which has none. Not started; Erik chose other enhancements first.
+
+## D-019  2026-10-12  E5: texture detail at the internal scale
+Context: after E7 (D-018, amended: the upscaled menus rejected) Erik chose texture filtering next. A race frame of
+this port at internal scale 4 is sharp at its edges and soft on its surfaces: the track a few ship lengths ahead,
+the walls at a grazing angle, the scenery. A recording of three Vineta K frames (the planning session, 2026-10-12;
+out/e5/race3.gerec on the Mac, frames 6300 to 6302 of the single-race route on a fresh stick) says why. Of 883
+textured draws a frame, 74% sample a texture with 2 to 5 levels (CLUT4 and CLUT8, almost all with 4), every one
+with linear magnification, minification and mip filters (trilinear); 762 of the 1969 mipmapped draws over the three
+frames use the GE's auto rule (648 of them lit: the ships and the moving things) and 1207 the slope rule with a bias
+the game sets per draw (-90 to +74 sixteenths of a level, median +25: the track and the scenery), none the constant
+rule. Both backends pick the level as the GE does for a 480x272 picture (task 037, task 058; D-015: the auto rule's
+gradient per PSP pixel, the slope rule by depth alone), so at internal scale S a surface is drawn from a level
+log2(S) coarser than the pixels could show: at 4x, two levels, a quarter of the texel density each way. That is the
+softness. E3's samples of the level are isotropic too, so a wall at a grazing angle blurs along its length.
+Decision (Erik, from the recommendation):
+1. A "Texture detail" game option row (patch 0019-game-option-rows), key `texture_detail`, choices "Original" and
+   "Enhanced", default Enhanced, `PURE_TEXTURE_DETAIL`, on the Video tab after the Text and sprites row. The row is
+   the Metal backend's first (task 075); the Vulkan renderer follows in a task of its own (the same rule in
+   `ge.frag`, a sampler with anisotropy, the device feature), and the row's help says so until then.
+2. Enhanced moves the GE's D, whatever the rule, down by 16 x log2(S) at internal scale S: the level the GE would
+   pick had the PSP S times the pixels each way, the game's per-draw intent (its slope and bias) kept relative. For
+   the auto rule that is the gradient per drawn pixel; for the slope rule the same shift. D is still clamped to the
+   levels the texture has, so a surface close by draws level 0 as before. At scale 1 the shift is 0.
+3. Enhanced samples the mipmapped draws anisotropically (16 taps at most, the device's limit if lower): the level
+   from the GE's shifted D through explicit gradients scaled to it, so the GPU takes its taps along the footprint's
+   long axis at the finer level the short axis allows. Draws of a texture with one level, the 2D draws, the targets
+   sampled as textures and the sprite upscale are untouched; Original is the path as it was, to the pixel.
+4. The checks measure the PSP's picture: every tool run has `PURE_TEXTURE_DETAIL=0` through `tools/purelib/port.py`
+   beside the other three. One check runs with it on: the four race HUD scenes at internal scale 4, each reduced to
+   480x272 by the centre pixel within the scene's limit of the reference (the picture is the same picture), the
+   full-size captures differing from the Original ones (the detail is there) and holding more high-frequency energy
+   on the track, the HUD found, a race at scale 4 still at 60 fps in the window.
+Consequences: a visible gain on every 3D surface beyond a few ship lengths and on every angled one, from the
+texels the game already has; nothing invented, so none of E7's look. The frame costs anisotropic taps on three of
+four textured draws; the M4 Pro has the margin, the check measures it. The Vulkan renderer draws the PSP's levels
+until its task lands, so the rig shows the row without its effect. Not changed: the levels' texels, the GE's
+filters, the lens flare and bloom chains at 1x (D-015).
+Alternatives: forcing level 0 everywhere (the shimmer of docs/fidelity.md difference 2 at distance, the game's
+blur-by-design on far scenery lost); a mip bias alone without anisotropy (the softness along a grazing wall stays);
+letting the GPU pick the level itself for the auto draws (ignores the game's slope draws, three of five).
+Status: accepted (Erik).
