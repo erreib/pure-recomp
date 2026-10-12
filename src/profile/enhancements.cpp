@@ -47,8 +47,8 @@ const char *const kSpriteChoices[] = {"Original", "Upscaled"};
 // any internal scale (task 037, D-015), so at scale S the track ahead and the angled walls are drawn from a level
 // log2(S) coarser than the pixels could show, and isotropically. Enhanced has the backend lower the GE's D by
 // 16 x log2(S) and sample those draws anisotropically through explicit gradients (docs/metal-backend.md "Texture
-// detail"); the backend reads the option itself, once a frame, so there is no hook here. The Vulkan renderer draws the
-// PSP's levels until its own task lands.
+// detail"); the backend reads the option itself, once a frame, so there is no hook here. The Vulkan renderer does the
+// same since task 076 (patch 0020-vulkan-texture-detail), reading it through the profile's texture_detail_option.
 const char *const kTextureDetailChoices[] = {"Original", "Enhanced"};
 
 const GameOption kOptions[] = {
@@ -83,8 +83,7 @@ const GameOption kOptions[] = {
      .choices = kTextureDetailChoices,
      .description = "The PSP picks each texture's level of detail for its own 480x272 pixels, so above 1x the track "
                     "ahead and angled walls stay as soft as on the PSP. Enhanced picks the level for the pixels drawn "
-                    "and samples angled surfaces anisotropically. Shows above 1x. Metal only for now: the Vulkan "
-                    "renderer draws the PSP's levels.",
+                    "and samples angled surfaces anisotropically. Shows above 1x. Both renderers.",
      .default_choice = 1u,
      .tab = MenuTab::Video},
 };

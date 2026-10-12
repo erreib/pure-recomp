@@ -137,3 +137,131 @@ changes outside vendor/. One or two commits.
   `texture_params[0]` is the plan; if that bit is taken, stop and say which bits are free)
 - a change under include/psprecomp/, to the GE state or the record format, or to config/ would be needed; a build
   takes over 5 minutes (a vendor host change rebuilds the host layer, minutes, not the corpus)
+
+## Result
+
+**Status: DONE.** Verify passes: both texture_check lanes, the Vulkan window suite 7/7, menu_check under the Vulkan shell, patches.sh check and docs_check.
+- **Patch 0020-vulkan-texture-detail** gives the Vulkan renderer the Metal backend's Texture detail: the level shift, `textureGrad` and an anisotropic sampler.
+- **Off, nothing changes.** With the option off (the pin), the renderer draws exactly as before. The seven window scenes equal the base build's to the pixel.
+- **MoltenVK applies the anisotropy** through `textureGrad`.
+- **Frame rate.** A race in the Vulkan window holds 60 fps with the option on, as it does off.
+
+### What the code does
+- **The option.** `GameProfile::texture_detail_option` (patch 0020; `host/profile.hpp`, default nullptr). Our profile sets it to `"texture_detail"` beside `.options`.
+  - The renderer reads `settings::game_option(key) == 1u` in `initialize` and once a frame in `begin_frame`, never per draw.
+  - It prints `[render] texture detail: off` at start when the option is off, and `[render] texture detail: on` once, at the first enhanced draw. Nothing is printed when the game names no key.
+- **Which draws.** The rule of metal_draw.mm, from the call's projection and lighting: a texture with levels from guest memory, on a draw that is neither through mode nor orthographic (`projection[3]`, `[7]`, `[11]` all 0) and unlit.
+  - A target's texture is never enhanced (it has 1 level), and neither is a texture pack replacement (`texture_descriptor` reports 1 level for it).
+- **The shift.** In the level rule block, `shift = lround(16 log2(drawn_extent.width / 480))`. The auto rule adds it as before; an enhanced draw then subtracts it, so for the auto rule nothing is added.
+  - The clamp to -2048..2047 and the packing are unchanged. The comment says it in D-019 point 2's terms.
+- **The flag.** `kPushDetail` = 2^21, beside `kPushPlaced` (2^20). Both comments are extended.
+  - Bit 21 was free. Everything packed into x stays under 2^24, so it is exact in a float.
+  - `mip_lod` now masks the constant's 12 bits (`((flags >> 8) & 0xFFF) - 2048`). Without the bit that is the same value.
+- **The shader** (ge.frag).
+  - With the bit, `dFdx`/`dFdy` of `uv` are taken right after the q divide.
+  - `lod` comes from `mip_lod`, with the constant already shifted.
+  - `rho = max(length(dx*size), length(dy*size))` and `k = exp2(lod - log2(max(rho, 1e-8)))`, then `textureGrad(guest_texture, uv, dx*k, dy*k)`.
+  - The `half_texel` clamp still uses `lod`.
+  - Without the bit, the `textureLod`/`texture` path is the old expression.
+- **ge.vert** is untouched: it reads only bit 3 and `kPlaced`.
+
+### The descriptor cache and the sampler (what I found)
+- **The descriptor cache.** The sampler is baked into each cached `Texture`'s one combined-image-sampler descriptor set. That set is written in `create_texture_image` and rewritten by `set_sharp_textures` (with `vkDeviceWaitIdle`) when the Texture filter changes.
+  - So the sampler is effectively part of the cache entry's identity. `texture_sampler(levels)` reaches only those two sites.
+  - The per-texture descriptor cannot be switched per draw:
+    - the same texture can be drawn in one frame by an enhanced draw and by a 2D draw (79 of the race route's mipmapped draws are 2D on Metal);
+    - a set already bound in the frame's command buffer cannot be rewritten.
+- **What I did about it.**
+  - `Texture` gained `detail_descriptor`: the same view through `texture_sampler(levels, true)`.
+  - It is allocated lazily at the texture's first enhanced draw (`detail_descriptor()`; if allocation fails, the draw falls back to the plain set).
+  - It is freed in `destroy_texture` and rewritten beside the other set in `set_sharp_textures`.
+  - With the option off, no extra set is ever allocated.
+  - The descriptor pool gets 4x instead of 2x `kMaxCachedTextures` sets when the game names the option, since retired textures keep their sets for a frame.
+  - The texture cache key itself did not need the sampler.
+- **`texture_sampler(levels, detail)`** returns `mip_detail_sampler` for an enhanced draw. Under Sharp it returns `mip_sharp_sampler` (said in a comment): the setting asks for the nearest texel.
+- **The sampler.** `mip_detail_sampler` is linear, mipmap linear, repeat, `VK_LOD_CLAMP_NONE`, with `anisotropyEnable` and `maxAnisotropy = min(16, limits.maxSamplerAnisotropy)`.
+  - `samplerAnisotropy` is enabled when supported, in the pattern of `dualSrcBlend`. When it is not, and the game names the option, the line "[render] texture detail samples isotropically: this device has no samplerAnisotropy" is printed.
+  - MoltenVK on this M4 Pro reports `maxSamplerAnisotropy` 16 (read with a temporary print), so the limit is 16.
+
+### texture_check --shell vulkan (the Verify run; default 960x544 window, S = 2)
+| Scene | Reduced, on (limit) | Reduced, off | On against off | Energy off | Energy on | Ratio | HUD |
+|---|---|---|---|---|---|---|---|
+| race_hud | 0.0727 (0.10) | 0.0647 | 0.0194 | 6.3364 | 6.8594 | 1.0825 | found |
+| tt_hud | 0.0800 (0.12) | 0.0699 | 0.0188 | 6.3131 | 7.1880 | 1.1386 | found |
+| fp_hud | 0.0797 (0.11) | 0.0696 | 0.0188 | 6.2722 | 7.1494 | 1.1399 | found |
+| zone_hud | 0.0557 (0.09) | 0.0556 | (0.0002) | (4.0860) | (4.0869) | (1.0002) | - |
+
+- **The count.** The Vulkan renderer has no draw count, so the lane checks instead that the race_hud run logs `on` with 1 and `off` (and no `on`) with 0. PASS.
+- **zone_hud is included** (two runs, cheap) and held to the reduction alone, as in the Metal lane.
+- **Reduced, off** was computed outside the tool. The centre pick at S = 2 takes each block's lower right pixel, where the suite takes the upper left, so it reads 0.0647 where the suite reads 0.0465.
+- **The ratios are lower than Metal's** (1.08 to 1.14, against 1.14 to 1.23): one level of shift at S = 2, against two at S = 4.
+- **The Metal lane** is unchanged, to the digit of task 075's figures: race_hud 0.0467 / 0.0218 / 1.1378, tt_hud 1.2279, fp_hud 1.2298, 192778 of 192857 enhanced, scale 1 0.0162.
+
+### maxAnisotropy 1 against the limit
+A temporary edit (`maxAnisotropy = 1.0f`, not committed; the file was restored byte for byte, and the rebuilt race_hud capture equals the earlier one to the pixel). The 1 captures against the committed build's:
+
+| | tol 0 | tol 2 | tol 24 |
+|---|---|---|---|
+| race_hud | 80872 of 522240 (0.1549) | 0.0215 | 0.0020 (1022 px) |
+| tt_hud | 0.2233 | 0.0522 | 0.0025 |
+
+The differences are only on surfaces at grazing angles: the crowds, buildings, the far track and the ships ahead. No game state differs (checked on the diff images).
+
+### Frame rate (the Vulkan window)
+The setup:
+- 960x544, FIFO at 120 Hz.
+- `main_menu.txt` + `single_race.txt` without shots, a fresh stick per run, `--data-dir out/076/perf/data` (warmed by one discarded run).
+- `PURE_PACED_FROM=6000`, to flip 9850, `PURE_PERF=log`. The figures are the 63 one-second lines from the race start.
+
+| Option | Scale | fps mean (lowest) | Seconds < 59.5 | Frame mean | Longest | GPU a frame (max) |
+|---|---|---|---|---|---|---|
+| off | Auto (2) | 59.70 (52.2) | 2 | 16.77 ms | 34.6 ms | 1.66 ms (9.3) |
+| on | Auto (2) | 59.71 (48.4) | 2 | 16.78 ms | 34.3 ms | 1.66 ms (9.0) |
+| off | 4 | 59.94 (59.8) | 0 | 16.70 ms | 21.4 ms | 2.05 ms (15.1) |
+| on | 4 | 59.94 (59.8) | 0 | 16.70 ms | 19.3 ms | 2.37 ms (10.4) |
+
+- **The dips at Auto** are the last two seconds of both runs, with the option off as on.
+- **The cost:** about 0.3 ms of GPU time a frame at internal scale 4. None is measurable at 2x.
+
+### The pin (the Original path)
+- **The Vulkan window suite.** 7/7 with the base figures: title 0.0302, main_menu 0.0331, race_hud 0.0465, tt_hud 0.0493, fp_hud 0.0475, zone_hud 0.0452, zone_change 0.0522.
+  - To check pixels, I reversed patch 0020 and the profile line, built the base, and ran the suite with a data directory of its own. All seven captures equal this build's, 0 pixels at tol 0.
+- **metal_check.** I copied the main checkout's recordings (team, race_1x and race_warm, from 2026-10-06) into this worktree's out/gerec and ran `tools/gerec/metal_check.sh`: PASS.
+  - Every diff figure and first-diff line equals the main checkout's 075 gate logs. Its replay line carries `PURE_TEXTURE_DETAIL=0`.
+  - These recordings hold one level, so they never reach the option.
+
+### Changed
+patches/0020-vulkan-texture-detail.patch (new; vendor/portablekit/host/gpu/vulkan_renderer.cpp, host/gpu/shaders/ge.frag, host/profile.hpp), patches/README.md, src/profile/pure_profile.cpp, src/profile/enhancements.cpp (the help text and the E5 comment), tools/texture_check.sh, docs/metal-backend.md, docs/controls.md, docs/verification.md, docs/windows.md, README.md, docs/tasks/076-vulkan-texture-detail.md. Two commits.
+
+### Verify output (last 20 lines)
+```
+title        1750    0.0302   0.05   24     0.030 +0.0002  PASS
+main_menu    4700    0.0331   0.05   24     0.033 +0.0001  PASS
+race_hud     6016    0.0465   0.10   32     0.047 -0.0005  PASS
+tt_hud       5890    0.0493   0.12   32     0.049 +0.0003  PASS
+fp_hud       5890    0.0475   0.11   32     0.048 -0.0005  PASS
+zone_hud     5260    0.0452   0.09   32     0.045 +0.0002  PASS
+zone_change   5679    0.0522   0.10   32     0.052 +0.0002  PASS
+
+frame regression: PASS, 7/7 scenes pass, the window scenes, shell vulkan, backend vulkan (1m 36s)
+menu_check: shell vulkan, out out/menu_check/vulkan
+menu_check: run_boot exit 0, 9 s, log out/menu_check/vulkan/run.log
+tabs: ok (4)
+Video: ok (20)
+Audio: ok (4)
+Controls: ok (37)
+System: ok (12)
+menu_check: PASS
+ok: 20 patch(es) reproduce vendor/portablekit at 8b0c3fe
+docs_check: 33 files, 0 findings: PASS
+verify 076: PASS
+```
+
+### Open questions
+1. **docs/upstream.md has no row for 0020.** It holds the patch dependency table and the per-patch upstream notes, and it is not in May touch; patches/README.md has the series row and the paragraph. What I found, read from the code (not tried patch by patch):
+   - to apply, 0020 needs 0019 (the `options` lines of profile.hpp) and 0012, 0015 and 0018 (the renderer and ge.frag lines it edits);
+   - to build, it needs 0012 (the mip rule, `mip_levels`), 0018 (`drawn_extent`) and 0019 (`settings::game_option`).
+2. **texture_check --shell vulkan reruns its 0 runs whenever any pipeline was made.** The reason: in a fresh data directory, a run that compiled 26 pipelines while paced moved tt_hud's race (27% of its pixels at tol 0). The 0 runs are now repeated, up to three rounds in all, while any 0 run logs `[render] N new pipeline(s)`. That trigger also fires on a straggler in a warm directory: in the final Verify it cost one extra round, 4m56s for the lane. A threshold on the stall's milliseconds would be quieter.
+3. **One Verify run's suite scored zone_change 0.0546.** The Zone run took 68 s instead of the usual 28, cause not found (machine load or the window). An immediate rerun gave 0.0522, equal to the pixel to the base build, and so did the final Verify. The paced window race is sensitive to stalls.
+4. **Out-of-scope files still describe the Vulkan renderer's texture detail as missing.** docs/status.md and docs/decisions.md (D-019's consequences) still say it draws the PSP's levels (Must not touch). src/profile/enhancements.hpp's header comment still names only the Metal backend as reading the option (not in May touch).
+5. **The Vulkan renderer counts no enhanced draws**, so the `on` line stands in for the count. A count could go on the `[perf]` line if wanted.
