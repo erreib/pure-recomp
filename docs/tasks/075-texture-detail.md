@@ -1,6 +1,6 @@
 # 075: Texture detail at the internal scale (E5, the Metal backend)
 
-Milestone: E5 (Erik, 2026-10-12; D-019) | Branch: task/075-texture-detail | Status: OPEN
+Milestone: E5 (Erik, 2026-10-12; D-019) | Branch: task/075-texture-detail | Status: MERGED (the merge commit after 80a0e90, 2026-10-12; replanned once after a BLOCKED first run: zone_hud's bars)
 
 ## Goal
 At internal scale S the Metal backend picks each mipmapped draw's level as the GE does for the PSP's own 480x272
@@ -242,3 +242,17 @@ verify 075: PASS
 1. **metal_check is skipped, as instructed;** its replay line carries the pin. The main checkout's out/gerec recordings date from 2026-10-06, before task 037, so they hold one level each. A replay of them never reaches the levels or this option. Recordings made since task 040 would.
 2. **refactor_check's count comparison** has printed "counts FAIL" on every run since task 073. Its strip of the GPU-wait clause expects that clause at the end of the exit line, and task 073 appended `; N textures upscaled (T ms)` after it, so the run-dependent wait counts stay in. The pixel comparison is unaffected. A one-line fix in that tool, which was outside this task's list.
 3. **The Vulkan renderer's Texture detail** is its own task (D-019): the same rule in `ge.frag`, a sampler with anisotropy, the device feature. Until then the row is shown there and draws the PSP's levels, as its help says.
+
+## Review
+Fable, 2026-10-12. Diff within May touch; the Original branch of `sample_texture` untouched, the enhanced branch
+subtracts the shift and samples by gradients scaled to the GE's level; no new pipeline. Merged `--no-ff` into
+batch/m2, built, and from the main checkout: `tools/verify_task.sh 075` PASS (texture_check race_hud 0.0467 of 0.10
+reduced, 0.0218 against Original, energy ratio 1.1378; tt_hud 1.2279; fp_hud 1.2298; zone_hud reduced 0.0346 of
+0.09 with its detail bars not applied; 192778 of 192857 mipmapped draws enhanced; scale 1 0.0162; menus PASS both
+shells; suite 18/18; scale_check and sprite_check to the digit; docs_check), the window suites 7/7 on both shells,
+hud_check 61 of 61, metal_check PASS (out/075_gate.log). Looked at the race_hud captures off and on: the crowds, the
+far banner's text and the wall details resolve, the near track is the same. Follow-ups: the Vulkan renderer's half
+(task 076, D-019); `tools/refactor_check.sh`'s count strip since task 073's stats clause (prints "counts FAIL"
+on every run; the pixel comparison is unaffected); recordings for metal_check made since task 040, so a replay
+exercises the levels.
+

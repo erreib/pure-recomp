@@ -160,8 +160,8 @@ simplification task, then the enhancements. The session-by-session resume notes 
   zip in out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix, E6 (the
   Flashes row, Smooth by default), E4 (the 30 fps modes row, 60 fps by default) and E7 (the Text and sprites row,
   Upscaled by default in that build, and the sprite dump that builds the texture pack; a settings.ini an earlier
-  build wrote lacks the keys and so reads the defaults). Since 2026-10-12 the row's default is Original (below);
-  a repack carries it when the next change warrants one.
+  build wrote lacks the keys and so reads the defaults). Repacked again 2026-10-12 from the task 075 merge (`--check out/075-bundle` PASS; out/repack-075.log): the Text and
+  sprites row defaults to Original and the Texture detail row (E5, Enhanced by default) is in.
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
@@ -240,7 +240,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   per-draw biases. Task 075 (the Metal backend): a "Texture detail" row (Original / Enhanced, default Enhanced,
   `game.texture_detail`, `PURE_TEXTURE_DETAIL`) that shifts the GE's D down by 16 x log2(S) and samples the
   mipmapped draws anisotropically through gradients scaled to that level; the pin beside the other three; a check
-  on the four race HUD scenes at scale 4. The Vulkan renderer's half follows as its own task.
+  on the four race HUD scenes at scale 4. **Task 075 merged (2026-10-12): the Metal half of E5 complete.** Gate:
+  verify PASS (race_hud, tt_hud and fp_hud reduced within their limits at scale 4 with 14% to 23% more
+  high-frequency energy, zone_hud unchanged since its textures hold no detail between their levels; a race at
+  scale 4 at 60 fps with the option on; the Original path pixel-identical on all 18 scenes), window suites 7/7 both
+  shells, hud 61/61, metal_check (out/075_gate.log). Follow-ups: the Vulkan renderer's half (task 076);
+  `tools/refactor_check.sh`'s count strip since task 073; fresh recordings for metal_check.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
