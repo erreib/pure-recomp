@@ -133,3 +133,28 @@ Read from out/078-probe and out/stutter_check/vulkan-vulkan/race in the 077 work
   of the probe, not a slowdown in play. The prewarm, the 1x effect targets (patch 0018) and the shader cache are
   not involved; the `PURE_NO_PIPELINE_PREWARM=1` and cleared-DXCache runs the brief proposes would only move a
   first use, which this is not, so they were not run.
+
+### A: the guest-time clusters are the guest thread blocked writing stdout to the sweep's pseudoconsole
+Two instrumented stutter_check runs (out/078/probe1, out/078/probe2 in this worktree; instruments not committed: the
+`[pure] ship frame` write in src/profile/test_hooks.cpp timed, a `[probe078] ship line write N ms` line when over
+1 ms (probe1) or 10 ms (probe2), and frame_stats' end_frame timing its own prints, reported on the next
+`[slow-frame]` line):
+- "Guest" in a `[slow-frame]` line is frame minus render minus wait (frame_stats.cpp end_frame), so it includes
+  every stdout write the emulation thread makes. On Windows the sweep runs the game under a ConPTY
+  (tools/purelib/port.py, task 055) and the MSVC runtime writes each `<<` of a line to the console unbuffered.
+- probe2 (threshold 10 ms): the A spikes are the ship line's write. 13364: guest 293.6 ms, ship-line write 255.5;
+  13358: 169.6 / 147.0; 14439: 183.3 / 167.1; 9621: 154.4 / 107.4; 7493: 91.8 / 64.3; 16826: 55.0 / 31.3. Where the
+  write explains less (14898: guest 149.0, write 20.6) the rest is the next write, the instrument's own
+  `[probe078]` line, which is untimed (the log shows nothing else in that frame). Calm frames: guest 10 to 14 ms.
+- probe1 (threshold 1 ms) is the dose-response: one extra line after each slow write turned the race from 8 of 222
+  seconds over 25 ms into 122 of 256, 7467 ship-line writes over 1 ms summing 25.4 s, the worst one line 540 ms.
+  More console output, more guest time: the cost is the console, not the game.
+- The spikes move run to run (16842 / 14715 in 078-probe, 9009 / 15878 in the run before, 13364 / 9621 / 14439
+  here): they follow when the sweep's reader falls behind, not the race's effects. No `[interpreter]` line in any
+  of the logs (its first fallback is announced unconditionally on stderr, which the ConPTY merges), so no
+  interpreter fallback; the E6 wrap runs once a frame (FUN_088eda8c is sceGeDrawSync's only caller) and is two
+  loads and a store.
+- The Mac's runs go through a pty, a kernel buffer the writer does not wait on, which is why its gates see none.
+  A player starts PureNative without the sweep's ship lines and without a ConPTY reader, so A, like B, is the
+  probe's; the fix belongs to the harness (an asynchronous log writer in the host, or the sweep's reader), both
+  outside this brief's May touch.
