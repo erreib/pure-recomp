@@ -90,14 +90,22 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
    - `tools/frame_regress.sh` [`frame regression: PASS, 7/7 scenes pass, the window scenes, shell vulkan, backend
      vulkan`; `--all-scenes` for 18]. Done 2026-10-11 with all 18: 18/18 in 12m 17s on the RTX 3080, every scene
      within 0.012 of the Mac-measured Vulkan column (out/071-suite.log on the rig; docs/status.md's E3 row).
-   - **open** `tools/menu_check.sh --shell vulkan` [`menu_check: PASS`; the Video tab ends `Restore video defaults,
-     Flashes`].
-   - **open** `tools/flash_check.sh --shell vulkan` [`flash_check: PASS (fade 57 flips off, 0 on; the race and its HUD
+   - `tools/menu_check.sh --shell vulkan` [`menu_check: PASS`; the Video tab now ends `30 fps modes, Flashes, Text
+     and sprites, Texture detail` since E4/E7/E5]. Done 2026-10-12: PASS, all five sections, after the game's first
+     non-ASCII output (the dump's button glyphs) found three Windows encoding defects in the tools — the run log,
+     Python's stdout and the pseudoconsole's OEM codepage — fixed in tools/ (commit "Tool runs survive the game's
+     non-ASCII output on Windows").
+   - `tools/flash_check.sh --shell vulkan` [`flash_check: PASS (fade 57 flips off, 0 on; the race and its HUD
      in both)`; windowed, paced from flip 5500; about 2 minutes]. The default shell is headless, which draws nothing
-     on Windows, so `--shell vulkan` is required here.
-   - **open** `tools/flash_check.sh --shell vulkan --race` [`flash_check: PASS (race: stretches N off, 0 on; mean lap
+     on Windows, so `--shell vulkan` is required here. Done 2026-10-12: PASS with exactly that line on the second
+     run; the first run's cold pipeline cache put a 0.6 s compile stall inside the race start, splitting the fade's
+     two-vblank run so the detector latched onto a 2-flip fragment. Run it with the data directory's pipeline cache
+     warm (a prior run suffices).
+   - `tools/flash_check.sh --shell vulkan --race` [`flash_check: PASS (race: stretches N off, 0 on; mean lap
      ...)`; two swept races, about 8 minutes. The lap bound is coarse (two different races); a FAIL on the lap figure
-     alone with 0 stretches is worth a second run before it is believed].
+     alone with 0 stretches is worth a second run before it is believed]. Done 2026-10-12: PASS on the second run
+     (stretches 5 off, 0 on, mean lap +2.3%); the first run FAILed on the lap figure alone (+6.0%, 0 stretches on),
+     the exact case above — the sweeps' laps vary run to run on this rig too.
    - **open**, by hand: a Single Race in a window, Esc, Video, Performance on, and watch the frame time through the
      start fade and a bomb or mine near the ship: with Flashes Smooth no 33 ms frames; set Original and the same
      moments show them, as the PSP does. The row's choice is saved to settings.ini (`game.smooth_flashes`).
@@ -116,16 +124,33 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
      To play with it, copy the folder into the rig's data directory as `textures/UCUS98612`
      (`%APPDATA%\pure-recomp\PureNative\textures\UCUS98612\textures.ini`), or install it from the game: Esc, Video,
      Import texture pack…, choose the folder; the Texture pack row (on by default) then notes `48 textures, ...`.
-   - **open** (task 076, E5's Vulkan half, patch 0020-vulkan-texture-detail; after `tools/patches.sh check`
+   - (task 076, E5's Vulkan half, patch 0020-vulkan-texture-detail; after `tools/patches.sh check`
      [`ok: 20 patch(es) ...`] and `tools/build.sh profile` with it): `tools/texture_check.sh --shell vulkan`
      [`texture_check: PASS`; race_hud, tt_hud and fp_hud at least 1% changed by the option with an energy ratio above
      1.0, all four within their limits after the reduction, the HUD found, `[render] texture detail: on` and `off` in
      the logs; 2 to 5 minutes. S is the capture's width over 480, so the rig's window size is fine as long as it is a
-     multiple of 480x272]. Then, by hand: a Single Race in a window, Esc, Video, Texture detail Original, then Enhanced:
+     multiple of 480x272]. Ran 2026-10-12, three times (28, 28 and 14 minutes here): the option's assertions each
+     passed — race_hud's energy ratio 1.07 to 1.08 in all three runs, tt_hud 1.12, fp_hud 1.09 to 1.13, zone_hud
+     exempt, the on/off render lines every time — but no single run went 4/4: each run one or two of the Enhanced
+     lane's routes ran late (a capture at Team Selection, a HUD still fading in), always lane 1, never the twelve
+     Original-lane routes. The pad presses fire at identical flips in both lanes; the divergence is the virtual load
+     time, which quantizes off real IO (the lanes' first loads differ by 1 ms of game time), so a menu transition can
+     cross a vblank and eat a press. A finding for texture_check's robustness follow-up (docs/status.md E5: the
+     capture rerun on pipeline creation wants the same treatment for load-boundary drift), not a defect of
+     0020-vulkan-texture-detail. Then, by hand: a Single Race in a window, Esc, Video, Texture detail Original, then Enhanced:
      with Enhanced the crowds, the far banners and the walls at a grazing angle resolve, the near track is the same, and
      Performance shows the same frame rate both ways (on this Mac's M4 Pro, 60 fps either way, 0.3 ms more GPU time a
      frame at internal scale 4). A device without `samplerAnisotropy` says so on a `[render]` line and samples
      isotropically.
+   - (task 072, E4, added after this checklist was written) `tools/framerate_check.sh --shell vulkan` and `--race`.
+     The route variant PASSed first try 2026-10-12 with the Mac's own figures: frontend 33.4/33.4 ms, race 33.4/16.7
+     ms and 29.97/59.94 flips a race-clock second off/on, the HUD drawn at 60. The race variant ran twice and FAILed
+     both times on one figure only, the game clock against the wall (off 0.9901 then 0.9873, on 0.9864 then 0.9921,
+     bound 0.99 to 1.01; which lane fails floats between runs): the rig loses about 1% of wall time to stalls the
+     pacer forgives past its 100 ms debt cap, and the compiles were warm (26 ms at worst), so the loss is
+     environmental. Everything internal passes every run — flips a race-clock second 29.94 to 29.97 off and 59.66 to
+     59.78 on, laps, contacts, the standing start within 5% — so E4's claim holds on this rig; the wall-clock bound
+     is coarse here the way the E6 lap bound is (docs/status.md E4's follow-ups).
 5. **Package:** `tools/bundle_windows.sh --zip` (rebuilds the Release binary when stale: 15 to 25 minutes cold), then
    `tools/bundle_windows.sh --check out/repack-win-070` [`bundle check: PASS`]. Done 2026-10-11: the zip
    pure-recomp-0.1.0-6393b67-windows-x64.zip, seven checks PASS (out/repack-071.log on the rig); then task 071 added
@@ -133,7 +158,9 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
    current tree carries the icon. Still **open** from task 071: open the staged folder in Explorer once and look at the
    exe's icon and Properties > Details, and whether the running window and its taskbar button show the icon.
 6. **Record** the last lines of each open check in this section (or send them to the Mac session); the
-   docs/status.md E3 follow-up row is cleared, the E6 bullet names the two open checks.
+   docs/status.md E3 follow-up row is cleared, the E6 bullet names the two open checks. Done 2026-10-12: every
+   scripted check above is recorded in place; what stays **open** is by hand and Erik's — the Flashes race with the
+   Performance overlay, the Texture detail race by eye, and task 071's Explorer and taskbar look at the icon.
 
 ## What to decide before starting
 

@@ -195,9 +195,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   times within 5%) is the check with it on. **Task 070 merged 68803cd (2026-10-11): E6 complete.** Gate: verify
   PASS, both menu dumps, suite 18/18 to the digit, HUD 61/61 (out/070_gate.log). Follow-ups: the `--race` lap bound
   is coarse (two different races; widen to 10% or compare the race clock's advance), the Flashes row's place after
-  the Restore button when more rows come; on Windows `tools/menu_check.sh --shell vulkan` and
-  `tools/flash_check.sh --shell vulkan` (and `--race`) have not run yet (docs/windows.md "Updating the rig": the rig's
-  2026-10-11 session ran the suite and repacked, those two and the by-hand race are open).
+  the Restore button when more rows come; on Windows all three ran 2026-10-12 on the rig and PASS:
+  `tools/menu_check.sh --shell vulkan` (all five sections, after the dump's button glyphs — the game's first
+  non-ASCII output — found three Windows encoding defects the rig fixed in tools/), `tools/flash_check.sh
+  --shell vulkan` (fade 57 flips off, 0 on, the Mac's line; a cold pipeline cache broke the first run's fade
+  detection) and `--race` (stretches 5 off, 0 on, mean lap +2.3% on the second run; the first hit the coarse lap
+  bound at +6.0%). The by-hand race stays Erik's (docs/windows.md "Updating the rig").
 - **E4, Time Trial, Free Play and Zone free-running** (D-017, 2026-10-11; Erik's pick after E6). The audit the plan
   asked for is done (the planning session; out/e4/ on the Mac): the lock is the frame object's byte `+0x116c`, set
   to 0 by the three modes' race managers after the race backend set it to 1, read only by the end-of-frame routine
@@ -210,8 +213,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   `tools/framerate_check.sh [--race]`. Gate: verify PASS (route 33.4/16.7 ms and 29.97/59.94 flips a second off/on;
   race 29.97/59.95, game clock 0.9994/1.0001, the standing start within 5%), flash_check, both menu dumps, suite
   18/18 to the digit, HUD 61/61 (out/072_gate.log). Follow-ups: Original chosen during a free-running race takes
-  effect at the next race; a save dialog in a race runs free with the option on; the frontend at 60 (not audited);
-  the check on the rig with `--shell vulkan`.
+  effect at the next race; a save dialog in a race runs free with the option on; the frontend at 60 (not audited).
+  The rig ran it 2026-10-12: the route variant PASS with the Mac's figures (33.4/16.7 ms, 29.97/59.94 flips a second
+  off/on, the HUD at 60); the race variant twice FAILed the game-clock-against-the-wall bound alone (0.9864 to
+  0.9921, bound 0.99; the failing lane floats between runs, every internal figure passes) — the rig loses about 1%
+  of wall time to stalls the pacer forgives past its 100 ms debt cap, so that bound is coarse there the way the E6
+  lap bound is (docs/windows.md "Updating the rig").
 - **E7, the frontend's resolution** (D-018, 2026-10-11; Erik's pick after E4: the menus look low-resolution). The
   menus are bitmap font atlases and art atlases drawn at one texel a screen pixel in through mode, so E3 only
   magnified their texels (the planning session; out/fe_tex/). A prototype edge-preserving 4x resample on the real
@@ -251,10 +258,16 @@ simplification task, then the enhancements. The session-by-session resume notes 
   descriptor per texture for the enhanced draws); `tools/texture_check.sh --shell vulkan` proves it in the Vulkan
   window (race_hud, tt_hud and fp_hud 8% to 14% more high-frequency energy at the window's 2x, within their limits
   reduced, MoltenVK applying the anisotropy; a race at 60 fps on as off), the window suites 7/7 both shells, the
-  headless suite 18/18, hud 61/61 under Vulkan, metal_check (out/076_gate.log). Follow-ups: the rig runs
-  `tools/texture_check.sh --shell vulkan` and looks at a race with the row on and off (docs/windows.md);
+  headless suite 18/18, hud 61/61 under Vulkan, metal_check (out/076_gate.log). The rig ran the check 2026-10-12,
+  three times: every assertion of the option passed at least once (race_hud's energy ratio 1.07 to 1.08 in all
+  three runs, tt_hud 1.12, fp_hud 1.09 to 1.13, zone_hud exempt, the on/off render lines every time), but no run
+  went 4/4 — one or two Enhanced-lane routes per run captured late (identical pad flips in both lanes; the virtual
+  load time quantizes off real IO and a 1 ms shift can eat a press at a menu boundary), never the twelve
+  Original-lane routes. The feature holds on Vulkan/Windows; the capture is the fragile part, and the rig's race by
+  eye stays Erik's (docs/windows.md "Updating the rig"). Follow-ups:
   `tools/refactor_check.sh`'s count strip since task 073; fresh recordings for metal_check; texture_check's Vulkan
-  lane reruns its 0 captures whenever a pipeline was made (a stall threshold would be quieter); a count of the
+  lane reruns its 0 captures whenever a pipeline was made (a stall threshold would be quieter, and the rig's
+  load-boundary drift above wants the same treatment); a count of the
   enhanced draws on the Vulkan renderer's perf line.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
