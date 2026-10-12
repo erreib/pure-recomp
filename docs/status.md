@@ -256,6 +256,20 @@ simplification task, then the enhancements. The session-by-session resume notes 
   `tools/refactor_check.sh`'s count strip since task 073; fresh recordings for metal_check; texture_check's Vulkan
   lane reruns its 0 captures whenever a pipeline was made (a stall threshold would be quieter); a count of the
   enhanced draws on the Vulkan renderer's perf line.
+- **DLC, the download packs** (Erik's pick 2026-10-12 after E5; docs/dlc.md, D-005 closed). The planning session
+  read the game's loader (the frontend root lists the stick, opens every `UCUS98612D*` folder's PI.WAD, checks its
+  RSA-signed trailer with the region keys and a console binding, mounts it as a WAD device), found the European set
+  Erik first had unusable (its own signatures and zlib), and with the US set on a scratch stick found the packs
+  load unchanged. **Task 077 merged (2026-10-12): the packs installed and checked.** The profile lists the twelve
+  pack folders (the save screen names them, Import accepts them by name), `tools/dlc_install.sh` copies a player's
+  packs onto the stick after checking them, `tools/dlc_check.sh --packs DIR` boots with the twelve (164 opens),
+  sees the league and team screens change, races Gamma, Delta and Classic 2 tracks with the HUD (Exostra Run and
+  the others, 5 to 8 MB allocated), and measures the boot cost (2.4 s against 2.2 s). Gate: dlc_check PASS, suite
+  18/18, save round trip PASS, docs (out/077_gate.log). Open: the menu's Import refuses seven packs whose file
+  list holds a non-name entry (task 078 relaxes it and adds a Download packs section); backups include installed
+  packs (62 MB); a pack-aware profile is 69 KB against 41 KB and its loading without the packs is untried; PROFILE
+  > DELETE may list the packs; no PPSSPP reference with packs; the rig untested; the other regions' packs a later
+  milestone (converter, hash hook, zlib).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

@@ -6,7 +6,7 @@
 | D-002 | 2026-10-05 | Renderer path: Vulkan/MoltenVK bootstrap, then native Metal behind a seam | accepted |
 | D-003 | 2026-10-06 | GE backend seam: shell vs GeBackend; Vulkan adapted, Metal implemented against it | accepted |
 | D-004 | pending | Determinism: virtual clock, fixed RTC, frame-indexed input | open (M3) |
-| D-005 | pending | Savedata directory layout, DLC-ready | open (M5) |
+| D-005 | 2026-10-12 | Savedata directory layout, DLC-ready: the PSP's memory-stick tree as it is, the download packs sibling folders the game loads unchanged | accepted (Erik; built in M5, proven by task 077) |
 | D-006 | 2026-10-05 | Licence of our code: GPL-2.0-or-later | accepted |
 | D-007 | 2026-10-06 | Shell seam: `host::Shell` behind the HLE; Vulkan shell adapted, headless shell added, Metal shell implemented against it | accepted |
 | D-008 | 2026-10-06 | Metal shell and Metal backend are the default on macOS; Vulkan stays the portable path, selectable | accepted |
@@ -67,6 +67,24 @@ patch. The render-target model (aliasing, stencil-as-alpha copy rule, depth writ
 Alternatives: split VulkanRenderer into shell and backend (cleaner, but a large patch against a moving upstream);
 Metal only via MoltenVK (no native backend).
 Status: accepted.
+
+## D-005  2026-10-12  Savedata directory layout, DLC-ready
+Context: planned in M5 as "the save layout must not close the DLC door": on a PSP a download pack is a save-data
+folder `UCUS98612D<PACK>` beside the profiles, holding PI.WAD, which the game lists, opens, verifies and mounts
+itself (docs/dlc.md). The port's saves live in a memory-stick tree, `<data dir>/ms0/PSP/SAVEDATA/`, through the
+framework's save-data HLE (task 014) and the PSP's own file format since task 045 (the import and export bridge).
+Decision (built, then proven): the layout stays the PSP's; nothing in the port learns what a pack is. Task 077
+(2026-10-12) put the twelve US packs on a scratch stick as they came from consoles and the game loaded every one:
+the pack leagues and ships appeared, three pack tracks raced with their HUD, half a second more at boot. The profile
+lists the twelve pack folders so the Esc menu's save screen names them and its Import accepts them by name;
+`tools/dlc_install.sh` and `tools/dlc_check.sh` are the tools; the packs are the game's data and never enter the
+repository or a release archive.
+Consequences: a pack installs by copying its folder, by the tool, or through the menu's Import (seven of the twelve
+refused there until the save transfer skips a file-list entry that is not a name: task 078). D-012's container,
+when it comes, presents the packs through the same save-data calls rather than folders, as decided there. The packs
+of the other regions are signed and compressed for their own builds; a converter, a hash hook and zlib in the WAD
+reader would be their own milestone (docs/dlc.md).
+Status: accepted (Erik).
 
 ## D-006  2026-10-05  Licence
 Context: the framework is MIT, FFmpeg is LGPL and linked dynamically, PPSSPP is GPL-2.0-or-later and may one
