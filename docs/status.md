@@ -269,14 +269,23 @@ simplification task, then the enhancements. The session-by-session resume notes 
   lane reruns its 0 captures whenever a pipeline was made (a stall threshold would be quieter, and the rig's
   load-boundary drift above wants the same treatment); a count of the
   enhanced draws on the Vulkan renderer's perf line.
-- **The rig's race stutter (task 077, open).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
+- **The rig's race stutter (task 077, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
   frames over budget — unchanged by vsync mode (FIFO/mailbox), audio on/off and internal scale (the drain, not the
   bytes), invisible to every virtual-time check, and the source of E4's forgiven ~1% game-clock loss. The Metal
   backend shares the architecture but unified memory hides the wait. Task 077 (brief f918a4c) asks for the smallest
   fix that holds 60 fps without moving a suite pixel, a `PURE_SYNC_READBACK` switch back, and a stutter check (the
-  task's deliverable), the wall-clock smoothness gate the suite never had; an upstream candidate.
+  task's deliverable), the wall-clock smoothness gate the suite never had; an upstream candidate. Fixed by patch
+  0021-vulkan-async-readback: the premise was wrong in one respect — the worker's characterization showed the stall
+  is the lens flare's depth write-back (`write_back_depth` at its GE SIGNAL, once a frame; the game's CPU reads that
+  depth 300 to 600 times a second), not a block transfer — and the one-frame-late design applied there. Readback
+  7.38 ms a frame to 0.00, the race renders at 66 fps, `tools/stutter_check.sh` PASS 8 of 222 seconds (unfixed: FAIL
+  65 of 232 on both bounds; with `PURE_SYNC_READBACK=1` the stall returns, 7.24), suite 18/18, flash and framerate
+  checks PASS with the race game clock back inside its bound (0.9919/0.9946: the E4 rig note's lost ~1% was this
+  drain). Still Erik's by eye: flare flicker as the sun passes behind scenery (the depth is a frame old). For the
+  Mac session: a windowed suite baseline sturdier than "to the digit" (zone_change swings 0.025 to 0.108 run to run
+  on the rig, either path).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

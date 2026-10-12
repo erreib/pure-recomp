@@ -1,6 +1,6 @@
 # 077: The Vulkan block-transfer readback stalls the race
 
-Milestone: Windows fidelity (Erik, 2026-10-12: the race stutters on the rig) | Branch: task/077-vulkan-readback-stutter | Status: OPEN
+Milestone: Windows fidelity (Erik, 2026-10-12: the race stutters on the rig) | Branch: task/077-vulkan-readback-stutter | Status: MERGED (685f2a3, 2026-10-12)
 
 ## Goal
 A race on the Windows rig (RTX 3080, the Vulkan renderer) misses its frame budget on about 15% of frames: Erik heard
@@ -232,3 +232,25 @@ docs_check: 33 files, 0 findings: PASS
 3. The windowed Vulkan suite is not reproducible to the digit run to run on the rig (zone_change 0.025 to 0.108), so
    the brief's "unchanged to the digit" criterion needs a different baseline (several runs, or headless replay).
 4. Still to run: framerate_check --race, the headless --all-scenes suite, and a stall probe with PURE_SYNC_READBACK=1.
+
+## Review
+
+Merged 685f2a3 (2026-10-12) after the review closed the Result's open items on the branch:
+- **The remaining gates, run by the review on the rig:** the 18-scene suite PASS 18/18 on the fix (8m 59s; the 13
+  non-race scenes within ±0.0008 of the column, the race scenes within their limits with tt_hud +0.0257 the largest
+  move — inside the windowed variance the Result documents, which swings zone_change by 0.08 on the synchronous path
+  too). `tools/framerate_check.sh --shell vulkan --race` PASS: the game clock 0.9919/0.9946 against the 0.99 bound it
+  failed twice before the fix (0.9864 to 0.9921) — the forgiven stall was the drain, as diagnosed. The sync probe:
+  `PURE_SYNC_READBACK=1 tools/stutter_check.sh` FAILs with the stall back (readback 7.24 ms a frame, 63 of 238
+  seconds; the unfixed figures were 7.38 and 65 of 232), so the switch restores the old path.
+- **A review fix on the branch (f73d069):** stutter_check judges a frame without its own pacing sleeps — the pacer
+  sleeps only when the game is ahead of real time, so a realign frame is the schedule holding, not a stutter. With
+  that, the committed check PASSes the fix end to end (8 of 222 seconds over 25 ms, readback 0.00) and still FAILs
+  the unfixed log on both bounds. The Result's open question 2 is thereby answered: the bound stands, the pacing is
+  taken off.
+- **Open question 1 (one-frame-old depth and the lens flare) stays with Erik:** watch a race for flare flicker as
+  the sun passes behind scenery. Open question 3 (a windowed baseline sturdier than "to the digit") is a tools
+  follow-up for the Mac session. The brief's premise was wrong (block transfers never reach the readback; the depth
+  write-back was the stall) and the worker's characterization-first order caught it — the brief's design 2 applied
+  to the right call.
+- The stutter probe logs are under out/077/ and out/stutter_check/ on the rig.
