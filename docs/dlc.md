@@ -29,6 +29,23 @@ executable.
   downloaded in-game was tied to the console that downloaded it. The port answers both calls from the framework's
   HLE (hle_system.cpp, hle_adhoc.cpp), so a bound pack would need the binding console's values, which nobody has; an
   unbound pack needs nothing.
+- **The keys and the cipher** (read with the community's converter, https://gitlab.com/thp/wipeout-pure-dlc2dlc,
+  and the executable). The two tables `FUN_088a7ee0` hands the decoder are an RSA public key: a 256-byte modulus at
+  `DAT_08aaccf4` and the exponent 65537 at `DAT_08aacbf4`. The trailer is a signed block the game recovers with that
+  key (`FUN_088a9680`, `FUN_088a9fb0`); only Sony's private key can make one, so a pack cannot be re-signed for
+  another region. The payload is an 8-round XTEA stream cipher under a 16-byte key of the pack's own, held in the
+  block (the converter's `crypt_with_key`: the keystream from `0x12345678` and the file offset in 8-byte blocks). The
+  payload check `FUN_088a3890` streams the whole file through a hash in 8 KB pieces, so a pack with another pack's
+  block fails it; the converter's README names the two instructions a cwcheat patch skips for that (US
+  0x200A45F4 and 0x200A4690: 0x088A45F4 and 0x088A4690, inside the hash context's set-up `FUN_088a4610`).
+- **Regions.** The packs are per region in every respect: the folder's game ID, the RSA key, the per-pack cipher
+  keys, and the WAD compression: the European game (UCES-00001, the newest build) packs with zlib, which the US and
+  Japanese builds cannot read, so the converter refuses a European source outright. The US packs, by the
+  community's key list: `UCUS98612DCLASSICPACK1` to `3`, `DDELTAPACK1` and `2`, `DGAMMAPACK1` to `3`,
+  `DPAKDAXTER`, `DPAKJAKX`, `DPAKSOCOM3`, `DPAKSOCOMFTB` (twelve). The set Erik found on 2026-10-12 ("WipEout
+  pure Complete DLC Pack") is the European one: nineteen `UCES00001D` folders, each `pi.wad`, `PARAM.SFO`
+  (CATEGORY MS, `SAVEDATA_TITLE` the pack's name), `TEST.BIN` (16 bytes, the listed save file), icons. The US game
+  never opens them (the name test), and could not read them if it did.
 - **The strings.** `Downloaded Ships`, `Downloaded ships not allowed` (ad hoc play with a pack ship against a console
   without it), `Download Check`, `Download Error`: the in-game browser's download flow, dead with Sony's server, not a
   part of loading.
@@ -47,6 +64,11 @@ real pack does on this port, which only a real pack can answer:
 
 ## The plan
 
+0. **The European set is not usable** (above). If the US set cannot be found, a fallback exists but is a
+   milestone, not a task: the payload deciphered with the published per-pack keys (a third-party file, never
+   committed), the zlib entries inflated by a port hook in the WAD reader or the WADs rebuilt with LZSS, the
+   signature check answered by a port hook at the two instructions above, and the folders renamed. Not planned
+   unless the US packs stay out of reach.
 1. **Erik obtains the US packs** (the PSP save-data folders, each with PI.WAD and PARAM.SFO) from the preserved
    copies and keeps them outside the repository, as the disc image is. PPSSPP first: the packs in its memory stick's
    `PSP/SAVEDATA/`, the game started, the Downloads screen and a pack track reached. That proves the files before the
