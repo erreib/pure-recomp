@@ -484,6 +484,15 @@ simplification task, then the enhancements. The session-by-session resume notes 
   green over it), the release page holding the Mac archive built at the tag (pure-recomp-0.1.0-macos-arm64.zip,
   29.5 MB, bundle check and archive scan PASS; out/release-0.1.0.log), SHA256SUMS and FFmpeg's source tarball (the
   LGPL offer). The Windows archive comes from the rig at the same tag (docs/release.md, "Publishing").
+  On the rig 2026-10-13: `tools/release_check.sh` PASS in 1.8 s (the six home findings were this machine's
+  paths and the hygiene commit's relative forms resolve here to the same directories); the warm ccache moved by hand
+  from the old repo-local `.ccache` to the new `$HOME/.cache/pure-recomp/ccache` default, 267 MB, so no cold corpus
+  rebuild.
+  The Windows 0.1.0 published 2026-10-13: packed detached at v0.1.0 (f31c1be, the tag fetched from GitHub; it is
+  not on the GitLab origin), `bundle_windows check` and `release_check.sh --archive` PASS, and
+  pure-recomp-0.1.0-windows-x64.zip (sha256 80f6d8f2...) uploaded to the GitHub release by `gh` (installed and
+  authenticated on the rig this day); the release's SHA256SUMS re-uploaded with the Windows line appended, since the
+  Mac's copy carried only its own zip and the FFmpeg source.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
