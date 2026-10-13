@@ -94,7 +94,7 @@ application names), or `PURE_DATA_DIR` when it is set:
 | `EBOOT.ELF` | the executable prepared from the image (3.6 MB) |
 | `disc.iso` | the copy of the image (241 MiB); absent when it is used in place, `settings.ini` then names where it is |
 | `settings.ini` | `disc_image=` and every setting of the Esc menu (docs/controls.md). `video.internal_scale` (the Video tab's Resolution) starts at `auto` for this game since task 067 (the framework's default is 2): the app draws at the display's resolution out of the box, 1920x1088 in the default window on a 2x display. A file that already holds a value keeps it, since the setting is the player's: a data directory an earlier build wrote holds `video.internal_scale=2` (every save writes every key) and stays at 2 until Resolution is set to Auto in the menu. `game.smooth_flashes` (the Video tab's Flashes, task 070, E6) is 1, Smooth, unless the player picks Original (0), `game.sixty_fps` (the Video tab's Frame rate, task 072, E4) is 1, 60 fps, unless the player picks Original (0), `game.sprite_upscale` (the Video tab's Text and sprites, task 073, E7) is 0, Original, since 2026-10-12 (D-018 as amended; builds through 0.1.0-56673a2 had 1, Upscaled) unless the player picks Upscaled (1), and `game.texture_detail` (the Video tab's Texture detail, task 075, E5) is 1, Enhanced, unless the player picks Original (0): a file without a key, an earlier build's included, reads as the default and gets the key at its next save |
-| `ms0/` | the memory stick: saves in `ms0/PSP/SAVEDATA/` |
+| `ms0/` | the memory stick: saves in `ms0/PSP/SAVEDATA/`, and the download packs the player installs beside them (`ms0/PSP/SAVEDATA/UCUS98612D<PACK>`; [Download packs](#download-packs-task-077)) |
 | `pipeline_cache.bin`, `pipeline_keys.bin` | the Vulkan path's pipeline cache, when it has run |
 
 After a copying setup the directory holds about 245 MiB: the image, 252,968,960 bytes (241 MiB), the 3.6 MB executable
@@ -167,6 +167,32 @@ from their own disc, on a Mac, since the scaler is the Metal backend's.
   what is loaded (`48 textures, ...`). The Text and sprites row does nothing under the Vulkan renderer (its help says
   so); the Texture pack row is the switch there. Under the Metal shell neither the Texture pack row nor the import is
   offered: the Metal backend upscales by itself and draws no pack.
+
+## Download packs (task 077)
+
+The game's download packs (docs/dlc.md: the twelve US packs, 62 MB) are the game's data, like the disc image: neither
+the app, the zip, the Windows folder nor this repository carries them, and the bundle checks' name and content
+rules would find a `PARAM.SFO` or a `.wad` in an archive. A player who has them installs them on the data directory's
+memory stick, beside the saves, where the game finds them at its next start:
+
+- in the game (since task 078): Esc, System, and in the Download packs section "Install download packs…". The file
+  browser opens at the home folder: open a pack's folder, or go to the folder holding the packs (a PSP stick's root or
+  its `PSP/SAVEDATA` will do) and pick "Import from this folder"; the next screen names each pack it found ("Gamma
+  Pack 1 (UCUS98612DGAMMAPACK1)"); "Import these saves" copies them, and "Restart now" starts the game again with
+  them. The section counts the packs on the stick ("12 of 12 installed") and lists each, Installed or Not installed.
+  All twelve US packs import (docs/dlc.md, "In the menu (task 078)");
+- with `tools/dlc_install.sh PACKS` from a checkout (the app's data directory by default, `--data-dir DIR` for
+  another; it checks each folder's name, PI.WAD and PARAM.SFO first, and skips a pack already there unless
+  `--replace`);
+- or by hand: the folders copied into `~/Library/Application Support/pure-recomp/PureNative/ms0/PSP/SAVEDATA/` on
+  macOS, `%APPDATA%\pure-recomp\PureNative\ms0\PSP\SAVEDATA\` on Windows (or under `PURE_DATA_DIR`), one
+  `UCUS98612D<PACK>` folder each.
+
+Export save… and Back up saves… leave the packs out: they are the game's data, not the player's saves.
+
+With the packs, LEAGUE SELECTION lists CLASSIC 2, DELTA and GAMMA under ALPHA and TEAM SELECTION adds ICARAS; the boot
+to MAIN MENU takes 0.2 to 0.4 s longer headless (the game opens every pack at start-up). `tools/dlc_check.sh --packs
+PACKS` checks a set on a scratch stick (README.md).
 
 ## Limits
 

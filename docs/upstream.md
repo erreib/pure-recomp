@@ -28,6 +28,7 @@ it uses.
 | 0018-vulkan-effects-at-1x | no | 0002 to 0004 and 0010 to 0015 (the renderer lines it changes; tried in task 068 on the pin: it applies on those, not on 0002 to 0004 alone) | 0003 (the framebuffer textures, the depth write-back), 0004 (`display_image`), 0012 (the mip rule), 0014 (the 16-bit pixel scale), 0015 (the placement) |
 | 0019-game-option-rows | no | 0016 and 0017 (the menu, profile and settings lines it sits beside; tried in task 070 on the pin plus 0003, 0004, 0016 and 0017: it applies, and not without 0017) | 0016 (`choice_row` through the dump's `ChoiceRow`) |
 | 0020-vulkan-texture-detail | no | 0012, 0015, 0018 and 0019 (the renderer, ge.frag and profile lines it edits; read from the code in task 076, not tried patch by patch) | 0012 (`mip_levels`, the level rule), 0018 (`drawn_extent`), 0019 (`settings::game_option`) |
+| 0021-content-packs | no | 0016 (the menu lines around the save rows that it adds its section after, `dump_row("[save rows]")`; tried in task 078 with `patch` on the pin plus 0003, 0004 and 0016: it applies) | 0016 (`dump_row`, `dump_detail` and the dump's row objects) |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -153,12 +154,6 @@ per-game choice the framework does not know (a frame-rate unlock, a skip of an i
 use it instead of an environment variable alone. Needs 0016's menu lines (the dump's row objects) and applies on 0017;
 offer it after them. Upstream may prefer the value as text (the choice's own name) rather than an index in the file.
 
-## Ours only
-No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
-readers for early recordings (0004); comments that cite this repo's tasks, fidelity differences and old patch
-numbers. If a future patch is ours only (a test hook, a seam only our profile uses), it stays a patch of its own so
-that this list stays true.
-
 ### 0020-vulkan-texture-detail: candidate, behind a profile field
 Texture detail at the internal scale (D-019): a game names, in `GameProfile::texture_detail_option`, the game option
 (patch 0019-game-option-rows) whose choice 1 asks the renderer to pick each mipmapped 3D draw's level for the pixels drawn rather than
@@ -167,8 +162,25 @@ through `textureGrad` with an anisotropic sampler (`samplerAnisotropy` when the 
 framework's games are untouched; with the option off the path is the old one to the pixel. Any port drawn above 1x
 gains from it. Needs 0012, 0018 and 0019.
 
+### 0021-content-packs: candidate
+Content packs as a kind of save folder (task 078): a profile marks a folder the game loads as content, such as a
+download pack (`SaveFolder::content_pack`), and names the System tab's section for them
+(`GameProfile::content_packs_label`), which shows how many the memory stick holds, each by name, and a row that opens
+Import's folder browser (`ui::open_import()`); Export and Back up saves leave content packs out; and Import skips, for a
+content pack only, a SAVEDATA_FILE_LIST entry that is not a printable name, which seven of Wipeout Pure's twelve US
+download packs carry (consoles took them). Nothing marked and no label: every screen, export, backup and import check
+is as before, so the framework's games are untouched. Any port of a game with download content gains a place for it
+that is not the saves. Needs 0016's dump rows; offer it after 0016. Upstream may prefer the relaxation as a flag of its
+own rather than tied to `content_pack`, and the count's text from the profile.
+
+## Ours only
+No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
+readers for early recordings (0004); comments that cite this repo's tasks, fidelity differences and old patch
+numbers. If a future patch is ours only (a test hook, a seam only our profile uses), it stays a patch of its own so
+that this list stays true.
+
 ## An order to offer them in
 0001; 0006; the kernel part of 0005; 0002; the standalone renderer fixes of 0003 (exact target, alpha test numbers,
 shutdown order); 0008; the rules of 0009; the stencil, shadow volume and dual-source part of 0003; 0007's no-key
-mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list, 0016, 0017, 0019 and 0020 after them; the depth
-write-back of 0003 behind a profile switch.
+mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list, 0016, 0017, 0019, 0020 and 0021
+after them; the depth write-back of 0003 behind a profile switch.

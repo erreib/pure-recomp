@@ -1,0 +1,17 @@
+# MAIN MENU -> SINGLE PLAYER -> SINGLE RACE -> VECTOR -> DELTA (a download pack's league) -> its first track,
+# IRIDIA -> FEISAR -> race, Cross held from the countdown (task 077; docs/dlc.md, docs/tracks.md). Follows
+# main_menu.txt (MAIN MENU at ~4450, a new profile saved to P0000) on a fresh stick holding the twelve US packs
+# (tools/dlc_install.sh), where LEAGUE SELECTION lists ALPHA, CLASSIC 2, DELTA and GAMMA: DELTA is two DOWN presses
+# at 5180, 5210 (30 flips apart, as tools/campaign_sweep.py picks a league), and the confirms are single_race.txt's:
+# league 5300, track 5500, team 5700, Cross held from 6100. Measured on a frame series (2026-10-12, headless on Metal):
+# TRACK SELECTION by 5350, TEAM SELECTION by 5550, the race HUD by 6000, GO at about 6250. tools/dlc_check.sh joins it
+# after main_menu.txt and takes its shots every 100 flips from 7100 to 7600.
+4700:pad a
+4900:pad a
+5100:pad a
+5180:pad dpdown
+5210:pad dpdown
+5300:pad a
+5500:pad a
+5700:pad a
+6100:pad a 3000

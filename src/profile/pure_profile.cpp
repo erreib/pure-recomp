@@ -23,13 +23,31 @@ void register_audio_capture(HleRegistrar &hle);
 namespace {
 
 // Save folders the executable itself names: profiles are "UCUS98612P%04d" (PROFILE.BIN + PARAM.SFO + ICON0.PNG),
-// ghosts "UCUS98612G%x", and download packs "UCUS98612D<PACK>" (PI.WAD), which is the door DLC walks through later.
+// ghosts "UCUS98612G%x", and download packs "UCUS98612D<PACK>" (PI.WAD + PARAM.SFO + TEST.BIN, docs/dlc.md).
+// This list is the save transfer's and the Esc menu's save screen's only (save_transfer.cpp): Import accepts a folder
+// by these names and the screen shows the description; the game's own save-data calls name their folders themselves.
+// The twelve US packs follow the profiles (task 077), each with its PARAM.SFO's SAVEDATA_TITLE (Delta 1's "Delat"
+// corrected). A pack is the game's data, not the player's save: exported is false, and content_pack (task 078, patch
+// 0021-content-packs) puts it in the System tab's Download packs section instead of among the saves, leaves it out of
+// Export and Back up saves, and lets Import skip the file list entry that names no file in seven of the twelve.
 constexpr SaveFolder kSaveFolders[] = {
     {"UCUS98612P0000", "Profile 1", true},   // the game's list starts at P0000 (task 014)
     {"UCUS98612P0001", "Profile 2", true},
     {"UCUS98612P0002", "Profile 3", true},
     {"UCUS98612P0003", "Profile 4", true},
     {"UCUS98612P0004", "Profile 5", true},
+    {"UCUS98612DCLASSICPACK1", "Classic Pack 1", false, true},
+    {"UCUS98612DCLASSICPACK2", "Classic Pack 2", false, true},
+    {"UCUS98612DCLASSICPACK3", "Classic Pack 3", false, true},
+    {"UCUS98612DDELTAPACK1", "Delta Pack 1", false, true},
+    {"UCUS98612DDELTAPACK2", "Delta Pack 2", false, true},
+    {"UCUS98612DGAMMAPACK1", "Gamma Pack 1", false, true},
+    {"UCUS98612DGAMMAPACK2", "Gamma Pack 2", false, true},
+    {"UCUS98612DGAMMAPACK3", "Gamma Pack 3", false, true},
+    {"UCUS98612DPAKDAXTER", "Daxter Pack", false, true},
+    {"UCUS98612DPAKJAKX", "Jak X Pack", false, true},
+    {"UCUS98612DPAKSOCOM3", "Socom 3 Pack", false, true},
+    {"UCUS98612DPAKSOCOMFTB", "Socom FTB Pack", false, true},
 };
 
 void return_zero(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 0u); }
@@ -184,6 +202,8 @@ const GameProfile &game() {
 
         .save_game_name = "UCUS98612",
         .save_folders = kSaveFolders,
+        // The System tab's section for the packs (task 078): the count installed, each pack, "Install download packs…".
+        .content_packs_label = "Download packs",
         .player_name_label = "Pilot name",
         .default_player_name = "Pilot",
 

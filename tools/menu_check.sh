@@ -22,8 +22,10 @@
 # where it does nothing until a texture pack exists) and Texture detail (task 075; game.texture_detail, locked by the
 # run's PURE_TEXTURE_DETAIL=0; shown under the Vulkan shell too, which draws the PSP's levels until its own task),
 # all tools/purelib/port.py's pin (the game's row is not called
-# Frame rate: under the Vulkan shell that is the renderer's frame-rate cap). A `*` in a list matches any text (the
-# device's name).
+# Frame rate: under the Vulkan shell that is the renderer's frame-rate cap). Both: the System tab's Download packs
+# section after the save rows (task 078, patch 0021-content-packs): the count row, its value in parentheses ("N of 12
+# installed", N whatever the checkout's game/ms0 holds), the twelve pack rows as one entry and the install row. A `*`
+# in a list matches any text (the device's name, the count).
 # Waits up to 600 s while another PureNative runs (one game at a time). Prints `menu_check: PASS` or each tab's
 # differences and `menu_check: FAIL`; exit 0 only on PASS.
 set -u
@@ -101,7 +103,8 @@ expected = {
                                      "Touch camera speed"])
                 + ["Use the classic keyboard layout"],
     "System": ["Resume", "Pause the game when the menu opens", "Open the data folder", "Set up game data again…",
-               "Quit game", "[save rows]", "Wipeout Pure Native", "Game", "Data folder", "Saves folder",
+               "Quit game", "[save rows]", "Download packs (* of 12 installed)", "[content pack rows]",
+               "Install download packs…", "Wipeout Pure Native", "Game", "Data folder", "Saves folder",
                "Graphics (%s on *)" % ("Metal" if metal else "Vulkan"), "Interface"],
 }
 

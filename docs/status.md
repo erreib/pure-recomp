@@ -113,10 +113,11 @@ simplification task, then the enhancements. The session-by-session resume notes 
 
 ## Resume
 
-- **Branches.** `main` = the commit below (Erik's twentieth fast-forward, 2026-10-12: tasks up to 076, M1 to M9,
-  the Windows bring-up with its icon, the billboard fix, the Esc menu by capability, E3 native resolution, E6 smooth
-  flashes, E4 the 30-fps modes free-running, E7 the menu art upscale behind a row that defaults to Original, and E5
-  texture detail on both renderers done, twenty patches by topic). `batch/m2` is the integration branch, equal to `main` at this point; every task branches
+- **Branches.** `main` = the commit below (Erik's twenty-first fast-forward, 2026-10-12: tasks up to 078, M1 to
+  M9, the Windows bring-up with its icon, the billboard fix, the Esc menu by capability, E3 native resolution, E6
+  smooth flashes, E4 the 30-fps modes free-running, E7 the menu art upscale behind a row that defaults to Original,
+  E5 texture detail on both renderers, and the US download packs installed, checked and offered in the Esc menu
+  done, twenty-one patches by topic). `batch/m2` is the integration branch, equal to `main` at this point; every task branches
   from it (`git switch -c task/NNN-slug batch/m2`). Remote: `origin` = Erik's private GitLab
   (https://dev.eriksmedia.com/erreib/pure-recomp.git); Erik alone pushes.
 - **The gate.** `tools/verify_task.sh NNN` reruns a brief's Verify from the main checkout; `tools/frame_regress.sh`
@@ -161,8 +162,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   zip in out/release-macos/dist. It has E3 (Auto resolution), the trimmed Esc menu, the billboard fix, E6 (the
   Flashes row, Smooth by default), E4 (the 30 fps modes row, 60 fps by default) and E7 (the Text and sprites row,
   Upscaled by default in that build, and the sprite dump that builds the texture pack; a settings.ini an earlier
-  build wrote lacks the keys and so reads the defaults). Repacked again 2026-10-12 from the task 075 merge (`--check out/075-bundle` PASS; out/repack-075.log): the Text and
-  sprites row defaults to Original and the Texture detail row (E5, Enhanced by default) is in.
+  build wrote lacks the keys and so reads the defaults). Repacked again 2026-10-12 from the task 075 merge (out/repack-075.log), the task 076 merge (out/repack-076.log) and
+  the task 078 merge (`--check out/078-bundle` PASS; out/repack-078.log): Wipeout Pure 0.1.0-16f16d1 at
+  out/release-macos/stage has the Text and sprites row at Original, the Texture detail row (E5, Enhanced by
+  default, both renderers) and the Download packs section of the System tab (task 078).
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
@@ -269,7 +272,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   lane reruns its 0 captures whenever a pipeline was made (a stall threshold would be quieter, and the rig's
   load-boundary drift above wants the same treatment); a count of the
   enhanced draws on the Vulkan renderer's perf line.
-- **The rig's race stutter (task 077, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
+- **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
   frames over budget — unchanged by vsync mode (FIFO/mailbox), audio on/off and internal scale (the drain, not the
@@ -364,6 +367,26 @@ simplification task, then the enhancements. The session-by-session resume notes 
   stalls in `display` while the scanner reads it — run twice before believing a first run). FP contraction stays
   clang-only by design; any future FMA-enabling flag must bring `-ffp-contract=off`. Upstream candidate of the
   first order: every Windows port of the framework compiled its corpus without inlining until this patch.
+- **DLC, the download packs** (Erik's pick 2026-10-12 after E5; docs/dlc.md, D-005 closed; the Mac line — its task
+  numbers 077 and 078 are 077-download-packs and 078-download-packs-menu, minted concurrently with this file's
+  Windows 077/078 above; the slugs disambiguate). The planning session
+  read the game's loader (the frontend root lists the stick, opens every `UCUS98612D*` folder's PI.WAD, checks its
+  RSA-signed trailer with the region keys and a console binding, mounts it as a WAD device), found the European set
+  Erik first had unusable (its own signatures and zlib), and with the US set on a scratch stick found the packs
+  load unchanged. **Task 077 merged (2026-10-12): the packs installed and checked.** The profile lists the twelve
+  pack folders (the save screen names them, Import accepts them by name), `tools/dlc_install.sh` copies a player's
+  packs onto the stick after checking them, `tools/dlc_check.sh --packs DIR` boots with the twelve (164 opens),
+  sees the league and team screens change, races Gamma, Delta and Classic 2 tracks with the HUD (Exostra Run and
+  the others, 5 to 8 MB allocated), and measures the boot cost (2.4 s against 2.2 s). Gate: dlc_check PASS, suite
+  18/18, save round trip PASS, docs (out/077_gate.log). **Task 078 merged (2026-10-12): the Esc menu's Download packs section.** Patch
+  0021-content-packs: a profile marks content-pack folders and names their section; the System tab shows "Download
+  packs (N of 12 installed)", a row per pack and "Install download packs…", which opens Import's browser; Import
+  skips a file-list entry that is not a name for a content pack (all twelve import now), and backups and exports
+  leave packs out; the check drives the import in a Metal window (twelve found, twelve imported). Gate: dlc_check
+  PASS, menus PASS both shells (15 System rows), suite 18/18, Metal window suite 7/7, save round trip, 21 patches
+  (out/078_gate.log). Open: a pack-aware profile is 69 KB against 41 KB and its loading without the packs is untried; PROFILE
+  > DELETE may list the packs; no PPSSPP reference with packs; the rig untested; the other regions' packs a later
+  milestone (converter, hash hook, zlib).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

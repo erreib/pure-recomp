@@ -18,7 +18,7 @@ save, named game name + save name, files flat in the folder as on a PSP memory s
 | `UCUS98612P0000` (`P%04d`, 0000 to 0004) | profile NEW (save question YES) and PROFILE > SAVE: LISTSAVE | `PARAM.SFO` 4912, `PROFILE.BIN` 41586 (41570 bytes of data, enciphered; 41570 plain before task 045), `ICON0.PNG` 6742, `ICON1.PMF` 51200, `PIC1.PNG` 172944, `SND0.AT3` 97604 |
 | `PPCD00001DLS001` | first boot, before the PROFILE screen: AUTOSAVE of `DATA1.BIN`, then `DATA2.BIN` through sceIo | `PARAM.SFO` 4912, `DATA1.BIN` 784 (768 enciphered; 768 plain before task 045), `DATA2.BIN` 276 (the game's own file, plain), `ICON0.PNG` 1451 |
 | `UCUS98612G%x` | ghosts (time trial); not exercised yet | |
-| `UCUS98612D<PACK>` | download packs (`PI.WAD`), e.g. `UCUS98612DGAMMAPACK1`; never written by the game here | |
+| `UCUS98612D<PACK>` | download packs, never written by the game; the twelve US packs `UCUS98612DCLASSICPACK1` to `3`, `DDELTAPACK1` and `2`, `DGAMMAPACK1` to `3`, `DPAKDAXTER`, `DPAKJAKX`, `DPAKSOCOM3`, `DPAKSOCOMFTB`, listed by the profile since task 077 (below) | `PI.WAD` or `pi.wad` (0.1 to 11.5 MB), `PARAM.SFO` 4912, `TEST.BIN` 16, `ICON0.PNG` 1440, `PIC1.PNG` 21040 |
 
 The game's parameter block is 0x5DC bytes, the firmware 1.x layout with no key field. A PSP writes such a save in the
 save-data utility's no-key mode (mode 1, below), and since task 045 so does the port: `PROFILE.BIN` is enciphered,
@@ -149,7 +149,24 @@ At boot, before the intro movie, the game lists `ms0:/PSP/SAVEDATA/` and opens `
 (0x80010002, no such file) and the game moves on: nothing else touches the folder, the profile loads and shows,
 PROFILE > SAVE still writes `P0000`, the recursive `ms0:` walks list the folder like any other, and the run reaches
 its last frame. The folder is not in the game's LISTLOAD list (`P0000..P0004`), so it cannot appear among the
-profiles. Real packs (`PI.WAD`, XTEA plus a signature trailer, docs/research.md) are for later.
+profiles.
+
+The twelve US packs load unchanged (task 077, docs/dlc.md "In the port (task 077)"): the game opens and checks each
+PI.WAD at start-up, its leagues and its ship appear in the menus, and its tracks race. Two things change on the save
+side:
+- **The profile grows** to 68874 bytes of data with the packs on the stick (`PROFILE.BIN` 68890 enciphered), against
+  41570 without, presumably the records of the packs' tracks (the contents were not read).
+- **The profile lists the packs** (src/profile/pure_profile.cpp, `kSaveFolders`, each with its pack's title,
+  `exported` false and, since task 078, `content_pack`), which only the save transfer and the Esc menu read
+  (`save_transfer.cpp`, `save_screen.cpp`, `menu.cpp`): the game's own save-data calls name their folders themselves,
+  so nothing the game does changed (the frame regression suite and the save round trip pass as before). Export save…
+  and, since task 078 (patch 0021-content-packs), Back up saves… leave the packs out: they are the game's data, not
+  the player's save. The System tab's Download packs section shows them instead (docs/dlc.md, "In the menu (task
+  078)").
+
+`tools/dlc_install.sh` copies packs onto a stick (docs/release.md, "Download packs"). By the code (`list_entries` in
+`hle_savedata.cpp`; not tried in a run), PROFILE > DELETE's list (mode 7) names every `UCUS98612*` folder on the stick,
+so the installed packs too.
 
 ## The PSP's format: mode 1 (task 045)
 
@@ -200,6 +217,15 @@ side is replaced by the copy: move it aside first if it is to be kept (the menu'
 `PSP/SAVEDATA/.backup/`). Renaming a folder to another slot was not tried: PARAM.SFO names the folder too, and its
 hash covers that. `PPCD00001DLS001` (the online system's info) need not be copied: every side writes its own at first
 boot.
+
+Download packs move the same way, a folder each (`UCUS98612D<PACK>`). In the port they go in through the System tab's
+Download packs section (task 078): "Install download packs…" opens this same import, and its check
+(`check_save_folder`) passes all twelve US packs. Seven of them list first in their PARAM.SFO's file list an entry that
+is no file name (four bytes, a PSP address, then zeros); for a folder the profile marks as a content pack such an
+entry is skipped (patch 0021-content-packs), where before task 078 it was refused with "NAME is missing." (docs/dlc.md,
+"In the menu (task 078)"). Import save… takes them as well, and `tools/dlc_install.sh` installs them from a checkout.
+Export save… and Back up saves… leave packs out: a backup of a stick holding a profile and the twelve packs holds the
+profile alone (`tools/dlc_check.sh`'s import step).
 
 ## Running the check
 

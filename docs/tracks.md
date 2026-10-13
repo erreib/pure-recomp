@@ -367,6 +367,32 @@ follower's 0.8 s lag, not a halt); Zone 2 to 4 run to SHIP DESTROYED with TOTAL 
 3 at Vector). The runs, the tries with other follower settings and the Zone panel's reading fix:
 [the record](history/tracks.md#runs-of-the-other-leagues-and-the-zone-tracks-task-032).
 
+## The download packs' leagues (task 077)
+
+With the twelve US download packs on the stick (docs/dlc.md; `tools/dlc_install.sh`), a new profile's LEAGUE SELECTION
+(Single Race, Vector) lists ALPHA, CLASSIC 2, DELTA and GAMMA, and TEAM SELECTION adds ICARAS after HARIMAU (the
+spike, 2026-10-12, headless on Metal). Each pack league's panel names its four tracks, and its TRACK SELECTION lists
+them:
+
+| League (DOWN) | Tracks, in menu order | Route | Track Allocated (first track) |
+|---|---|---|---|
+| Classic 2 (1) | VOHL SQUARE, PORTO KORA, ODESSA KEYS, ALTIMA VII | `config/pad_scripts/classic2_race.txt` | 5003 KB |
+| Delta (2) | IRIDIA, ANULPHA PASS, KOLTIWA, KHARA DESCENT | `config/pad_scripts/delta_race.txt` | 5826 KB |
+| Gamma (3) | EXOSTRA RUN, UBERMALL, SEBENCO PEAK, STATEN PARK | `config/pad_scripts/gamma_race.txt` | 7821 KB |
+
+The routes follow `config/pad_scripts/main_menu.txt` on a fresh stick and are single_race.txt with the league's DOWN
+presses at 5180, 5210, 5240 (30 flips apart, as the sweep picks a league): the league confirmed at 5300, TRACK
+SELECTION up by 5350, the first track confirmed at 5500, TEAM SELECTION by 5550, FEISAR at 5700, the race HUD by 6000,
+GO at about 6250, Cross held from 6100 (frame series of all three, 2026-10-12). `tools/dlc_check.sh` races each to flip
+7630 and finds the HUD in its shots from 7100 to 7600. The sweep (`tools/campaign_sweep.py`) knows none of these
+tracks: no MODES cells, steering tables or racing lines yet.
+
+The spike's route went through the menus twice, after a WARNING ("autosave will be disabled until the profile is
+saved from within the profile menu") that a Cross returned from to MAIN MENU. That warning is the answer NO to SAVE
+PROFILE, not a pack league's: the spike's stick held five profiles, so the YES of main_menu.txt found no free slot,
+the question stayed up, and the league's DOWN presses moved it to NO (docs/dlc.md, "In the port (task 077)"). On a
+stick with a free slot the route above is the whole of it.
+
 ## Recording a human lap (Erik's line)
 
 Where the follower cannot drive a track (Sinucit's fork, Manor Top's bend, the long Beta tracks on a bad grid), a

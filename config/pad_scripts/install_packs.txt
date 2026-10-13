@@ -1,0 +1,67 @@
+# The download packs' import through the Esc menu (task 078, tools/dlc_check.sh's import step). A window only: the
+# menu and its file browser are the interface's. On a memory stick holding a profile and no pack, with HOME (on
+# Windows USERPROFILE) pointed at a folder whose PSP/SAVEDATA holds the twelve packs, since the browser opens there.
+# Boot to the title (frontend.txt's steps before PRESS START), Escape opens the menu (PURE_MENU_DUMP prints its tabs:
+# "Download packs (0 of 12 installed)"), Q the System tab on Resume; 23 Down presses pass Pause the game when the menu
+# opens, Open the data folder, Set up game data again..., Quit game, the five save rows, the Download packs row and
+# the twelve pack rows to "Install download packs..."; Return opens the browser at HOME, Return picks "Import from this
+# folder", End, Up, Up and Return press "Import these saves". Escape back to the System tab, on Import save...; Down,
+# Down and Return open Back up saves..., Down and Return back up to the backups folder (the data directory's
+# save-backups/, a folder named by the time). Escape twice closes the menu; Escape opens it again for a second dump
+# ("12 of 12 installed") and Escape closes it. While the paused menu is open the script counts the menu's frames, so
+# the run's flips stop at about 2100 until the menu closes; the check ends the run at flip 2300.
+700:pad a
+1600:pad a
+1650:pad a
+1750:shot title
+2100:key Escape
+2140:key Q
+2160:shot system
+2170:key Down
+2178:key Down
+2186:key Down
+2194:key Down
+2202:key Down
+2210:key Down
+2218:key Down
+2226:key Down
+2234:key Down
+2242:key Down
+2250:key Down
+2258:key Down
+2266:key Down
+2274:key Down
+2282:key Down
+2290:key Down
+2298:key Down
+2306:key Down
+2314:key Down
+2322:key Down
+2330:key Down
+2338:key Down
+2346:key Down
+2360:shot install_row
+2370:key Return
+2410:shot browser
+2420:key Return
+2470:shot review
+2480:key End
+2490:key Up
+2500:key Up
+2510:shot before_import
+2520:key Return
+2560:shot imported
+2570:key Escape
+2600:key Down
+2610:key Down
+2620:shot backup_row
+2630:key Return
+2660:key Down
+2670:shot backup_screen
+2680:key Return
+2720:shot backed_up
+2730:key Escape
+2760:key Escape
+2830:key Escape
+2900:shot menu_again
+2910:key Escape

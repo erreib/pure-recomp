@@ -63,8 +63,9 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0018-vulkan-effects-at-1x | (task 068) | Fidelity | candidate, behind a profile switch | Each Vulkan target the size its stride gives (D-015, as the Metal backend draws): the internal resolution for a buffer at least 480 pixels wide, 480x272 for a narrower one (the bloom's buffers, the billboards'), so the bloom's blur and glow stay the PSP's at any scale; every pass, viewport, scissor, copy, blit and read-back takes the target's own size, and guest memory gets the centre pixel of each block |
 | 0019-game-option-rows | (task 070) | Missing feature | candidate | A game's own settings as menu rows: `GameProfile::options` (`GameOption`: key, label, choices, help, default, tab), each kept as an index in settings.ini (`game.<key>`), `<prefix>_<KEY>` deciding it for a run, `settings::game_option(key)` for the port, and a Game section at the end of the tab it names; no option, no section |
 | 0020-vulkan-texture-detail | (task 076) | Fidelity, enhancement | candidate, behind a profile field | Texture detail at the internal scale in the Vulkan renderer, as the Metal backend draws it: with the game option `GameProfile::texture_detail_option` names at 1, a draw that samples a texture with mip levels and is not a 2D draw has the GE's D lowered by 16 x log2 of its target's scale whatever the rule, and `ge.frag` samples that level through the coordinates' own gradients (`textureGrad`, `texture_params.x` bit 21) with an anisotropic sampler (`samplerAnisotropy`, at most 16 taps); no option named, or the option at 0, draws as before |
-| 0021-vulkan-async-readback | (task 077) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
-| 0022-vulkan-cached-window-capture | (task 078) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
+| 0021-content-packs | (task 078-download-packs-menu, the Mac line) | Missing feature | candidate | Content packs among a game's save folders: `SaveFolder::content_pack` marks a folder the game loads as content (a download pack) and `GameProfile::content_packs_label` names the System tab's section for them, after Saves: how many the memory stick holds, each pack Installed or Not installed, and "Install <label>…", which opens Import's folder browser (`ui::open_import()`); Export and Back up saves leave content packs out; Import skips a content pack's SAVEDATA_FILE_LIST entry that is not a printable name; nothing marked and no label, nothing changes |
+| 0021-vulkan-async-readback | (task 077-vulkan-readback-stutter) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
+| 0022-vulkan-cached-window-capture | (task 078-vulkan-effect-slowdowns) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
 | 0023-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
 | 0024-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
 | 0025-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
@@ -471,8 +472,29 @@ texture sets when the game names the option. `[render] texture detail: on` at th
 option, or with it at 0, the draws, the samplers and the pictures are as before (the Vulkan window suite's seven scenes
 to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`).
 
+### 0021-content-packs
+Task 078 (078-download-packs-menu, the Mac line's 078; D-005; docs/dlc.md, "In the menu (task 078)"). A game's download packs are save folders the game loads as
+content, and the framework had them only as save folders: listed among the saves, copied by Back up saves, and checked
+on Import as saves, where seven of Wipeout Pure's twelve US packs were refused ("NAME is missing.": the first entry of
+their PARAM.SFO's SAVEDATA_FILE_LIST is four bytes of a PSP address, 0x08xxxxxx, then zeros, and TEST.BIN, the file
+they hold, is the second). `host/profile.hpp`: `SaveFolder::content_pack` (false by default) marks such a folder, and
+`GameProfile::content_packs_label` (null by default) names the section that shows them. `host/save_data/`:
+`names_of_save_folders`, which the export's names and `saves_to_back_up` (the backup, its conflicts and the backup
+screen's text) read, skips content packs, so Export and Back up saves leave them out whatever `exported` says;
+`is_game_save_name` and `save_label` still take them, so Import does; `check_save_folder` skips, for a content pack
+only, a file list entry whose name up to its first NUL holds a byte outside printable ASCII (an empty name was already
+skipped for every folder), and checks the rest as before; `content_packs(memory_stick)` lists the profile's content
+packs in its order, each installed when its folder holds a PARAM.SFO (as `saves_to_back_up` counts a save; none while
+the memory stick is unknown). `host/ui/menu.cpp`: when the label is set, `Menu::system` draws after the Saves section
+`section(label)`, an `info_row(label, "N of M installed")` (the dump adds the count in parentheses), a
+`[content pack rows]` dump entry and one widgets `info_row` a pack (its description, "Installed" or "Not installed"),
+and a `button_row("Install " + the label in lower case + "…")` whose help says what to pick and which calls
+`ui::open_import()` (`host/ui/save_screen.{hpp,cpp}`: Import save…'s `open_browser(Stage::ChooseImport)`, on Android its
+picker), disabled while the memory stick is unknown. A game that marks nothing and names no label gets no section, the
+same exports, backups and import checks. Our profile marks the twelve US packs and names "Download packs".
+
 ### 0021-vulkan-async-readback
-Task 077. On a discrete GPU (the rig's RTX 3080) a race lost 9 to 16 ms a frame to `perf::Stall::Readback`: not the
+Task 077 (077-vulkan-readback-stutter). On a discrete GPU (the rig's RTX 3080) a race lost 9 to 16 ms a frame to `perf::Stall::Readback`: not the
 block-transfer readback the stall's name suggests (`read_back_framebuffer` never runs in Wipeout Pure's race; its block
 transfers are all main RAM to VRAM), but `write_back_depth`, which at every GE SIGNAL with a screen-wide depth buffer
 (once per race frame: the lens flare's CPU depth test, patch 0003-vulkan-renderer-fixes) submitted the half-recorded frame and waited for its
@@ -486,7 +508,7 @@ restores exactly. The start-up line says which (`a frame late` or `synchronous`)
 lag is what a game's CPU depth test sees, so a framework would want it per game or documented.
 
 ### 0022-vulkan-cached-window-capture
-Task 078. The input script's `shot` (a window capture, `write_capture`) copied the swapchain image into a buffer from
+Task 078 (078-vulkan-effect-slowdowns). The input script's `shot` (a window capture, `write_capture`) copied the swapchain image into a buffer from
 `find_memory_type(HOST_VISIBLE | HOST_COHERENT)`, the first such type, which on NVIDIA is uncached, and `write_bmp`
 then read it a byte at a time: 110 to 160 ms a capture on the rig, a long frame at every scripted shot (the "first-use
 present hitches" task 078 was opened for). The buffer now comes from a HOST_VISIBLE | HOST_COHERENT | HOST_CACHED type
