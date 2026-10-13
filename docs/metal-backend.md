@@ -834,14 +834,17 @@ the smaller of the two scales over each). Patch 0028-vulkan-orthographic-fit giv
 sprite upscale and texture detail above: a draw is 2D when it is in through mode, or transformed under an
 orthographic projection with lighting off. A through-mode draw's vertices are moved, as before; a transformed one has
 its clip x and y scaled by `fit_x`, `fit_y` after `viewport_into_clip` (clip (0, 0) is the screen's centre), in its
-transform and in its interpolation summary, and its scissor fitted with it. A draw into another framebuffer, a clear,
-a draw that samples a rendered picture (the bloom chain) and a draw at least 470 PSP pixels wide through its transform
-(the menus' white backdrop, a fade) stay spread with the 3D view. At 1260x540 the race HUD and the menus keep their
-proportions (`tools/aspect_check.sh` (e) and (f)). Not covered: the profile screens (PROFILE, SET NAME, SET TAG,
-flips 1800 to 4300 of the main_menu route) draw their panel art (the rules, the A-G RACING box, the logo, the memory
-stick) as one full-screen quad of a 512x512 CLUT8 texture in VRAM at 0x04179a40, 0 to 480 wide, which the width rule
-takes for a backdrop: under Fill it stays spread while the text and buttons over it are fitted. The Metal shell has no
-Fill yet (task 086).
+transform and in its interpolation summary, and its scissor fitted with it. A draw into another framebuffer, a clear
+and a draw that samples a rendered picture (the bloom chain) stay spread with the 3D view. So does a transformed draw
+at least 470 PSP pixels wide through its transform, unless it is textured and lies within the screen (2 PSP pixels of
+margin each side). The textured ones within the screen are layers of interface art: the profile screens (PROFILE, SET
+NAME, SET TAG, flips 1800 to 4300 of the main_menu route) draw their panel (the rules, the A-G RACING box, the logo,
+the memory stick) as one quad, 0 to 480, of a 512x512 CLUT8 texture in VRAM at 0x04179a40, and the title screen its
+logo as a 512x128 one at the same address; fitted, they line up with the text over them. The untextured ones (the
+menus' white backdrop, the fades) and the ones past the screen's edges (the race's fly-in glow, x -142 to 1571) are
+what should cover the window. Through-mode draws keep their vertex fit and its 470-pixel rule. At 1260x540 the race
+HUD and the menus keep their proportions (`tools/aspect_check.sh` (e) and (f)). The Metal shell has no Fill yet (task
+086).
 
 ## The Metal shell
 

@@ -184,12 +184,14 @@ tooling.
 ### 0028-vulkan-orthographic-fit: candidate
 Under Fill, the renderer's interface fit takes the 2D draws a game makes in 3D mode too: transformed, orthographic,
 lighting off (task 085). Their clip x and y are scaled about the screen's centre after `viewport_into_clip`, in the
-transform and in the interpolation summary alike; a draw at least 470 PSP pixels wide stays spread, as the through
-rule has it. Any game whose menus or HUD are orthographic draws (Wipeout Pure's all are) keeps its 2D at square pixels
-under Fill; a game whose 2D is through mode sees no change. `<prefix>_NO_ORTHOGRAPHIC_FIT` restores the through-only
-fit. Needs 0010; offer it after 0010 and 0020. The width rule cannot tell a screen-wide layer of interface art from a
-backdrop (Wipeout Pure's profile screens draw their panel as one full-screen quad), which upstream may want answered
-before it takes the rule.
+transform and in the interpolation summary alike. A draw at least 470 PSP pixels wide stays spread (a backdrop, a
+fade, an effect past the screen's edges) unless it is textured and lies within the screen, 2 pixels of margin each
+side: a layer of interface art drawn as one full-screen quad (Wipeout Pure's profile screens and title logo), which
+must line up with the fitted text over it. Any game whose menus or HUD are orthographic draws (Wipeout Pure's all are)
+keeps its 2D at square pixels under Fill; a game whose 2D is through mode sees no change. A full-screen textured
+picture meant as a backdrop would be fitted too, with the clear colour beside it; upstream may want a profile switch
+for that before it takes the rule. `<prefix>_NO_ORTHOGRAPHIC_FIT` restores the through-only fit. Needs 0010; offer it
+after 0010 and 0020.
 
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
