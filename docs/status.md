@@ -167,6 +167,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   the task 078 merge (`--check out/078-bundle` PASS; out/repack-078.log): Wipeout Pure 0.1.0-16f16d1 at
   out/release-macos/stage has the Text and sprites row at Original, the Texture detail row (E5, Enhanced by
   default, both renderers) and the Download packs section of the System tab (task 078).
+  Repacked 2026-10-13 from f576ae3, the twenty-second fast-forward with the rig's stutter arc (`--check
+  out/pull22-bundle` PASS; out/repack-pull22.log): Wipeout Pure 0.1.0-f576ae3 at out/release-macos/stage carries
+  the async depth write-back on its Vulkan path and the audio and guest-split traces; the Metal path is as before.
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
@@ -397,6 +400,13 @@ simplification task, then the enhancements. The session-by-session resume notes 
   line had marked untried — and `tools/save_roundtrip.sh` PASS including its DLC-door run; docs_check passes. Still
   open from the Mac line's windows.md item: `tools/dlc_check.sh` on the rig needs the twelve pack folders copied
   from the Mac ($HOME/dlc-packs, 62 MB) — Erik's by hand, like playing with them (`tools/dlc_install.sh`).
+  Pulled on the Mac 2026-10-13 (Erik's twenty-second fast-forward, f576ae3): the five rig patches (0022-vulkan-async-readback to 0026-corpus-inlining) applied to the
+  Mac's vendor copy (`tools/patches.sh check`: 26), the profile rebuilt, and the gate for them run here
+  (out/pull22_gate.log): the headless suite 18/18, the Vulkan window suite 7/7 (zone_change 0.024 against the
+  column's 0.052, the windowed swing task 077 notes), `tools/hud_check.sh --shell vulkan` 61 of 61, and the new
+  `tools/stutter_check.sh` PASS on both shells with readback 0.00 ms a frame — Metal 4 of 200 seconds over 25 ms
+  (the worst at the race's end, flip 17975 at 142 ms), Vulkan 0 of 191. The async depth write-back (0022-vulkan-async-readback) is live
+  on the Mac's Vulkan path too; the flare's one-frame-old depth is the thing to watch by eye there.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
