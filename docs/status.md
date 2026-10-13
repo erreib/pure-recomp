@@ -387,6 +387,15 @@ simplification task, then the enhancements. The session-by-session resume notes 
   (out/078_gate.log). Open: a pack-aware profile is 69 KB against 41 KB and its loading without the packs is untried; PROFILE
   > DELETE may list the packs; no PPSSPP reference with packs; the rig untested; the other regions' packs a later
   milestone (converter, hash hook, zlib).
+- **The two lines merged on the rig (2026-10-13, merge f0b3c03).** The Mac's DLC work and the rig's stutter arc
+  branched from one base and minted task numbers 077/078 and patch number 0021 independently; the merge keeps both
+  task pairs (the slugs disambiguate; the colliding references in the docs now carry full slugs) and renumbers the
+  Windows patches to 0022-0026, the Mac's 0021-content-packs keeping its pushed name. The patch sets touch disjoint
+  vendor files; `tools/patches.sh check` reports 26. Gated on the rig after the merge: `tools/menu_check.sh --shell
+  vulkan` PASS with the System tab at 15 rows — the Download packs section draws on the Vulkan shell, which the Mac
+  line had marked untried — and `tools/save_roundtrip.sh` PASS including its DLC-door run; docs_check passes. Still
+  open from the Mac line's windows.md item: `tools/dlc_check.sh` on the rig needs the twelve pack folders copied
+  from the Mac ($HOME/dlc-packs, 62 MB) — Erik's by hand, like playing with them (`tools/dlc_install.sh`).
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
