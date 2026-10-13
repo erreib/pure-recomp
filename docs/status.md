@@ -479,6 +479,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
   0.1.0, BUILDINFO.txt "Built from: e91d443...". The read-mes name the source,
   https://github.com/erreib/pure-recomp; the notices name the repository and point at the read-me for the address,
   since the framework's packer refuses an app holding this Mac's user name, which is the GitHub account.
+  On the rig 2026-10-13: `tools/release_check.sh` PASS in 1.8 s (the six home findings were this machine's
+  paths and the hygiene commit's relative forms resolve here to the same directories); the warm ccache moved by hand
+  from the old repo-local `.ccache` to the new `$HOME/.cache/pure-recomp/ccache` default, 267 MB, so no cold corpus
+  rebuild.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
