@@ -21,6 +21,7 @@
 | D-017 | 2026-10-11 | E4: Time Trial, Free Play and Zone free-running at the display's rate (the frame object's lock byte set while the race backend lives), a "30 fps modes" row in the Esc menu, 60 fps by default; the checks run with it off; the frontend stays at 30 | accepted (Erik) |
 | D-018 | 2026-10-11 | E7: the menus' and HUD's bitmap art upscaled 4x at decode in the Metal backend (through-mode draws' palette textures, an edge-preserving resample), a "Text and sprites" row in the Esc menu, on by default then, off since 2026-10-12 (Erik's judgement of the picture); the checks run with it off; a texture pack from the same scaler for the Vulkan renderer and as the base for an AI pass, second | accepted (Erik) |
 | D-019 | 2026-10-12 | E5: texture detail at the internal scale: the mip level picked for the pixels drawn rather than the PSP's, anisotropic sampling on the mipmapped draws, a "Texture detail" row in the Esc menu, on by default; the checks run with it off; Metal first, the Vulkan renderer second | accepted (Erik) |
+| D-020 | 2026-10-13 | E2: the 3D view at the window's shape (the framework's Fill aspect) through a profile hook on the game's perspective builder and its horizontal half-FOV, since the game bakes 480/272 into code; the 2D interface at square pixels about the centre; Vulkan first, the Metal shell's Fill after | accepted |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -452,3 +453,74 @@ Alternatives: forcing level 0 everywhere (the shimmer of docs/fidelity.md differ
 blur-by-design on far scenery lost); a mip bias alone without anisotropy (the softness along a grazing wall stays);
 letting the GPU pick the level itself for the auto draws (ignores the game's slope draws, three of five).
 Status: accepted (Erik).
+
+## D-020  2026-10-13  E2: the 3D view at the window's shape (ultrawide)
+
+**Context.** Erik's pick after the DLC and the rig's stutter arc (2026-10-13): play at odd aspect ratios such as
+21:9. The framework has the mechanism on its Vulkan renderer already, the Aspect ratio row's Fill (vendor
+`VulkanRenderer`, `wanted_target_extent`, `interface_fit`): the target takes the window's shape, so a PSP pixel is
+wider than square, the game is told the picture's width over height once a frame through
+`GameProfile::view_aspect_frame` and is expected to draw its 3D view at that shape, and the 2D interface's draws into
+the shown framebuffer are pulled in about the screen's centre to square pixels again (through-mode draws narrower
+than 470 PSP pixels that do not sample a rendered picture). Fill is offered only when the profile has the hook
+(`supports_fill`). The Metal shell has no Fill (D-008's shell answers Original for it).
+
+The audit of the game (out/aspect/, Ghidra decompiles): Wipeout Pure keeps its camera's field of view in three floats
+at 0x08b1fb10 (degrees, 65 by default), 0x08b1fb18 (the tangent of half the vertical angle) and 0x08b1fb14 (the
+horizontal tangent, written as the vertical one times 480/272 by every writer: the Camera constructor at
+0x0883f9b0, the camera modes at FUN_088467f0, FUN_088473e4 (the start sequence, once a frame while it blends),
+FUN_08849970 and FUN_0884b400). The projection itself is built by FUN_08a31148(fovy in radians, aspect, near, far,
+y scale, frame object): m00 = cot(fovy/2)/aspect, m11 = cot(fovy/2), uploaded through the matrix setter
+FUN_088ee1a4 and copied back into the game's own projection at 0x08b18d80, which the CPU-side transforms read
+(FUN_0881e048, FUN_08820728: the lens flare's sun position among them). Six call sites pass the aspect: the race
+camera's apply FUN_0883ff34 passes the literal 1.7647059 (f13, a lui/ori immediate), the frontend's three 3D views
+(FUN_088b31c8, FUN_088c99d4, FUN_088c9ce8) the literal 0x3fe1e1e2, and FUN_08869290 passes 1.0 (a square view,
+left alone). Unlike the framework's own game, whose aspect sits in a camera object a memory write can change, the
+constant here is in code, so the hook has to be a function override. The runtime offers one: `Runtime::
+register_function(address, fn, name)` with a name that is not a generated unit's disables cross-unit chaining into
+that unit and routes every call through the function table, where the profile's function runs with the guest
+context; it can read and change the argument registers and then call the generated body
+(`Runtime::lookup_function`, saved before the registration). All six callers lie outside FUN_08a31148's 16 KiB
+unit, so all reach the override.
+
+**Decision.**
+1. The player's switch is the framework's Aspect ratio row, Fill; no new row. Fill does something only when the
+   window's shape differs from 480:272 (a resized window, or fullscreen on a 21:9 or 32:9 display).
+2. The profile implements `view_aspect_frame`: on the first call it saves the generated FUN_08a31148 and registers an
+   override at 0x08a31148 that replaces an aspect argument within 1e-4 of 480/272 (f13) by the view aspect of the
+   frame, then runs the generated body; other aspects pass unchanged. At each flip with an aspect other than 480/272
+   it writes 0x08b1fb14 = 0x08b1fb18 x aspect, so the game's own uses of the horizontal tangent follow; when the
+   aspect returns to 480/272 after a change it writes the PSP's value back once; at exactly 480/272 with nothing
+   changed before it writes nothing. The override is a profile function, not a vendor change (task 084).
+3. The 2D interface: Wipeout Pure's menus and HUD are transformed orthographic draws, not through mode (task 073's
+   finding), so the Vulkan renderer's fit rule gains "or orthographic and unlit", the sprite rule of E7, as a vendor
+   patch (task 085). Screen-wide draws (fades, backdrops) and draws that sample a rendered picture (the bloom chain)
+   stay spread, as the rule already says.
+4. The Metal shell and backend gain Fill: a target of the window's shape, the viewport scale per axis, the same fit
+   rule, `supports_aspect(Fill)` true, the shell presenting the whole target (task 086). Until then the hook is a
+   no-op on Metal, since the shell reports 480:272.
+5. A check (`aspect_check.sh` under tools/, task 084): a 21:9 window (a test-only `<prefix>_WINDOW_SIZE=WxH` on the Vulkan window's
+   creation, vendor, tooling), the race route twice, Original and Fill, the race_hud capture of each: the Fill
+   picture's central 480/272 over the window's shape of its width, scaled to 480x272, matches the Original capture
+   within a limit (the same vertical field of view), its outer strips hold the scene (not black, not a stretch of
+   the edge), and the draw count at the frame is reported for both (culling that follows the aspect draws more).
+6. What the player should see, by eye: at 21:9 the race shows more of the track to each side at the same height; the
+   HUD and menus keep their proportions; the lens flare sits on the sun; no objects appear late at the edges.
+
+**Consequences.** One profile override of a game function, the first in this port; a cost of per-PC dispatch for the
+16 KiB unit around 0x08a31148 (a few render helpers), to measure in the stutter check. The frontend's 3D previews
+(the ship and track views) widen too, which is right for a 3D view. The one-frame-late depth of patch
+0022-vulkan-async-readback is unrelated. Effects stay in guest space (the screen is still 480x272 to the game), so
+the bloom chain and the lens flare's depth read work unchanged. Culling that reads the horizontal tangent from
+memory follows the flip write; culling built otherwise would show as pop-in at the edges, which the check's draw
+count and Erik's eye would catch; the fix then is a second override at the culling function.
+
+**Alternatives.** Rescaling the projection in the renderer (m00 = m11/aspect for perspective matrices at the PSP's
+ratio): no game knowledge needed and both backends at once, but the game's CPU-side transforms keep the narrow
+projection, so the lens flare and any screen-space placement land off the sun by up to a quarter of the width, and
+culling never widens. Patching the code immediates: they are compiled into the recompiled units, so only a regen
+could change them. A new Esc menu row: the framework's row already says Fill.
+
+**Status.** Accepted 2026-10-13. Tasks 084 (the hook and the check, Vulkan), 085 (the Vulkan fit for orthographic
+draws), 086 (Metal Fill).
+
