@@ -454,6 +454,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   `tools/stutter_check.sh` PASS on both shells with readback 0.00 ms a frame — Metal 4 of 200 seconds over 25 ms
   (the worst at the race's end, flip 17975 at 142 ms), Vulkan 0 of 191. The async depth write-back (0022-vulkan-async-readback) is live
   on the Mac's Vulkan path too; the flare's one-frame-old depth is the thing to watch by eye there.
+- **Erik's play check (2026-10-13, the rig, the staged 0.1.0-f52bc3d).** Erik played the restaged build and
+  everything looked and sounded right: the audio clicks are gone with the dips (the stutter arc's last open
+  question — the sink's resync branch now starves quietly, task 081's fork stays demoted to polish), Fill showed
+  no late objects at the track edges (E2's culling question), and the lens flare showed no flicker from the
+  one-frame-old depth (task 077-vulkan-readback-stutter's by-eye item, closed). Still open by hand: the Explorer
+  icon look (task 071) and the DLC packs copied to the rig for `tools/dlc_check.sh`.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
