@@ -1,6 +1,6 @@
 # 084: The 3D view at the window's shape (E2, the game-side hook and the check)
 
-Milestone: E2 | Branch: task/084-ultrawide-view | Status: OPEN
+Milestone: E2 | Branch: task/084-ultrawide-view | Status: MERGED
 
 ## Goal
 Under the framework's Fill aspect the game draws its 3D view at the window's shape instead of a stretched 480:272:
@@ -244,4 +244,19 @@ docs_check: 34 files, 0 findings: PASS
 - **The switch's label.** README.md lists `PURE_WINDOW_SIZE` as run-control, "for the checks", because it shapes the window (the README's definition). The brief called it test-only.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged 89e82bf into batch/m2 (2026-10-13). Verify rerun on the merge from the main checkout (out/084_gate.log,
+out/aspect_check/summary.txt): aspect_check PASS in 4m 53s with cold pipeline caches ((a) 0.0793 between the
+HUD's bars, 0.0892 over the whole strip, a stretched picture 0.4652; (b) left 3884.5 / 0.6331, right 6222.5 /
+0.5239; (c) 865 transformed draws Original, 861 Fill; (d) race camera 289 calls 0 widened against 255 calls 255
+widened), the headless suite 18/18 to the digit, patches 27, docs_check PASS; then the Vulkan window suite 7/7
+(fp_hud 0.0488, zone_change 0.0522, within the window swing) and `tools/hud_check.sh --shell vulkan` 61 of 61.
+Spot-read: src/profile/aspect.cpp (the override, the `Registrations` replay of the corpus registration, the
+flip-time tangent write and its restore), patches/0027-window-size-switch.patch, tools/aspect_check.sh.
+Both departures accepted: `lookup_function` is private and include/psprecomp is closed, so the replay is the
+public route (a comment says why; if upstream opens the lookup it collapses to one line); installing the override
+only once a shape other than 480:272 is seen is what the brief's "nothing changes at Original" demands, now that
+the registration is known to move the dispatch counts. The 21:9 capture by eye: the vertical field of view kept,
+the track and stands continue to both sides, the HUD stretched as expected before task 085. Open: the culling
+question stands (the transformed draw counts moved by a few either way between runs, so they say nothing);
+Erik's eye in a 21:9 race decides, with D-020's second override as the remedy. The window-size switch is
+run-control in README.md's sense, as the worker labelled it.
