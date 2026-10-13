@@ -468,10 +468,13 @@ simplification task, then the enhancements. The session-by-session resume notes 
   BUILDINFO.txt naming a clean commit, and its tag for a release). On batch/m2 with the task: every rule PASS but
   home, six findings, all the rig's user folder in the planning session's files (the `win-x64` preset's
   `SDL3_ROOT`, the Windows `CCACHE_DIR` default in tools/env.sh, tools/ppsspp/ppsspp_ctl.py's PPSSPP path, three lines
-  of docs/setup.md), about 1 s; the history PASSES, 821 commits, 392 paths and 1646 file versions (45.7 MB) in
-  3.5 s, with no game file, key or token ever committed. `tools/bundle.sh` and `tools/bundle_windows.sh` name the
-  archives after the project version alone at the tag `v<version>` with a clean tree (`0.1.0-<commit>[-dirty]`
-  otherwise; a disagreeing tag stops the pack), BUILDINFO.txt keeping the full commit. The read-mes name the source,
+  of docs/setup.md), under 1 s; the history PASSES at e91d443, 823 commits, 393 paths and 1656 file versions
+  (46.0 MB) in 3.6 s, with no game file, key or token ever committed; `--archive` PASSES on the fresh
+  pure-recomp-0.1.0-e91d443-macos-arm64.zip (87 entries), whose `tools/bundle.sh --check out/087-bundle` passes all
+  eight. `tools/bundle.sh` and `tools/bundle_windows.sh` name the archives after the project version alone at the tag
+  `v<version>` with a clean tree (`0.1.0-<commit>[-dirty]` otherwise; a disagreeing tag stops the pack), BUILDINFO.txt
+  keeping the full commit: the dry run at a scratch tag v0.1.0 packed pure-recomp-0.1.0-macos-arm64.zip, Info.plist
+  0.1.0, BUILDINFO.txt "Built from: e91d443...". The read-mes name the source,
   https://github.com/erreib/pure-recomp; the notices name the repository and point at the read-me for the address,
   since the framework's packer refuses an app holding this Mac's user name, which is the GitHub account.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel

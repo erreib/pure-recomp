@@ -332,9 +332,13 @@ the files of HEAD, what a push publishes, and prints each finding as `FILE:LINE:
 2026-10-13 (task 087) on `batch/m2` plus the task: every rule PASS but home, with six findings, all the rig's user
 folder in files the planning session owns: the `win-x64` preset's `SDL3_ROOT` (CMakePresets.json), the Windows
 `CCACHE_DIR` default (tools/env.sh), PPSSPP's path (tools/ppsspp/ppsspp_ctl.py) and three lines of docs/setup.md. The
-history PASSES: 821 commits, 392 paths ever added and 1646 file versions (45.7 MB) in 3.5 s, with no game path,
-name or header, no binary but the three, and no key or token; its 1438 SHA-256 and 13 git object ids are the allow
-list's (the references' table, the notices' pins, the profile's hashes, task 052's tree ids).
+history PASSES (at e91d443): 823 commits, 393 paths ever added and 1656 file versions (46.0 MB) in 3.6 s, with no
+game path, name or header, no binary but the three, and no key or token; its 1443 SHA-256 and 15 git object ids are
+the allow list's (the references' table, the notices' pins, the profile's hashes, task 052's tree ids). `--archive`
+PASSES on the fresh `pure-recomp-0.1.0-e91d443-macos-arm64.zip` (87 entries, 14 text files of the app's Resources
+read), and at a scratch tag `v0.1.0` (deleted after) the pack was `pure-recomp-0.1.0-macos-arm64.zip`, Info.plist
+0.1.0, BUILDINFO.txt naming e91d443, its `--archive` PASS while the tag stood and FAIL ("the tag v0.1.0 is not on
+commit e91d443") once it was gone.
 
 **What the GPL asks of a distributed build.** The program is a combination under GPL-2.0-or-later (D-006); whoever
 distributes it owes the source of that version (section 3). The release page does it: the tag's source archives are
