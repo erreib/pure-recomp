@@ -4,6 +4,7 @@
 // switches (PURE_EXIT_AT_FRAME, PURE_FRAME_LOG, PURE_PACED_FROM); the enhancements, each a menu option, are in
 // enhancements.cpp (task 070).
 #include "profile.hpp"
+#include "aspect.hpp"
 #include "enhancements.hpp"
 #include "test_hooks.hpp"
 
@@ -210,6 +211,10 @@ const GameProfile &game() {
         .adhoc_product_code = "UCUS98612",
 
         .register_extra_hle = &register_pure_hle,
+
+        // E2 (D-020, task 084): the 3D view at the shape of the picture under the Vulkan renderer's Fill aspect
+        // (aspect.cpp); with the hook set the renderer offers Fill. At the PSP's 480:272 it changes nothing.
+        .view_aspect_frame = &aspect::view_aspect_frame,
 
         // E3 (D-015, task 067): the picture at the display's own resolution out of the box. Auto draws the Metal
         // backend's screen-wide targets at the smallest multiple of 272 lines that covers the window's drawable (4 in

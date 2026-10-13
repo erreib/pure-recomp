@@ -29,6 +29,7 @@ it uses.
 | 0019-game-option-rows | no | 0016 and 0017 (the menu, profile and settings lines it sits beside; tried in task 070 on the pin plus 0003, 0004, 0016 and 0017: it applies, and not without 0017) | 0016 (`choice_row` through the dump's `ChoiceRow`) |
 | 0020-vulkan-texture-detail | no | 0012, 0015, 0018 and 0019 (the renderer, ge.frag and profile lines it edits; read from the code in task 076, not tried patch by patch) | 0012 (`mip_levels`, the level rule), 0018 (`drawn_extent`), 0019 (`settings::game_option`) |
 | 0021-content-packs | no | 0016 (the menu lines around the save rows that it adds its section after, `dump_row("[save rows]")`; tried in task 078 with `patch` on the pin plus 0003, 0004 and 0016: it applies) | 0016 (`dump_row`, `dump_detail` and the dump's row objects) |
+| 0027-window-size-switch | yes (tried in task 084 with `git apply --check` on a clean checkout of the pin) | nothing | nothing |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -172,6 +173,12 @@ download packs carry (consoles took them). Nothing marked and no label: every sc
 is as before, so the framework's games are untouched. Any port of a game with download content gains a place for it
 that is not the saves. Needs 0016's dump rows; offer it after 0016. Upstream may prefer the relaxation as a flag of its
 own rather than tied to `content_pack`, and the count's text from the profile.
+
+### 0027-window-size-switch: candidate (tooling)
+`<prefix>_WINDOW_SIZE=WxH` opens the Vulkan renderer's window at that size instead of 480x272 times the window
+scale (task 084), so a check can run a window of another shape, such as the 21:9 of `tools/aspect_check.sh`; unset
+or malformed, nothing changes. Any port's window checks can use it. Applies to the pin alone; offer it with the
+tooling.
 
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's

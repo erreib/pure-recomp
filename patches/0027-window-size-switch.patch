@@ -1,0 +1,28 @@
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index f5b1073..4bd23ce 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -2291,8 +2291,21 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     // under them). The safe area keeps the picture clear of a camera cutout.
+     window_flags |= SDL_WINDOW_FULLSCREEN;
+ #endif
+-    impl.window = SDL_CreateWindow(config.title.c_str(), static_cast<int>(kPspWidth * window_scale),
+-                                   static_cast<int>(kPspHeight * window_scale), window_flags);
++    int window_width = static_cast<int>(kPspWidth * window_scale);
++    int window_height = static_cast<int>(kPspHeight * window_scale);
++    // Test-only: <prefix>_WINDOW_SIZE=WxH opens the window at that size instead
++    // (a check of another shape, such as 21:9); anything else is ignored.
++    if (const char *size = portablekit::env("WINDOW_SIZE"); size != nullptr) {
++        int width = 0, height = 0;
++        char tail = 0;
++        if (std::sscanf(size, "%dx%d%c", &width, &height, &tail) == 2 && width >= 1 && height >= 1 &&
++            width <= 16384 && height <= 16384) {
++            window_width = width;
++            window_height = height;
++            std::cout << "[render] window " << width << "x" << height << " (WINDOW_SIZE)\n";
++        }
++    }
++    impl.window = SDL_CreateWindow(config.title.c_str(), window_width, window_height, window_flags);
+     if (impl.window == nullptr) {
+         error = std::string("SDL_CreateWindow failed: ") + SDL_GetError();
+         return false;
