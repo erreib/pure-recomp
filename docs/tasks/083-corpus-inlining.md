@@ -82,3 +82,20 @@ patches/README.md with the upstream column loud, the figures, and the docs. Comm
 - any suite scene moves beyond the windowed wobble the task files document (report the scene and fractions)
 - the after `game` bucket does not land near the night's figure (report; something else differs from the
   experiment)
+
+## Result
+
+### Before: the unfixed tree on a fresh boot (2026-10-13)
+`PURE_TRACE_GUEST=1 tools/stutter_check.sh --out out/083-before` on the worktree's unfixed build (the corpus /O2 /Ob0,
+ccache-built from the main checkout's objects), the rig freshly rebooted, first game run of the session. The
+`[guest-split]` lines are read from the race's first paced flip to the end, ms per game frame:
+
+| run | seconds | game mean | game median | game max | guest mean | guest max | hle mean | stutter_check |
+|---|---|---|---|---|---|---|---|---|
+| before (fresh boot, /Ob0) | 248 | 10.08 | 9.57 | 16.74 | 13.43 | 57.40 | 3.35 | FAIL, 164 of 248 seconds over 25 ms |
+| night baseline (/Ob0, tired) | 241 | 9.68 | 9.29 | 20.97 | 15.16 | 87.03 | 5.49 | FAIL, 121 of 241 |
+| night probe (/Ob2, tired) | 187 | 3.57 | 3.52 | 4.83 | 5.76 | 7.32 | 2.19 | PASS, 3 of 187 |
+
+(The night rows are recomputed from out/ob2-baseline and out/ob2-probe with the same reader; status.md's 9.83 for
+the baseline used a slightly different window.) The fresh boot does not rescue the /Ob0 build: its `game` bucket is
+the night's, so the machine's state was never the cause.
