@@ -2,7 +2,7 @@
 
 Milestone: Windows fidelity (Erik, 2026-10-12: "I'd consider my cpu quite far above what should be required to run
 a recomp like this" — he is right, and nobody has measured where the 9 to 11 ms go) | Branch:
-task/082-guest-frame-profile | Status: OPEN
+task/082-guest-frame-profile | Status: MERGED (cb1194d, 2026-10-12)
 
 ## Goal
 The rig's i5-8600K spends 9 to 11 ms of guest time a frame in Erik's play (out/play-trace*.log), swelling by ~2.5 ms
@@ -231,3 +231,17 @@ the brief's 7: 18/18 twice with the trace off (out/082-regress-off.log, out/082-
 - The SAS suspicion is refuted (0.13 ms, flat in storms). The storms are game code: more of the game's own work per
   frame, matched by the rising HLE call count (584 to 894).
 - Whether to ship a flag is for Erik and the Mac session. On these numbers AVX2 is not worth it.
+
+## Review
+
+Merged cb1194d (2026-10-12). Every deliverable landed and the day's question is answered with numbers: Erik's CPU
+is plenty (PPSSPP, a JIT, does the whole game in 6.5 ms a frame on it), the port's Windows guest cost is anomalous
+(8.8 ms in the recompiled code alone, the storms swelling exactly that bucket), AVX2 is noise, SAS is cleared, and
+the prime suspect is vendor cmake's MSVC branch compiling the corpus /O2 /Ob0 — no inlining at all where the Mac's
+clang path inlines. The follow-on experiment (one local corpus build with /Ob2, the same probe) is the next
+session's first act, on a freshly rebooted rig: the Verify's stutter_check FAIL tracks the machine degrading over
+the day (6 GB of memory compression after ~40 game runs and five worktree builds), measured to be independent of
+the new trace (0.1 ms on against off), and the probe bounds should be read against a rested machine. If /Ob2
+restores the game bucket toward PPSSPP's figure, the fix is a one-line vendor cmake patch with upstream value for
+every Windows port, and the 60 fps ceiling story dissolves. The sink's grace (081's fork) then handles what little
+grazing remains.

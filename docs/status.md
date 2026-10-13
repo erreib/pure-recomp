@@ -331,6 +331,17 @@ simplification task, then the enhancements. The session-by-session resume notes 
   an inaudible lead rebuild) makes the grazes quiet; the guest-swell characterization (the SAS voices) and a look
   at the Windows corpus codegen flags may lower the floor; and 30 fps modes Original is the faithful mitigation on
   CPUs near the ceiling, worth a line in the Windows README once confirmed.
+- **The guest frame named; the ceiling story overturned (task 082, merged cb1194d 2026-10-12).** The guest split
+  (patch 0024-guest-time-split, `PURE_TRACE_GUEST=1`, a `[guest-split]` line a second) attributes the rig's 10.7 ms:
+  82% is the recompiled code, the storms swell exactly that bucket (+2.37 ms; SAS cleared at 0.13), all HLE 2.0 ms.
+  AVX2 buys 1 to 3% (measured, reverted, not shipped). The yardstick: PPSSPP 1.20.4 runs the whole game in 6.5 ms a
+  frame on the same i5-8600K, so the CPU is plenty and the port's Windows cost is anomalous — and the suspect is
+  vendor cmake's MSVC branch compiling the corpus /O2 /Ob0 (no inlining; the Mac's clang path inlines). Next, on a
+  rested rig: one local corpus build with /Ob2 and the same probe — if the game bucket falls toward PPSSPP's figure,
+  the fix is a one-line vendor cmake patch, upstream-worthy for every Windows port, and the sink's fork (081)
+  shrinks to polish. The day's late probe figures degrade with the machine (6 GB of memory compression by evening);
+  read bounds against a fresh boot. FP contraction differs between the branches too (-ffp-contract=off on clang
+  only): harmless at baseline, it matters under any FMA-enabling flag.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
