@@ -207,7 +207,9 @@ gone; no mouse camera, so Mouse, Mouse sensitivity and the two mouse invert rows
 captured by `input.mouse`, and the mouse's buttons bind as before); no ad hoc play, so the Network tab and the System
 tab's "Pause during multiplayer" are gone and opening the menu turns `network.adhoc` off. The Metal shell has no
 touch controls and no performance overlay, so the Touch screen section and the F3 line are gone there (the Vulkan
-shell keeps them). A hidden row keeps its settings.ini key and value; "Restore control defaults" still puts the hidden
+shell keeps them). The Video tab's Aspect ratio row offers Original, Stretch and Fill in both shells: Fill needs a game
+that widens its own view, which this one does since task 084 (D-020), and the Metal shell draws it since task 086
+(before, it left Fill out). A hidden row keeps its settings.ini key and value; "Restore control defaults" still puts the hidden
 rows' settings back too. `tools/menu_check.sh` checks the lists (docs/verification.md).
 
 ### In settings.ini

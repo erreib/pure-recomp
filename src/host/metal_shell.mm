@@ -19,7 +19,9 @@
 //              480x272, see sampler_for()); a Metal image is sampled where the backend left it, a Cpu image is
 //              uploaded first, no image clears to black. The interface over it, then presentDrawable and commit.
 //              Vsync is the layer's displaySyncEnabled. No frame interpolation: present_due and present_until do
-//              nothing.
+//              nothing. Under the Fill aspect (task 086, for a game that widens its view) the Metal backend draws
+//              its screen-wide targets at the drawable's shape (metal_device.hpp's set_fill), the picture covers the
+//              whole drawable, and game_aspect() hands the game the targets' shape for its next frame.
 //   pacing     while the game is held to real time, each picture is presented at the real time of the PSP vblank
 //              after the one its frame began from (presentDrawable:atTime:), as the PSP shows a flip at the next
 //              vblank: a flip a millisecond late or early then no longer shows one picture for three refreshes of a
@@ -60,6 +62,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <functional>
@@ -112,6 +115,25 @@ fragment float4 shell_fragment(Shown in [[stage_in]], texture2d<float> picture [
 }
 )";
 
+// The Aspect ratio as this shell draws it (task 086): Original, Stretch, or Fill for a game that widens its own view
+// (GameProfile::view_aspect_frame, as the Vulkan renderer's usable_aspect() rules); Fill for another game is drawn as
+// Original, keeping the PSP's shape.
+pk::settings::Aspect usable_aspect(pk::settings::Aspect aspect) {
+    return aspect == pk::settings::Aspect::Fill && pk::game().view_aspect_frame == nullptr
+               ? pk::settings::Aspect::Original
+               : aspect;
+}
+
+// For a check of another shape (task 086, as patch 0027-window-size-switch does for the Vulkan window):
+// PURE_WINDOW_SIZE=WxH, a size in pixels, 1 to 16384 each way; false when unset or malformed.
+bool window_size_switch(int &width, int &height) {
+    const char *size = pk::env("WINDOW_SIZE");
+    if (size == nullptr) return false;
+    char tail = 0;
+    return std::sscanf(size, "%dx%d%c", &width, &height, &tail) == 2 && width >= 1 && height >= 1 &&
+           width <= 16384 && height <= 16384;
+}
+
 // The window's title when ShellConfig has none: the program's name and the build label, as the Vulkan shell's
 // gpu::default_window_title() makes it.
 std::string default_title() {
@@ -130,8 +152,7 @@ public:
         @autoreleasepool {
             const pk::settings::Settings &player = pk::settings::current();
             present_mode_ = player.present_mode;
-            aspect_ = player.aspect == pk::settings::Aspect::Stretch ? pk::settings::Aspect::Stretch
-                                                                     : pk::settings::Aspect::Original;
+            set_aspect(player.aspect);
             sharp_ = player.sharp_screen;
 
             if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -146,12 +167,30 @@ public:
             if (player.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
             const std::uint32_t scale = std::clamp<std::uint32_t>(player.window_scale, 1u, pk::settings::kMaxWindowScale);
             const std::string title = config.title.empty() ? default_title() : config.title;
-            window_ = SDL_CreateWindow(title.c_str(), static_cast<int>(kPspWidth * scale),
-                                       static_cast<int>(kPspHeight * scale), flags);
+            int window_width = static_cast<int>(kPspWidth * scale);
+            int window_height = static_cast<int>(kPspHeight * scale);
+            int switch_width = 0, switch_height = 0;
+            const bool sized = window_size_switch(switch_width, switch_height);
+            if (sized) {
+                window_width = switch_width;
+                window_height = switch_height;
+            }
+            window_ = SDL_CreateWindow(title.c_str(), window_width, window_height, flags);
             if (window_ == nullptr) {
                 error = std::string("SDL_CreateWindow failed: ") + SDL_GetError();
                 return false;
             }
+            // PURE_WINDOW_SIZE counts the drawable's pixels, which the window captures and the backend's Fill shape
+            // are in: at a pixel density d the window is W/d x H/d points, so a check's captures are W x H on any
+            // display, as the Vulkan window's are (it draws at a pixel a point).
+            if (const float density = SDL_GetWindowPixelDensity(window_); sized && density > 1.0f) {
+                SDL_SetWindowSize(window_, static_cast<int>(std::lround(switch_width / density)),
+                                  static_cast<int>(std::lround(switch_height / density)));
+                SDL_SyncWindow(window_);
+            }
+            if (sized)
+                std::cout << "[shell] metal: window " << switch_width << "x" << switch_height << " pixels (WINDOW_SIZE)"
+                          << std::endl;
             view_ = SDL_Metal_CreateView(window_);
             if (view_ == nullptr) {
                 error = std::string("SDL_Metal_CreateView failed: ") + SDL_GetError();
@@ -420,7 +459,15 @@ public:
         if (ready_) capture_path_ = path;
     }
 
+    // The shape the game's 3D view should have: 480/272, or under Fill the shape of the screen-wide targets the
+    // backend draws the next frame into (task 086; metal_device.hpp's view_size, which the Metal backend sets at each
+    // flip before this is asked, and the hook of task 084 reads at each flip).
     float game_aspect() const noexcept override {
+        if (aspect_ == pk::settings::Aspect::Fill) {
+            std::uint32_t width = 0u, height = 0u;
+            pure::metal::view_size(width, height);
+            if (width != 0u && height != 0u) return static_cast<float>(width) / static_cast<float>(height);
+        }
         return static_cast<float>(kPspWidth) / static_cast<float>(kPspHeight);
     }
     float display_refresh() const noexcept override { return display_hz_; }
@@ -446,21 +493,23 @@ public:
     bool supports_present_mode(pk::settings::PresentMode mode) const override {
         return mode != pk::settings::PresentMode::Mailbox;
     }
-    // Original or Stretch. Fill needs the game to draw a view of the window's shape; this shell keeps the PSP's.
+    // Original, Stretch or Fill (task 086): under Fill the Metal backend draws at the drawable's shape from its next
+    // frame (metal_device.hpp's set_fill) and the game is told that shape; for a game that cannot widen its view, Fill
+    // is drawn as Original.
     void set_aspect(pk::settings::Aspect aspect) override {
-        aspect_ = aspect == pk::settings::Aspect::Stretch ? pk::settings::Aspect::Stretch : pk::settings::Aspect::Original;
+        aspect_ = usable_aspect(aspect);
+        pure::metal::set_fill(aspect_ == pk::settings::Aspect::Fill);
     }
     void set_sharp_screen(bool sharp) override { sharp_ = sharp; }
     void set_perf_overlay(bool) override {}
     std::string device_name() const override { return device_ != nil ? std::string(device_.name.UTF8String) : std::string{}; }
     // What the menu offers of this shell (patch 0016-menu-rows-by-capability): it leaves out the Frame rate and Lower
-    // when behind rows (no interpolation), Performance and F3 (no overlay; PURE_PERF=log still prints), the Fill
-    // choice (drawn as Original) and the Touch screen rows (no touch controls), and says "Metal on <device>".
+    // when behind rows (no interpolation), Performance and F3 (no overlay; PURE_PERF=log still prints) and the Touch
+    // screen rows (no touch controls), and says "Metal on <device>". Every aspect: Fill since task 086 (the menu offers
+    // it only to a game that widens its view).
     bool supports_frame_interpolation() const noexcept override { return false; }
     bool supports_perf_overlay() const noexcept override { return false; }
-    bool supports_aspect(pk::settings::Aspect aspect) const noexcept override {
-        return aspect != pk::settings::Aspect::Fill;
-    }
+    bool supports_aspect(pk::settings::Aspect) const noexcept override { return true; }
     bool supports_touch() const noexcept override { return false; }
     std::string api_name() const override { return "Metal"; }
 
@@ -622,7 +671,8 @@ private:
     }
 
     // Where the picture goes in a drawable of `width` x `height` pixels: the PSP's shape, as large as fits and
-    // centred (Original), or the whole drawable (Stretch). The Vulkan renderer's record_game_blit, to the pixel.
+    // centred (Original), or the whole drawable (Stretch, and Fill, whose target has the drawable's shape already:
+    // task 086). The Vulkan renderer's record_game_blit, to the pixel.
     MTLViewport viewport_for(std::int32_t width, std::int32_t height) const {
         std::int32_t shown_width = width;
         std::int32_t shown_height = height;

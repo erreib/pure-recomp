@@ -3,14 +3,17 @@
 // and the copy a draw samples when it reads the target it draws into; block transfers, read-backs and the frame and
 // depth write-backs, which store a target's pixels or depth in guest memory; a CPU picture copied into a target.
 #include "metal_backend.hpp"
+#include "metal_device.hpp"
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace pure::gpu::metal_backend {
 
@@ -20,8 +23,10 @@ Target &MetalGeBackend::target_for(const TargetKey &key) {
     auto target = std::make_unique<Target>();
     target->key = key;
     // D-015: a screen-wide target (the display buffers, stride 512) at the internal scale; a narrower one (the
-    // billboards' 128, the bloom's 256) at 480x272, so the bloom's blur keeps the PSP's radius on the screen.
+    // billboards' 128, the bloom's 256) at 480x272, so the bloom's blur keeps the PSP's radius on the screen. Under
+    // Fill (task 086) the screen-wide ones take the drawable's shape at 272S rows; the narrower ones stay 480x272.
     target->scale = key.stride >= kWidth ? scale_ : 1u;
+    target->columns = key.stride >= kWidth ? columns_ : kWidth;
     MTLTextureDescriptor *descriptor =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                            width:target->width()
@@ -47,8 +52,9 @@ Target &MetalGeBackend::target_for(const TargetKey &key) {
 // whatever the scale, stay with what they hold), and the three shared buffers are made for the new size. Nothing is
 // read back: the frame write-back pending since the last flip keeps its target and its buffer, and a flip that finds
 // no target of the new scale at the display address shows the retired one, until the game draws it again. The
-// start line's clause is printed again, `[metal] internal scale now S: ...`.
-void MetalGeBackend::change_scale(std::uint32_t scale) {
+// start line's clause is printed again, `[metal] internal scale now S: ...`. Under Fill (task 086) a change of the
+// drawable's shape is a change of the targets' width, and goes the same way.
+void MetalGeBackend::change_scale(const Extent &extent) {
     end_encoder();
     for (auto it = targets_.begin(); it != targets_.end();) {
         if (it->first.stride < kWidth) {
@@ -59,8 +65,10 @@ void MetalGeBackend::change_scale(std::uint32_t scale) {
         retired_.push_back(std::move(it->second));
         it = targets_.erase(it);
     }
-    scale_ = scale;
-    const std::size_t largest = kPictureBytes * scale_ * scale_;
+    scale_ = extent.scale;
+    columns_ = extent.columns;
+    pure::metal::set_view_size(columns_, kHeight * scale_);
+    const std::size_t largest = static_cast<std::size_t>(columns_) * kHeight * scale_ * 4u;
     readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
     frame_writeback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
     guest_readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
@@ -298,20 +306,33 @@ void MetalGeBackend::store_target(GuestMemory &memory, Target &target, std::uint
         ++writes.written;
 }
 
+namespace {
+
+// The pixel of a target `size` pixels across that holds the centre of guest pixel `index` of `guest` (480 or 272):
+// (index + 0.5) x size / guest, rounded down, in whole numbers. At internal scale S that is index S + S/2 (D-015),
+// the centre pixel of its S x S block; under Fill (task 086) a fraction of the way across the target's width.
+std::uint32_t centre_of(std::uint32_t index, std::uint32_t guest, std::uint32_t size) {
+    return static_cast<std::uint32_t>((static_cast<std::uint64_t>(2u * index + 1u) * size) / (2u * guest));
+}
+
+} // namespace
+
 // The guest's 480x272 picture of `target` from `pixels`, its colour read back at its own size (rows of width() RGBA
 // pixels): `pixels` itself at internal scale 1; at S, the centre pixel of each S x S block, (x S + S/2, y S + S/2),
-// gathered into guest_picture_ (D-015: the game sees a 480x272 picture as before).
+// gathered into guest_picture_ (D-015: the game sees a 480x272 picture as before); under Fill (task 086) the pixel
+// at the centre of each guest pixel's place, (x + 0.5) x width/480 across (centre_of()).
 const std::uint8_t *MetalGeBackend::guest_pixels(const Target &target, const std::uint8_t *pixels) {
-    const std::uint32_t scale = target.scale;
-    if (scale == 1u) return pixels;
+    if (target.width() == kWidth && target.height() == kHeight) return pixels;
     guest_picture_.resize(kPictureBytes);
     const std::size_t row_pixels = target.width();
-    const std::uint32_t half = scale / 2u;
+    std::array<std::uint32_t, kWidth> columns{};
+    for (std::uint32_t x = 0; x < kWidth; ++x) columns[x] = centre_of(x, kWidth, target.width());
     for (std::uint32_t y = 0; y < kHeight; ++y) {
-        const std::uint8_t *row = pixels + ((static_cast<std::size_t>(y) * scale + half) * row_pixels + half) * 4u;
+        const std::uint8_t *row =
+            pixels + static_cast<std::size_t>(centre_of(y, kHeight, target.height())) * row_pixels * 4u;
         std::uint8_t *out = guest_picture_.data() + static_cast<std::size_t>(y) * kWidth * 4u;
         for (std::uint32_t x = 0; x < kWidth; ++x)
-            std::memcpy(out + static_cast<std::size_t>(x) * 4u, row + static_cast<std::size_t>(x) * scale * 4u, 4u);
+            std::memcpy(out + static_cast<std::size_t>(x) * 4u, row + static_cast<std::size_t>(columns[x]) * 4u, 4u);
     }
     return guest_picture_.data();
 }
@@ -376,16 +397,17 @@ bool MetalGeBackend::store_depth(std::uint32_t color_address, std::uint32_t dept
     stats_.depths.wait_ms += last_wait_ms_;
     trace_.times.wait_depth += last_wait_ms_;
     const auto *depths = static_cast<const float *>(guest_readback_.contents);
-    // At internal scale S each guest pixel's depth is the centre of its S x S block (D-015).
-    const std::uint32_t scale = target->scale;
-    const std::uint32_t half = scale / 2u;
+    // At internal scale S each guest pixel's depth is the centre of its S x S block (D-015); under Fill the pixel at
+    // the centre of its place across the target's width (task 086), as guest_pixels() takes the colour.
     const std::size_t row_pixels = target->width();
+    std::array<std::uint32_t, kWidth> columns{};
+    for (std::uint32_t x = 0; x < kWidth; ++x) columns[x] = centre_of(x, kWidth, target->width());
     std::uint32_t lowest = 0xFFFFu, highest = 0u;
     std::array<std::uint16_t, kWidth> row{};
     for (std::uint32_t y = 0; y < kHeight; ++y) {
-        const float *line = depths + (static_cast<std::size_t>(y) * scale + half) * row_pixels + half;
+        const float *line = depths + static_cast<std::size_t>(centre_of(y, kHeight, target->height())) * row_pixels;
         for (std::uint32_t x = 0; x < kWidth; ++x) {
-            const float depth = line[static_cast<std::size_t>(x) * scale];
+            const float depth = line[columns[x]];
             const auto z = static_cast<std::uint32_t>(std::clamp(depth, 0.0f, 1.0f) * 65535.0f + 0.5f);
             lowest = std::min(lowest, z);
             highest = std::max(highest, z);
@@ -428,6 +450,10 @@ void MetalGeBackend::upload(std::uint32_t display_address, const std::uint8_t *p
         not_emulated("CPU picture not 480x272 (copied to the top left, unscaled), width", width);
     // A target never drawn starts cleared where the picture does not cover it.
     if (!target->color_defined) begin_pass(*target);
+    if (target->reshaped()) {
+        upload_fitted(*target, pixels, copied_width, copied_height, stride);
+        return;
+    }
     // At the target's internal scale S each pixel of the picture is an S x S block (D-015).
     const std::uint32_t scale = target->scale;
     const std::uint32_t scaled_width = copied_width * scale;
@@ -460,13 +486,76 @@ void MetalGeBackend::upload(std::uint32_t display_address, const std::uint8_t *p
            destinationLevel:0
           destinationOrigin:MTLOriginMake(0, 0, 0)];
     [blit endEncoding];
-    target->color_defined = true;
+    uploaded(*target);
+}
+
+// What an upload leaves: the target drawn, by a picture from guest memory, which texturing reads correctly anyway.
+void MetalGeBackend::uploaded(Target &target) {
+    target.color_defined = true;
     frame_drawn_ = true;
-    // The picture came from guest memory, which texturing reads correctly anyway.
-    target->draw_serial = ++draw_counter_;
-    target->guest_words.clear();
-    last_drawn_ = target;
+    target.draw_serial = ++draw_counter_;
+    target.guest_words.clear();
+    last_drawn_ = &target;
     ++stats_.uploads;
+}
+
+// A CPU picture into a target of another shape than the PSP's (Fill, task 086). The picture has the PSP's shape (a movie
+// frame, a loading picture) and keeps it, as the Vulkan renderer keeps a movie's under Fill: it fills the target's
+// height, centred, with black beside it (or, in a target narrower than the PSP's shape, its width, with black above and
+// below), each target pixel the picture's pixel under its centre; at 272S rows in a wider target that is an S x S block
+// a pixel, as at Original.
+void MetalGeBackend::upload_fitted(Target &target, const std::uint8_t *pixels, std::uint32_t width,
+                                   std::uint32_t height, std::uint32_t stride) {
+    const std::uint32_t columns = target.width();
+    const std::uint32_t rows = target.height();
+    const std::uint32_t shown_width = std::min<std::uint32_t>(
+        columns, static_cast<std::uint32_t>(std::lround(static_cast<double>(rows) * kWidth / kHeight)));
+    const std::uint32_t shown_height = std::min<std::uint32_t>(
+        rows, static_cast<std::uint32_t>(std::lround(static_cast<double>(columns) * kHeight / kWidth)));
+    const std::uint32_t left = (columns - shown_width) / 2u;
+    const std::uint32_t top = (rows - shown_height) / 2u;
+    const std::size_t row_bytes = static_cast<std::size_t>(columns) * 4u;
+    const std::size_t bytes = row_bytes * rows;
+    const auto [buffer, offset] = allocate(bytes);
+    auto *staging = static_cast<std::uint8_t *>(buffer.contents) + offset;
+    constexpr std::uint32_t kOpaqueBlack = 0xFF000000u;
+    // The picture's column for each target column (kWidth, beyond what the picture has, for black).
+    std::vector<std::uint32_t> sources(columns, kWidth);
+    for (std::uint32_t x = 0; x < shown_width; ++x) {
+        const std::uint32_t source = static_cast<std::uint32_t>((static_cast<std::uint64_t>(2u * x + 1u) * kWidth) /
+                                                                (2u * shown_width));
+        if (source < width) sources[left + x] = source;
+    }
+    for (std::uint32_t y = 0; y < rows; ++y) {
+        auto *line = reinterpret_cast<std::uint32_t *>(staging + static_cast<std::size_t>(y) * row_bytes);
+        const std::uint32_t source_y =
+            y >= top && y < top + shown_height
+                ? static_cast<std::uint32_t>((static_cast<std::uint64_t>(2u * (y - top) + 1u) * kHeight) /
+                                             (2u * shown_height))
+                : kHeight;
+        if (source_y >= height) {
+            std::fill(line, line + columns, kOpaqueBlack);
+            continue;
+        }
+        const std::uint8_t *source = pixels + static_cast<std::size_t>(source_y) * stride * 4u;
+        for (std::uint32_t x = 0; x < columns; ++x) {
+            if (sources[x] >= width) line[x] = kOpaqueBlack;
+            else std::memcpy(line + x, source + static_cast<std::size_t>(sources[x]) * 4u, 4u);
+        }
+    }
+    end_encoder();
+    id<MTLBlitCommandEncoder> blit = [commands_ blitCommandEncoder];
+    [blit copyFromBuffer:buffer
+               sourceOffset:offset
+          sourceBytesPerRow:row_bytes
+        sourceBytesPerImage:bytes
+                 sourceSize:MTLSizeMake(columns, rows, 1)
+                  toTexture:target.color
+           destinationSlice:0
+           destinationLevel:0
+          destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [blit endEncoding];
+    uploaded(target);
 }
 
 } // namespace pure::gpu::metal_backend

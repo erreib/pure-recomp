@@ -17,7 +17,8 @@ it differs from the Vulkan backend on purpose".
 The backend was built by tasks 023 (the 2D frontend), 024 (3D: lighting, fog, sprites, culling), 025 (the effects),
 027 (the Metal shell), 031 (one command queue), 033 (frame times, the pre-warm), 036 (texture mapping), 037 (mipmaps),
 040 (the colour test, 16-bit writes, the depth clamp), 042 (the pre-warm list over the campaign), 049 (the split
-into files by concern), 066 (the internal scale), 073 (the sprite upscale) and 075 (texture detail). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
+into files by concern), 066 (the internal scale), 073 (the sprite upscale), 075 (texture detail) and 086 (the Fill
+aspect). What each measured: [docs/history/metal-backend.md](history/metal-backend.md).
 
 ## Quick start
 
@@ -79,7 +80,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 |---|---|
 | `src/gpu/metal_backend.mm` | the backend proper: `initialize` (device, shaders, samplers, the switches into `switches_`) and `shutdown`, `submit`, the flip (`present_image`) and `capture_frame`, the frame's command buffers, render passes and vertex space (`commit`, `end_encoder`, `begin_pass`, `allocate`, and `copy_to_buffer`, the one blit of a target's colour or depth into a shared buffer, which `read_back`, the frame write-back, `store_target` and `store_depth` use), `not_emulated`, and the `BackendRegistration("metal", ...)`. Its opening comment is the backend's overview |
 | `src/gpu/metal_backend.hpp` | the class: its members grouped under a heading per concern that names the file defining them, its data members (50, among them one struct each for the switches, the trace and the pre-warm: `switches_`, `trace_`, `prewarm_`), and the eight helpers more than one file uses (`unpack_color`, `not_emulated`, `to_compare`, `stored_reference`, `stencil_alpha`, `alpha_follows_stencil`, `format_name`, `texture_bits`), each with the file that defines it |
-| `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, the guest's 480x272, `kMaxScale`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target` (with `bytes()` and `contains(address)`, the guest memory a target covers, which every scan of the targets uses, and since task 066 its internal `scale`, `width()` and `height()`), `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm`; and the three structs the class holds once each (task 062): `Switches` (`switches_`, filled by `initialize`), `TraceState` (`trace_`, metal_trace.mm's) and `PrewarmState` (`prewarm_`, metal_pipelines.mm's) |
+| `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, the guest's 480x272, `kMaxScale`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target` (with `bytes()` and `contains(address)`, the guest memory a target covers, which every scan of the targets uses, and since task 066 its internal `scale`, `width()` and `height()`, and since task 086 its width under Fill, `columns`, and `scale_x()`), `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm`; and the three structs the class holds once each (task 062): `Switches` (`switches_`, filled by `initialize`), `TraceState` (`trace_`, metal_trace.mm's) and `PrewarmState` (`prewarm_`, metal_pipelines.mm's) |
 | `src/gpu/metal_targets.mm` | "Targets" and "Guest memory": the target cache (`target_for`, `latest_target_at`, the guest-word snapshot), a texture bind found in a target (`find_framebuffer_texture`, the rule of task 009) and the copy a draw samples of the target it draws into; `block_transfer`, `read_back_framebuffer`, `write_back_frame`, `write_back_depth` and the stores into guest memory; `upload_frame` |
 | `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule; the sprite upscale's dump and its texture pack (`dump_sprite`, "Sprite upscale"); the game options the backend reads itself, at start and once a frame (`read_game_options`: Text and sprites, Texture detail) |
 | `src/gpu/metal_pipelines.mm` | "The pipeline key" and "The pre-warm list": the fragment-function variants, `render_pipeline` and `depth_state` (made on first use or taken from the pre-warm), the GE-to-Metal compare and stencil tables, the list's text form and parser, `start_prewarm`, the pipelines' exit line and `PURE_METAL_PIPELINES_OUT`; the pre-warm's state and the keys the draws used are `prewarm_` (`PrewarmState`) |
@@ -94,7 +95,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `tools/scale_check.sh` | (task 066) the backend at internal scale S against 1: the suite's 18 scenes headless at both, compared after reducing the S captures to 480x272 by their blocks' centre pixels, plus the race scenes' bloom region ("Internal scale") |
 | `tools/refactor_check.sh` | (task 049) the proof that a change moved code and changed no picture: the frame regression suite's 18 scenes captured before the change (`--before`, on the starting commit) and after, compared at `--tol 0`, plus the backend's exit counts per route; PASS only at 0 differing pixels everywhere |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
-| `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), the frame trace's hook through which the shell reports its presents (task 033, "Frame times"), and the Metal shell's drawable size, which the backend's Auto internal scale reads (task 066, "Internal scale"). Objective-C++ with ARC |
+| `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), the frame trace's hook through which the shell reports its presents (task 033, "Frame times"), and the Metal shell's drawable size, which the backend's Auto internal scale reads (task 066, "Internal scale"), and since task 086 the two values of the Fill aspect: the shell's switch (`set_fill`) and the size of the backend's next screen-wide targets (`set_view_size`), whose shape the shell hands the game ("Fill"). Objective-C++ with ARC |
 | `config/metal_pipelines.txt` | the render pipelines and depth-stencil states made at start (task 033, "The pre-warm list"); since task 042 it covers the campaign and the app carries a copy in `Contents/Resources` |
 | `tools/frame_times.py` | the frame trace's summary (task 033, "Frame times") |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, `imgui_impl_metal.h` and `imgui_impl_metal.mm` from the 1.92.9b release (the vendored ImGui's), verbatim, MIT |
@@ -134,7 +135,7 @@ each file's anonymous namespace.
 | Depth | the GE function as the depth compare; written only where the GE tests it (`test_enabled && write_enabled`), through mode included. With CLIPENABLE on (every transformed draw of the game), as the GE: clipped at the near plane only, each vertex's screen z clamped to 0..65535, and MINZ/MAXZ tested per pixel (task 040) |
 | Clears | CLEARMODE draws have no blend, texture or tests; bits 8..10 choose the colour, the alpha and the depth, and the depth compare is ALWAYS. A clear of the alpha on a 5551, 4444 or 8888 target writes the stencil with it: ALWAYS, REPLACE with the clear colour's alpha (task 011) |
 | Culling | transformed triangles with culling on, back faces culled, the GE's clockwise front as Metal's `MTLWindingClockwise`: Metal counts the winding in window coordinates (y down), as the GE and Vulkan's flipping viewport do. Confirmed on the race (task 024): race frame 6016 culls 593 of its 906 draws, 353 of them among the first 393 (344 with the counter-clockwise front, 266 of those into the display target; 9 with the clockwise one, the shadow volumes, which write only the stencil), and it matches Vulkan's up to its draw 394, while a build with the winding reversed differs from draw 41 on, 49% of the picture by draw 393 ("The 3D check"). The clockwise case, the shadow volumes, reaches the picture through the stencil since task 025 |
-| Scissor | the GE scissor, both ends included, clamped to 480x272, times the target's internal scale; an empty one draws nothing |
+| Scissor | the GE scissor, both ends included, clamped to 480x272, times the target's internal scale (under Fill each axis's, rounded, and a fitted draw's fitted with it: task 086, "Fill"); an empty one draws nothing |
 
 ### The pipeline key
 
@@ -151,7 +152,7 @@ first use (task 033, "Frame times").
 Per draw, the vertex uniforms (matrix, folded viewport, uv transform, the row of view x world that gives view-space z,
 the mode: through, sprite corners in clip space, fog, lighting, and since task 036 the texture map mode with the texture
 matrix, the viewer's direction and the texture's place in the image sampled, and since task 040 the GE's z scale and
-offset and MINZ/MAXZ for the depth clamp; 256 bytes), the fragment uniforms (FIX colour, texture function, TCC, opaque
+offset and MINZ/MAXZ for the depth clamp, and since task 086 the interface's fit under Fill; 256 bytes), the fragment uniforms (FIX colour, texture function, TCC, opaque
 texel alpha, whether the coordinates are divided by q, alpha test function, reference and mask, fog colour, the stencil
 value the alpha stores, since task 037 the mip level rule, and since task 040 the colour test and, for a 16-bit target,
 the GE's blend factors, equation and FIX colours, the dither matrix and the target's format: 208 bytes), the blend
@@ -166,7 +167,8 @@ As section 2 of `docs/ge-backend.md`: a target is keyed by (colour address, stri
 modulo the cached/uncached mirrors. Each is an `RGBA8Unorm` colour texture (5650, 5551 and 4444 targets too: since
 task 040 their draws write only the values the format's bits expand to) and a `Depth32Float_Stencil8` texture, both
 private to the GPU, at 480x272, or at 480S x 272S for a key at least 480 pixels wide when the backend draws at an
-internal scale S above 1 (task 066, "Internal scale"; until then internal scale 1 alone, as D-002 asked first).
+internal scale S above 1 (task 066, "Internal scale"; until then internal scale 1 alone, as D-002 asked first), and
+under the Metal shell's Fill aspect at the drawable's shape, 272S rows high (task 086, "Fill").
 
 - A pass draws into one target. A draw into another target ends the pass; the next one loads the target, or clears
   it to zero the first time.
@@ -303,6 +305,7 @@ prints them.
   pixels into the target at that address (made with the given stride and 8888 when there is none) through a staging
   buffer and a blit, each pixel an S x S block at an internal scale S. A picture of another size than 480x272 is
   copied to the top left, unscaled, and logged once (the Vulkan backend stretches it); the frontend's are 480x272.
+  Under Fill (task 086) the picture keeps the PSP's shape in the middle of the target, black beside it ("Fill").
 - `shutdown` waits for the GPU, prints the counts, and frees every target, texture and pipeline before the queue and
   the device.
 
@@ -487,6 +490,102 @@ from 0.77 ms at 1 to 0.94 ms at 4 and 1.24 ms at 6. Runs with the window off the
 app's full-screen Space, or the screen locked: two at Auto, one each at 6 and 1) are not in the table; their backend
 figures were alike (means 16.68 to 17.22 ms), and their only frames over 25 ms waited for a drawable macOS held back
 while the window was hidden (up to 1.1 s), not a player's case.
+
+## Fill (task 086)
+
+Task 086 (E2, D-020 point 4, 2026-10-13): the Aspect ratio row's Fill on the Metal shell and backend, the Mac's
+default path (D-008). Until then the shell took Fill as Original and its `game_aspect()` said 480:272, so task 084's
+hook (`src/profile/aspect.cpp`) never widened the view on the Mac. Under Fill the screen-wide targets take the
+drawable's shape, the game is told that shape at each flip (the hook draws its 3D view at it), the 2D interface is
+pulled in to square pixels about the screen's centre, and the shell shows the whole target. At Original and Stretch
+nothing changes: `tools/refactor_check.sh` from the commit before, headless at internal scale 1 and at 3 (an odd S, for
+the centre arithmetic), found 0 differing pixels on all 18 scenes and the same exit counts but for the ring's GPU waits,
+which follow the machine's load; the suites keep their figures.
+
+### The shape
+
+| Part | Under Fill |
+|---|---|
+| The switch | the shell keeps Fill for a game that widens its view (`GameProfile::view_aspect_frame`, the Vulkan renderer's `usable_aspect` rule; another game's Fill is drawn as Original), and tells the backend through `pure::metal::set_fill` (`metal_device.hpp`) at start and at each change of the row. `supports_aspect(Fill)` is true, so the menu offers Fill (`tools/menu_check.sh`) |
+| The targets | a key at least 480 wide is 272S rows high, S the internal scale as before (Auto from the drawable's height), and round(272S x shape) columns wide, the shape the drawable's width over its height clamped to 1:4 .. 8:1 as the Vulkan renderer clamps it (`extent_for`, metal_backend.mm): 1269x544 for a 1260x540 drawable at S = 2. `Target::scale` stays S, the vertical scale and a whole number; `Target::columns` is the width and `scale_x()` the horizontal scale, columns over 480. A narrower key stays 480x272 (D-015), so the bloom's buffers and the billboards' adverts are the PSP's at any shape. A drawable of the PSP's shape gives 480S columns: Fill is then Original to the pixel |
+| When it changes | at the frame boundary, as the scale does (`apply_scale` at `begin_frame`, "A change while the game runs"): a new shape (a resize, the row changed) retires the screen-wide targets like a scale change and prints the scale line again; nothing is read back |
+| The game's shape | at each flip `present_image` publishes the size of the targets the next frame draws into (`pure::metal::set_view_size`, also at each change), and the shell's `game_aspect()` returns its width over height under Fill, 480/272 otherwise. The HLE asks it right after the flip (`camera::game_aspect_frame`), so the frame drawn next is projected at the shape of the targets it draws into, a resize included: the hook sees 2.33272 (1269/544) for a 1260x540 drawable |
+| The window | `viewport_for` covers the whole drawable under Fill (the target has its shape already); `sampler_for` as before: nearest where the target covers the drawable a whole number of times (a drawable of the PSP's shape), linear otherwise (1269x544 into 1260x540) |
+| The lines | `[metal] drawing with ..., internal scale 2: targets 1269x544 at 2.333:1, effects 480x272; ...`, the shape after the size when it is not the PSP's (`scale_report`); `target_size()`, the Resolution row's figure, is the real size |
+
+### The paths at two scales
+
+| Path | Under Fill |
+|---|---|
+| Positions | unchanged: clip space for the guest's 480x272 screen, the Metal viewport the target's own pixels, which spreads the guest's 480 columns over the target's width |
+| Scissor | each edge times its axis's scale, rounded (`lround(edge x scale_x())` across, x S down; at the PSP's shape the S x S blocks as before), and a fitted draw's scissor fitted with it (below), as the Vulkan renderer fits it |
+| A target sampled as a texture | `uv_remap`, the texture's size and first texel at the sampled target's `scale_x()` across and S down over the target's own size: a ratio, as before |
+| Mip levels and texture detail | the vertical S on both axes, for the auto rule's per-PSP-pixel gradient and the detail shift alike: the game draws its 3D view at the target's shape, so a drawn pixel spans the same angle across as down, and S of them a PSP pixel's height |
+| Guest memory | the frame write-back, `read_back_framebuffer`, a block transfer's source rows and the depth write-back give the guest the pixel holding each guest pixel's centre, ((x + 0.5) x columns/480, (y + 0.5) x S) rounded down (`centre_of` in metal_targets.mm, whole-number arithmetic; at the PSP's shape exactly the S x S block's centre pixel as before). The lens flare's 4x4 depth test reads the depth where the game's own widened projection puts the sun |
+| CPU pictures | `upload_frame` keeps the picture's shape (the PSP's: a movie frame, a loading picture), as the Vulkan renderer keeps a movie's: the picture fills the target's height in its middle, an S x S block a pixel, black beside it (in a target narrower than the PSP's shape it fills the width, black above and below), each target pixel the picture's pixel under its centre (`upload_fitted`). This game sends none: every route counts 0 uploads, its movies being GE draws (below) |
+
+### The 2D fit
+
+The rule is the Vulkan renderer's (tasks 084 and 085: `interface_fit` and the draw path's fit), so a capture of either
+path agrees. A draw is fitted when it is 2D (through mode, or transformed under an orthographic projection, the w row
+`projection[3]`, `[7]` and `[11]` all 0, with lighting off: the sprite rule of task 073), draws into a target of
+another shape than the PSP's at one of the last two displayed addresses (`present_image` keeps them), is not a clear,
+samples no target (a draw that reads a rendered picture, the bloom's composite, stays spread with what it reads), and is
+narrower than 470 of the guest's 480 pixels between its leftmost and rightmost vertex: through mode by its positions,
+transformed by its positions through the transform and the folded GE viewport, measured on the CPU where the vertices
+already are (`screen_wide`). A screen-wide draw (a fade, a backdrop, the shadows' darkening quad) stays spread with the
+3D view. The fit is the square scale over each axis's: with x the target's width over 480 and y its S, fit_x =
+min(x, y)/x and fit_y = min(x, y)/y (0.756 and 1 at 1269x544). It is applied in clip space by `ge_vertex`
+(`VertexUniforms::fit`: x and y scale the position's clip x and y when z is 1, both for through-mode and transformed
+positions, w kept, so the draw shrinks about the clip origin, the screen's centre); the block grew from 240 to 256
+bytes, and the pipelines are the same (`config/metal_pipelines.txt` unchanged). `PURE_METAL_LOG`'s line ends `fitted`
+for a fitted draw.
+
+What it does to this game's frames at 21:9 (1260x540, the race_hud route and the frontend, checked with
+`PURE_METAL_LOG`):
+
+- **The race HUD.** Frame 6016: the HUD's 28 sprite draws and its four orthographic strips are fitted (32 draws), and
+  sit where they sit at Original, at their proportions.
+- **The lens flare** is an orthographic, unlit strip of 60 vertices (10 quads joined by degenerate triangles), so the
+  rule would fit it, but its strip spans at least 470 guest pixels in every frame seen (765 flare draws to flip 8500,
+  none fitted): it stays with the 3D view, on the sun the game projected with its widened projection.
+- **The bloom** keeps its chain: the downsample reads the whole Fill-shaped back buffer into the 480x272 buffer, the
+  blur runs at the PSP's radius, and the composite (it samples a target) spreads it back over the whole target.
+- **The menus** are fitted and their white backdrops spread (the main menu's outer strips are white, not black).
+- **The movies.** The language page's backdrop is the paused intro movie's last frame, and the boot movies' frames are
+  drawn the same way: one through-mode draw of 150 sprites over the screen from a main-memory texture, so screen-wide:
+  spread like a backdrop, the picture stretched to the window's shape, with the language page's fitted text over its
+  stretched panel. The Vulkan renderer's rule does the same; a movie keeps its shape only through `upload_frame`, which
+  this game does not use (task 086's Open questions).
+
+### The check
+
+`tools/aspect_check.sh --shell metal` runs task 084's lanes (and task 085's bars, once merged) on the Metal shell and
+backend: the race_hud route at `PURE_WINDOW_SIZE=1260x540`, which the Metal shell reads as its drawable's pixels (630x270
+points on this Mac's 2x panel, so the captures are 1260x540 as the Vulkan window's), the backend at Auto
+(`PURE_INTERNAL_SCALE=0`: 960x544 under Original as the Vulkan lane's target, 1269x544 under Fill against Vulkan's
+1260x540), Original and Fill. On 2026-10-13 (the task's build), beside the Vulkan lane on the same build (task 084's
+figures, the HUD still spread there until task 085):
+
+| Bar | Metal | Vulkan |
+|---|---|---|
+| (a) the central strips between the HUD's bars (limit 0.10); over the whole strip | 0.0627; 0.0469 | 0.0691; 0.0826 |
+| (b) left strip: variance, apart | 3813.7, 0.6330 | 3884.5, 0.6356 |
+| (b) right strip: variance, apart | 6163.3, 0.5179 | 6222.6, 0.5239 |
+| (c) draws over the run at flip 6016, Original and Fill | 342712, 343264 | 342712, 343264 (857 and 858 transformed in the frame; the Metal backend prints no `[3d]` line) |
+| (d) race camera calls widened, Fill; Original | 275 of 275; 0 of 273 | 287 of 287; 0 of 303 |
+| task 085's (e), computed by hand: the HUD bands (rows 0 to 40 and 212 to 272) | 0.0166 and 0.0219 | (085's) |
+| task 085's (f), computed by hand: the main menu's central strip; its outer strips | 0.0024 (limit 0.05); white | (085's) |
+
+The Metal and Vulkan captures against each other at tol 32, reduced to 480x272: Original 0.0000 over the frame; Fill
+0.0173 between the HUD's bars (the same widened view, Metal's 1269x544 resampled to the window against Vulkan's native
+1260x540) and 0.0554 over the frame, the HUD fitted on Metal and spread on Vulkan before task 085. About 30 s with warm
+caches (the Metal pipelines are pre-warmed, so no lane runs again). Two runs gave (a) and (b) to the fourth decimal.
+
+At run time (input scripts in a 1260x540 window): the row switched from Original to Fill in the Esc menu mid-race
+prints `internal scale now 2: targets 1269x544 at 2.333:1`, and from the next flip the hook sees 2.33272 and widens
+the race camera's calls; the Window size row changed under Fill (to 1440x816 points, the PSP's shape) prints `internal
+scale now 6: targets 2880x1632` and the view goes back to 480/272, the picture as at Original.
 
 ## Sprite upscale (task 073)
 
@@ -858,23 +957,23 @@ black); the Vulkan backend needs the Vulkan shell and draws nothing here, as in 
 |---|---|
 | Window | an SDL window (`SDL_WINDOW_METAL \| SDL_WINDOW_RESIZABLE \| SDL_WINDOW_HIGH_PIXEL_DENSITY`, 480x272 points times the window-size setting, full screen by the setting), titled as the Vulkan shell's (`PURE_WINDOW_TITLE`, else the program's name and build label); `SDL_Metal_CreateView` and its `CAMetalLayer`: BGRA8, tagged sRGB (as MoltenVK tags its swapchain, so the colours look the same), `framebufferOnly` off for the captures, the drawable the window's size in pixels ("The drawable" below), the program's one device and command queue (`src/gpu/metal_device.hpp`, the backend's; "One command queue" below). Prints `[shell] metal: Apple M4 Pro, window 960x544 points, 1920x1088 pixels, 2x, vsync`, and `[shell] metal: window ...` again when the drawable's size changes |
 | Events and input | `pump_events` handles the window's events as the Vulkan renderer's pump does: close, gamepads arriving and leaving, a display change, the mouse while it is captured for the game (only the script's mouse under scripted input), then the interface's event hook. The pad is a `host::SdlPad` the shell holds, the code the Vulkan shell uses: the keyboard through the player's bindings, the first gamepad or the input script's virtual one, the script's keys (`set_scripted_key`), the neutral pad while an interface screen is up (`set_game_input`). The pointer is captured by the Vulkan renderer's rule. `sample_pad` pumps SDL and samples without handling events |
-| Present | the backend's `Metal` image (its target's `id<MTLTexture>`) is drawn into the layer's next drawable by one triangle over the letterboxed rectangle, placed as the Vulkan renderer's `record_game_blit` places it (Original), or over the whole drawable (Stretch); a `Cpu` image is uploaded to a texture first; no image clears to black. The interface is drawn in the same pass, then `presentDrawable` and commit; while the game is held to real time the drawable is presented at the real time of the PSP vblank after the one its frame began from (`presentDrawable:atTime:`, task 033, "Frame times"; `PURE_METAL_PACE=0` presents at once). A fast-forwarding load presents a flip only when none was shown for 33 ms, as the Vulkan shell does. Vsync is the layer's `displaySyncEnabled`, off for Immediate; there is no Mailbox (`supports_present_mode`) |
+| Present | the backend's `Metal` image (its target's `id<MTLTexture>`) is drawn into the layer's next drawable by one triangle over the letterboxed rectangle, placed as the Vulkan renderer's `record_game_blit` places it (Original), or over the whole drawable (Stretch, and Fill, whose target has the drawable's shape: task 086, "Fill"); a `Cpu` image is uploaded to a texture first; no image clears to black. The interface is drawn in the same pass, then `presentDrawable` and commit; while the game is held to real time the drawable is presented at the real time of the PSP vblank after the one its frame began from (`presentDrawable:atTime:`, task 033, "Frame times"; `PURE_METAL_PACE=0` presents at once). A fast-forwarding load presents a flip only when none was shown for 33 ms, as the Vulkan shell does. Vsync is the layer's `displaySyncEnabled`, off for Immediate; there is no Mailbox (`supports_present_mode`) |
 | Scaling filter | nearest when the sharp-screen setting is on, and whenever the picture covers a whole multiple of its size in the drawable's pixels (the default window on a 2x display, 1920x1088: 4x a 480x272 picture); linear otherwise (below) |
 | Captures | `capture_window` (the input script's `shot`): the next present also copies the drawable, interface included, into a shared buffer, waits for it and writes the BMP at the drawable's size (`[render] window 1920x1088 -> PATH` on a 2x display), as the Vulkan shell's window captures are written. `ShellConfig::capture_frame` is not used |
 | Interface | `initialize_ui`: `ImGui_ImplSDL3_InitForMetal` and `ImGui_ImplMetal_Init` (task 027 moved the SDL3 platform init from `Layer::attach` into the shells); `begin_ui_frame`: `ImGui_ImplMetal_NewFrame` with a render pass descriptor that has the drawable's attachments (one BGRA8 colour attachment, no depth: a 1x1 stand-in texture, since the drawable itself is taken at the present); `set_ui_draw_data` keeps the draw data, drawn by the next `present` or `present_ui` over the picture; `present_ui(show_game)` presents the last game picture (behind the paused menu) or the setup screens' brown, with the interface; `shutdown_ui` waits for the GPU and shuts both ImGui backends down |
-| Other | `hold_frame` keeps a copy of the picture on screen while the hold lasts; `frame_rate_now` counts the presents of the last second; `display_refresh` is the refresh rate SDL gives for the window's display; `game_aspect` is 480/272; `device_name` the Metal device's name |
+| Other | `hold_frame` keeps a copy of the picture on screen while the hold lasts; `frame_rate_now` counts the presents of the last second; `display_refresh` is the refresh rate SDL gives for the window's display; `game_aspect` is 480/272, or under Fill the shape of the targets the backend draws the next frame into (task 086); `device_name` the Metal device's name; `PURE_WINDOW_SIZE=WxH` (task 086, for the checks) makes the drawable W x H pixels, the window W/d x H/d points at the pixel density d |
 
 What it leaves out: frame interpolation (`present_due`, `present_until` and `pause_interpolation` do nothing and
-`set_frame_rate` is ignored: every flip is presented as it comes), the Fill aspect (taken as Original: the shell keeps
-the PSP's shape, as `usable_aspect` does for a game that cannot draw another), the touch controls
+`set_frame_rate` is ignored: every flip is presented as it comes), the touch controls
 (`touch_controls_visible` is false), the performance overlay (`set_perf_overlay` does nothing; `PURE_PERF=log` still
 prints), and the menu's texture filter and texture-pack rows, which need the Vulkan renderer (`active_renderer()` is
 null under this shell, and the menu leaves them out). The Resolution row is the GE backend's since task 067 (patch
 0017-internal-scale-by-backend), and the Metal backend answers it ("Internal scale"). Since task 064 (patch
 0016-menu-rows-by-capability) the shell says so to the menu, which hides the rows: `supports_frame_interpolation()`,
-`supports_perf_overlay()` and `supports_touch()` answer false and `supports_aspect` false for Fill, so the Video tab
-has no Frame rate, Lower when behind or Performance row and Aspect ratio no Fill, and the Controls tab no F3 line and
-no Touch screen section. `api_name()` is "Metal", so the System tab's graphics line reads "Metal on Apple M4 Pro".
+`supports_perf_overlay()` and `supports_touch()` answer false, so the Video tab has no Frame rate, Lower when behind
+or Performance row, and the Controls tab no F3 line and no Touch screen section. Until task 086 the shell left out the
+Fill aspect too (taken as Original, `supports_aspect` false for Fill); it draws it now ("Fill"), and the Aspect ratio
+row offers it, as the Vulkan shell's does, to a game that widens its view. `api_name()` is "Metal", so the System tab's graphics line reads "Metal on Apple M4 Pro".
 `tools/menu_check.sh` checks the rows (docs/controls.md, "Rows the menu leaves out").
 
 ### The drawable

@@ -34,6 +34,18 @@ std::array<float, 4> transform_point(const std::array<float, 16> &m, const std::
     return result;
 }
 
+// A 2D draw (tasks 073 and 086): through mode, or transformed under an orthographic projection (its w row,
+// projection[3], [7] and [11], all 0: the menus' text and art and the race HUD) with lighting off (the TEAM screen's
+// ship is orthographic but lit, a model).
+bool flat(const DrawCall &call) {
+    const bool orthographic = call.projection[3] == 0.0f && call.projection[7] == 0.0f && call.projection[11] == 0.0f;
+    return call.through || (orthographic && !call.lighting_enabled);
+}
+
+// A 2D draw at least this wide, in the guest's 480 pixels, covers the screen (a fade, a backdrop): under Fill it
+// spreads with the 3D view rather than keeping the interface's proportions (the Vulkan renderer's kScreenWideDraw).
+constexpr float kScreenWideDraw = 470.0f;
+
 } // namespace
 
 // A GE colour register (0x00BBGGRR) as 0..1 floats, with an explicit fourth value.
@@ -402,16 +414,18 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
             // target (task 063), whose sampler clamps at its edges. The place is relative: the texture's size and
             // first texel at the sampled target's internal scale over that target's own size (D-015), so a target
             // at 1x and one at 480S x 272S place the same rectangle, whatever the scale of the target drawn into.
+            // Under Fill (task 086) a screen-wide target's guest pixel is scale_x() pixels wide and S tall.
             texture = sample_target(*source, target);
             sampler = (linear_mag ? 1u : 0u) | (linear_min ? 2u : 0u) | 4u | 8u;
-            const float scale = static_cast<float>(source->scale);
+            const float scale_x = source->scale_x();
+            const float scale_y = static_cast<float>(source->scale);
             const float source_width = static_cast<float>(source->width());
             const float source_height = static_cast<float>(source->height());
-            const float width = static_cast<float>(state.width) * scale;
-            const float height = static_cast<float>(state.height) * scale;
+            const float width = static_cast<float>(state.width) * scale_x;
+            const float height = static_cast<float>(state.height) * scale_y;
             fragment.uv_remap = {width / source_width, height / source_height,
-                                 static_cast<float>(source_x) * scale / source_width,
-                                 static_cast<float>(source_y) * scale / source_height};
+                                 static_cast<float>(source_x) * scale_x / source_width,
+                                 static_cast<float>(source_y) * scale_y / source_height};
             fragment.wrap = {1u, state.wrap_s != 0u ? 1u : 0u, state.wrap_t != 0u ? 1u : 0u, 0u};
             ++stats_.framebuffer_textures;
         } else {
@@ -424,10 +438,7 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
             // texture samples in place; linear in both directions whatever the GE's filters say (they were for one
             // texel a pixel), with the GE's wrap. Never an 8888 texture, a target's, a mipmapped one or a perspective
             // draw's.
-            const bool orthographic =
-                call.projection[3] == 0.0f && call.projection[7] == 0.0f && call.projection[11] == 0.0f;
-            const bool flat = call.through || (orthographic && !call.lighting_enabled);
-            const bool upscale = sprite_upscale_ && flat && levels == 1u && upscalable(state.format);
+            const bool upscale = sprite_upscale_ && flat(call) && levels == 1u && upscalable(state.format);
             texture = decoded_texture(memory, state, levels, upscale);
             sampler = (linear_mag || upscale ? 1u : 0u) | (linear_min || upscale ? 2u : 0u) |
                       (state.wrap_s != 0u ? 4u : 0u) | (state.wrap_t != 0u ? 8u : 0u);
@@ -436,7 +447,10 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
                 sampler |= (state.min_filter & 2u) != 0u ? kMipLinear : kMipNearest;
                 set_level_rule(state, levels, fragment);
                 // The auto rule's gradient per PSP pixel, not per drawn one, as the Vulkan renderer takes it: at
-                // internal scale S level 0's size times S, so the GE picks the level it picks at 1x (D-015).
+                // internal scale S level 0's size times S, so the GE picks the level it picks at 1x (D-015). Under
+                // Fill (task 086) the vertical S on both axes, here and in the detail shift below: the game draws its
+                // 3D view at the target's shape, so a drawn pixel spans the same angle across as down, and S of them
+                // a PSP pixel's height.
                 if (target.scale != 1u) {
                     fragment.level[2] *= static_cast<float>(target.scale);
                     fragment.level[3] *= static_cast<float>(target.scale);
@@ -445,7 +459,7 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
                 // the level the GE would pick with S times the pixels (for the auto rule, the gradient per drawn
                 // pixel: ge_log16 of S times a value is the value's plus 16 log2 S at S a power of two), and the
                 // level sampled through gradients with the anisotropic sampler (shaders/ge.metal). Not a 2D draw's.
-                if (texture_detail_ && !flat) {
+                if (texture_detail_ && !flat(call)) {
                     fragment.level_range[1] = 16.0f * std::log2(static_cast<float>(target.scale));
                     fragment.level_range[2] = 1.0f;
                     sampler |= kAnisotropic;
@@ -498,6 +512,43 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     const bool cull = call.culling_enabled && !switches_.no_cull && !call.through && type == MTLPrimitiveTypeTriangle &&
                       call.primitive != PrimitiveType::Sprites && !call.clear_mode;
 
+    // The interface's fit under Fill (task 086, D-020; the Vulkan renderer's rule of tasks 084 and 085). The game's
+    // 480x272 screen is spread over a target of the drawable's shape, which suits the 3D view the game now draws at
+    // that shape but would stretch its 2D interface. A 2D draw (through mode, or orthographic and unlit) into a shown
+    // framebuffer of another shape, not a clear and not sampling a rendered picture, is pulled in about the screen's
+    // centre to square pixels again, in clip space by the vertex function (VertexUniforms::fit), so both kinds share
+    // one path. Draws that cover the screen's width (fades, backdrops) stay spread with the 3D view, and so do those
+    // that sample a target (the bloom's composite).
+    float fit_x = 1.0f, fit_y = 1.0f;
+    const bool fitted = !call.clear_mode && source == nullptr && flat(call) && interface_fit(target, fit_x, fit_y) &&
+                        !screen_wide(call, vertex, transform);
+    if (fitted) vertex.fit = {fit_x, fit_y, 1.0f, 0.0f};
+
+    // The scissor in the target's pixels, each guest pixel scale_x() wide and S tall (an S x S block at the PSP's
+    // shape), its edges rounded; a fitted draw's scissor is fitted with it, as the Vulkan renderer fits it, so a list
+    // the interface clips still clips at its own edges. One that rounds to nothing draws nothing.
+    std::array<float, 4> edges{static_cast<float>(scissor.x), static_cast<float>(scissor.y),
+                               static_cast<float>(scissor.x + scissor.width),
+                               static_cast<float>(scissor.y + scissor.height)};
+    if (fitted) {
+        const float centre_x = 0.5f * static_cast<float>(kWidth);
+        const float centre_y = 0.5f * static_cast<float>(kHeight);
+        edges[0] = centre_x + (edges[0] - centre_x) * fit_x;
+        edges[2] = centre_x + (edges[2] - centre_x) * fit_x;
+        edges[1] = centre_y + (edges[1] - centre_y) * fit_y;
+        edges[3] = centre_y + (edges[3] - centre_y) * fit_y;
+    }
+    const auto to_pixels = [](float edge, float scale, std::uint32_t size) {
+        return static_cast<NSUInteger>(std::clamp<long>(std::lround(edge * scale), 0l, static_cast<long>(size)));
+    };
+    const float scale_y = static_cast<float>(target.scale);
+    const NSUInteger left = to_pixels(edges[0], target.scale_x(), target.width());
+    const NSUInteger top = to_pixels(edges[1], scale_y, target.height());
+    const NSUInteger right = to_pixels(edges[2], target.scale_x(), target.width());
+    const NSUInteger bottom = to_pixels(edges[3], scale_y, target.height());
+    if (right <= left || bottom <= top) return;
+    const ViewportScissor scaled_scissor{left, top, right - left, bottom - top};
+
     // Into the target's pass (after the texture, whose copy may have ended it).
     begin_pass(target);
     // A blend that reads the destination's alpha reads the PSP's stencil.
@@ -514,16 +565,12 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     const auto [buffer, offset] = allocate(bytes);
     std::memcpy(static_cast<std::uint8_t *>(buffer.contents) + offset, vertices_.data(), bytes);
 
-    // The scissor in the target's pixels: each guest pixel an S x S block.
-    const std::uint32_t scale = target.scale;
-    const ViewportScissor scaled_scissor{scissor.x * scale, scissor.y * scale, scissor.width * scale,
-                                         scissor.height * scale};
     bind_state(call, key, pipeline, depth, stencil_reference, viewport, clamp_depth, scaled_scissor, cull,
                blend_color);
     bind_inputs(buffer, offset, vertex, lit || fogged || shade_mapped, fragment, texture, sampler);
     [encoder_ drawPrimitives:type vertexStart:0 vertexCount:drawn];
 
-    if (switches_.log_draws) log_draw(call, target, source, source_x, source_y, scissor);
+    if (switches_.log_draws) log_draw(call, target, source, source_x, source_y, scissor, fitted);
     ++stats_.draws;
     ++frame_draws_;
 }
@@ -729,6 +776,46 @@ void MetalGeBackend::bind_inputs(id<MTLBuffer> buffer, NSUInteger offset, const 
     }
 }
 
+// Under Fill (task 086): whether 2D draws into `target` are fitted, a target of another shape than the PSP's at one
+// of the last two displayed addresses, and by how much: fit_x and fit_y the square scale over each axis's, as the
+// Vulkan renderer's interface_fit (its width over 480 across, S down: in a target wider than the PSP's shape fit_x is
+// S over that and fit_y 1). False when nothing needs fitting.
+bool MetalGeBackend::interface_fit(const Target &target, float &fit_x, float &fit_y) const {
+    if (!target.reshaped()) return false;
+    const std::uint32_t address = target.key.address;
+    if (address == 0u || (address != display_addresses_[0] && address != display_addresses_[1])) return false;
+    const float x = target.scale_x();
+    const float y = static_cast<float>(target.scale);
+    const float square = std::min(x, y);
+    fit_x = square / x;
+    fit_y = square / y;
+    return fit_x < 0.999f || fit_y < 0.999f;
+}
+
+// Whether a 2D draw covers the screen's width, at least kScreenWideDraw of the guest's 480 pixels between its leftmost
+// and rightmost vertex (task 086): through mode by its positions, which are the screen's pixels; transformed by its
+// positions through the transform and the folded GE viewport (`vertex.screen`; a transformed sprite's corners are in
+// clip space already). A vertex behind the eye makes it no interface draw: it stays spread.
+bool MetalGeBackend::screen_wide(const DrawCall &call, const VertexUniforms &vertex,
+                                 const std::array<float, 16> &transform) const {
+    const std::size_t count = sprite_corners_ != 0u ? sprite_corners_ : vertices_.size();
+    float left = 0.0f, right = 0.0f;
+    for (std::size_t i = 0; i < count; ++i) {
+        const GpuVertex &v = vertices_[i];
+        float x = v.x;
+        if (!call.through) {
+            const std::array<float, 4> clip = sprite_corners_ != 0u ? std::array<float, 4>{v.x, v.y, v.z, v.w}
+                                                                    : transform_point(transform, {v.x, v.y, v.z, 1.0f});
+            if (!(clip[3] > 0.0f)) return true;
+            const float ndc = (clip[0] * vertex.screen[0] + clip[3] * vertex.screen[1]) / clip[3];
+            x = (ndc + 1.0f) * 0.5f * static_cast<float>(kWidth);
+        }
+        left = i == 0u ? x : std::min(left, x);
+        right = i == 0u ? x : std::max(right, x);
+    }
+    return right - left >= kScreenWideDraw;
+}
+
 MetalGeBackend::ViewportScissor MetalGeBackend::scissor_of(const DrawCall &call) {
     const std::uint32_t x1 = call.viewport.scissor_x1;
     const std::uint32_t y1 = call.viewport.scissor_y1;
@@ -739,7 +826,7 @@ MetalGeBackend::ViewportScissor MetalGeBackend::scissor_of(const DrawCall &call)
 }
 
 void MetalGeBackend::log_draw(const DrawCall &call, const Target &target, const Target *source, std::uint32_t x,
-                              std::uint32_t y, const ViewportScissor &scissor) {
+                              std::uint32_t y, const ViewportScissor &scissor, bool fitted) {
     static const char *const kPrimitives[] = {"points", "lines", "linestrip", "triangles",
                                               "tristrip", "trifan", "sprites"};
     const auto primitive = static_cast<std::size_t>(call.primitive);
@@ -790,7 +877,7 @@ void MetalGeBackend::log_draw(const DrawCall &call, const Target &target, const 
             std::cout << (call.cull_clockwise ? " cull cw" : " cull ccw");
     }
     std::cout << " scissor " << scissor.x << "," << scissor.y << "+" << scissor.width << "x" << scissor.height
-              << "\n";
+              << (fitted ? " fitted" : "") << "\n";
 }
 
 } // namespace pure::gpu::metal_backend

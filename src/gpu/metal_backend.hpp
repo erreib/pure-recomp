@@ -60,12 +60,11 @@ public:
     std::uint64_t frames_presented() const noexcept override { return frames_; }
 
     // The menu's Resolution row (patch 0017-internal-scale-by-backend, task 067): the setting (0 Auto) takes effect
-    // at the next frame (metal_backend.mm); the screen-wide targets' size now.
+    // at the next frame (metal_backend.mm); the screen-wide targets' size now (under Fill, task 086, the drawable's
+    // shape at 272S rows).
     bool supports_internal_scale() const noexcept override { return true; }
     void set_internal_scale(std::uint32_t setting) override;
-    std::array<std::uint32_t, 2> target_size() const noexcept override {
-        return {kWidth * scale_, kHeight * scale_};
-    }
+    std::array<std::uint32_t, 2> target_size() const noexcept override { return {columns_, kHeight * scale_}; }
 
 private:
     // The frame flow: start, shutdown, submit, the flip, captures; command buffers, passes, space (metal_backend.mm)
@@ -77,11 +76,18 @@ private:
     void begin_pass(Target &target);
     void read_back(Target &target);
     void copy_to_buffer(id<MTLTexture> texture, __strong id<MTLBuffer> &buffer, MTLBlitOption options);
+    // The screen-wide targets' size a setting gives now: S, and the width, 480S or under Fill the drawable's shape at
+    // 272S rows (task 086).
+    struct Extent {
+        std::uint32_t scale{1u};
+        std::uint32_t columns{kWidth};
+    };
+    static Extent extent_for(std::uint32_t setting);
     void apply_scale();
 
     // Targets and guest memory: the target cache, transfers, read-backs, write-backs, CPU pictures (metal_targets.mm)
     Target &target_for(const TargetKey &key);
-    void change_scale(std::uint32_t scale);
+    void change_scale(const Extent &extent);
     Target *latest_target_at(std::uint32_t address);
     Target *latest_retired_at(std::uint32_t address);
     bool retired(const Target *target) const;
@@ -100,6 +106,9 @@ private:
                      GuestMemory &memory, const char *why);
     void upload(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
                 std::uint32_t stride);
+    void upload_fitted(Target &target, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
+                       std::uint32_t stride);
+    void uploaded(Target &target);
 
     // Textures from guest memory: mip levels, the content key, the decode and cache, the sprite upscale (task 073), the
     // level rule, the game options the backend reads (tasks 073 and 075) (metal_textures.mm)
@@ -167,8 +176,10 @@ private:
     void bind_inputs(id<MTLBuffer> buffer, NSUInteger offset, const VertexUniforms &vertex, bool lighting_read,
                      const FragmentUniforms &fragment, id<MTLTexture> texture, std::uint32_t sampler);
     static ViewportScissor scissor_of(const DrawCall &call);
+    bool interface_fit(const Target &target, float &fit_x, float &fit_y) const;
+    bool screen_wide(const DrawCall &call, const VertexUniforms &vertex, const std::array<float, 16> &transform) const;
     void log_draw(const DrawCall &call, const Target &target, const Target *source, std::uint32_t x, std::uint32_t y,
-                  const ViewportScissor &scissor);
+                  const ViewportScissor &scissor, bool fitted);
 
     // What the open encoder has bound, so that unchanged state is not set again.
     struct Bound {
@@ -220,6 +231,10 @@ private:
 
     // The internal scale of the targets at least 480 pixels wide (D-015, initialize()); the narrower ones are 1x.
     std::uint32_t scale_{1u};
+    // Their width: 480S, or under the Metal shell's Fill aspect the drawable's shape at 272S rows (task 086).
+    std::uint32_t columns_{kWidth};
+    // The last two displayed addresses (present_image()): under Fill a 2D draw into one of them is fitted (task 086).
+    std::array<std::uint32_t, 2> display_addresses_{};
     // video.internal_scale as the backend takes it (0 Auto, which follows the drawable): from initialize(), then
     // from the menu (set_internal_scale()). scale_ follows it at the next frame (apply_scale()).
     std::uint32_t setting_{1u};

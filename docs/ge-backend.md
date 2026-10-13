@@ -370,7 +370,7 @@ The `metal` shell (task 027) is in our sources, `src/host/metal_shell.mm`, regis
 - `HeadlessShell`: no window, no SDL, no GPU (below).
 - `MetalShell` (ours, task 027, `src/host/metal_shell.mm`): an SDL window with a `CAMetalLayer`, the shared SDL pad
   sampler, ImGui's SDL3 and Metal backends (`third_party/imgui_metal/`), the backend's texture drawn into the
-  drawable, letterboxed by `game_aspect()` (docs/metal-backend.md, "The Metal shell").
+  drawable, letterboxed at the PSP's shape, or under Fill (task 086) the whole drawable, the backend's targets then of its shape and `game_aspect()` reporting it (docs/metal-backend.md, "The Metal shell", "Fill").
 
 The SDL pad sampling (the scripted keys, the gamepad attach) is `host/shell/sdl_pad.cpp`, shared by the Vulkan and
 Metal shells; `ui/input_script.cpp` keeps pushing SDL events at `shell.window()` for the SDL shells.

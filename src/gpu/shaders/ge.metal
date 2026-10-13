@@ -13,7 +13,8 @@
 // to a source-alpha blend as a second output (dual-source blending, ge_fragment_dual) as patches 0004 and 0006 do
 // (task 025). Task 040 added the colour test, the writes into 16-bit targets (ge_fragment_16: the blend done in the
 // shader on the target's colour, the dither matrix's offset, and the target's own bits kept) and the depth clamp of
-// CLIPENABLE (the near plane and MINZ/MAXZ as clip distances, each vertex's screen z clamped). Logic ops and colour
+// CLIPENABLE (the near plane and MINZ/MAXZ as clip distances, each vertex's screen z clamped). Task 086 added the
+// interface's fit under Fill (a 2D draw's clip x and y scaled about the screen's centre). Logic ops and colour
 // doubling are not in the draw state.
 //
 // The structs below are laid out exactly as their C++ twins in metal_types.hpp (static_asserts there).
@@ -49,6 +50,9 @@ struct VertexUniforms {
     // The depth clamp (task 040), for transformed draws with mode.w 1 (CLIPENABLE on): x and y the GE viewport's z
     // scale and offset, z and w MINZ and MAXZ.
     float4 depth;
+    // The interface's fit under Fill (task 086): with z 1, the position's clip x and y times x and y, so the draw is
+    // pulled in about the screen's centre (clip 0, 0) to square pixels on a target of another shape than the PSP's.
+    float4 fit;
 };
 
 // One of the GE's lights: Light in metal_types.hpp. Colours are 0..1.
@@ -268,6 +272,7 @@ vertex VertexOut ge_vertex(uint vid [[vertex_id]],
         out.position = float4(v.position.x * (2.0f / 480.0f) - 1.0f,
                               1.0f - v.position.y * (2.0f / 272.0f),
                               clamp(v.position.z / 65535.0f, 0.0f, 1.0f), 1.0f);
+        if (u.fit.z != 0.0f) out.position.xy *= u.fit.xy;
         return out;
     }
     // A sprite's corners are lit and fogged as its second vertex, which `source` names.
@@ -298,6 +303,8 @@ vertex VertexOut ge_vertex(uint vid [[vertex_id]],
         out.clip_distance[1] = zw - u.depth.z * clip.w;
         out.clip_distance[2] = u.depth.w * clip.w - zw;
     }
+    // A 2D draw under Fill (task 086): scaled in clip space, w kept, so its NDC scale about the screen's centre.
+    if (u.fit.z != 0.0f) out.position.xy *= u.fit.xy;
     return out;
 }
 

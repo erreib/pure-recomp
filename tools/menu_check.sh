@@ -3,7 +3,8 @@
 # 0016-menu-rows-by-capability) and checks each tab's rows against the lists this game and this shell should show.
 #   tools/menu_check.sh [--shell metal|vulkan] [--out DIR]
 #   --shell  the window shell, with its own GE backend (default metal, the macOS default): the Metal shell answers no
-#            to frame interpolation, the performance overlay, Fill and touch controls; the Vulkan shell yes to all.
+#            to frame interpolation, the performance overlay and touch controls; the Vulkan shell yes to all. Both
+#            answer yes to Fill (the Metal shell since task 086).
 #   --out    default out/menu_check/<shell>: the run's log (run.log), its shots (shots/title.png, shots/menu.png: the
 #            Video tab as the menu shows it after the dump) and the result (summary.txt). Removed first.
 # The route: config/pad_scripts/menu_check.txt, frontend.txt's steps to the title, then Escape at flip 2100 (the menu
@@ -14,8 +15,9 @@
 # choice, camera inversion or mouse rows. Both shells: Resolution first (the GE backend's internal scale, patch
 # 0017-internal-scale-by-backend, task 067; locked by the run's PURE_INTERNAL_SCALE=1). Metal: no Texture filter or
 # texture pack rows (the Vulkan renderer's), no Frame rate, Lower when behind or Performance, no F3 row, no Touch
-# screen rows, "Metal on". Vulkan: all of those, "Vulkan on". Aspect ratio offers Original and Stretch in both: Fill needs a game that widens its view
-# (GameProfile::view_aspect_frame), which this one does not. Both: the Video tab ends with the game's own options
+# screen rows, "Metal on". Vulkan: all of those, "Vulkan on". Aspect ratio offers Original, Stretch and Fill in both:
+# Fill needs a game that widens its view (GameProfile::view_aspect_frame), which this one does since task 084 (D-020),
+# and a shell that draws it, which the Metal shell does since task 086. Both: the Video tab ends with the game's own options
 # (patch 0019-game-option-rows, task 070) in the option table's order: 30 fps modes (task 072; game.sixty_fps, locked by
 # the run's PURE_SIXTY_FPS=0), Flashes (game.smooth_flashes; locked by the run's PURE_SMOOTH_FLASHES=0), Text and
 # sprites (task 073; game.sprite_upscale, locked by the run's PURE_SPRITE_UPSCALE=0; shown under the Vulkan shell too,
@@ -89,7 +91,7 @@ bindings = ["Move forward", "Move left", "Move back", "Move right", "△", "○ 
             "Camera down", "Camera right"]
 expected = {
     "tabs": ["Video", "Audio", "Controls", "System"],
-    "Video": ["Resolution", "Display", "Window size", "Aspect ratio (Original / Stretch)", "Scaling filter"]
+    "Video": ["Resolution", "Display", "Window size", "Aspect ratio (Original / Stretch / Fill)", "Scaling filter"]
              + ([] if metal else ["Texture filter", "Texture pack", "[texture pack rows]"]) + ["Vsync"]
              + ([] if metal else ["Frame rate", "Lower when behind"]) + ["Game speed", "Fast loading"]
              + ([] if metal else ["Performance"])

@@ -1,5 +1,6 @@
-// The one Metal device and command queue of the program (metal_device.hpp), and the frame trace's hook between the
-// backend and the shell (task 033).
+// The one Metal device and command queue of the program (metal_device.hpp), the drawable's size and the Fill aspect
+// the shell hands the backend (tasks 066 and 086), and the frame trace's hook between the backend and the shell (task
+// 033).
 #include "metal_device.hpp"
 
 #include "profile.hpp"
@@ -36,6 +37,28 @@ void set_drawable_size(std::uint32_t width, std::uint32_t height) {
 void drawable_size(std::uint32_t &width, std::uint32_t &height) {
     width = drawable_width.load(std::memory_order_relaxed);
     height = drawable_height.load(std::memory_order_relaxed);
+}
+
+namespace {
+
+std::atomic<bool> fill_aspect{};
+std::atomic<std::uint32_t> view_width{};
+std::atomic<std::uint32_t> view_height{};
+
+} // namespace
+
+void set_fill(bool fill) { fill_aspect.store(fill, std::memory_order_relaxed); }
+
+bool fill() { return fill_aspect.load(std::memory_order_relaxed); }
+
+void set_view_size(std::uint32_t width, std::uint32_t height) {
+    view_width.store(width, std::memory_order_relaxed);
+    view_height.store(height, std::memory_order_relaxed);
+}
+
+void view_size(std::uint32_t &width, std::uint32_t &height) {
+    width = view_width.load(std::memory_order_relaxed);
+    height = view_height.load(std::memory_order_relaxed);
 }
 
 namespace {
