@@ -77,3 +77,12 @@ One vendor patch, `patches/0024-audio-sink-grace.patch`, its rows in patches/REA
   per-channel cursor, which is HLE territory)
 - flash_check's race figures move beyond their bounds
 - the probe still shows resyncs well above 0 after the fix (name what writes land entirely in the past)
+
+## Result
+Status: in progress. The before-probe on the unfixed branch (patches 0001-0023):
+`PURE_TRACE_AUDIO=1 tools/stutter_check.sh --out out/081/before`: PASS (22 of 222 seconds over 25 ms, readback
+0.00). `[audio] total frames=24977536 silent=0 dropped=0 resyncs=7390 resynced=27826304`. From the paced flip on
+(327 `[audio]` seconds, the race and its results tail): resyncs 5686 (17.4/s, the 080 baseline's rate), resynced
+12,104,064, silent 0. The race seconds' resynced per event is 2033 to 2063 frames: the cursor was AT the device's
+read position (0 to ~15 frames ahead), not behind it — the jump fired on a lead under 512 frames, not on a write
+in the past.
