@@ -113,11 +113,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
 
 ## Resume
 
-- **Branches.** `main` = the commit below (Erik's twenty-first fast-forward, 2026-10-12: tasks up to 078, M1 to
-  M9, the Windows bring-up with its icon, the billboard fix, the Esc menu by capability, E3 native resolution, E6
-  smooth flashes, E4 the 30-fps modes free-running, E7 the menu art upscale behind a row that defaults to Original,
-  E5 texture detail on both renderers, and the US download packs installed, checked and offered in the Esc menu
-  done, twenty-one patches by topic). `batch/m2` is the integration branch, equal to `main` at this point; every task branches
+- **Branches.** `main` = the commit below (Erik's twenty-second fast-forward, 2026-10-13: everything of the
+  twenty-first — tasks up to the Mac line's 078, the US download packs installed, checked and offered in the Esc
+  menu — plus the rig's stutter arc merged in: the Windows tasks 077 to 083, the async depth readback, the cached
+  window capture, the resync counter, the guest-time split and the corpus inlining fix that closed the rig's 60 fps
+  story, the two lines' concurrent 077/078 task numbers kept with their slugs and the Windows patches renumbered
+  0022 to 0026, twenty-six patches by topic). `batch/m2` is the integration branch, equal to `main` at this point; every task branches
   from it (`git switch -c task/NNN-slug batch/m2`). Remote: `origin` = Erik's private GitLab
   (https://dev.eriksmedia.com/erreib/pure-recomp.git); Erik alone pushes.
 - **The gate.** `tools/verify_task.sh NNN` reruns a brief's Verify from the main checkout; `tools/frame_regress.sh`
