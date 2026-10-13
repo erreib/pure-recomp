@@ -1,7 +1,7 @@
 # 080: The guest's frame budget at scale, and the sink's grace
 
 Milestone: Windows fidelity (Erik, 2026-10-12: the slowdown and the click are one defect, task 079's finding) |
-Branch: task/080-guest-budget-and-sink-grace | Status: OPEN
+Branch: task/080-guest-budget-and-sink-grace | Status: MERGED (d8fe8fc, 2026-10-12; BLOCKED as briefed, the baseline kept)
 
 ## Goal
 Task 079's counter made the stutter legible: in effect storms at 60 fps the guest time swells to 13 to 14 ms of the
@@ -152,3 +152,16 @@ Open questions:
 - Should B be re-briefed alone as 0024-audio-sink-grace?
 - The sweep's race runs at 78.7% (4x) and 89.5% (2x) speed, against Erik's 98 to 99% in play. The harness's cost,
   noted in 079, still makes the sweep a pessimistic stand-in.
+
+## Review
+
+Merged d8fe8fc (2026-10-12). The third consecutive block-or-redirect earned by characterizing first, and the second
+brief premise of the planning session's to die on primary evidence: store_depth already reads only the centre
+texels, so A targeted a 0.5 ms slice that does not move with scale or with the dips. The baseline table is the
+deliverable — the guest's ~11 ms is scale-independent, Erik's dips add ~2.5 ms of unnamed guest work in effect
+storms, 4x costs GPU time and the depth fence wait, and the sink skips 17.4/s with silent=0 in the gate's config.
+B goes ahead alone as task 081 (0024-audio-sink-grace): it never depended on A, and both 079's and 080's own
+measurements make its case. The dip profile (what swells the guest in effect storms: the SAS voices of the
+explosions are the natural suspect, being both guest work and audio demand in one) is the follow-up after 081, and
+it needs a guest-side instrument, not a renderer one. The 4x fence wait is real but not the dips' cause; it waits
+with the GPU figures for whoever next works the 4x path.
