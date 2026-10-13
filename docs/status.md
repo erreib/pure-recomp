@@ -170,6 +170,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   Repacked 2026-10-13 from f576ae3, the twenty-second fast-forward with the rig's stutter arc (`--check
   out/pull22-bundle` PASS; out/repack-pull22.log): Wipeout Pure 0.1.0-f576ae3 at out/release-macos/stage carries
   the async depth write-back on its Vulkan path and the audio and guest-split traces; the Metal path is as before.
+  Repacked again 2026-10-13 from bb9b090, E2 complete (`--check out/086-bundle` PASS; out/repack-086.log):
+  Wipeout Pure 0.1.0-bb9b090 at out/release-macos/stage offers Fill in the Aspect ratio row on both shells; drag
+  the window to 21:9 or go full screen on such a display and choose Fill.
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
