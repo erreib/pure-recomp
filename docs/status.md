@@ -114,8 +114,8 @@ simplification task, then the enhancements. The session-by-session resume notes 
 ## Resume
 
 - **Branches.** `main` = the commit below (Erik's twenty-third fast-forward, 2026-10-13: everything of the
-  twenty-second plus E2, the view at the window's shape on both renderers (tasks 084 to 086, D-020, patches 0027
-  and 0028, twenty-eight patches by topic), the Mac gate of the rig's stutter arc and the app repacked twice; the
+  twenty-second plus E2, the view at the window's shape on both renderers (tasks 084 to 086, D-020, patches 0027-window-size-switch
+  and 0028-vulkan-orthographic-fit, twenty-eight patches by topic), the Mac gate of the rig's stutter arc and the app repacked twice; the
   twenty-second: everything of the
   twenty-first — tasks up to the Mac line's 078, the US download packs installed, checked and offered in the Esc
   menu — plus the rig's stutter arc merged in: the Windows tasks 077 to 083, the async depth readback, the cached
