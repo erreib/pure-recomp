@@ -99,3 +99,29 @@ ccache-built from the main checkout's objects), the rig freshly rebooted, first 
 (The night rows are recomputed from out/ob2-baseline and out/ob2-probe with the same reader; status.md's 9.83 for
 the baseline used a slightly different window.) The fresh boot does not rescue the /Ob0 build: its `game` bucket is
 the night's, so the machine's state was never the cause.
+
+### The patch and the build
+Both `/Ob0` sites in vendor/portablekit/cmake/PortableKit.cmake became `/Ob2` (patches/0025-corpus-inlining.patch,
+`tools/patches.sh check`: 25). After `tools/build.sh configure`, before any build, compile_commands.json: 144 of 144
+corpus units carry `/O2 /Ob2 /bigobj` and no command carries `/Ob0` (before the change: 145 did, the 144 units and
+generated_registry.cpp). generated_unit_0000.cpp: `... /O2 /Ob1 /DNDEBUG -std:c++20 -MD /O2 /Ob2 /bigobj ...`.
+The compiler is clang-cl 23.1.3 (`C:/Program Files/LLVM/bin/clang-cl.exe`), not cl, so the patch comment's FP note
+covers both. The build: `tools/build.sh profile`, 148 steps, 17 s, exit 0: every unit came from ccache, the night
+experiment's identical /Ob2 compile of the same sources (the night's own cold build: 9m39s to 16m, no unit failed,
+memory within the pool). So no cold corpus compile ran in this task; the binary is the inlined one by the probe below.
+
+### After: the patched tree, same probe
+| run | seconds | game mean | game median | game max | guest mean | guest max | hle mean | display max | stutter_check |
+|---|---|---|---|---|---|---|---|---|---|
+| before (fresh boot, /Ob0) | 248 | 10.08 | 9.57 | 16.74 | 13.43 | 57.40 | 3.35 | 42.18 | FAIL, 164 of 248 |
+| after, first run (/Ob2) | 209 | 3.46 | 3.18 | 38.14 | 7.07 | 79.75 | 3.81 | 119.59 | FAIL, 67 of 209 |
+| after, second run (/Ob2) | 197 | 3.13 | 3.12 | 3.80 | 5.35 | 6.07 | 2.22 | 2.24 | PASS, 2 of 197 |
+| night probe (/Ob2, tired) | 187 | 3.57 | 3.52 | 4.83 | 5.76 | 7.32 | 2.19 | 2.49 | PASS, 3 of 187 |
+
+The first after run (out/083-after) failed on stalls that are not the recompiled code: its `game` mean is the
+night's, and its long frames (to 672 ms) sit in the `display` bucket, sceDisplay calls with render and pacing taken
+off, 26 seconds over 3 ms against none in either /Ob2 run that passed; the slow frames spread over the whole race.
+It was the second game run after the reboot, on a binary the machine had not run before; the immediate rerun
+(out/083-after2), nothing changed in between, passed with the night's margin. The before run shows some of the same
+`display` stalls (66 seconds over 3 ms), but its 791 guest-dominated counted slow frames are the /Ob0 storms the
+`game` bucket names (16.74 ms at its worst second).
