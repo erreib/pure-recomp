@@ -342,6 +342,17 @@ simplification task, then the enhancements. The session-by-session resume notes 
   shrinks to polish. The day's late probe figures degrade with the machine (6 GB of memory compression by evening);
   read bounds against a fresh boot. FP contraction differs between the branches too (-ffp-contract=off on clang
   only): harmless at baseline, it matters under any FMA-enabling flag.
+- **The missing flag found (2026-10-13, the planning session's experiment; nothing committed).** One local corpus
+  build with the vendor cmake's MSVC `/Ob0` flipped to `/Ob2` (both sites in PortableKit.cmake; a target-level
+  append is a no-op because the source-property /Ob0 serializes later - check compile_commands.json, as the
+  experiment did) and the same probe back-to-back on the same machine: the guest's `game` bucket fell from 9.83 to
+  3.58 ms a frame, the storm maximum from 20.97 to 4.83. The recompiled code was running 2.7x slow on Windows for
+  want of inlining; the whole guest frame now sits at PPSSPP's own figure and the 60 fps ceiling on the i5-8600K
+  dissolves. The build with /Ob2 took ~16 minutes and no unit failed. Next session, on a fresh boot: task 083 -
+  the one-line vendor patch (0025), the full gates (the 18-scene suite, flash, framerate, stutter_check, and the
+  guest split before/after), the restage, and Erik's ears; expect the audio clicks to mostly vanish with the dips,
+  demoting 081's sink fork to polish. An upstream candidate of the first order: every Windows port of the
+  framework pays this. The experiment's logs: out/ob2-baseline and out/ob2-probe on the rig.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
