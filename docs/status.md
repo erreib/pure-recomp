@@ -311,6 +311,18 @@ simplification task, then the enhancements. The session-by-session resume notes 
   fixes: the depth write-back's CPU conversion runs on the guest thread at the full scaled size (a GPU downsample
   to 480x272 before the copy cuts it 16-fold at 4x), and the sink's stalled-producer branch should play counted
   silence rather than skip. The sweep's speed figures with sound and traces on are the harness's cost, not play's.
+- **The sink's design fork (tasks 080 and 081, both blocked as briefed, 2026-10-12).** Task 080's baseline killed
+  the depth-store premise (store_depth already reads only the centre texels; the guest's ~11 ms is
+  scale-independent and Erik's dips add ~2.5 ms of unnamed guest work in effect storms; what grows at 4x is GPU
+  time and the depth fence wait). Task 081 built the graceful-late rule, measured it muting a channel (80% of its
+  frames dropped under a sustained deficit) and named the law: a producer below real time leaves a deficit that
+  must surface as silence, a pitch or tempo change, or lost content — the old jump's 46 ms silence IS the click,
+  and in play the clicks cluster at the dips because a lost lead never rebuilds at 100% speed except by the jump.
+  The fork, for Erik and the Mac session (the sink is shared code): a smaller jump; keep content and gap only the
+  lateness; the same plus an inaudible lead rebuild (the SDL stream ratio ~1% low for a few seconds after a dip);
+  or HLE backpressure (hle_media.cpp's queued_until_us — the territory the briefs have ruled out). The root above
+  the fork: what swells the guest in the storms (the SAS voices are the suspect) — fix the dips and the sink's
+  policy matters a tenth as often. Figures: docs/tasks/080 and 081, the probes in their worktrees' out/.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
