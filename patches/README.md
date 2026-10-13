@@ -69,6 +69,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0024-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
 | 0025-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
 | 0026-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
+| 0027-window-size-switch | (task 084) | Tooling | candidate | `<prefix>_WINDOW_SIZE=WxH` opens the Vulkan renderer's window at W x H instead of 480x272 times `video.window_scale`, so a check can run a window of another shape (21:9 for `tools/aspect_check.sh`, the Fill aspect of D-020); unset or malformed, the window is as before |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -552,3 +553,12 @@ source expression, so inlining fuses nothing new, and without `/arch:AVX2` an x6
 flag that enables FMA here must bring `-ffp-contract=off` (clang-cl) with it. The corpus rebuild with the flag is
 the only cost (~16 minutes on the rig). Upstream: a candidate of the first order; every Windows port of the framework
 pays this today.
+
+### 0027-window-size-switch
+Task 084. The Vulkan renderer opens its window at 480x272 times `video.window_scale` (1 to the framework's maximum),
+so every window it opens has the PSP's shape until the player resizes it. A check of the Fill aspect (D-020: the game
+draws its 3D view at the window's shape) needs a window of another shape from the first frame, the same in every run.
+`<prefix>_WINDOW_SIZE=WxH`, read once beside `SDL_CreateWindow`, opens the window at W x H (1 to 16384 each) and
+prints `[render] window WxH (WINDOW_SIZE)`; unset, or anything but two positive numbers joined by an `x`, and the
+window is as before. Nothing else reads it: the menu's Window size row and a later resize work as they did. Applies to
+the pin alone. Upstream: a candidate, tooling any port's window checks can use.

@@ -276,6 +276,20 @@ simplification task, then the enhancements. The session-by-session resume notes 
   lane reruns its 0 captures whenever a pipeline was made (a stall threshold would be quieter, and the rig's
   load-boundary drift above wants the same treatment); a count of the
   enhanced draws on the Vulkan renderer's perf line.
+- **E2, the 3D view at the window's shape** (D-020, 2026-10-13; Erik's pick after the DLC and the stutter arc: odd
+  aspect ratios such as 21:9). **Task 084 (the hook and the check, Vulkan).** `src/profile/aspect.cpp` is the
+  profile's `view_aspect_frame`, so the Vulkan renderer now offers Fill: at the first flip under a shape other than
+  480:272 it registers an override of the projection builder FUN_08a31148 (the generated body found by replaying the
+  corpus's registration, `Runtime::lookup_function` being private) that replaces an aspect of 480/272 in f13 by the
+  picture's, and each such flip sets the horizontal half-angle tangent at 0x08b1fb14 to the vertical one times the
+  shape; at the PSP's shape it registers and writes nothing (a registration from the first flip moved the headless
+  suite's tt_hud, fp_hud and zone_change through the dispatch timing). Patch 0027-window-size-switch
+  (`PURE_WINDOW_SIZE`) and `tools/aspect_check.sh` (a 1260x540 window, Original and Fill): the Fill capture's central
+  953 pixels within 0.069 of the Original picture at tol 32 between the HUD's bars (0.083 with the HUD; a stretched
+  picture 0.465), its outer strips the scene, the race camera's 302 calls widened; the same figures in two runs. The
+  headless suite 18/18 and the Vulkan window suite 7/7 unchanged. Owed: task 085 fits the 2D interface (the HUD is
+  still spread under Fill), task 086 gives the Metal shell Fill. The draws barely move with the wider view (857 to
+  858 transformed at flip 6016), so whether the game's culling follows is for Erik's eye: late objects at the edges.
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
