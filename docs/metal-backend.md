@@ -826,6 +826,23 @@ The two seconds under 59.5 at Auto are the last two of both runs, with the optio
 with the option on as it does off; at internal scale 4 (`PURE_INTERNAL_SCALE=4`, a 1920x1088 target) the anisotropic
 taps add about 0.3 ms of GPU time a frame.
 
+## The interface fit under Fill (task 085, the Vulkan renderer)
+
+Under the Fill aspect (D-020) the Vulkan renderer's target has the window's shape and the game draws its 3D view at
+it, so the 2D interface is pulled in about the screen's centre to square pixels (`interface_fit`: `fit_x`, `fit_y`
+the smaller of the two scales over each). Patch 0028-vulkan-orthographic-fit gives the fit the same 2D rule as the
+sprite upscale and texture detail above: a draw is 2D when it is in through mode, or transformed under an
+orthographic projection with lighting off. A through-mode draw's vertices are moved, as before; a transformed one has
+its clip x and y scaled by `fit_x`, `fit_y` after `viewport_into_clip` (clip (0, 0) is the screen's centre), in its
+transform and in its interpolation summary, and its scissor fitted with it. A draw into another framebuffer, a clear,
+a draw that samples a rendered picture (the bloom chain) and a draw at least 470 PSP pixels wide through its transform
+(the menus' white backdrop, a fade) stay spread with the 3D view. At 1260x540 the race HUD and the menus keep their
+proportions (`tools/aspect_check.sh` (e) and (f)). Not covered: the profile screens (PROFILE, SET NAME, SET TAG,
+flips 1800 to 4300 of the main_menu route) draw their panel art (the rules, the A-G RACING box, the logo, the memory
+stick) as one full-screen quad of a 512x512 CLUT8 texture in VRAM at 0x04179a40, 0 to 480 wide, which the width rule
+takes for a backdrop: under Fill it stays spread while the text and buttons over it are fitted. The Metal shell has no
+Fill yet (task 086).
+
 ## The Metal shell
 
 `PURE_SHELL=metal` puts the game in a window shell of our own, `src/host/metal_shell.mm` (`MetalShell :

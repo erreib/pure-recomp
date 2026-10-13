@@ -93,7 +93,130 @@ task extends the fit to those draws, as a vendor patch, and extends the aspect c
 - Anything would touch include/psprecomp/ or the Metal backend.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+
+**Status: BLOCKED**, on the brief's second escalation condition: a screen-wide orthographic draw that holds interface
+art cannot be told from a backdrop by its extent (the draw is below). Everything else the brief asks for is done and
+passes: the patch, the check's (e) and (f), the docs, Verify (aspect_check PASS, the Vulkan window suite 7/7, 28
+patches, docs_check PASS), and the headless suite 18/18 with the same figures as task 084's. The review decides
+whether the remaining case blocks the merge. Nothing was widened to work around it.
+
+**Changed:**
+- New: patches/0028-vulkan-orthographic-fit.patch (host/gpu/vulkan_renderer.cpp, host/gpu/frame_interpolation.hpp
+  and .cpp).
+- Edited: tools/aspect_check.sh ((e), (f); the lane function takes the scene), patches/README.md (row and section),
+  docs/upstream.md (row and section), docs/metal-backend.md (a new section, "The interface fit under Fill"),
+  docs/status.md (the E2 bullet), docs/verification.md (the check's row and the "Which path" line), README.md (the
+  tool row and `PURE_NO_ORTHOGRAPHIC_FIT`), this file.
+
+### What the patch does
+- In `submit`, a transformed draw that is orthographic (`projection[3]`, `[7]`, `[11]` all 0) with lighting off,
+  into the shown framebuffer, not clear mode, not sampling a rendered picture, under Fill (`interface_fit` true), is
+  measured: its vertices through `viewport_into_clip(call) * projection * view * world`, divided by w. Below 470 of
+  the 480 PSP pixels wide, it is fitted: `clip_fit = {fit_x, fit_y}`.
+- `push.transform` takes `viewport_into_clip(call, fit_x, fit_y)`, a new overload that scales the clip x and y rows.
+  Clip (0, 0) is the screen's centre, so that is the fit about the centre. The draw's scissor is fitted with it, as a
+  through-mode draw's is.
+- The interpolation summary takes the same fit: `record_draw_for_replay(..., clip_fit)` and `summarize(call, fit_x,
+  fit_y)`, which folds it into the summary's projection. So the replay, which rebuilds a blended draw's transform from
+  the summaries, agrees with the main path.
+- At a fit of 1 both are bit for bit as before (a multiply by 1.0f). Through-mode draws keep the vertex fit unchanged.
+  The `orthographic` flag is computed once and reused by the texture detail test of patch 0020.
+- A raw draw (GPU decode, `PURE_GPU_DECODE=1`, off by default) has no vertices on the CPU to measure and stays
+  spread.
+- One addition the brief did not ask for: `PURE_NO_ORTHOGRAPHIC_FIT` fits through-mode draws alone, as before (the
+  framework's "give new behaviour an off switch"). README.md has its row.
+
+### The draw that blocks
+- **Which.** The profile screens (PROFILE, SET NAME, SET TAG: the main_menu route's flips about 1800 to 4300) draw
+  their panel art as one quad. The panel art is the rules across the screen, the CONFIRM row's line, the A-G RACING
+  box, the logo and the memory stick's outline.
+  - The quad samples a CLUT8 texture, 512x512, in VRAM at 0x04179a40. On the title screen the same address is a
+    512x128 texture, whose spread I could not see in the capture.
+  - It is orthographic, unlit and blended, and spans x 0 to 480 through its transform.
+  - The renderer finds no render target there (`framebuffer_source` is null), so the texels are written by the guest,
+    not rendered.
+- **What the rule does with it.** At 480 wide it stays spread, like the white backdrop drawn just before it (an
+  untextured quad, 0 to 480).
+  - The text and buttons drawn over it are fitted: PROFILE, LOAD, NEW, DELETE, the cursor, CONFIRM, BACK, the NAME00
+    box.
+  - Under Fill at 1260x540 the panel's top rule runs from x 58 to 1228, its boxes are a third too wide, and none of it
+    lines up with the fitted text any more.
+  - Captures in this worktree: out/085_byhand/shots/f2100.png, out/085_byhand/shots2/g3000.png and g3900.png.
+- **How it was found.** A temporary trace (removed before the export) listed every textured 2D draw at least 470
+  pixels wide on the main_menu + single_race route.
+  - Besides the layer there was only one: a 64x64 CLUT8 texture at 0x0968a4b0 during the race's fly-in (flips about
+    5950), x -101 to 1176. It is wider than the screen, an effect, and spread under any rule.
+- **Options for the review** (none taken):
+  1. Merge as is and accept the profile screens stretched under Fill (a player sees them when making or loading a
+     profile).
+  2. Fit a textured screen-wide 2D draw and keep only untextured ones spread. The white backdrop is untextured (seen
+     in the trace); the fades were not checked. The race's 64x64 effect would be pulled in a third too.
+  3. A profile field naming the texture addresses that are interface layers (game knowledge, a `GameProfile` field).
+  4. Leave it to Erik's eye.
+
+### aspect_check (two runs, every fraction the same to the fourth decimal; the second run's counts)
+- **(a)** 0.0691 between the HUD's bars (limit 0.10), as in task 084. Over the whole strip it is now 0.0512 (task 084:
+  0.0826 with the HUD spread). A stretched picture scores 0.4647.
+- **(b)** Left strip: variance 3884.5, 0.6356 apart from the central strip. Right strip: 6222.6 and 0.5239.
+- **(c)** Transformed draws at the frame: 857 under Original, 858 under Fill.
+- **(d)** Original: race camera 300 calls, 0 widened. Fill: 294 calls, 294 widened.
+- **(e)** 0.0205 over the HUD's bands (rows 0 to 40 and 212 to 272) at tol 32.
+  - The limit is 0.05, measured with a margin of about 2.4.
+  - A stretched picture scores 0.4419 over the same bands.
+  - strip.hud.diff.png shows the edges of the 3D view and of the HUD's glyphs: resampling.
+- **(f)** The main menu's central strips differ in 0.0205 at tol 24.
+  - The limit is 0.05; the tol and limit are the suite's for the scene.
+  - The differences are glyph edges and the one-pixel rule under MAIN MENU: resampling.
+  - The outer strips are 1.0000 not black, mean colour (255, 255, 255): the white backdrop stays spread.
+- **Time.** 5m 18s the first run (both race lanes made pipelines and ran again). 3m 57s the second, which included
+  two waits for task 086's game.
+
+### By hand
+I read the captures of a window at 1260x540 under Fill. The route was main_menu + single_race without
+`PURE_TRACE_3D`, so the direct vertex path ran; the check's race lanes take the expanded path, and its menu lanes
+both.
+- **Title (1750):** the logo, PRESS START BUTTON and the bottom bar at their proportions, white across the window.
+- **The fade after START (1805):** white over the whole window.
+- **Profile screens (2100, 3000, 3900):** the blocking case above.
+- **Main menu (4460, 4700), SINGLE PLAYER (4712, 4740), TEAM SELECTION (5600):** text, art, rules and the bottom panel
+  fitted; the white backdrop over the whole window.
+- **Race start (6016) and racing (6400):** the HUD at its proportions (CURRENT, POS, LAP, the speed and shield bars,
+  the track's name), the track to both sides.
+- **Not exercised: the interpolation replay of a fitted draw.** This game's profile does not blend orthographic draws
+  (`CutThresholds::orthographic` false), so a fitted draw is replayed from its recorded state, which has the fit. The
+  summary carries the fit for a game that blends them.
+
+### Verify output (last 20 lines)
+Verify's four commands were run one at a time, each after waiting for task 086's game to end: out/verify_085_*.txt.
+The headless suite: 18/18, every figure as in task 084's Verify (zone_change 0.0369).
+```
+run main_menu+single_race: run_boot exit 0, frame 6046 reached: yes, 11 s, paced from flip 5716, log /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-acce1db8807af49eb/out/regress/main_menu+single_race.log
+run main_menu+time_trial: 5920 flips, paced from flip 5590 ...
+run main_menu+time_trial: run_boot exit 0, frame 5920 reached: yes, 15 s, paced from flip 5590, log /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-acce1db8807af49eb/out/regress/main_menu+time_trial.log
+run main_menu+free_play: 5920 flips, paced from flip 5590 ...
+run main_menu+free_play: run_boot exit 0, frame 5920 reached: yes, 15 s, paced from flip 5590, log /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-acce1db8807af49eb/out/regress/main_menu+free_play.log
+run main_menu+zone: 5709 flips, paced from flip 4960 ...
+run main_menu+zone: run_boot exit 0, frame 5709 reached: yes, 28 s, paced from flip 4960, log /Users/erreib/dev/pure-recomp/.claude/worktrees/agent-acce1db8807af49eb/out/regress/main_menu+zone.log
+
+scene       frame  fraction  limit  tol  measured   delta  result
+title        1750    0.0302   0.05   24     0.030 +0.0002  PASS
+main_menu    4700    0.0331   0.05   24     0.033 +0.0001  PASS
+race_hud     6016    0.0465   0.10   32     0.047 -0.0005  PASS
+tt_hud       5890    0.0505   0.12   32     0.049 +0.0015  PASS
+fp_hud       5890    0.0488   0.11   32     0.048 +0.0008  PASS
+zone_hud     5260    0.0452   0.09   32     0.045 +0.0002  PASS
+zone_change   5679    0.0522   0.10   32     0.052 +0.0002  PASS
+
+frame regression: PASS, 7/7 scenes pass, the window scenes, shell vulkan, backend vulkan (1m 36s)
+ok: 28 patch(es) reproduce vendor/portablekit at 8b0c3fe
+docs_check: 34 files, 0 findings: PASS
+```
+
+### Open questions
+- **The profile screens' panel layer, above:** which option, if any.
+- **Raw draws are not fitted** (GPU decode, opt-in): measuring them would need their positions decoded on the CPU.
+- **The docs describe the rule as it stands.** They name the profile screens as not covered (docs/metal-backend.md,
+  docs/status.md, patches/README.md, docs/upstream.md), so a different decision means editing those lines.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

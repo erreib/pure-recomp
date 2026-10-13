@@ -70,6 +70,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0025-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
 | 0026-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
 | 0027-window-size-switch | (task 084) | Tooling | candidate | `<prefix>_WINDOW_SIZE=WxH` opens the Vulkan renderer's window at W x H instead of 480x272 times `video.window_scale`, so a check can run a window of another shape (21:9 for `tools/aspect_check.sh`, the Fill aspect of D-020); unset or malformed, the window is as before |
+| 0028-vulkan-orthographic-fit | (task 085) | Behaviour | candidate | Under the Fill aspect the Vulkan renderer's interface fit (2D draws into the shown framebuffer pulled in about the screen's centre to square pixels) takes transformed draws under an orthographic projection with lighting off too, not only through mode: their clip x and y scaled after `viewport_into_clip`, in the draw's transform and in its frame-interpolation summary alike; a draw at least 470 of the 480 PSP pixels wide through its transform stays spread; `<prefix>_NO_ORTHOGRAPHIC_FIT` fits through-mode draws alone, as before; Original and Stretch draw as before |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -562,3 +563,22 @@ draws its 3D view at the window's shape) needs a window of another shape from th
 prints `[render] window WxH (WINDOW_SIZE)`; unset, or anything but two positive numbers joined by an `x`, and the
 window is as before. Nothing else reads it: the menu's Window size row and a later resize work as they did. Applies to
 the pin alone. Upstream: a candidate, tooling any port's window checks can use.
+
+### 0028-vulkan-orthographic-fit
+Task 085 (D-020, point 3). Under Fill the target has the window's shape, so each of the game's 480x272 pixels is wider
+than square, and the renderer pulls the 2D interface in about the screen's centre to square pixels again
+(`interface_fit`). It did so for through-mode draws only, by moving their vertices. Wipeout Pure draws its menus and
+HUD as transformed draws under an orthographic projection (the w row, `projection[3]`, `[7]` and `[11]`, all 0) with
+lighting off (task 073's finding; the rule E7 and E5 use), so they stretched: at 21:9 the HUD was a third wider than it
+should be. Such a draw into the shown framebuffer, not in clear mode and not sampling a rendered picture, now has its
+clip x and y scaled by `fit_x` and `fit_y` after `viewport_into_clip`: clip (0, 0) is the screen's centre, so the
+scale is the same fit about the centre. The fit goes into `push.transform` and, through the `viewport_into_clip`
+overload and `summarize(call, fit_x, fit_y)`, into the draw's interpolation summary, from which the replay rebuilds a
+blended draw's transform, so the two paths agree; at a fit of 1 both are bit for bit as before. A draw whose vertices
+span at least 470 of the 480 PSP pixels through its transform (a fade, a backdrop) stays spread, as the through rule
+has it; a raw draw (`<prefix>_GPU_DECODE`) has no vertices on the CPU to measure and stays spread. The fitted draw's
+scissor is fitted with it, as a through-mode draw's is. `<prefix>_NO_ORTHOGRAPHIC_FIT` fits through-mode draws alone,
+as before. Nothing changes at Original or Stretch (no fit) or for a game without `view_aspect_frame` (no Fill). The
+texture detail test of 0020 now reads the same `orthographic` flag. Needs 0010 (`viewport_into_clip`) and 0020 (the
+flag it moves). Not covered by the width rule: a screen-wide draw that holds interface art, such as the profile
+screens' panel layer (task 085's Result), stays spread.

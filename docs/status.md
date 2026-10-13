@@ -290,6 +290,15 @@ simplification task, then the enhancements. The session-by-session resume notes 
   headless suite 18/18 and the Vulkan window suite 7/7 unchanged. Owed: task 085 fits the 2D interface (the HUD is
   still spread under Fill), task 086 gives the Metal shell Fill. The draws barely move with the wider view (857 to
   858 transformed at flip 6016), so whether the game's culling follows is for Erik's eye: late objects at the edges.
+  **Task 085 (the Vulkan fit for orthographic draws; BLOCKED for a decision, see below).** Patch
+  0028-vulkan-orthographic-fit: under Fill the renderer's interface fit takes transformed orthographic unlit draws
+  too (their clip x and y scaled about the centre after `viewport_into_clip`, the interpolation summary alike), so
+  the race HUD and the menus keep their proportions: `tools/aspect_check.sh` gains (e) the HUD's bands of the central
+  strip within 0.0205 of Original at tol 32 (limit 0.05; a stretched picture 0.442; the whole strip 0.083 before,
+  0.051 now) and (f) the main menu's central strip within 0.0205 at tol 24 (limit 0.05), its outer strips the white
+  backdrop. Open: the profile screens (PROFILE, SET NAME, SET TAG) draw their panel art as one full-screen quad of a
+  VRAM texture, which the 470-pixel width rule keeps spread while their text is fitted (docs/metal-backend.md, "The
+  interface fit under Fill"); telling it from a backdrop is the brief's escalation, left to the review.
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
