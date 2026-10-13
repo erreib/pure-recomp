@@ -512,5 +512,5 @@ functions it did before. Module families: kernel (ThreadMan, Kernel_Library, Sys
 ModuleMgr, LoadExec, sceSuspend, sceDmac), io (IoFileMgr, sceUmd, Stdio), sas (sceSasCore), audio (sceAudio,
 sceAtrac, sceMp3, sceVaudio), ge (sceGe_), display (sceDisplay), other (the rest). Render time (display lists,
 presents) and pacing sleeps inside a call are subtracted, as the [perf] guest figure subtracts them; the depth store
-(patch 0021) runs inside a list's render time, so it is not guest time and shows as `store`. Unimplemented imports
+(patch 0021-vulkan-async-readback) runs inside a list's render time, so it is not guest time and shows as `store`. Unimplemented imports
 (`[hle-stub]`) are registered elsewhere and count as game. Measurements: docs/tasks/082-guest-frame-profile.md.

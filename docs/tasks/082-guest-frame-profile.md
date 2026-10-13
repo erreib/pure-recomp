@@ -136,3 +136,98 @@ quartile), within the run-to-run spread of the swept race (the follower's race d
 HLE calls a frame). stutter_check with AVX2: FAIL by one second (25 of 232 over 25 ms, 10.8%, against 21 of 221 with
 the baseline): the same noise band. Reverted: `git checkout CMakeLists.txt`, rebuilt from ccache in 10 s (no
 `arch:AVX2` left in build.ninja), `git status` clean, `tools/patches.sh check` ok at 24.
+
+### The yardstick (stage 4)
+Task 055's PPSSPP 1.20.4 (`H:/errei/Documents/dev-stuff/deps/ppsspp-1.20.4/PPSSPPWindows64.exe`, x64 JIT, Vulkan),
+driven by `tools/ppsspp/ppsspp_ctl.py` through a scratch script (out/082_ppsspp.py, not committed): the scorecard's
+Vineta K Single Race route (`scorecard.pp_routes`) with Cross held from READY, then 60 s of wall time from five
+seconds after READY, each PPSSPP thread's CPU time (GetThreadTimes) against the emulated time (out/082-ppsspp-yardstick.log):
+speed 100.0% (3600 vblanks in 60.1 s), process 260 ms of CPU per emulated second, the emulation thread **194 ms per
+emulated second = 3.2 ms a vblank = 6.5 ms per game frame** (the game's own 30 fps), and that thread does the JIT'd
+game code, the HLE and the GE command and vertex decode together.
+
+### The comparison table
+| | per emulated second | per game frame | notes |
+|---|---|---|---|
+| port, guest thread (game + HLE), 60 fps (E4) | ~640 ms | 10.7 ms (game 8.8, HLE 2.0) | + render 5.4 ms a frame on the same thread |
+| port, `game` alone, calm seconds | ~490 ms | 8.1 ms | baseline x86-64; AVX2 8.0 |
+| port, `game`, storm quartile | ~600 ms | 10.1 ms | AVX2 9.6 |
+| PPSSPP 1.20.4 emu thread, 30 fps (the game's own) | 194 ms | 6.5 ms | everything: JIT code, HLE, GE decode |
+
+Per game update, the port's recompiled code alone (8 to 10 ms) costs more than PPSSPP's whole emulation thread
+(6.5 ms) on the same CPU, and E4's 60 fps asks for it twice as often. Better codegen flags are not the gap (AVX2:
+1 to 3%).
+
+### The trace's cost and the probe's spread
+| run | build | PURE_TRACE_GUEST | race seconds | speed | guest | render | stutter_check |
+|---|---|---|---|---|---|---|---|
+| out/082-on | baseline | 1 | 221 | 89.3% | 10.72 | 5.44 | PASS 21/221 |
+| out/082-avx2 | AVX2 corpus | 1 | 232 | 91.9% | 10.51 | 5.09 | FAIL 25/232 |
+| out/stutter_check (Verify) | baseline | off | 214 | 92.1% | 10.59 | 5.07 | FAIL 48/214 |
+| out/082-off2 | baseline | off | 221 | 89.9% | 10.63 | 5.40 | FAIL 39/221 |
+| out/082-on2 | baseline | 1 | 234 | 84.5% | 12.07 | 5.58 | FAIL 119/234 |
+
+On against off: the mean guest moves 0.1 ms (10.72 against 10.59 and 10.63), inside the off runs' own spread; the
+wrapper adds ~770 timed calls a frame. The later runs degraded on both settings (on2 is the worst of all, its calm
+seconds still game 8.29 against 8.12): the rig's state over the session, not the trace — at the end `tasklist` showed
+Memory Compression at 6 GB resident. The check's 10% bound sits inside this spread, so its verdict on this rig is
+the ceiling grazed or not, run by run.
+
+### Status
+PARTIAL. Every deliverable is in (the instrument, the attribution, the AVX2 delta with the tree clean, the PPSSPP
+yardstick, the docs), but the Verify line fails on `tools/stutter_check.sh` with the trace off (48 of 214 seconds,
+then 39 of 221 on a rerun). That is outside this task: with the trace off the patch binds the same functions as
+before, and the suite and the trace-on run passed earlier in the session. The acceptance item "stutter_check PASS with
+the trace on" held once (out/082-on, 21/221) and failed once later (out/082-on2, 119/234, the rig degraded).
+
+### Changed
+- patches/0024-guest-time-split.patch (new): vendor/portablekit/host/perf/frame_stats.hpp and .cpp (the `GuestPart`
+  split, `guest_split_enabled`, `guest_excluded_time`, `add_guest_split`, the `[guest-split]` line beside
+  `[render-split]`); the HLE dispatch site is **host/hle/hle_common.cpp `HleRegistrar::bind`**, which wraps each
+  import in a timer only when `PURE_TRACE_GUEST` is set. Untouched: include/psprecomp/, src/runtime.cpp (the
+  runtime's `invoke_import_cached`), the kernel. The depth store is in its own `store` column, inside render, outside
+  the guest total.
+- patches/README.md (the 0024 row and section), README.md (the `PURE_TRACE_GUEST` row), this file.
+- docs/verification.md unchanged: the check list did not change.
+- No committed flag change: the AVX2 edit was local and is reverted.
+
+### Verify output (last 20 lines, out/082-verify.log)
+```
+track_select   5390    0.0411   0.06   24     0.041 +0.0001  PASS
+team_select   5600    0.0416   0.06   24     0.042 -0.0004  PASS
+tt_track_select   5375    0.0400   0.06   24     0.040 +0.0000  PASS
+tt_hud       5890    0.0609   0.12   32     0.049 +0.0119  PASS
+fp_track_select   5375    0.0409   0.06   24     0.041 -0.0001  PASS
+fp_hud       5890    0.0728   0.11   32     0.048 +0.0248  PASS
+tournament_select   5185    0.0622   0.08   24     0.063 -0.0008  PASS
+zone_track_select   4975    0.0333   0.05   24     0.033 +0.0003  PASS
+zone_hud     5260    0.0461   0.09   32     0.045 +0.0011  PASS
+zone_change   5679    0.0308   0.10   32     0.052 -0.0212  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell vulkan, backend vulkan (12m 9s)
+stutter_check: shell vulkan, backend vulkan, out .../out/stutter_check/vulkan-vulkan
+stutter_check: campaign_sweep exit 0, 322 s, log .../out/stutter_check/vulkan-vulkan/race/single_race-vineta_k.log
+race: PASS, paced from flip 6100; 214 seconds, 11934 frames
+(a) seconds with a frame over 25 ms: 48 of 214 (22.4%); apart, the live-file flips (a multiple of 10) over it: 1049, worst 68.4 ms
+(b) readback: 0.00 ms a frame
+worst second: #209 after the paced flip, frame avg 18.7 max 91.1 ms, flip 17703 91.1 ms
+stutter_check: FAIL (48 of 214 seconds over 25 ms, readback 0.00 ms a frame; 48 of 214 seconds have a frame over 25 ms (at most 10%))
+VERIFY EXIT 1
+```
+Afterwards, run separately: `tools/patches.sh check` reports `ok: 24 patch(es) reproduce vendor/portablekit at 8b0c3fe`,
+and `python3 tools/docs_check.py` reports `33 files, 0 findings: PASS`. The first run found one finding in this task's
+own patches/README.md text ("patch 0021" by number alone), and it is fixed. The windowed suite is 18 scenes now, not
+the brief's 7: 18/18 twice with the trace off (out/082-regress-off.log, out/082-verify.log).
+
+### Open questions
+- **The corpus is compiled `/O2 /Ob0` on Windows** (vendor/portablekit/cmake/PortableKit.cmake: MSVC-style
+  generated options): inlining is turned off for all the recompiled code. The clang path (Mac) gets `-O2` with
+  inlining. That would explain the rig's `game` bucket better than the instruction set does, and it is the next
+  measurement to make: one local `/Ob1` or `/Ob2` corpus run on this same probe. Also unmeasured: whether clang-cl
+  contracts FP on the Windows corpus today. Without FMA in baseline x86-64 nothing fuses, but the clang path passes
+  `-ffp-contract=off` and the MSVC path does not.
+- 1.6 ms a frame is sceDisplay outside render (the flip's host work: shell pump, input script, overlay revalidation),
+  the largest HLE item; the tools' input script is part of it, and a player's build may pay less.
+- The SAS suspicion is refuted (0.13 ms, flat in storms). The storms are game code: more of the game's own work per
+  frame, matched by the rising HLE call count (584 to 894).
+- Whether to ship a flag is for Erik and the Mac session. On these numbers AVX2 is not worth it.
