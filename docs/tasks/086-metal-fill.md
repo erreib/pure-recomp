@@ -1,6 +1,6 @@
 # 086: Fill on the Metal shell (E2, the view at the window's shape on the Mac's default renderer)
 
-Milestone: E2 | Branch: task/086-metal-fill | Status: OPEN
+Milestone: E2 | Branch: task/086-metal-fill | Status: MERGED
 
 ## Goal
 The Mac plays on the Metal shell and backend (D-008), which have no Fill: the Aspect ratio row offers Original and
@@ -212,4 +212,18 @@ verify 086: PASS
 - **Stale doc outside my scope.** docs/ge-backend.md 8.2 still says the Metal shell letterboxes by `game_aspect()`. That file is outside "May touch".
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged 27906a1 into batch/m2 (2026-10-13), after task 085: four conflicts (tools/aspect_check.sh's lane function
+and header, README.md's and docs/verification.md's rows, docs/status.md's E2 bullet) resolved by combining both
+tasks' changes, so the Metal lane now runs 085's bars (e) and (f) as they are; docs/ge-backend.md 8.2's letterbox
+line brought up to date. Verify rerun on the merge from the main checkout (out/086_gate.log): `aspect_check --shell
+metal` PASS in 49 s ((a) 0.0627 between the bars, (e) 0.0198 over the HUD's bands, (f) 0.0058, the override 275 of
+275 widened), the headless suite 18/18, hud_check 61 of 61, menu_check PASS on both shells, docs_check PASS; then
+the Vulkan aspect check PASS with the merged script, the Metal window suite 7/7 (5m 13s), texture_check PASS and
+`tools/gerec/metal_check.sh` PASS. Spot-read: metal_targets.mm (`columns`, `centre_of`), metal_draw.mm (the fit's
+measure and `VertexUniforms::fit`), metal_shell.mm (`game_aspect`, `set_fill`, `PURE_WINDOW_SIZE`). By eye, the
+Metal lane's 21:9 race capture: the view wider at the same height, the HUD at its proportions in the central
+953 pixels (its corners sit at the 16:9 frame's edges, not the window's: anchoring the HUD to the window's edges
+would be a later refinement, a design call for Erik). Open, carried in status: the movies stretch under Fill on
+both renderers (one screen-wide through-mode draw each; a rule for a screen-wide through draw of an 8888
+main-memory texture would keep their shape); the lens flare stays spread by its measured width alone; no settle
+delay on a live resize; the rig untested.
