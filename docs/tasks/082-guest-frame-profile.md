@@ -115,3 +115,24 @@ Vulkan window with sound, the shipped defaults, 60 fps; read from the paced flip
 2. The storm bucket is **`game`**: the high-guest quartile carries +2.35 ms of guest over the low one, and +2.37 ms
    of it is `game`. SAS moves +0.02 ms (0.12 to 0.14): the SAS-voice suspicion is refuted. HLE calls per frame rise
    (584 to 894) while their time stays flat. The depth store is inside render (0.48 ms, flat), not guest time.
+
+### The codegen run (stage 3)
+The LOCAL edit, one line after `portablekit_add_game(PureNative ...)` in CMakeLists.txt:
+`target_compile_options(PureNative_generated PRIVATE /arch:AVX2 /clang:-ffp-contract=off)` — the corpus object
+target alone (host unchanged); `-ffp-contract=off` because clang-cl would otherwise fuse multiply-adds once FMA is
+available, which D-013's rounding forbids. 145 compile lines carried the flag; `tools/build.sh profile` (the
+memory-capped job pool) rebuilt it in 9 min 39 s with no warning or error (out/082-avx2-build.log). Same probe,
+`PURE_TRACE_GUEST=1 tools/stutter_check.sh --out out/082-avx2`:
+
+| seconds | baseline game | AVX2 game | baseline guest | AVX2 guest | baseline speed | AVX2 speed |
+|---|---|---|---|---|---|---|
+| all | 8.76 | 8.51 | 10.72 | 10.51 | 89.3% | 91.9% |
+| calm (>= 97%) | 8.12 | 8.03 | 10.01 | 10.00 | 98.9% | 99.0% |
+| low guest quartile | 7.69 | 7.60 | 9.68 | 9.66 | 95.5% | 96.7% |
+| high guest quartile | 10.06 | 9.55 | 12.03 | 11.55 | 81.8% | 86.5% |
+
+AVX2 is worth 1 to 3% of the `game` bucket (0.1 ms in calm seconds, 0.25 ms on the mean, 0.5 ms at the top
+quartile), within the run-to-run spread of the swept race (the follower's race differs run to run: 772 against 664
+HLE calls a frame). stutter_check with AVX2: FAIL by one second (25 of 232 over 25 ms, 10.8%, against 21 of 221 with
+the baseline): the same noise band. Reverted: `git checkout CMakeLists.txt`, rebuilt from ccache in 10 s (no
+`arch:AVX2` left in build.ninja), `git status` clean, `tools/patches.sh check` ok at 24.
