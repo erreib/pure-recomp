@@ -186,3 +186,32 @@ verify exit 0
 - The FP contract is left unaligned (the rig's compiler is clang-cl 23; the patch comment says why). Any future
   FMA-enabling flag must bring `-ffp-contract=off` with it.
 - Still Erik's: the restage, and his ears (whether the audio clicks went with the dips).
+
+## Review
+
+Merged ef413d9 into batch/m2, 2026-10-13. The patch is exactly the brief: both `/Ob0` sites in the vendor cmake's
+MSVC branch become `/Ob2`, `/bigobj` and the opt level untouched, each site commented — the first with the cost and
+the FP-contract reasoning (why `-ffp-contract=off` stays clang-only: contraction is per source expression, and no
+FMA exists without `/arch:AVX2`), the second with why it must follow the first. compile_commands.json was verified
+before the build (144 of 144 units `/Ob2`, no `/Ob0` anywhere), which matters doubly because ccache then served the
+whole corpus from the night experiment's identical compile in 17 s — the verification plus the after figures are the
+proof the binary is the inlined one. The chain of evidence is complete: the fresh-boot before (game 10.08 ms,
+stutter_check FAIL 164/248) kills the tired-machine objection to the night baseline, and the after (3.13 ms, PASS
+2/197, then 0/194 in Verify) reproduces the night probe on a rested machine. The full gates passed: 18/18 scenes,
+flash, framerate, menu, and the race with the game clock at 0.9993/1.0002 s per second — the 0.992 slowdown that fed
+the audio sink's clicks is gone.
+
+Two observations, neither blocking:
+- zone_change read 0.0185/0.0289/0.0251 across the three /Ob2 suites, all under the 0.052 measured value, within
+  task 077's documented 0.025–0.108 rig swing except the first by 0.0065 — and toward the reference, not away. Task
+  082's /Ob0 run read 0.0308. Windowed wobble; the worker's suggestion of a headless or Mac-side comparison to
+  resettle the scene's baseline is a fair small follow-up, not a defect.
+- The first after probe failed on `display`-bucket stalls (to 672 ms) on a binary the machine had never executed;
+  the immediate rerun was clean. The planning session watched Defender's real-time scan spike through this task's
+  build on this same morning, and a first execution of a fresh unsigned exe is exactly what that scanner intercepts;
+  the before run shows traces of the same. Worth remembering when a first run of a freshly linked binary stutters:
+  run it twice before believing it.
+
+The upstream row is marked candidate of the first order and that is right: every Windows port of the framework
+compiles its corpus without inlining today. Remaining from the brief's story: the release restage (this session) and
+Erik's ears on the clicks.
