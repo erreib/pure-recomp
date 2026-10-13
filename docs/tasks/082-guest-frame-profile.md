@@ -92,3 +92,26 @@ change. Commits per proven stage.
   boundary you found)
 - the trace's own cost moves the probe (report on vs off)
 - the AVX2 rebuild fails to build or exceeds the vendor guide's expectations badly (report; do not fight the build)
+
+## Result
+
+### The attribution run (stage 2)
+`PURE_TRACE_GUEST=1 tools/stutter_check.sh --out out/082-on` (the stutter_check probe: Vineta K Single Race in the
+Vulkan window with sound, the shipped defaults, 60 fps; read from the paced flip 6100): stutter_check PASS (21 of
+221 seconds over 25 ms, readback 0.00). 221 race seconds, ms per game frame (out/082_split.py):
+
+| seconds | n | speed | render | game | kernel | io | sas | audio | ge | display | other | guest | hle | calls/frame | store (in render) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| all (mean) | 221 | 89.3% | 5.44 | **8.76** | 0.07 | 0.00 | 0.13 | 0.11 | 0.05 | 1.56 | 0.04 | 10.72 | 1.96 | 772 | 0.48 |
+| calm (speed >= 97%) | 46 | 98.9% | 4.27 | 8.12 | 0.06 | 0.00 | 0.12 | 0.10 | 0.04 | 1.52 | 0.04 | 10.01 | 1.89 | 639 | 0.48 |
+| dip (speed < 97%) | 175 | 86.7% | 5.75 | 8.93 | 0.07 | 0.00 | 0.13 | 0.11 | 0.05 | 1.56 | 0.04 | 10.91 | 1.98 | 807 | 0.49 |
+| low guest quartile | 55 | 95.5% | 5.06 | 7.69 | 0.06 | 0.00 | 0.12 | 0.11 | 0.04 | 1.63 | 0.04 | 9.68 | 1.99 | 584 | 0.48 |
+| high guest quartile (the storms) | 55 | 81.8% | 5.79 | **10.06** | 0.08 | 0.00 | 0.14 | 0.11 | 0.05 | 1.55 | 0.04 | 12.03 | 1.97 | 894 | 0.49 |
+| worst second | 1 | 74% | | 11.96 | 0.10 | 0.00 | 0.13 | 0.12 | 0.08 | 1.44 | 0.04 | 13.87 | 1.92 | 1239 | 0.51 |
+
+1. Where the ~11 ms go: **82% is `game`, the recompiled code** (8.8 of 10.7 ms). All HLE together is 2.0 ms, and
+   1.6 ms of that is sceDisplay outside render (the flip's host work: the shell's event pump, the input script, the
+   overlay revalidation). Kernel and sync, IO, SAS, audio and GE calls are under 0.15 ms each.
+2. The storm bucket is **`game`**: the high-guest quartile carries +2.35 ms of guest over the low one, and +2.37 ms
+   of it is `game`. SAS moves +0.02 ms (0.12 to 0.14): the SAS-voice suspicion is refuted. HLE calls per frame rise
+   (584 to 894) while their time stays flat. The depth store is inside render (0.48 ms, flat), not guest time.
