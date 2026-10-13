@@ -27,7 +27,7 @@
 #                 commit of this repository (the PortableKit and tiny-AES-c pins, tools/vendor_setup.sh's PIN);
 #               - in config/*.csv, a field of a column whose header names a hash or sha (none today);
 #               - vendor/PIN (git-ignored, so only if a commit ever held it).
-#   tokens    no GitHub (ghp_ gho_ ghu_ ghs_ ghr_ github_pat_), GitLab (glpat-) or AWS (AKIA) token, no PEM block
+#   tokens    no GitHub (ghp_ gho_ ghu_ ghs_ ghr_ github_pat_), GitLab (glpat-) or AWS (AKIA) token, no PEM block, no private host name
 #   home      no home directory (/Users/NAME, /home/NAME, X:\Users\NAME or X:/Users/NAME, /x/Users/NAME) and no path
 #             in the rig's user folder (H:\errei, H:/errei, /h/errei: tools/bundle_windows.sh's machine check), except
 #             as notes: in the record (docs/tasks/, docs/history/, docs/research.md: a task's machine paths are
@@ -74,7 +74,7 @@ BYTES16 = re.compile(r"[{\[]\s*(?:0x[0-9A-Fa-f]{1,2}\s*,\s*){15}0x[0-9A-Fa-f]{1,
 WORDS4 = re.compile(r"[{\[]\s*(?:0x[0-9A-Fa-f]{8}[uUlL]*\s*,\s*){3}0x[0-9A-Fa-f]{8}[uUlL]*\s*,?\s*[}\]]")
 ESC16 = re.compile(r"(?:\\x[0-9A-Fa-f]{2}){16}")
 TOKEN = re.compile(r"(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}"
-                   r"|AKIA[0-9A-Z]{16})|-----BEGIN [A-Z0-9 ]+-----")
+                   r"|AKIA[0-9A-Z]{16})|-----BEGIN [A-Z0-9 ]+-----|eriksmedia\.com")  # the last: a private host of Erik's
 SHA256_WORD = re.compile(r"sha-?256|shasum", re.I)
 OBJECT_WORD = re.compile(r"\b(?:commit|tree|pin|sha-?1)\b", re.I)
 HOME = re.compile(r"(?<![\w.:/~-])/Users/(?!Shared\b)[A-Za-z0-9._-]+"
