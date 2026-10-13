@@ -14,7 +14,9 @@
 # first), so the app is signed with the list inside.
 #   --zip   also the zip archive, in out/release-macos/dist with the FFmpeg source archive and SHA256SUMS
 #   --dist   the disk image and the zip archive, in out/release-macos/dist
-# The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty].
+# The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty]; at a release, HEAD exactly at
+# the tag v<project version> with no uncommitted change, the version alone, 0.1.0 (task 087). A v-tag at HEAD that is
+# not v<project version> stops the pack. BUILDINFO.txt names the commit either way (docs/release.md, "Publishing").
 #
 # --check DIR (task 029's Verify line; DIR/data and the shots are made afresh, nothing outside DIR is written):
 #   bundle   codesign --verify --deep --strict, signed ad hoc; every Mach-O loads only system libraries and libraries
@@ -79,6 +81,26 @@ list_counts() {   # list_counts FILE: "R render pipelines, D depth-stencil state
   printf '%s render pipelines, %s depth-stencil states' "$(grep -c '^render ' "$1")" "$(grep -c '^depth ' "$1")"
 }
 
+# The version the artifacts are named after (task 087; the same function is in tools/bundle_windows.sh): the project
+# version alone when HEAD is exactly at the tag v<version> and no tracked file has uncommitted changes, else
+# <version>-<hash>[-dirty] (the abbreviated commit; --exclude='*' keeps a tag out of it). A v-tag at HEAD that is not
+# v<version> is an error: the tag and CMakeLists.txt's version must agree.
+release_version() {
+  local v tags
+  v=$(sed -n 's/^project(PureRecomp VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | tr -d '\r')
+  tags=$(git tag --points-at HEAD --list 'v[0-9]*' | tr -d '\r' | paste -sd' ' -)
+  if [ -n "$tags" ] && ! printf ' %s ' "$tags" | grep -qF " v$v "; then
+    echo "release version: FAIL: HEAD is tagged $tags but CMakeLists.txt's version is $v (tag v$v, or bump the version)" >&2
+    return 1
+  fi
+  if [ -n "$tags" ] && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
+    printf '%s' "$v"
+  else
+    [ -n "$tags" ] && echo "release version: HEAD is at v$v but the tree has uncommitted changes: not named as the release" >&2
+    printf '%s-%s' "$v" "$(git describe --always --dirty --exclude='*')"
+  fi
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 pack() {
   local packer_args=(--no-dmg) newer version
@@ -88,6 +110,7 @@ pack() {
     "") ;;
     *) usage ;;
   esac
+  version=$(release_version) || exit 1   # before the build: a tag that disagrees stops here
   if [ ! -x $BUILD/bin/PureNative ]; then
     echo "== $BUILD/bin/PureNative is missing: tools/build.sh release (10 to 20 minutes the first time)"
     tools/build.sh release || exit 1
@@ -111,7 +134,6 @@ pack() {
   mkdir -p "$BUILD/bin/$RESOURCES"
   cp "config/$LIST" "$BUILD/bin/$RESOURCES/" || exit 1
   echo "== $BUILD/bin/$RESOURCES/$LIST for Contents/Resources: $(list_counts "config/$LIST")"
-  version="$(sed -n 's/^project(PureRecomp VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)-$(git describe --always --dirty)"
   echo "== packing $NAME $version: release_macos.sh --game . ${packer_args[*]} $BUILD"
   # The packer is not executable at the pin (mode 100644), so bash runs it.
   bash vendor/portablekit/scripts/release_macos.sh --game . --version "$version" "${packer_args[@]}" $BUILD || {

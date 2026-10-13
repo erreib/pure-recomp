@@ -92,6 +92,7 @@ pure-recomp is free software under the GNU General Public License, version 2
 or later: LICENSE.txt. It is built on PortableKit (MIT) and ships SDL3 and
 FFmpeg (LGPL, dynamically linked: the DLLs beside the program, which you may
 replace) and contains Dear ImGui, each under its own licence: licenses\, with
-THIRD_PARTY_NOTICES.md. BUILDINFO.txt names the commit this build was made
-from. Wipeout Pure is a trademark of its owners, who have nothing to do with
-this program.
+THIRD_PARTY_NOTICES.md. Its source code is at
+https://github.com/erreib/pure-recomp, at the commit BUILDINFO.txt names
+(a release's tag, v0.1.0 for 0.1.0, is on that commit). Wipeout Pure is a
+trademark of its owners, who have nothing to do with this program.
