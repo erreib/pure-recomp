@@ -317,6 +317,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   the HUD bands 0.017 and 0.022 and the main menu 0.002 by task 085's bars computed by hand. Original is the old path to
   the pixel (refactor check at internal scale 1 and 3), the suites 18/18 and 7/7, hud_check 61 of 61. Open: the
   game's movies are one screen-wide GE draw each, so under Fill they stretch like a backdrop on both renderers.
+  Gated on the rig 2026-10-13 (the first native Vulkan driver, RTX 3080): `tools/aspect_check.sh` PASS with the
+  Mac's figures (the HUD bands 0.0209 and the main menu 0.0204 against the 0.05 limits; a stretched picture 0.44;
+  308 of 308 race-camera calls widened under Fill, none under Original), `tools/menu_check.sh --shell vulkan` PASS
+  (the Aspect ratio row offers Fill), the suite 18/18 (zone_change 0.0756 this run against 0.0185 to 0.0289 the day
+  before — the documented 0.025 to 0.108 swing, both directions). Erik's eye still owes E2 the culling look: a wide
+  window, Fill, and the track edges for late objects.
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
