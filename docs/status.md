@@ -290,6 +290,16 @@ simplification task, then the enhancements. The session-by-session resume notes 
   headless suite 18/18 and the Vulkan window suite 7/7 unchanged. Owed: task 085 fits the 2D interface (the HUD is
   still spread under Fill), task 086 gives the Metal shell Fill. The draws barely move with the wider view (857 to
   858 transformed at flip 6016), so whether the game's culling follows is for Erik's eye: late objects at the edges.
+  **Task 085 (the Vulkan fit for orthographic draws).** Patch 0028-vulkan-orthographic-fit: under Fill the
+  renderer's interface fit takes transformed orthographic unlit draws too (their clip x and y scaled about the centre
+  after `viewport_into_clip`, the interpolation summary alike), so the race HUD and the menus keep their proportions.
+  A screen-wide one (470 PSP pixels or more) stays spread when untextured (the white backdrop, the fades) or when it
+  reaches past the screen's edges (the race's fly-in glow), and is fitted when textured and within the screen: the
+  profile screens' panel and the title's logo, each one full-screen quad of a VRAM texture, which now line up with
+  the text over them (the review's rule after the worker's first run escalated them). `tools/aspect_check.sh` gains
+  (e) the HUD's bands of the central strip within 0.0205 of Original at tol 32 (limit 0.05; a stretched picture
+  0.442; the whole strip 0.083 before, 0.051 now) and (f) the main menu's central strip within 0.0205 at tol 24
+  (limit 0.05), its outer strips the white backdrop (docs/metal-backend.md, "The interface fit under Fill").
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
