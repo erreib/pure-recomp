@@ -126,7 +126,122 @@ D-020 holds the audit and the design; read it first.
 - Anything would touch include/psprecomp/, the kernel, or codegen.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+
+**Status: DONE.** Verify passes (out/verify_084.txt):
+- aspect_check: PASS.
+- The headless suite: 18/18. Every figure equals the build without the hook.
+- `tools/patches.sh check`: 27 patches reproduce the pin.
+- docs_check: PASS.
+
+The work departs from the brief in two places, both explained below:
+- The hook finds the generated body without `lookup_function`, which is private.
+- The override goes in at the first flip under a shape other than the PSP's, not at the first flip.
+
+**Changed:**
+- New: src/profile/aspect.cpp, src/profile/aspect.hpp, tools/aspect_check.sh, patches/0027-window-size-switch.patch.
+- Edited: src/profile/pure_profile.cpp (the include and `.view_aspect_frame`), CMakeLists.txt (the profile's source list), patches/README.md (row and section), docs/upstream.md (row and section), README.md (the tool row, `PURE_WINDOW_SIZE`, `PURE_TRACE_ASPECT`), docs/status.md (the E2 bullet), docs/verification.md (the check's row and the "Which path" line), and this file.
+- Not changed: docs/controls.md. It has no Aspect ratio row to annotate.
+
+### What the code does
+- **Install.** `view_aspect_frame` waits until a flip reports a shape other than 480/272, or until the first flip when `PURE_TRACE_ASPECT=1` is set. It then installs once:
+  - It finds the generated FUN_08a31148 and registers `pure::perspective` at 0x08a31148.
+  - It prints `[aspect] FUN_08a31148 overridden: ...`.
+  - If the function is not found, it prints one `not found` line instead and does nothing from then on.
+- **`perspective`.** When f13 is within 1e-4 of 480/272 and the last view aspect is not, it sets f13 to the view aspect. It then runs the generated body with ctx.pc at the entry.
+  - It counts the calls from the race camera (ra 0x088402c0, the return address of the call at 0x088402b8) apart from the others, and counts the calls it widened.
+- **At each flip after the install:**
+  - Under another shape, it sets 0x08b1fb14 to the float at 0x08b1fb18 times the aspect (only when that value is finite and positive) and remembers that it did.
+  - Back at 480/272 after a change, it writes 0x08b1fb18 x 480/272 once.
+- **`PURE_TRACE_ASPECT=1`** prints `[aspect] calls: race camera R (W widened), other O (V widened); view aspect A` once a wall-clock second.
+
+### Departure 1: `lookup_function` is private
+- **The problem.** `Runtime::lookup_function` is declared under `private:` in vendor/portablekit/include/psprecomp/runtime.hpp (line 166; `private:` is at line 149). `rt.lookup_function(0x08a31148)` does not compile from the profile, and include/psprecomp is out of bounds.
+- **The public route.** The hook defines a `CorpusRuntime` subclass, `Registrations` in aspect.cpp. It uses the corpus ABI's protected constructor with a host table that holds only `register_function` and `register_unit`.
+  - It replays `psprecomp::register_generated_functions` and keeps what the corpus registers at 0x08a31148: `recomp_unit_0139`.
+  - That is the same pointer the live runtime holds: the game has one statically linked corpus, no editions and no overlays.
+  - It runs once, guarded by `rt.has_function(0x08a31148)`. An unknown executable runs under the interpreter and gets the not-found line.
+- **The registration then behaves as D-020 says.** Unit 139 is poisoned for direct chaining, and every caller arrives through the function table. The trace counts the race camera's calls at about 60 a second.
+- **The alternative.** If the review prefers a public accessor, it is a one-line move in runtime.hpp, at the cost of a corpus rebuild.
+
+### Departure 2: the override goes in at the first flip under another shape
+- **Registered at the first flip, as briefed,** the headless suite stayed 18/18, but three race scenes moved:
+
+  | Scene | Without the hook | Registered at the first flip |
+  |---|---|---|
+  | tt_hud | 0.0112 | 0.0095 |
+  | fp_hud | 0.0116 | 0.0262 |
+  | zone_change | 0.0369 | 0.0018 |
+
+  - The build without the hook reproduces the old figures.
+  - The cause: the registration sends FUN_08a31148's calls through the outer dispatch. That moves where the scheduler's dispatch counts fall (as `PURE_TRACE_RAND`'s README row notes).
+- **The change.** The brief asks for the suite unchanged and for nothing registered that changes a picture. So at the PSP's shape the hook now registers and writes nothing, and it installs at the first flip whose shape differs.
+- **Results:**
+  - The headless suite: 18/18, equal to the hook-less build to the fourth decimal.
+  - The Vulkan window suite: 7/7, with no `[aspect]` line in its logs. Its figures match the 2026-10-13 gate log (out/pull22_gate.log) within the window runs' usual swing: fp_hud 0.0488 against 0.0508, zone_change 0.0242 against 0.0240, the rest within 0.0001.
+- **`PURE_TRACE_ASPECT=1` installs at the first flip whatever the shape.** Both lanes of the check set it, so they run the same dispatches.
+  - Without it, the Original lane raced a moment apart: an AI ship moved, (a) read 0.0770, and the transformed draws were 895 against 858.
+  - With it, the Vulkan window suite is also 7/7, with the override running and f13 left alone everywhere: race_hud 0.0441, tt_hud 0.0475, fp_hud 0.0486, zone_hud 0.0453, zone_change 0.0228. On the race route the race camera made 300 calls and none was widened.
+
+### aspect_check (three runs, the same figures to the fourth decimal each time)
+- **(a) The central strips.** The 953-pixel strips (x 153 to 1106), reduced to 480x272 by the area mean, differ in 0.0691 at tol 32 between the HUD's bars (rows 40 to 212 of 272). The limit is 0.10.
+  - Over the whole strip the figure is 0.0826. The HUD, spread under Fill, raises it, so the bar is the band between the HUD's bars, as the brief allows.
+  - A stretched picture (the Original strip spread to 1260 pixels, its centre cut) scores 0.4647.
+  - The differences are edges and the crowd's texture, from resampling: Fill draws at 1260x540 natively, while Original draws at 960x544 and is blitted to 953x540.
+  - Nearest neighbour gave 0.095 over the whole strip, so the check uses the area mean.
+- **(b) The outer strips.** The left and right 153-pixel strips, over the band:
+
+  | Strip | Variance (at least 200) | Apart from the adjacent central 153 pixels, tol 32 (at least 0.30) |
+  |---|---|---|
+  | Left | 3884.5 | 0.6356 |
+  | Right | 6222.6 | 0.5239 |
+
+- **(c) The draws.** Printed, not bound.
+
+  | Lane | `[render] frame 6016 (D draws)` | Transformed draws in the captured frame |
+  |---|---|---|
+  | Original | 342712 | 857 |
+  | Fill | 343264 | 858 |
+
+  - The `[render]` count is cumulative over the run: the renderer never resets it.
+  - The transformed draws come from `PURE_TRACE_3D`, the `[3d]` line before the capture.
+- **(d) The override's counts.**
+  - Original: race camera 297 calls, 0 widened; other 12630, 0 widened.
+  - Fill: race camera 296 calls, 296 widened; other 12630, 11736 widened. The square view's aspect of 1.0 is left alone.
+  - Both logs have the overridden line, and neither has a not-found line.
+- **Time.** 1m 51s with warm pipeline caches. The first run took 3m 40s, because each lane ran again once while its fresh pipeline cache was made.
+
+### Verify output (last 20 lines)
+```
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 21s)
+ok: 27 patch(es) reproduce vendor/portablekit at 8b0c3fe
+docs_check: 34 files, 0 findings: PASS
+```
+
+### Open questions
+- **Culling may not follow the wider view.**
+  - At flip 6016 the wider view adds one transformed draw (857 to 858).
+  - Ghidra lists no reader of 0x08b1fb14 (out/aspect/callers4.txt shows writes only), so the flip's tangent write may reach nothing.
+  - The race_hud frame shows no missing scenery at the edges. Objects appearing late at the edges are for Erik's eye in a 21:9 race; D-020's remedy is a second override at the culling function.
+- **Departures 1 and 2 above** are design calls for the review.
+- **Cost not measured.** The per-PC dispatch of unit 139 while Fill is in use is not measured: stutter_check is not in this Verify. At the PSP's shape there is no cost now.
+- **The switch's label.** README.md lists `PURE_WINDOW_SIZE` as run-control, "for the checks", because it shapes the window (the README's definition). The brief called it test-only.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
