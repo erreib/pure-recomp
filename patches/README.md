@@ -67,6 +67,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0022-vulkan-cached-window-capture | (task 078) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
 | 0023-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
 | 0024-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
+| 0025-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -514,3 +515,18 @@ sceAtrac, sceMp3, sceVaudio), ge (sceGe_), display (sceDisplay), other (the rest
 presents) and pacing sleeps inside a call are subtracted, as the [perf] guest figure subtracts them; the depth store
 (patch 0021-vulkan-async-readback) runs inside a list's render time, so it is not guest time and shows as `store`. Unimplemented imports
 (`[hle-stub]`) are registered elsewhere and count as game. Measurements: docs/tasks/082-guest-frame-profile.md.
+
+### 0025-corpus-inlining
+Task 083. `cmake/PortableKit.cmake` passed `/Ob0` (no inlining) beside `/O${PSPRECOMP_GENERATED_OPT_LEVEL}` in its
+MSVC branch twice: the generated units' source property `COMPILE_OPTIONS` and the overlay target's compile options.
+Both are `/Ob2` now. A target-level `/Ob2` appended from a port's own CMakeLists is a no-op, since the source
+property serializes after it on the command line (compile_commands.json shows `/O2 /Ob1 ... /O2 /Ob0 /bigobj`), so
+the fix belongs in the framework. Recompiled code is almost nothing but small functions (the guest memory accessors
+above all); without inlining every one stays a call, and on the rig (i5-8600K, clang-cl 23) the recompiled code ran
+2.7x slow: the `game` bucket of `PURE_TRACE_GUEST` was 10.08 ms a game frame on a fresh boot and the race's
+stutter_check failed in two of three seconds. The figures after: docs/tasks/083-corpus-inlining.md. The FP contract
+is left as it was: the clang path passes `-ffp-contract=off`, this branch does not; contraction is decided per
+source expression, so inlining fuses nothing new, and without `/arch:AVX2` an x64 target has no FMA instruction. A
+flag that enables FMA here must bring `-ffp-contract=off` (clang-cl) with it. The corpus rebuild with the flag is
+the only cost (~16 minutes on the rig). Upstream: a candidate of the first order; every Windows port of the framework
+pays this today.
