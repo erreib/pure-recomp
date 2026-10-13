@@ -1,0 +1,30 @@
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 2af20fc..607cd31 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -284,7 +284,14 @@ function(portablekit_add_game target)
+             if(PSPRECOMP_GENERATED_OPT_LEVEL STREQUAL "0")
+                 set(generated_options "/Od;/bigobj")
+             else()
+-                set(generated_options "/O${PSPRECOMP_GENERATED_OPT_LEVEL};/Ob0;/bigobj")
++                # /Ob2: recompiled code is almost all small functions (the guest memory accessors above all), and
++                # /Ob0 left every one a call: the corpus ran 2.7x slow against the clang path, which inlines
++                # (pure-recomp task 083: 9.8 to 3.6 ms of recompiled code a game frame on an i5-8600K). The
++                # -ffp-contract=off of the clang path is left out here, as before: contraction is decided per
++                # source expression, so inlining fuses nothing new, and an x64 target without /arch:AVX2 has no
++                # FMA instruction, so cl and clang-cl alike round every translated instruction on its own (D-013).
++                # A flag that enables FMA here must turn contraction off with it (clang-cl: -ffp-contract=off).
++                set(generated_options "/O${PSPRECOMP_GENERATED_OPT_LEVEL};/Ob2;/bigobj")
+             endif()
+         else()
+             # -ffp-contract=off: every translated instruction rounds on its own, as the VFPU and the FPU do
+@@ -643,7 +650,8 @@ function(_portablekit_add_overlay host_target meta_path output_dir)
+         if(PSPRECOMP_GENERATED_OPT_LEVEL STREQUAL "0")
+             target_compile_options(${target} PRIVATE /Od /bigobj)
+         else()
+-            target_compile_options(${target} PRIVATE /O${PSPRECOMP_GENERATED_OPT_LEVEL} /Ob0 /bigobj)
++            # /Ob2 as for the generated units above; a /Ob0 here would follow them onto their command lines.
++            target_compile_options(${target} PRIVATE /O${PSPRECOMP_GENERATED_OPT_LEVEL} /Ob2 /bigobj)
+         endif()
+     else()
+         target_compile_options(${target} PRIVATE -O${PSPRECOMP_GENERATED_OPT_LEVEL} -g0)
