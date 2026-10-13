@@ -1,0 +1,178 @@
+diff --git a/host/hle/hle_common.cpp b/host/hle/hle_common.cpp
+index 250026a..2e7c273 100644
+--- a/host/hle/hle_common.cpp
++++ b/host/hle/hle_common.cpp
+@@ -1,8 +1,10 @@
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
++#include "perf/frame_stats.hpp"
+ 
+ #include "psprecomp/common.hpp"
+ 
++#include <algorithm>
+ #include <cstdlib>
+ #include <iostream>
+ #include <unordered_set>
+@@ -45,8 +47,54 @@ bool HleRegistrar::try_add(std::string_view library, std::string_view name, HleF
+     return true;
+ }
+ 
++namespace {
++
++// The module family an import's time is charged to under <prefix>_TRACE_GUEST.
++perf::GuestPart guest_part(std::string_view library) {
++    const auto starts = [&](std::string_view prefix) { return library.starts_with(prefix); };
++    if (starts("ThreadMan") || starts("Kernel_Library") || starts("SysMem") || starts("UtilsFor") ||
++        starts("InterruptManager") || starts("ModuleMgr") || starts("LoadExec") || starts("sceSuspend") ||
++        starts("sceDmac"))
++        return perf::GuestPart::Kernel;
++    if (starts("IoFileMgr") || starts("sceUmd") || starts("StdioFor")) return perf::GuestPart::Io;
++    if (starts("sceSasCore")) return perf::GuestPart::Sas;
++    if (starts("sceAudio") || starts("sceAtrac") || starts("sceMp3") || starts("sceVaudio"))
++        return perf::GuestPart::Audio;
++    if (starts("sceGe_")) return perf::GuestPart::Ge;
++    if (starts("sceDisplay")) return perf::GuestPart::Display;
++    return perf::GuestPart::Other;
++}
++
++// Times one HLE call for the guest split: its wall time less the render and
++// pacing time inside it. A call made from inside another is the outer one's.
++HleFunction timed(HleFunction function, perf::GuestPart part) {
++    return [function = std::move(function), part](Runtime &rt, AllegrexContext &ctx) {
++        static int depth = 0;
++        if (depth != 0) {
++            function(rt, ctx);
++            return;
++        }
++        struct Scope {
++            perf::GuestPart part;
++            perf::Clock::time_point start{perf::Clock::now()};
++            perf::Clock::duration excluded{perf::guest_excluded_time()};
++            Scope(perf::GuestPart p) : part(p) { ++depth; }
++            ~Scope() {
++                --depth;
++                const perf::Clock::duration spent =
++                    (perf::Clock::now() - start) - (perf::guest_excluded_time() - excluded);
++                perf::add_guest_split(part, std::max(spent, perf::Clock::duration::zero()));
++            }
++        } scope(part);
++        function(rt, ctx);
++    };
++}
++
++} // namespace
++
+ void HleRegistrar::bind(const std::string &library, std::uint32_t nid, HleFunction function) {
+     bound_[{library, nid}] = function;
++    if (perf::guest_split_enabled()) function = timed(std::move(function), guest_part(library));
+     runtime_.register_hle(library, nid, std::move(function));
+ }
+ 
+diff --git a/host/perf/frame_stats.cpp b/host/perf/frame_stats.cpp
+index 83c44cd..059d61d 100644
+--- a/host/perf/frame_stats.cpp
++++ b/host/perf/frame_stats.cpp
+@@ -267,7 +267,58 @@ void restart_measurement() {
+     s.gpu_frames = 0u;
+ }
+ 
+-void add_render_time(Clock::duration duration) { state().render += duration; }
++namespace {
++
++constexpr std::size_t kGuestParts = static_cast<std::size_t>(GuestPart::Count);
++
++struct GuestSplit {
++    std::array<Clock::duration, kGuestParts> parts{};
++    std::uint64_t calls{};
++    Clock::duration excluded{};  // render and pacing, running total
++};
++
++GuestSplit &guest_split() {
++    static GuestSplit value;
++    return value;
++}
++
++// Prints the second's guest split per game frame. `guest_ms` is the [perf]
++// line's guest time per frame, `store_ms` the stores' per frame.
++void report_guest_split(double frames, double guest_ms, double store_ms) {
++    GuestSplit &split = guest_split();
++    if (frames <= 0.0) return;
++    const auto ms = [&](GuestPart part) { return to_ms(split.parts[static_cast<std::size_t>(part)]) / frames; };
++    double hle = 0.0;
++    for (std::size_t i = 0; i < kGuestParts; ++i) hle += ms(static_cast<GuestPart>(i));
++    std::printf("[guest-split] ms per game frame: game %.2f | kernel %.2f io %.2f sas %.2f audio %.2f ge %.2f "
++                "display %.2f other %.2f | store %.2f (in render) | guest %.2f hle %.2f calls %.0f\n",
++                std::max(0.0, guest_ms - hle), ms(GuestPart::Kernel), ms(GuestPart::Io), ms(GuestPart::Sas),
++                ms(GuestPart::Audio), ms(GuestPart::Ge), ms(GuestPart::Display), ms(GuestPart::Other), store_ms,
++                guest_ms, hle, static_cast<double>(split.calls) / frames);
++    std::fflush(stdout);
++    split.parts = {};
++    split.calls = 0u;
++}
++
++} // namespace
++
++bool guest_split_enabled() noexcept {
++    static const bool enabled = portablekit::env("TRACE_GUEST") != nullptr;
++    return enabled;
++}
++
++Clock::duration guest_excluded_time() noexcept { return guest_split().excluded; }
++
++void add_guest_split(GuestPart part, Clock::duration duration) noexcept {
++    GuestSplit &split = guest_split();
++    split.parts[static_cast<std::size_t>(part)] += duration;
++    ++split.calls;
++}
++
++void add_render_time(Clock::duration duration) {
++    state().render += duration;
++    if (guest_split_enabled()) guest_split().excluded += duration;
++}
+ 
+ namespace {
+ 
+@@ -357,6 +408,7 @@ void add_pacing_time(Clock::duration duration) {
+     State &s = state();
+     s.pacing += duration;
+     s.stalls[static_cast<std::size_t>(Stall::Pacing)].add(duration);
++    if (guest_split_enabled()) guest_split().excluded += duration;
+ }
+ void add_overlay_time(Clock::duration duration) { state().overlay += duration; }
+ void count_display_list() { ++state().lists; }
+@@ -502,6 +554,8 @@ void end_frame(std::uint64_t virtual_us, bool presented) {
+     out.requested_rate = s.requested_rate;
+     if (options().log) print(out);
+     if (split_enabled()) report_split(frames);
++    if (guest_split_enabled())
++        report_guest_split(frames, out.guest_ms, to_ms(s.stall_sum[static_cast<std::size_t>(Stall::Store)].total) / frames);
+     // A phone has no environment to set <prefix>_TRACE_STALLS in: there the
+     // [stalls] line comes with the [perf] line (Performance: Log), so a log a
+     // player saves from the menu says where the frame time went.
+diff --git a/host/perf/frame_stats.hpp b/host/perf/frame_stats.hpp
+index c7ffdb8..8575b5a 100644
+--- a/host/perf/frame_stats.hpp
++++ b/host/perf/frame_stats.hpp
+@@ -190,6 +190,22 @@ private:
+     std::uint64_t start_{};
+ };
+ 
++// <prefix>_TRACE_GUEST: where the guest thread's time goes, as a
++// [guest-split] line once a second in milliseconds per game frame. "Guest"
++// is the [perf] line's: the frame less render and pacing. Each HLE call is
++// timed at its registration's wrapper (HleRegistrar::bind, installed only
++// when the trace is on, so off it costs nothing per call), less the render
++// and pacing time spent inside it, and charged to its module family; what is
++// left is "game", the recompiled code and the dispatch between imports.
++// "store" (the depth and frame stores into guest memory) happens inside
++// render calls and is shown for reference, outside the guest total.
++enum class GuestPart : std::uint8_t { Kernel, Io, Sas, Audio, Ge, Display, Other, Count };
++[[nodiscard]] bool guest_split_enabled() noexcept;
++// Render and pacing time so far, a running total the HLE wrapper reads
++// before and after a call to take them out of the call's own time.
++[[nodiscard]] Clock::duration guest_excluded_time() noexcept;
++void add_guest_split(GuestPart part, Clock::duration duration) noexcept;
++
+ // Frame times in milliseconds, a ring written at `history_cursor()`.
+ inline constexpr std::size_t kHistoryFrames = 192u;
+ [[nodiscard]] const std::array<float, kHistoryFrames> &frame_history();

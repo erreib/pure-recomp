@@ -66,6 +66,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0021-vulkan-async-readback | (task 077) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
 | 0022-vulkan-cached-window-capture | (task 078) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
 | 0023-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
+| 0024-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -502,3 +503,14 @@ read_position` at the line. No behaviour changes. The swept race on the rig show
 frames each, while emulation ran at 88% of real time. The menus, at 100% real time, showed none from drift. The
 skips track the producer's lost time, not a fast device clock, so the slug's rate-matching was not built (task 079's
 Result). Upstream: a candidate, since any port with a slow or bursty producer skips here without knowing it.
+
+### 0024-guest-time-split
+Task 082. The guest thread's twin of the render split: where the [perf] line's guest milliseconds go. The timer sits
+in `HleRegistrar::bind` (host/hle/hle_common.cpp), the one place every implemented import is registered, so the
+recompiled code, the runtime's dispatch (src/) and the kernel are untouched and an untraced run registers the very
+functions it did before. Module families: kernel (ThreadMan, Kernel_Library, SysMem, Utils, InterruptManager,
+ModuleMgr, LoadExec, sceSuspend, sceDmac), io (IoFileMgr, sceUmd, Stdio), sas (sceSasCore), audio (sceAudio,
+sceAtrac, sceMp3, sceVaudio), ge (sceGe_), display (sceDisplay), other (the rest). Render time (display lists,
+presents) and pacing sleeps inside a call are subtracted, as the [perf] guest figure subtracts them; the depth store
+(patch 0021) runs inside a list's render time, so it is not guest time and shows as `store`. Unimplemented imports
+(`[hle-stub]`) are registered elsewhere and count as game. Measurements: docs/tasks/082-guest-frame-profile.md.
