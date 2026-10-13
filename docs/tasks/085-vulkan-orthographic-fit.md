@@ -1,6 +1,6 @@
 # 085: The 2D interface at square pixels under Fill (E2, the Vulkan fit for orthographic draws)
 
-Milestone: E2 | Branch: task/085-vulkan-orthographic-fit | Status: OPEN
+Milestone: E2 | Branch: task/085-vulkan-orthographic-fit | Status: MERGED
 
 ## Goal
 Under the framework's Fill aspect (task 084 made this game's 3D view take the window's shape) the HUD and the menus
@@ -224,4 +224,16 @@ docs_check: 34 files, 0 findings: PASS
 - **Raw draws are not fitted** (GPU decode, opt-in): measuring them would need their positions decoded on the CPU.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged 48625ad into batch/m2 (2026-10-13). One BLOCKED round: the profile screens' panel art is one textured
+screen-wide orthographic quad, which the 470-pixel rule took for a backdrop; the review chose the worker's option 2,
+refined (a textured screen-wide 2D draw lying within the screen is interface art and is fitted; untextured
+screen-wide draws and draws reaching past the edges stay spread), and the second round implemented it. Verify rerun
+on the merge from the main checkout (out/085_gate.log): aspect_check PASS ((a) 0.0691 between the bars, (e) 0.0205
+over the HUD's bands, (f) 0.0205 with the white backdrop over the strips, (d) 297 of 297 widened under Fill), the
+Vulkan window suite 7/7, patches 28, docs_check PASS; then `tools/hud_check.sh --shell vulkan` 61 of 61 and the
+headless suite 18/18 to the digit. Spot-read: patches/0028-vulkan-orthographic-fit.patch (the measure through the
+transform, `kScreenEdgeMargin`, the fit folded into `viewport_into_clip` and the interpolation summary),
+tools/aspect_check.sh. By eye, the worker's 21:9 captures: the PROFILE screen's panel, text and memory stick at
+their proportions in the centre with the white backdrop across the window. Open, carried in status: a game that
+draws a backdrop as a full-screen textured picture would see it fitted (none here); the profile screens are by
+hand only (a `profile` scene in the check would cost 50 s a lane); raw draws under PURE_GPU_DECODE stay spread.
