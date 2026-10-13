@@ -15,7 +15,9 @@
 #   BUILDINFO.txt        the version, the commit, the toolchain and the pins
 #   licenses/            FFmpeg-LICENSE.txt and FFmpeg-SOURCE.txt (the build's), PortableKit's, SDL3's, Dear ImGui's,
 #                        tiny-AES-c's and xxHash's licences, and packaging/THIRD_PARTY_NOTICES.md
-# The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty].
+# The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty]; at a release, HEAD exactly at
+# the tag v<project version> with no uncommitted change, the version alone, 0.1.0 (task 087). A v-tag at HEAD that is
+# not v<project version> stops the pack. BUILDINFO.txt names the commit either way (docs/release.md, "Publishing").
 #   --zip   also out/release-windows/dist/pure-recomp-<version>-windows-x64.zip (Windows' own tar.exe -a), SHA256SUMS
 #           and BUILDINFO.txt
 #
@@ -27,7 +29,8 @@
 #   dlls     every DLL the executable and each bundled DLL imports (llvm-objdump -p) is beside it in the folder or a
 #            system DLL: an api-ms-win-*/ext-ms-* API set, or a DLL of System32 that is not a redistributable C/C++
 #            runtime (vcruntime*, msvcp*, concrt*, vccorlib*, ucrtbased*); vulkan-1.dll is the driver's loader
-#   machine  no path of this machine (H:/errei, C:/Users/<user> in either slash, the user name) in any file
+#   machine  no path of this machine (H:/errei, C:/Users/<user> in either slash, the user name) in any file; README.txt
+#            and the notices are read without SOURCE_URL, whose GitHub account is the user's name (task 087)
 #   names    no file named like game data (tools/bundle.sh's names and packaging/release.env's RELEASE_GAME_NAMES)
 #   content  no file holds a disc image (CD001 at 32769), a PSP executable (MIPS ELF, ~PSP), a PBP or a PARAM.SFO; the
 #            strings UCUS98612, .iso, .wad, EBOOT, BOOT.BIN and the disc image's SHA-256 prefix are in no file but the
@@ -69,6 +72,9 @@ DLLS="SDL3.dll avcodec-61.dll avutil-59.dll swresample-5.dll"
 LICENSES="FFmpeg-LICENSE.txt FFmpeg-SOURCE.txt PortableKit-LICENSE.txt SDL3-LICENSE.txt DearImGui-LICENSE.txt
 tiny-AES-c-UNLICENSE.txt xxHash-LICENSE.txt THIRD_PARTY_NOTICES.md"
 DOCS="README.txt licenses/THIRD_PARTY_NOTICES.md"   # our own texts for the player (the content check lists their hits)
+# Where the source lives (task 087): README.txt names it. The GitHub account in it is the user's name, which the
+# machine check looks for, so the check reads DOCS without this address.
+SOURCE_URL=https://github.com/erreib/pure-recomp
 TITLE_TOL=24
 TITLE_MAX_FRAC=0.05
 ROUTE_FRAMES=2200
@@ -81,7 +87,25 @@ expected_files() {   # the folder's files, sorted
     for f in $LICENSES; do printf 'licenses/%s\n' "$f"; done; } | LC_ALL=C sort
 }
 
-version() { printf '%s-%s' "$(sed -n 's/^project(PureRecomp VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" "$(git describe --always --dirty)"; }
+# The version the artifacts are named after (task 087; the same function is in tools/bundle.sh): the project
+# version alone when HEAD is exactly at the tag v<version> and no tracked file has uncommitted changes, else
+# <version>-<hash>[-dirty] (the abbreviated commit; --exclude='*' keeps a tag out of it). A v-tag at HEAD that is not
+# v<version> is an error: the tag and CMakeLists.txt's version must agree.
+release_version() {
+  local v tags
+  v=$(sed -n 's/^project(PureRecomp VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | tr -d '\r')
+  tags=$(git tag --points-at HEAD --list 'v[0-9]*' | tr -d '\r' | paste -sd' ' -)
+  if [ -n "$tags" ] && ! printf ' %s ' "$tags" | grep -qF " v$v "; then
+    echo "release version: FAIL: HEAD is tagged $tags but CMakeLists.txt's version is $v (tag v$v, or bump the version)" >&2
+    return 1
+  fi
+  if [ -n "$tags" ] && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
+    printf '%s' "$v"
+  else
+    [ -n "$tags" ] && echo "release version: HEAD is at v$v but the tree has uncommitted changes: not named as the release" >&2
+    printf '%s-%s' "$v" "$(git describe --always --dirty --exclude='*')"
+  fi
+}
 
 disc_image() {   # Erik's disc image: where disc.iso points; on Windows disc.iso is a hard link to it (docs/setup.md)
   local target
@@ -98,6 +122,8 @@ disc_image() {   # Erik's disc image: where disc.iso points; on Windows disc.iso
 # ---------------------------------------------------------------------------------------------------------------------
 stage() {
   local newer sdl_root v
+  v=$(release_version) || exit 1   # before the build: a tag that disagrees stops here
+  VERSION=$v                       # pack names the zip after it
   if [ ! -f $BUILD/bin/PureNative.exe ]; then
     echo "== $BUILD/bin/PureNative.exe is missing: tools/build.sh release (15 to 25 minutes the first time)"
     tools/build.sh release || exit 1
@@ -115,7 +141,6 @@ stage() {
   fi
   sdl_root=$(sed -n 's/^SDL3_ROOT:[A-Z]*=//p' $BUILD/CMakeCache.txt | tr -d '\r')
   [ -f "$sdl_root/LICENSE.txt" ] || { echo "bundle_windows: no SDL3 licence at '$sdl_root/LICENSE.txt' (SDL3_ROOT)"; exit 1; }
-  v=$(version)
   echo "== staging $NAME $v in $STAGE/$NAME"
   rm -rf "$STAGE"
   mkdir -p "$FOLDER/licenses"
@@ -147,7 +172,7 @@ pack() {
   case "${1:-}" in --zip) zip=yes ;; "") ;; *) usage ;; esac
   stage
   if [ $zip = yes ]; then
-    v=$(version)
+    v=$VERSION
     archive="$RELEASE_SLUG-$v-windows-x64.zip"
     rm -rf "$DIST"; mkdir -p "$DIST"
     # Windows' own tar (bsdtar) writes zip archives (-a by the suffix); Git Bash's GNU tar comes first on PATH.
@@ -313,13 +338,24 @@ check() {
   # machine: no path of this machine.
   # Git Bash's grep aborts on -i (any file, 2026-10-09), which `|| true` would read as "no leak": the patterns are
   # made case-blind by hand ([Hh]...), a slash matches either slash, and grep's own failure fails the check.
-  local leaks user=${USERNAME:-$(id -un)} grc
-  leaks=$(LC_ALL=C grep -rlaE -e "$(ci 'H:/errei')" -e "$(ci '/h/errei')" -e "$(ci "C:/Users/$user")" \
-            -e "$(ci "$user")" -e "$(ci 'dev-stuff')" "$FOLDER")
+  local leaks user=${USERNAME:-$(id -un)} grc machine_pats kept=""
+  machine_pats=(-e "$(ci 'H:/errei')" -e "$(ci '/h/errei')" -e "$(ci "C:/Users/$user")" -e "$(ci "$user")"
+                -e "$(ci 'dev-stuff')")
+  leaks=$(LC_ALL=C grep -rlaE "${machine_pats[@]}" "$FOLDER")
   grc=$?
+  # README.txt names SOURCE_URL, whose GitHub account is the user's name (task 087): a file of DOCS counts only if it
+  # still matches without that address.
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case " $DOCS " in
+      *" ${f#"$FOLDER/"} "*) LC_ALL=C sed "s#$SOURCE_URL##g" "$f" | LC_ALL=C grep -qaE "${machine_pats[@]}" || continue ;;
+    esac
+    kept+="$f"$'\n'
+  done <<< "$leaks"
+  leaks=${kept%$'\n'}
   if [ $grc -gt 1 ]; then result machine FAIL "grep failed (exit $grc)"
   elif [ -n "$leaks" ]; then result machine FAIL "$(printf '%s' "$leaks" | tr '\n' ' ')"
-  else result machine PASS "no H:/errei, H:\\errei, C:/Users/$user (either slash), $user or dev-stuff in any file, any case"; fi
+  else result machine PASS "no H:/errei, H:\\errei, C:/Users/$user (either slash), $user or dev-stuff in any file, any case (README.txt's source address aside)"; fi
 
   # names: no file named like game data.
   local base pattern bad_names=""

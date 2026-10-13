@@ -17,8 +17,11 @@ its owners; pure-recomp is not affiliated with them.
 
 The game profile, the Metal graphics backend and window, the tools around them, and the changes to PortableKit kept
 as a numbered patch series. GNU General Public License, version 2 or later: `Wipeout Pure-LICENSE.txt`. The source is
-the pure-recomp repository at the commit in the app's version (Finder's Get Info, or `CFBundleGetInfoString` in
-`Contents/Info.plist`).
+the pure-recomp repository on GitHub, whose address is in the read-me that comes with the build (`Read Me.txt` beside
+the app, `README.txt` in the Windows folder), at the version of the app (Finder's Get Info, or
+`CFBundleGetInfoString` in `Contents/Info.plist`): a release such as 0.1.0 is the tag `v0.1.0`, a build between
+releases names its commit after the version number (0.1.0-1a2b3c4). The `BUILDINFO.txt` published with the build
+gives the full commit.
 
 ## Compiled into the program
 
@@ -139,7 +142,8 @@ the Japanese fallback font). PortableKit, Dear ImGui, tiny-AES-c, stb and xxHash
 Microsoft's C and C++ runtime (the static runtime of Visual Studio 2022's MSVC 14.39), so no runtime has to be
 installed. The licence texts are in the folder's `licenses/`: `PortableKit-LICENSE.txt`, `DearImGui-LICENSE.txt`,
 `tiny-AES-c-UNLICENSE.txt`, `xxHash-LICENSE.txt`, `SDL3-LICENSE.txt`, `FFmpeg-LICENSE.txt` and `FFmpeg-SOURCE.txt`.
-pure-recomp's own licence is `LICENSE.txt`; the commit the build was made from is in `BUILDINFO.txt`.
+pure-recomp's own licence is `LICENSE.txt`; the commit the build was made from is in `BUILDINFO.txt`, and its source
+is that commit of the repository `README.txt` names.
 
 The DLLs beside the program are unmodified prebuilt releases, dynamically linked; you may replace them with your own
 builds of the same or a compatible version.

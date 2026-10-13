@@ -86,7 +86,10 @@ Licence
 -------
 
 pure-recomp is free software under the GNU General Public License, version 2
-or later. It is built on PortableKit (MIT) and ships SDL3, FFmpeg (LGPL,
-dynamically linked), the Vulkan loader, MoltenVK and Dear ImGui under their
-own licences: Wipeout Pure.app/Contents/Resources/licenses/. Wipeout Pure is
-a trademark of its owners, who have nothing to do with this program.
+or later. Its source code is at https://github.com/erreib/pure-recomp, at
+the tag of this version (0.1.0 is v0.1.0; Finder's Get Info shows the
+version), or for a build between releases at the commit named after the
+version number. It is built on PortableKit (MIT) and ships SDL3, FFmpeg
+(LGPL, dynamically linked), the Vulkan loader, MoltenVK and Dear ImGui under
+their own licences: Wipeout Pure.app/Contents/Resources/licenses/. Wipeout
+Pure is a trademark of its owners, who have nothing to do with this program.
