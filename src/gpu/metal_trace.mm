@@ -27,11 +27,20 @@ constexpr std::uint64_t kTraceDelay = 30u;
 // The internal scale (D-015), for the start-up line: `internal scale 4: targets 1920x1088, effects 480x272`, the
 // screen-wide targets' size and the narrower ones' (the bloom's and the billboards'). Part of the line that opens with
 // "drawing with", which tools/refactor_check.sh leaves out of the counts it compares. `changed`: the line of a change
-// from the menu (task 067), `internal scale now 1: ...`, printed only when the scale changes.
+// from the menu (task 067), `internal scale now 1: ...`, printed only when the scale changes. Under Fill, with the
+// targets of another shape than the PSP's (task 086), their shape follows their size: `targets 1269x544 at 2.333:1`;
+// a change of the shape alone (the window resized) prints the line too.
 std::string MetalGeBackend::scale_report(bool changed) const {
+    const std::uint32_t rows = kHeight * scale_;
+    std::string shape;
+    if (columns_ != kWidth * scale_) {
+        char text[32];
+        std::snprintf(text, sizeof(text), " at %.3f:1", static_cast<double>(columns_) / rows);
+        shape = text;
+    }
     return std::string("internal scale ") + (changed ? "now " : "") + std::to_string(scale_) + ": targets " +
-           std::to_string(kWidth * scale_) + "x" + std::to_string(kHeight * scale_) + ", effects " +
-           std::to_string(kWidth) + "x" + std::to_string(kHeight);
+           std::to_string(columns_) + "x" + std::to_string(rows) + shape + ", effects " + std::to_string(kWidth) +
+           "x" + std::to_string(kHeight);
 }
 
 void MetalGeBackend::open_trace(const char *path) {

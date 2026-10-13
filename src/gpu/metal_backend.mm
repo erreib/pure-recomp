@@ -7,7 +7,8 @@
 //   targets    keyed by (colour address, stride, format), each an RGBA8 colour texture (5650, 5551 and 4444
 //              targets too) and a Depth32Float_Stencil8 texture, at 480x272, or at 480S x 272S for a key at
 //              least 480 wide at the internal scale S (task 066, D-015; guest memory gets each block's
-//              centre pixel). A pass draws into one target; switching targets ends it.
+//              centre pixel), under the Metal shell's Fill aspect at the drawable's shape, 272S rows high (task
+//              086). A pass draws into one target; switching targets ends it.
 //   stencil    the GE's stencil test and operations on the attachment; the colour target's alpha kept as
 //              the PSP's stencil by patch 0006's rule: written by the zpass REPLACE/ZERO where the colour
 //              path can (dual-source blending under a source-alpha blend), copied from the attachment where
@@ -23,7 +24,8 @@
 //              at decode (task 073, the menu's Text and sprites row: sprite_upscale.cpp) and sampled linear.
 //   draws      every primitive, through mode or transformed, through one pipeline whose key holds the
 //              blend, the write masks, the alpha test, the colour test, the depth test and the stencil; clears;
-//              scissor; the GE viewport folded into clip space; back-face culling. A draw into a 5650, 5551 or
+//              scissor; the GE viewport folded into clip space; back-face culling; under Fill, the 2D interface
+//              pulled in to square pixels about the screen's centre (task 086). A draw into a 5650, 5551 or
 //              4444 target blends in the shader and keeps the format's bits, dithered when the GE says (task
 //              040); with CLIPENABLE on, depth is clamped as the GE clamps it, and MINZ/MAXZ tested.
 //              Transformed draws get the GE's per-vertex lighting and fog (ge.vert's, in the shaders), and
@@ -63,6 +65,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -100,7 +103,27 @@ std::uint32_t scale_for(std::uint32_t setting) {
     return std::clamp(scale, 1u, kMaxScale);
 }
 
+// The widest target under Fill, Metal's texture limit on Apple GPUs; at 6 a shape of 8:1 needs 13056.
+constexpr std::uint32_t kMaxColumns = 16384u;
+
 } // namespace
+
+// The screen-wide targets' size for a setting (task 086): S as scale_for() gives it, 272S rows, and 480S columns, or,
+// while the Metal shell's Aspect ratio is Fill, the drawable's shape at those rows, the shape clamped to 1:4 to 8:1 as
+// the Vulkan renderer clamps it (wanted_target_extent): round(272S x shape). S stays the whole number the rows count,
+// so a guest pixel is 1/480 of the width across and S rows tall.
+MetalGeBackend::Extent MetalGeBackend::extent_for(std::uint32_t setting) {
+    Extent extent;
+    extent.scale = scale_for(setting);
+    extent.columns = kWidth * extent.scale;
+    std::uint32_t drawable_width = 0u, drawable_height = 0u;
+    pure::metal::drawable_size(drawable_width, drawable_height);
+    if (!pure::metal::fill() || drawable_width == 0u || drawable_height == 0u) return extent;
+    const double shape = std::clamp(static_cast<double>(drawable_width) / drawable_height, 0.25, 8.0);
+    const double columns = std::round(static_cast<double>(kHeight * extent.scale) * shape);
+    extent.columns = static_cast<std::uint32_t>(std::clamp(columns, 1.0, static_cast<double>(kMaxColumns)));
+    return extent;
+}
 
 // Says once per value which GE state is drawn approximately.
 void not_emulated(const char *what, std::uint32_t value) {
@@ -177,9 +200,12 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         const std::uint32_t opaque_white = 0xFFFFFFFFu;
         [white_ replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&opaque_white bytesPerRow:4];
         setting_ = setting_at_start(config);
-        scale_ = scale_for(setting_);
-        // The largest target's colour (or depth, 4 bytes a pixel too): 480S x 272S.
-        const std::size_t largest = kPictureBytes * scale_ * scale_;
+        const Extent extent = extent_for(setting_);
+        scale_ = extent.scale;
+        columns_ = extent.columns;
+        pure::metal::set_view_size(columns_, kHeight * scale_);
+        // The largest target's colour (or depth, 4 bytes a pixel too): 480S x 272S, or under Fill its own width.
+        const std::size_t largest = static_cast<std::size_t>(columns_) * kHeight * scale_ * 4u;
         readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
         frame_writeback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
         guest_readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
@@ -318,10 +344,12 @@ void MetalGeBackend::set_internal_scale(std::uint32_t setting) {
     if (!frame_drawn_) apply_scale();
 }
 
+// A change of S, or under Fill of the shape (the drawable's, task 086), retires the screen-wide targets
+// (change_scale()).
 void MetalGeBackend::apply_scale() {
     if (!ready_) return;
-    const std::uint32_t wanted = scale_for(setting_);
-    if (wanted != scale_) change_scale(wanted);
+    const Extent wanted = extent_for(setting_);
+    if (wanted.scale != scale_ || wanted.columns != columns_) change_scale(wanted);
 }
 
 void MetalGeBackend::submit(const DrawCall &call, const GuestMemory &memory) {
@@ -368,12 +396,19 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         // The targets of the scale before a change go once nothing reads them: the write-back pending now is this
         // picture's, and it is the new scale's (or nothing at all).
         if (!retired_.empty() && !retired(shown)) retired_.clear();
+        // Under Fill (task 086): the shown framebuffers, whose 2D draws are fitted, and the size the next frame's
+        // screen-wide targets will have (begin_frame() applies it), whose shape the shell hands the game at this flip.
+        const std::uint32_t displayed = GuestMemory::canonical(display_address);
+        if (displayed != display_addresses_[0]) display_addresses_ = {displayed, display_addresses_[0]};
+        const Extent next = extent_for(setting_);
+        pure::metal::set_view_size(next.columns, kHeight * next.scale);
         if (frames_ % kReportEvery == 0u) report();
         if (prewarm_.shared && !prewarm_.reported) report_prewarm_done();
         if (shown != nullptr) {
             image.api = pk::ImageApi::Metal;
             image.address = shown->key.address;
-            // The target's own size: 480S x 272S for a display target at internal scale S (D-015).
+            // The target's own size: 480S x 272S for a display target at internal scale S (D-015), under Fill the
+            // drawable's shape at 272S rows (task 086).
             image.width = shown->width();
             image.height = shown->height();
             image.image = reinterpret_cast<std::uint64_t>((__bridge void *)shown->color);

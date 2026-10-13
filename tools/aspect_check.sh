@@ -8,7 +8,12 @@
 # counts, src/profile/aspect.cpp), PURE_TRACE_3D=1 (each frame's transformed draws) and PURE_SCREENSHOT_EVERY=6016
 # (the `[render] frame 6016 (D draws)` line: the draws over the run). A lane whose run made Vulkan pipelines (a cold
 # pipeline cache stalls the paced race) is run again, up to three times in all, and the last compared.
-#   tools/aspect_check.sh [--out DIR] [--wait SECONDS]
+#   tools/aspect_check.sh [--shell vulkan|metal] [--out DIR] [--wait SECONDS]
+#   --shell default vulkan. metal (task 086): the same lanes and bars on the Metal shell and backend (--shell metal
+#           --backend metal), PURE_WINDOW_SIZE there the drawable's pixels (1260x540 on any display, as the Vulkan
+#           window's), the backend at Auto (PURE_INTERNAL_SCALE=0, the Vulkan lanes' scale: 960x544 under Original,
+#           1269x544 under Fill), its data directories out/data/aspect_check_metal/<lane> and its default out
+#           out/aspect_check_metal. The Metal backend prints no `[3d]` line, so (c) has its draws over the run alone.
 #   --out   default out/aspect_check: DIR/original and DIR/fill hold each lane's frame_regress output (shots/race_hud.png
 #           the window capture at flip 6016, the run's log), DIR/strip.<lane>.png the central strips at 480x272,
 #           DIR/strip.diff.png their differing pixels, DIR/summary.txt the figures.
@@ -40,15 +45,17 @@ cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
 
-DIR=out/aspect_check
+DIR=
 WAIT=600
 SIZE=1260x540
+SHELL_NAME=vulkan
 usage() {
-  echo "usage: tools/aspect_check.sh [--out DIR] [--wait SECONDS]"
+  echo "usage: tools/aspect_check.sh [--shell vulkan|metal] [--out DIR] [--wait SECONDS]"
   exit 2
 }
 while [ $# -gt 0 ]; do
   case $1 in
+    --shell) [ $# -ge 2 ] || usage; SHELL_NAME=$2; shift 2 ;;
     --out) [ $# -ge 2 ] || usage; DIR=$2; shift 2 ;;
     --wait) [ $# -ge 2 ] || usage; WAIT=$2; shift 2 ;;
     -h|--help) usage ;;
@@ -56,23 +63,30 @@ while [ $# -gt 0 ]; do
   esac
 done
 case $WAIT in ''|*[!0-9]*) echo "aspect_check: --wait takes seconds, not $WAIT"; exit 2 ;; esac
+# The shell's lane (task 086): the Vulkan window as task 084 made the check, or the Metal shell and backend at Auto.
+case $SHELL_NAME in
+  vulkan) DATA=out/data/aspect_check; LANE_ENV=() ;;
+  metal) DATA=out/data/aspect_check_metal; LANE_ENV=(--env PURE_INTERNAL_SCALE=0) ;;
+  *) echo "aspect_check: --shell is vulkan or metal, not $SHELL_NAME"; exit 2 ;;
+esac
+DIR=${DIR:-$([ "$SHELL_NAME" = vulkan ] && echo out/aspect_check || echo out/aspect_check_$SHELL_NAME)}
 mkdir -p "$DIR"
 DIR=$(cd "$DIR" && pwd)
 rm -f "$DIR"/strip.*.png "$DIR/summary.txt"
 START=$SECONDS
-echo "aspect check $(date '+%Y-%m-%d %H:%M'): race_hud in the Vulkan window at $SIZE, video.aspect original and fill," \
-  "into $DIR"
+echo "aspect check $(date '+%Y-%m-%d %H:%M'): race_hud in the $SHELL_NAME window at $SIZE, video.aspect original" \
+  "and fill, into $DIR"
 
 # lane NAME: the race_hud route with video.aspect=NAME in the lane's data directory, into DIR/NAME; again while the
 # run made pipelines, up to three runs.
 lane() {
   local name=$1 data rounds=0 rc
-  data=$(python3 - "$name" <<'EOF'
+  data=$(python3 - "$name" "$DATA" <<'EOF'
 import sys
 sys.path.insert(0, "tools")
 from purelib import port
 env = {}
-path = port.scratch_data_dir(env, f"out/data/aspect_check/{sys.argv[1]}")
+path = port.scratch_data_dir(env, f"{sys.argv[2]}/{sys.argv[1]}")
 settings = f"{path}/settings.ini"
 with open(settings) as f:
     lines = [ln for ln in f.read().splitlines() if not ln.startswith("video.aspect=")]
@@ -85,9 +99,9 @@ EOF
     python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
 sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("aspect_check: " + m, flush=True),
                               limit=float(sys.argv[1])) else 2)' "$WAIT" || exit 2
-    tools/frame_regress.sh --out "$DIR/$name" --shell vulkan --backend vulkan --only race_hud \
+    tools/frame_regress.sh --out "$DIR/$name" --shell "$SHELL_NAME" --backend "$SHELL_NAME" --only race_hud \
       --env "PURE_DATA_DIR=$data" --env "PURE_WINDOW_SIZE=$SIZE" --env PURE_TRACE_ASPECT=1 --env PURE_TRACE_3D=1 \
-      --env PURE_SCREENSHOT_EVERY=6016 > "$DIR/frame_regress.$name.stdout" 2>&1
+      --env PURE_SCREENSHOT_EVERY=6016 ${LANE_ENV[@]+"${LANE_ENV[@]}"} > "$DIR/frame_regress.$name.stdout" 2>&1
     rc=$?
     rounds=$((rounds + 1))
     if grep -q '^frame_regress: another PureNative is running' "$DIR/frame_regress.$name.stdout"; then

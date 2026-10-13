@@ -74,8 +74,11 @@ struct VertexUniforms {
     std::array<float, 16> texture_matrix{};
     std::array<float, 4> viewer{};
     std::array<float, 4> depth{};  // the depth clamp (task 040): the GE's z scale and offset, MINZ, MAXZ
+    // The interface's fit under Fill (task 086): x and y scale the position's clip x and y about the screen's centre
+    // when z is 1 (a 2D draw into a target of another shape than the PSP's, metal_draw.mm); z 0 leaves it alone.
+    std::array<float, 4> fit{1.0f, 1.0f, 0.0f, 0.0f};
 };
-static_assert(sizeof(VertexUniforms) == 240u, "VertexUniforms must match shaders/ge.metal");
+static_assert(sizeof(VertexUniforms) == 256u, "VertexUniforms must match shaders/ge.metal");
 
 struct Light {
     std::array<float, 4> position{};
@@ -156,8 +159,12 @@ struct TargetKey {
 
 struct Target {
     TargetKey key;
-    // The internal scale it is drawn at (D-015): 480S x 272S pixels, each S x S block one pixel of the guest's.
+    // The internal scale it is drawn at (D-015): 480S x 272S pixels, each S x S block one pixel of the guest's. Under
+    // the Fill aspect (task 086) S is the vertical scale alone, the whole number the mip and texture detail arithmetic
+    // uses, and `columns` the width: the drawable's shape at 272S rows, so a guest pixel is columns/480 (scale_x())
+    // pixels wide and S tall. 480S otherwise, and 480 for a narrower key (1x whatever the scale).
     std::uint32_t scale{1u};
+    std::uint32_t columns{kWidth};
     id<MTLTexture> color;
     id<MTLTexture> depth;  // depth and the stencil, whose copy the colour's alpha is
     id<MTLTexture> copy;   // what a draw samples when it reads the target it draws into
@@ -172,8 +179,12 @@ struct Target {
 
     [[nodiscard]] std::uint32_t bytes_per_pixel() const { return key.format == 3u ? 4u : 2u; }
     // Its textures' size in pixels, and its colour's bytes at 4 a pixel.
-    [[nodiscard]] std::uint32_t width() const { return kWidth * scale; }
+    [[nodiscard]] std::uint32_t width() const { return columns; }
     [[nodiscard]] std::uint32_t height() const { return kHeight * scale; }
+    // The horizontal scale: S, or under Fill a fraction (task 086).
+    [[nodiscard]] float scale_x() const { return static_cast<float>(columns) / static_cast<float>(kWidth); }
+    // Of another shape than the PSP's (Fill, task 086).
+    [[nodiscard]] bool reshaped() const { return columns != kWidth * scale; }
     [[nodiscard]] std::size_t picture_bytes() const { return static_cast<std::size_t>(width()) * height() * 4u; }
     // The guest memory the target covers from its address: kHeight rows of `stride` pixels.
     [[nodiscard]] std::uint64_t bytes() const {

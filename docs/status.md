@@ -287,9 +287,20 @@ simplification task, then the enhancements. The session-by-session resume notes 
   (`PURE_WINDOW_SIZE`) and `tools/aspect_check.sh` (a 1260x540 window, Original and Fill): the Fill capture's central
   953 pixels within 0.069 of the Original picture at tol 32 between the HUD's bars (0.083 with the HUD; a stretched
   picture 0.465), its outer strips the scene, the race camera's 302 calls widened; the same figures in two runs. The
-  headless suite 18/18 and the Vulkan window suite 7/7 unchanged. Owed: task 085 fits the 2D interface (the HUD is
-  still spread under Fill), task 086 gives the Metal shell Fill. The draws barely move with the wider view (857 to
-  858 transformed at flip 6016), so whether the game's culling follows is for Erik's eye: late objects at the edges.
+  headless suite 18/18 and the Vulkan window suite 7/7 unchanged. Owed: task 085 fits the 2D interface on the Vulkan
+  renderer (the HUD is still spread there under Fill). The draws barely move with the wider view (857 to 858
+  transformed at flip 6016), so whether the game's culling follows is for Erik's eye: late objects at the edges.
+  **Task 086 (Fill on the Metal shell: E2 on the Mac).** The Metal shell offers and draws Fill: the backend's
+  screen-wide targets take the drawable's shape at 272S rows (`Target` with a vertical S and a horizontal fraction;
+  the scissor, the sampled targets' placement, the read-backs and the depth write-back by each axis's scale, the mip
+  arithmetic by the vertical S), the shell hands the game that shape at each flip, and the 2D interface (through mode,
+  or orthographic and unlit, narrower than 470 of 480, into a shown framebuffer) is pulled in to square pixels in
+  `ge_vertex` by the Vulkan rule of tasks 084 and 085 (docs/metal-backend.md, "Fill"). `tools/aspect_check.sh --shell
+  metal` (a 1260x540 drawable, `PURE_WINDOW_SIZE` read by the Metal shell): 0.063 between the HUD's bars and 0.047 over
+  the strip with the HUD fitted (Vulkan 0.069 and 0.083), the outer strips the scene, the race camera's calls widened;
+  the HUD bands 0.017 and 0.022 and the main menu 0.002 by task 085's bars computed by hand. Original is the old path to
+  the pixel (refactor check at internal scale 1 and 3), the suites 18/18 and 7/7, hud_check 61 of 61. Open: the
+  game's movies are one screen-wide GE draw each, so under Fill they stretch like a backdrop on both renderers.
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race

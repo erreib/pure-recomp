@@ -26,6 +26,15 @@ id<MTLCommandQueue> queue();
 void set_drawable_size(std::uint32_t width, std::uint32_t height);
 void drawable_size(std::uint32_t &width, std::uint32_t &height);
 
+// The Fill aspect (task 086, D-020): the Metal shell says whether the menu's Aspect ratio is Fill (for a game that
+// widens its view), and the backend then draws its screen-wide targets at the drawable's shape. The backend says back
+// the size of the screen-wide targets the next frame draws into (set at each flip and at each change), whose shape the
+// shell hands the game as its view's (Shell::game_aspect). False and 0 x 0 until set.
+void set_fill(bool fill);
+bool fill();
+void set_view_size(std::uint32_t width, std::uint32_t height);
+void view_size(std::uint32_t &width, std::uint32_t &height);
+
 // The frame trace (PURE_METAL_TRACE, task 033; docs/metal-backend.md, "Frame times"). The backend writes a row per
 // flip; the Metal shell, which presents the backend's picture right after present_image(), hands it its own part
 // of each flip through these calls (the hook the brief offered, rather than a second file). The shell calls them
