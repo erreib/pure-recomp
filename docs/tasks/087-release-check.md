@@ -1,6 +1,6 @@
 # 087: The release check and the tagged version (the first public release)
 
-Milestone: R1 (public release) | Branch: task/087-release-check | Status: OPEN
+Milestone: R1 (public release) | Branch: task/087-release-check | Status: MERGED
 
 ## Goal
 Before the repository and its archives go public on GitHub, one command proves what the hard rules promise: the
@@ -235,4 +235,17 @@ The rest of the line, run on its own:
    private GitLab remote, and it goes public with the repository.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged ca895f8 into batch/m2 (2026-10-13) with the worker's BLOCKED Result standing as written: the Verify failed
+on the six machine paths alone, in files outside the brief's scope, and the review fixed them in the follow-up
+commit 7458cb3 (the Windows preset's `SDL3_ROOT` relative to the checkout, `CCACHE_DIR` under the home cache,
+the PPSSPP driver's path beside the checkout, docs/setup.md's placeholders) along with the worker's open
+questions 5 and 6 (patches/README.md's "nine below", the private remote's address in docs/status.md) and 4: both
+read-mes and the README now say what a build holds, a translation of the game's executable code and none of its
+data, instead of "no code". Verify rerun on 7458cb3: `tools/release_check.sh --history` PASS, every rule
+(345 tracked files, 827 commits, 1668 file versions in 3.5 s), docs_check PASS; the archive scan and the bundle
+check are rerun on the next pack (out/repack-087.log). Spot-read: tools/release_check.sh (the allow list, the
+history walk over objects rather than `git log -p`), the `release_version` function of both bundle scripts.
+Open question 2 stands as the worker left it (the URL in the read-mes, the notices pointing at them; a vendor
+patch narrowing the packer's machine-path check would let the notices carry it). Open question 3 is the rig's:
+`tools/bundle_windows.sh --check` there, and the rig's next build needs `../deps/SDL3-3.4.18` beside its
+checkout, which is where its SDL already is.
