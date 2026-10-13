@@ -113,7 +113,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
 
 ## Resume
 
-- **Branches.** `main` = the commit below (Erik's twenty-third fast-forward, 2026-10-13: everything of the
+- **Branches.** `main` = the commit below (Erik's twenty-fourth fast-forward, 2026-10-13: the first public release's
+  preparation, R1: the public README and CHANGELOG, `tools/release_check.sh` and the tagged version naming (task
+  087), the read-mes' wording, no machine paths; the twenty-third: everything of the
   twenty-second plus E2, the view at the window's shape on both renderers (tasks 084 to 086, D-020, patches 0027-window-size-switch
   and 0028-vulkan-orthographic-fit, twenty-eight patches by topic), the Mac gate of the rig's stutter arc and the app repacked twice; the
   twenty-second: everything of the
