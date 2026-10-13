@@ -193,7 +193,7 @@ Export save… and Back up saves… leave the packs out: they are the game's dat
 
 With the packs, LEAGUE SELECTION lists CLASSIC 2, DELTA and GAMMA under ALPHA and TEAM SELECTION adds ICARAS; the boot
 to MAIN MENU takes 0.2 to 0.4 s longer headless (the game opens every pack at start-up). `tools/dlc_check.sh --packs
-PACKS` checks a set on a scratch stick (README.md).
+PACKS` checks a set on a scratch stick (docs/developing.md).
 
 ## Limits
 

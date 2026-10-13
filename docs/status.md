@@ -510,7 +510,7 @@ The follow-ups resolved since they were collected, with what resolved them:
 - Suite "measured" column is Vulkan's; a Metal run reports every scene as moved (tasks 023, 024). Resolved: task 028: a
   measured column per backend.
 - `run_boot.py --script` implies a window and leaves audio on; a `--shell headless` flag (task 026). Resolved: task 028:
-  `--shell headless` (README.md).
+  `--shell headless` (docs/developing.md).
 - Time Trial and Free Play on the other Alpha tracks (budgets 11000 untested; the 30-fps modes read the live file every
   10 flips) (task 018). Resolved: the fidelity audit (task 035) ran Time Trial on all 12 circuits and Free Play on each
   league.

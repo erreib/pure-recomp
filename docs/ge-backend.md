@@ -101,7 +101,7 @@ An unknown name prints the registered ones and falls back to vulkan; an empty va
 When the Vulkan shell cannot be made ("Renderer: unavailable (...); running headless"), a backend that needs no
 window runs in the headless shell. The kernel's clock is paced to real time when the shell has a window and unpaced
 when it has none (`Kernel::set_paced`, set where the HLE makes the shell: patch 0005-kernel-host-waits-and-pacing);
-`PURE_PACED_FROM` (README.md) overrides that per run.
+`PURE_PACED_FROM` (docs/developing.md) overrides that per run.
 
 ## 6. The seam in the vendor tree, and the .gerec format
 

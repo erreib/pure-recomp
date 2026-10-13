@@ -91,7 +91,7 @@ leaves the executable.
   TEST.BIN` passes Gamma 1 and Classic 1 as it passes Jak X). Passing them (an entry that is no file name skipped) was
   task 078's vendor change ("In the menu (task 078)" below): since then the menu imports all twelve. The game itself
   reads neither TEST.BIN nor the list.
-- **The check: `tools/dlc_check.sh --packs PACKS [--out DIR] [--wait SECONDS]`** (README.md). Every run on a fresh
+- **The check: `tools/dlc_check.sh --packs PACKS [--out DIR] [--wait SECONDS]`** (docs/developing.md). Every run on a fresh
   stick of its own with the packs installed by tools/dlc_install.sh, headless on Metal: the selection run with
   `PURE_TRACE_IO` (PI.WAD opened in each of the twelve folders; league_select and team_select changed against the
   references, which have no packs), a race on the first track of Gamma, Delta and Classic 2 (the HUD in at least 4 of
@@ -131,7 +131,7 @@ leaves the executable.
   "Copies ... to a folder" names the profiles alone). Import still takes them (`is_game_save_name`), so the Saves
   section's Import save… installs a pack too. PROFILE > DELETE's list comes from the save-data HLE (`list_entries` in
   hle_savedata.cpp), which task 078 did not change: by the code it still names every `UCUS98612*` folder.
-- **The check.** `tools/dlc_check.sh` gained a step (README.md): a window run on a stick holding the profile the
+- **The check.** `tools/dlc_check.sh` gained a step (docs/developing.md): a window run on a stick holding the profile the
   selection run saved and no pack, with HOME pointed at a folder whose PSP/SAVEDATA holds copies of the twelve (the
   browser opens at HOME), drives the section's install and then Back up saves… through
   `config/pad_scripts/install_packs.txt`, with `PURE_MENU_DUMP=1`. 2026-10-12, Metal window: 12 folders found, 12

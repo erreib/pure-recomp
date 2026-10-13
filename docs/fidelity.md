@@ -12,7 +12,7 @@ report, every table and finding with its date, is [docs/history/fidelity.md](his
 | `tools/scorecard.py` | the standing answer: six categories (pictures, trajectories, timing, audio, saves, coverage) graded `faithful`, `close` or `differs` against PPSSPP or the game's own facts | docs/scorecard.md (the latest `--full` run), docs/verification.md "The accuracy scorecard" |
 | `tools/frame_regress.sh` | 18 scenes against PPSSPP's captures: every menu of the five modes and the first race frames | docs/verification.md "Frame regression suite" |
 | `tools/fidelity_audit.py` | the campaign matrix: 46 cells (every circuit in Single Race at Vector and Phantom and in Time Trial, Free Play and the tournaments by league, Zone 1 to 4), headless, collecting every halt, stub, unemulated GE state, warning, two-vblank stretch and audio figure; about 4 hours | README.md, the tools table; [the matrix of 2026-10-06](history/fidelity.md#the-campaign-matrix-item-2) |
-| `tools/ai_seed_check.sh` | the scorecard's trajectories with PPSSPP's race clock pinned (difference 13) | README.md |
+| `tools/ai_seed_check.sh` | the scorecard's trajectories with PPSSPP's race clock pinned (difference 13) | docs/developing.md |
 | `tools/sas_reverb_check.sh` | the reverb's tail at a pause against PPSSPP's (difference 12) | docs/verification.md "The SAS reverb check" |
 | `tools/save_interchange.sh` | saves both ways between the port and PPSSPP (difference 5) | docs/verification.md "The save interchange check" |
 | `tools/vfpu_probe.py`, `tools/vfpu_model.py` | the VFPU's rounding at the game's own instructions (difference 13) | docs/verification.md "The VFPU dot-product check" |
