@@ -22,6 +22,7 @@
 | D-018 | 2026-10-11 | E7: the menus' and HUD's bitmap art upscaled 4x at decode in the Metal backend (through-mode draws' palette textures, an edge-preserving resample), a "Text and sprites" row in the Esc menu, on by default then, off since 2026-10-12 (Erik's judgement of the picture); the checks run with it off; a texture pack from the same scaler for the Vulkan renderer and as the base for an AI pass, second | accepted (Erik) |
 | D-019 | 2026-10-12 | E5: texture detail at the internal scale: the mip level picked for the pixels drawn rather than the PSP's, anisotropic sampling on the mipmapped draws, a "Texture detail" row in the Esc menu, on by default; the checks run with it off; Metal first, the Vulkan renderer second | accepted (Erik) |
 | D-020 | 2026-10-13 | E2: the 3D view at the window's shape (the framework's Fill aspect) through a profile hook on the game's perspective builder and its horizontal half-FOV, since the game bakes 480/272 into code; the 2D interface at square pixels about the centre; Vulkan first, the Metal shell's Fill after | accepted |
+| D-021 | 2026-10-13 | VR, Windows only: an OpenXR shell on the Vulkan renderer, each game frame replayed once per eye through the frame interpolation's replay path with the headset's view and projection, the 2D interface on a panel in front; a Quest over Link on the rig; a stereo spike first (task 088), the milestone after it only if the spike holds 72 Hz | accepted |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -523,4 +524,50 @@ could change them. A new Esc menu row: the framework's row already says Fill.
 
 **Status.** Accepted 2026-10-13. Tasks 084 (the hook and the check, Vulkan), 085 (the Vulkan fit for orthographic
 draws), 086 (Metal Fill).
+
+## D-021  2026-10-13  VR on Windows: an OpenXR shell over the replay path
+
+**Context.** Erik asked (2026-10-13) whether a VR mode could ever come, and that Windows only would be fine; the rig
+has a Meta Quest over Link, which exposes the standard OpenXR runtime. Three pieces make it tractable rather than a
+rewrite. The camera is in hand since E2: the projection builder FUN_08a31148 takes the field of view and the aspect
+as arguments and the profile already overrides one of them (src/profile/aspect.cpp), and the camera's horizontal
+tangent write widens the game's own culling. The Vulkan renderer re-draws a frame with a changed camera today: the
+frame interpolation records every draw of a frame (`record_draw_for_replay`, the `DrawSummary`) and `replay()`
+draws them again with blended view matrices (vulkan_renderer.cpp about line 8158), which is what stereo needs,
+once per eye with the headset's view and projection in place of the blend. And the recompiled game leaves most
+of a 72 Hz frame unused on the rig since the inlining fix. On the Mac there is no consumer VR runtime, and Vision
+Pro would be a separate visionOS application, so this is Windows only by nature, not by choice.
+
+**Decision.**
+1. A spike first (task 088, on the rig): an OpenXR shell (a new file under src/host/, ours, Windows only) that
+   opens a session on the Vulkan renderer's instance and device, and at each game flip replays the frame once per
+   eye into the runtime's swapchain images with the eye's view (the head pose composed with the game's view) and the
+   eye's projection (the runtime's asymmetric field of view), submitting through the OpenXR frame loop; the desktop
+   window keeps showing the game. The 2D interface (through-mode and orthographic unlit draws, the classification
+   E2 built) is drawn as a flat panel at a fixed distance in front of the eyes. No head tracking reaches the game in
+   the spike: the game's culling stays at its 65 degree field of view, so the periphery pops in when the head turns;
+   the FOV argument of the projection override closes that in the milestone. The game stays at 60 Hz; the runtime
+   reprojects.
+2. What the renderer needs from the vendor, as patches: instance and device extensions and a physical-device
+   choice supplied by the shell through `RendererConfig` (OpenXR names what it needs before the instance exists),
+   the instance, device and queue handed back, and a replay entry that takes a per-draw transform override and
+   draws into a caller's image. Everything else is the shell's.
+3. The milestone, only if the spike shows a race in stereo at the headset's rate without stalls: head tracking into
+   the game's view matrix (the setter after the camera's apply), the FOV override for culling, the kernel's vblank
+   at 72 or 90 Hz (the uncapped-fps question, with E4's audit), the panel's placement and the menu in VR, comfort
+   options (a fixed horizon, the ship as the reference frame), and a check that renders both eyes headless from a
+   recorded pose for the suite.
+4. The spike's judge is Erik in the headset; its mechanical proof is the per-eye capture (`PURE_VR_DUMP`) and the
+   frame-time line, since nothing of it can run on the Mac.
+
+**Consequences.** A Windows-only feature in a port that has kept both platforms equal; the docs say so. The
+rig needs the Meta Quest Link app (its OpenXR runtime active) and the Khronos OpenXR loader beside its SDL
+(`deps/openxr`). A milestone on the scale of the Metal backend, five to eight tasks, all on the rig.
+
+**Alternatives.** Rendering the scene twice from the game (two camera applies a frame) would double the guest's
+work and fight the game's frame structure; the replay path draws the recorded frame for free. A head-tracked
+desktop view without stereo is a smaller first step but proves nothing about the runtime. Waiting for a Mac VR
+runtime: none is announced.
+
+**Status.** Accepted 2026-10-13. Task 088 the spike, on the rig.
 
