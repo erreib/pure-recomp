@@ -479,6 +479,11 @@ simplification task, then the enhancements. The session-by-session resume notes 
   0.1.0, BUILDINFO.txt "Built from: e91d443...". The read-mes name the source,
   https://github.com/erreib/pure-recomp; the notices name the repository and point at the read-me for the address,
   since the framework's packer refuses an app holding this Mac's user name, which is the GitHub account.
+- **Released: 0.1.0 (2026-10-13).** The first public release: `v0.1.0` tagged on main f31c1be, the repository
+  public at https://github.com/erreib/pure-recomp (main the default branch, the full history, the release check
+  green over it), the release page holding the Mac archive built at the tag (pure-recomp-0.1.0-macos-arm64.zip,
+  29.5 MB, bundle check and archive scan PASS; out/release-0.1.0.log), SHA256SUMS and FFmpeg's source tarball (the
+  LGPL offer). The Windows archive comes from the rig at the same tag (docs/release.md, "Publishing").
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
