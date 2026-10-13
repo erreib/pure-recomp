@@ -71,6 +71,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0026-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
 | 0027-window-size-switch | (task 084) | Tooling | candidate | `<prefix>_WINDOW_SIZE=WxH` opens the Vulkan renderer's window at W x H instead of 480x272 times `video.window_scale`, so a check can run a window of another shape (21:9 for `tools/aspect_check.sh`, the Fill aspect of D-020); unset or malformed, the window is as before |
 | 0028-vulkan-orthographic-fit | (task 085) | Behaviour | candidate | Under the Fill aspect the Vulkan renderer's interface fit (2D draws into the shown framebuffer pulled in about the screen's centre to square pixels) takes transformed draws under an orthographic projection with lighting off too, not only through mode: their clip x and y scaled after `viewport_into_clip`, in the draw's transform and in its frame-interpolation summary alike; a draw at least 470 of the 480 PSP pixels wide through its transform stays spread unless it is textured and lies within the screen (2 PSP pixels of margin each side: a layer of interface art); `<prefix>_NO_ORTHOGRAPHIC_FIT` fits through-mode draws alone, as before; Original and Stretch draw as before |
+| 0029-windows-file-url | (the planning session, 2026-10-13, after Erik's Windows play) | Bug fix | **candidate of the first order (every Windows port's folder buttons)** | The menu's folder buttons (Open the data folder, the saves, backups, textures and fonts folders) build a `file://` URL for `SDL_OpenURL` by percent-encoding the whole path, so a Windows path came out `file://C%3A%5CUsers%5C...`, which Explorer refuses: nothing opened. The three copies of `file_url` (menu.cpp, font_menu.cpp, save_screen.cpp) now put three slashes before an absolute path, keep the drive's colon and turn backslashes into slashes: `file:///C:/Users/...`; macOS and Linux paths come out as before (`file:///Users/...`) |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -586,3 +587,14 @@ fitted draw's scissor is fitted with it, as a through-mode draw's is. `<prefix>_
 through-mode draws alone, as before. Nothing changes at Original or Stretch (no fit) or for a game without
 `view_aspect_frame` (no Fill). The texture detail test of 0020 now reads the same `orthographic` flag. Needs 0010
 (`viewport_into_clip`) and 0020 (the flag it moves).
+
+### 0029-windows-file-url
+The planning session (2026-10-13), after Erik found the Esc menu's "Open the data folder" and its siblings doing
+nothing on Windows. `SDL_OpenURL` takes a URL, and the menus make one from a path by percent-encoding every byte
+that is not a letter, digit, slash, dash, underscore, dot or tilde: fine for `/Users/...` (one leading slash from
+the path, `file://` giving the other two), wrong for `C:\Users\...`, whose colon and backslashes came out `%3A` and
+`%5C` with only two slashes before them. The fix adds the third slash when the path does not start with one, keeps
+`:` and maps `\` to `/`, in the three identical helpers (a shared one would be the upstream shape). Tested by a
+compile of the helper on three paths (macOS unchanged, two Windows drives) and by the rig by hand. Upstream: a
+candidate of the first order, every Windows port of the framework has dead folder buttons today.
+

@@ -493,6 +493,13 @@ simplification task, then the enhancements. The session-by-session resume notes 
   pure-recomp-0.1.0-windows-x64.zip (sha256 80f6d8f2...) uploaded to the GitHub release by `gh` (installed and
   authenticated on the rig this day); the release's SHA256SUMS re-uploaded with the Windows line appended, since the
   Mac's copy carried only its own zip and the FFmpeg source.
+- **The Esc menu's folder buttons on Windows (patch 0029-windows-file-url, 2026-10-13).** Erik's first refinement
+  pick after the release: "Open the data folder" and its siblings did nothing on Windows. The menus hand
+  `SDL_OpenURL` a `file://` URL made by percent-encoding the path, which on Windows encoded the drive's colon and
+  the backslashes with only two slashes before them. The three copies of the helper now make `file:///C:/Users/...`
+  (macOS unchanged: `file:///Users/...`, checked by a compile of the helper on both shapes). Verified on the rig by
+  hand (docs/windows.md "Updating the rig"); `tools/menu_check.sh` unchanged on the Mac. Next refinements are
+  Erik's to name.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

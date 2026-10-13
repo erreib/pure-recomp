@@ -31,6 +31,7 @@ it uses.
 | 0021-content-packs | no | 0016 (the menu lines around the save rows that it adds its section after, `dump_row("[save rows]")`; tried in task 078 with `patch` on the pin plus 0003, 0004 and 0016: it applies) | 0016 (`dump_row`, `dump_detail` and the dump's row objects) |
 | 0027-window-size-switch | yes (tried in task 084 with `git apply --check` on a clean checkout of the pin) | nothing | nothing |
 | 0028-vulkan-orthographic-fit | no | 0010 and 0020 (the transform and summary lines, the `orthographic` flag it moves; read from the code in task 085, not tried patch by patch) | 0010 (`viewport_into_clip` in the transform and the summary) |
+| 0029-windows-file-url | yes (every Windows port's folder buttons are dead without it; a shared `file_url` would be the upstream shape) | none | none |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.

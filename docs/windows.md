@@ -167,6 +167,11 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
      call and the `game` bucket of `PURE_TRACE_GUEST` took 10.08 ms a game frame on a fresh boot (stutter_check FAIL,
      164 of 248 seconds). Patch 0026-corpus-inlining passes `/Ob2`: 3.13 ms, stutter_check PASS 2 of 197, the whole
      guest frame 5.35 ms against PPSSPP's 6.5 on the same CPU. See docs/tasks/083-corpus-inlining.md.
+   - **open** (patch 0029-windows-file-url, 2026-10-13): after `tools/patches.sh check` reports 29 and a rebuild, the Esc
+     menu's folder buttons by hand: System's "Open the data folder", the saves tab's "Open the saves folder" and
+     "Open the backups folder", Video's "Open the textures folder" and the fonts' folder: each opens Explorer at the
+     folder and the log has no `[menu] cannot open` line (before the patch every one printed it, with the URL
+     `file://C%3A%5C...`). `tools/menu_check.sh --shell vulkan` unchanged.
    - **open** (task 077-download-packs — the Mac line's 077, not this file's readback 077; docs/dlc.md): copy the twelve US pack folders (`UCUS98612D<PACK>`, 62 MB,
      on the Mac in `$HOME/dlc-packs`; the game's data, never in the repository or the zip) to the rig, outside the
      checkout, then `tools/dlc_check.sh --packs DIR` (DIR the copied folder) [`dlc_check: PASS`; PI.WAD opened in 12 of

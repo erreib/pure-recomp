@@ -1,0 +1,69 @@
+diff --git a/host/ui/font_menu.cpp b/host/ui/font_menu.cpp
+index 31110d1..348a626 100644
+--- a/host/ui/font_menu.cpp
++++ b/host/ui/font_menu.cpp
+@@ -49,9 +49,16 @@ RowOptions options_for(const char *key, std::string description) {
+ }
+ 
+ std::string file_url(const std::string &path) {
++    // A file URL has three slashes before an absolute path: "file:///Users/..." on
++    // macOS and Linux, where the path brings the third, and "file:///C:/Users/..."
++    // on Windows, where the path starts with a drive letter and its separators
++    // are backslashes. Encoding the colon and the backslashes made
++    // "file://C%3A%5CUsers%5C...", which Explorer refuses (patch 0029-windows-file-url).
+     std::string url = "file://";
+-    for (const unsigned char c : path) {
+-        if (std::isalnum(c) != 0 || c == '/' || c == '-' || c == '_' || c == '.' || c == '~') {
++    if (path.empty() || (path[0] != '/' && path[0] != '\\')) url += '/';
++    for (unsigned char c : path) {
++        if (c == '\\') c = '/';
++        if (std::isalnum(c) != 0 || c == '/' || c == ':' || c == '-' || c == '_' || c == '.' || c == '~') {
+             url += static_cast<char>(c);
+         } else {
+             char escaped[4];
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index ffa25c6..973c3bd 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -96,9 +96,16 @@ int cycle(int value, int delta, int count) { return ((value + delta) % count + c
+ 
+ // Percent-encodes a path for a file:// URL.
+ std::string file_url(const std::string &path) {
++    // A file URL has three slashes before an absolute path: "file:///Users/..." on
++    // macOS and Linux, where the path brings the third, and "file:///C:/Users/..."
++    // on Windows, where the path starts with a drive letter and its separators
++    // are backslashes. Encoding the colon and the backslashes made
++    // "file://C%3A%5CUsers%5C...", which Explorer refuses (patch 0029-windows-file-url).
+     std::string url = "file://";
+-    for (const unsigned char c : path) {
+-        if (std::isalnum(c) != 0 || c == '/' || c == '-' || c == '_' || c == '.' || c == '~') {
++    if (path.empty() || (path[0] != '/' && path[0] != '\\')) url += '/';
++    for (unsigned char c : path) {
++        if (c == '\\') c = '/';
++        if (std::isalnum(c) != 0 || c == '/' || c == ':' || c == '-' || c == '_' || c == '.' || c == '~') {
+             url += static_cast<char>(c);
+         } else {
+             char escaped[4];
+diff --git a/host/ui/save_screen.cpp b/host/ui/save_screen.cpp
+index d1712da..17fe887 100644
+--- a/host/ui/save_screen.cpp
++++ b/host/ui/save_screen.cpp
+@@ -99,9 +99,16 @@ fs::path backups_directory() {
+ 
+ // Percent-encodes a path for a file:// URL.
+ std::string file_url(const std::string &path) {
++    // A file URL has three slashes before an absolute path: "file:///Users/..." on
++    // macOS and Linux, where the path brings the third, and "file:///C:/Users/..."
++    // on Windows, where the path starts with a drive letter and its separators
++    // are backslashes. Encoding the colon and the backslashes made
++    // "file://C%3A%5CUsers%5C...", which Explorer refuses (patch 0029-windows-file-url).
+     std::string url = "file://";
+-    for (const unsigned char c : path) {
+-        if (std::isalnum(c) != 0 || c == '/' || c == '-' || c == '_' || c == '.' || c == '~') {
++    if (path.empty() || (path[0] != '/' && path[0] != '\\')) url += '/';
++    for (unsigned char c : path) {
++        if (c == '\\') c = '/';
++        if (std::isalnum(c) != 0 || c == '/' || c == ':' || c == '-' || c == '_' || c == '.' || c == '~') {
+             url += static_cast<char>(c);
+         } else {
+             char escaped[4];
