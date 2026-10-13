@@ -85,6 +85,9 @@ patches/README.md with the upstream column loud, the figures, and the docs. Comm
 
 ## Result
 
+**Status: DONE.** Changed: patches/0025-corpus-inlining.patch (new), patches/README.md, docs/windows.md,
+docs/tasks/083-corpus-inlining.md. Nothing under vendor/ committed.
+
 ### Before: the unfixed tree on a fresh boot (2026-10-13)
 `PURE_TRACE_GUEST=1 tools/stutter_check.sh --out out/083-before` on the worktree's unfixed build (the corpus /O2 /Ob0,
 ccache-built from the main checkout's objects), the rig freshly rebooted, first game run of the session. The
@@ -125,3 +128,61 @@ It was the second game run after the reboot, on a binary the machine had not run
 (out/083-after2), nothing changed in between, passed with the night's margin. The before run shows some of the same
 `display` stalls (66 seconds over 3 ms), but its 791 guest-dominated counted slow frames are the /Ob0 storms the
 `game` bucket names (16.74 ms at its worst second).
+
+### The gates (the /Ob2 tree, out/083-gates.log)
+- `tools/frame_regress.sh --all-scenes`: PASS 18/18 (12m 4s). Fraction / measured: lang 0.0544/0.054, title
+  0.0302/0.030, profile 0.0543/0.054, main_menu 0.0330/0.033, race_hud 0.0460/0.047, single_player 0.0251/0.025,
+  class_select 0.0452/0.045, league_select 0.0614/0.062, track_select 0.0411/0.041, team_select 0.0416/0.042,
+  tt_track_select 0.0400/0.040, tt_hud 0.0465/0.049, fp_track_select 0.0409/0.041, fp_hud 0.0578/0.048,
+  tournament_select 0.0622/0.063, zone_track_select 0.0333/0.033, zone_hud 0.0441/0.045, zone_change 0.0185/0.052
+  (flagged "moved more than 0.03"; limit 0.10). The thirteen frontend scenes are within 0.0008 of the column; the race
+  scenes are within their windowed wobble. zone_change re-run alone: 0.0289 PASS. In the Verify run's suite: 0.0251 PASS
+  (race_hud 0.0461, tt_hud 0.0589, fp_hud 0.0469, zone_hud 0.0443), 18/18. Task 077 documents zone_change swinging
+  0.025 to 0.108 run to run on the rig (see Open questions).
+- `tools/flash_check.sh --shell vulkan`: PASS (fade 57 flips off, 0 on; the race and its HUD in both).
+- `tools/framerate_check.sh --shell vulkan`: PASS (frontend 33.4/33.4 ms, race 33.4/16.7 ms, 29.97/59.94 flips a
+  second off/on; the HUD drawn at 60). Again in Verify: 29.97/59.95.
+- `tools/framerate_check.sh --shell vulkan --race`: PASS, 29.98 flips a second off, 59.96 on; **the game clock 0.9993
+  and 1.0002 s a second** (task 077: 0.9919/0.9946); laps 79.0/89.8/72.6 s off and 65.2/57.9/57.4 s on.
+- `tools/menu_check.sh --shell vulkan`: PASS (Controls 37, System 12).
+- In the Verify run: stutter_check PASS, 0 of 194 seconds over 25 ms (a third /Ob2 probe); `tools/patches.sh check`:
+  ok, 25 patches; `python3 tools/docs_check.py`: 33 files, 0 findings, PASS.
+
+### Verify output (`tools/verify_task.sh 083`, last 20 lines)
+```
+H:/errei/Documents/dev-stuff/pure-recomp/.claude/worktrees/agent-ab6b50e36c9f923a8/patches/0004-ge-backend-and-shell-seams.patch:44: trailing whitespace.
+#include <algorithm>
+warning: squelched 2600 whitespace errors
+warning: 2605 lines add whitespace errors.
+H:/errei/Documents/dev-stuff/pure-recomp/.claude/worktrees/agent-ab6b50e36c9f923a8/patches/0007-savedata-list-and-no-key-mode.patch:938: trailing whitespace.
+#include "ui/save_list.hpp"
+H:/errei/Documents/dev-stuff/pure-recomp/.claude/worktrees/agent-ab6b50e36c9f923a8/patches/0007-savedata-list-and-no-key-mode.patch:939: trailing whitespace.
+
+H:/errei/Documents/dev-stuff/pure-recomp/.claude/worktrees/agent-ab6b50e36c9f923a8/patches/0007-savedata-list-and-no-key-mode.patch:940: trailing whitespace.
+#include "ui/layer.hpp"
+H:/errei/Documents/dev-stuff/pure-recomp/.claude/worktrees/agent-ab6b50e36c9f923a8/patches/0007-savedata-list-and-no-key-mode.patch:941: trailing whitespace.
+#include "ui/widgets.hpp"
+H:/errei/Documents/dev-stuff/pure-recomp/.claude/worktrees/agent-ab6b50e36c9f923a8/patches/0007-savedata-list-and-no-key-mode.patch:942: trailing whitespace.
+
+warning: squelched 567 whitespace errors
+warning: 572 lines add whitespace errors.
+ok: 25 patch(es) reproduce vendor/portablekit at 8b0c3fe
+docs_check: 33 files, 0 findings: PASS
+verify 083: PASS
+verify exit 0
+```
+
+### Open questions
+- zone_change sat at the low end in all three /Ob2 suite runs: 0.0185, 0.0289 and 0.0251, all under the measured 0.052
+  (limit 0.10). The last two are inside the rig's documented 0.025 to 0.108 swing. The first is 0.0065 under it and
+  moves toward the reference, not away. Task 082's /Ob0 run gave 0.0308. Inlining should not move a pixel, so this is
+  read as windowed wobble, but a headless or Mac-side zone_change comparison would settle whether its baseline should
+  move. Not escalated: every scene PASSes and no scene moved away from the reference.
+- The first after probe (out/083-after) failed stutter_check, 67 of 209, on `display`-bucket stalls (up to 672 ms),
+  not on the recompiled code (game 3.46 ms). The next two /Ob2 probes passed, 2 of 197 and 0 of 194. Cause not found;
+  the guess is a first run of a fresh binary after the reboot. Worth watching in Erik's play.
+- No cold corpus compile ran here: ccache served every /Ob2 unit from the night experiment's build (17 s). The night's
+  cold figures (9m39s to 16m, no unit failed) stand as the build cost.
+- The FP contract is left unaligned (the rig's compiler is clang-cl 23; the patch comment says why). Any future
+  FMA-enabling flag must bring `-ffp-contract=off` with it.
+- Still Erik's: the restage, and his ears (whether the audio clicks went with the dips).
