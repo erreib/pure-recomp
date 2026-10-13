@@ -32,7 +32,7 @@ port of the framework pays this today.
   paragraph this closes), docs/verification.md
 
 ## Deliverable
-One vendor patch, `patches/0025-corpus-inlining.patch` (through `tools/patches.sh export`), its rows in
+One vendor patch, `patches/0026-corpus-inlining.patch` (through `tools/patches.sh export`), its rows in
 patches/README.md with the upstream column loud, the figures, and the docs. Commits per proven stage.
 - **The before, on this rested machine:** one probe (`PURE_TRACE_GUEST=1 tools/stutter_check.sh`) on the unfixed
   tree, committed with the `game` bucket figures — the fresh-boot baseline the night experiment lacked.
@@ -64,9 +64,9 @@ patches/README.md with the upstream column loud, the figures, and the docs. Comm
 `tools/stutter_check.sh && tools/frame_regress.sh --all-scenes && tools/flash_check.sh --shell vulkan && tools/framerate_check.sh --shell vulkan && tools/patches.sh check && python3 tools/docs_check.py`
 
 ## May touch
-- vendor/portablekit/cmake/PortableKit.cmake: only through `tools/patches.sh export 0025-corpus-inlining`; commit
+- vendor/portablekit/cmake/PortableKit.cmake: only through `tools/patches.sh export 0026-corpus-inlining`; commit
   patches/, never vendor/
-- patches/0025-corpus-inlining.patch (new), patches/README.md
+- patches/0026-corpus-inlining.patch (new), patches/README.md
 - docs/windows.md, docs/verification.md, README.md, docs/tasks/083-corpus-inlining.md (the Result)
 
 ## Must not touch
@@ -85,7 +85,7 @@ patches/README.md with the upstream column loud, the figures, and the docs. Comm
 
 ## Result
 
-**Status: DONE.** Changed: patches/0025-corpus-inlining.patch (new), patches/README.md, docs/windows.md,
+**Status: DONE.** Changed: patches/0026-corpus-inlining.patch (new), patches/README.md, docs/windows.md,
 docs/tasks/083-corpus-inlining.md. Nothing under vendor/ committed.
 
 ### Before: the unfixed tree on a fresh boot (2026-10-13)
@@ -104,7 +104,7 @@ the baseline used a slightly different window.) The fresh boot does not rescue t
 the night's, so the machine's state was never the cause.
 
 ### The patch and the build
-Both `/Ob0` sites in vendor/portablekit/cmake/PortableKit.cmake became `/Ob2` (patches/0025-corpus-inlining.patch,
+Both `/Ob0` sites in vendor/portablekit/cmake/PortableKit.cmake became `/Ob2` (patches/0026-corpus-inlining.patch,
 `tools/patches.sh check`: 25). After `tools/build.sh configure`, before any build, compile_commands.json: 144 of 144
 corpus units carry `/O2 /Ob2 /bigobj` and no command carries `/Ob0` (before the change: 145 did, the 144 units and
 generated_registry.cpp). generated_unit_0000.cpp: `... /O2 /Ob1 /DNDEBUG -std:c++20 -MD /O2 /Ob2 /bigobj ...`.

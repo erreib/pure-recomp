@@ -7,7 +7,7 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
 ## What transfers as it is
 
 - The framework (PortableKit, vendored at 8b0c3fe with our nine patches): it builds on Windows (Yakumo ships there);
-  `cmake/PortableKit.cmake` has the MSVC branches (`/O<level> /Ob2 /bigobj` since patch 0025-corpus-inlining, `/Ob0`
+  `cmake/PortableKit.cmake` has the MSVC branches (`/O<level> /Ob2 /bigobj` since patch 0026-corpus-inlining, `/Ob0`
   before it; the 1 MiB default stack the comment
   near line 523 explains).
 - Our profile (src/profile/), the HLE overrides (src/hle/), the host entry point (src/host/pure_main.cpp: it sets
@@ -154,18 +154,18 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
      is coarse here the way the E6 lap bound is (docs/status.md E4's follow-ups).
    - (task 077, added after this checklist was written) `tools/stutter_check.sh` [`stutter_check: PASS (...)`;
      one swept race in the Vulkan window with sound, about 6 minutes]. The stall in the 2026-10-12 findings was the
-     depth write-back at the lens flare's SIGNAL, not a block-transfer readback; patch 0021-vulkan-async-readback
+     depth write-back at the lens flare's SIGNAL, not a block-transfer readback; patch 0022-vulkan-async-readback
      stores the frame before's depth instead of draining the queue (readback 7.38 ms a frame to 0.00), and
      `PURE_SYNC_READBACK=1` restores the drain. See docs/tasks/077-vulkan-readback-stutter.md's Result for what
      still makes slow frames (the sweep's live-file reads every 10 flips and the pacer's waits after them).
      Task 078 found the probes' remaining "effects slowdowns" to be the probe's own: the guest-time spikes are the
      game thread blocked writing its `[pure] ship` lines to the sweep's ConPTY (up to 255 ms one line), and the
-     100 to 160 ms present hitches were the sweep's window captures (patch 0022-vulkan-cached-window-capture: about
+     100 to 160 ms present hitches were the sweep's window captures (patch 0023-vulkan-cached-window-capture: about
      4 ms now); neither happens to a player. See docs/tasks/078-vulkan-effect-slowdowns.md.
      Closed by task 083 (2026-10-13): the stutter that remained was the recompiled code itself, compiled without
      inlining. The vendor cmake's MSVC branch built the corpus `/O2 /Ob0`, so every guest memory accessor stayed a
      call and the `game` bucket of `PURE_TRACE_GUEST` took 10.08 ms a game frame on a fresh boot (stutter_check FAIL,
-     164 of 248 seconds). Patch 0025-corpus-inlining passes `/Ob2`: 3.13 ms, stutter_check PASS 2 of 197, the whole
+     164 of 248 seconds). Patch 0026-corpus-inlining passes `/Ob2`: 3.13 ms, stutter_check PASS 2 of 197, the whole
      guest frame 5.35 ms against PPSSPP's 6.5 on the same CPU. See docs/tasks/083-corpus-inlining.md.
    - **open** (task 077-download-packs — the Mac line's 077, not this file's readback 077; docs/dlc.md): copy the twelve US pack folders (`UCUS98612D<PACK>`, 62 MB,
      on the Mac in `$HOME/dlc-packs`; the game's data, never in the repository or the zip) to the rig, outside the

@@ -30,7 +30,7 @@ the finding before designing.
 - CLAUDE.md, docs/tasks/077-vulkan-readback-stutter.md (the whole file: the probe method, the Result, the Review:
   stutter_check judges frames on involuntary time), docs/status.md (the 077 row; E3/E4/E5 rows), docs/windows.md
   ("Updating the rig": the 2026-10-12 findings), patches/README.md (0018-vulkan-effects-at-1x,
-  0021-vulkan-async-readback as models), docs/upstream.md
+  0022-vulkan-async-readback as models), docs/upstream.md
 - The probe logs on this rig: out/078-probe/single_race-vineta_k.log (PURE_TRACE_RENDER on; the spike flips above),
   out/stutter_check/vulkan-vulkan/race/single_race-vineta_k.log (the run before; same spikes, other flips for A)
 - vendor/portablekit/host/perf/frame_stats.hpp (the Split kinds, `PURE_TRACE_RENDER`, `PURE_TRACE_STALLS`,
@@ -169,7 +169,7 @@ or the host's logging, both outside May touch, so A is explained, not fixed. The
 which FAILs the same way without patch 0022 (see below), so the FAIL is not this task's.
 
 ### Changed
-- patches/0022-vulkan-cached-window-capture.patch (new; vendor/portablekit/host/gpu/vulkan_renderer.cpp: the
+- patches/0023-vulkan-cached-window-capture.patch (new; vendor/portablekit/host/gpu/vulkan_renderer.cpp: the
   window capture's buffer comes from a HOST_CACHED | HOST_COHERENT type when there is one), patches/README.md (row
   and section)
 - docs/windows.md (one line in the 2026-10-12 findings), docs/tasks/078-vulkan-effect-slowdowns.md (Findings, Result)
@@ -238,7 +238,7 @@ Merged bef8bda (2026-10-12). Both characterizations hold up and both overturn a 
 a row where characterizing first earned its place:
 - **B (the present hitches) was the sweep's window captures**, not a first use; the brief's prewarm designs and the
   PURE_NO_PIPELINE_PREWARM / DXCache runs were rightly dropped as testing a ruled-out cause. Patch
-  0022-vulkan-cached-window-capture is small and right (the capture buffer from a HOST_CACHED type), and it
+  0023-vulkan-cached-window-capture is small and right (the capture buffer from a HOST_CACHED type), and it
   benefits every windowed capture the tools take: the shot flips fell from 118-160 ms to 26-31, the remainder being
   A's stdout cost.
 - **A (the guest clusters) is the game thread blocked writing stdout into the tools' pseudoconsole** (a single line

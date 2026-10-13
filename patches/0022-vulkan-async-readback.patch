@@ -11,7 +11,7 @@ index d6b1e33..0a98bc5 100644
 +    bool create_depth_readback(Staging &staging, VkDeviceSize &size, VkDeviceSize bytes, std::string &error);
 +    void destroy_depth_readback(Staging &staging, VkDeviceSize &size);
 +    void destroy_depth_readback();  // the shared buffer and every slot's
-+    // What a slot's depth copy holds (patch 0021-vulkan-async-readback).
++    // What a slot's depth copy holds (patch 0022-vulkan-async-readback).
 +    struct DepthRecorded {
 +        std::uint32_t color_address{};
 +        std::uint32_t depth_address{};
@@ -189,7 +189,7 @@ index d6b1e33..0a98bc5 100644
 +    const Impl::DepthRecorded recorded{color_address, depth_address, depth_stride, extent, impl.depth_format,
 +                                       texel_bytes};
 +
-+    // Patch 0021-vulkan-async-readback: the copy is recorded into the frame
++    // Patch 0022-vulkan-async-readback: the copy is recorded into the frame
 +    // and not waited for; the guest gets the depth the frame before recorded
 +    // at its SIGNAL, finished by now (its fence), so the game's CPU test reads
 +    // depth one frame old instead of the queue draining here, every race

@@ -11,7 +11,7 @@ lead — an audible click. Task 079 measured 5.18 of them a second through a swe
 at both scales, every one with `silent=0`: the shortfalls are real and the skips are how they reach Erik's ears.
 After this task a late producer keeps its content: only frames already played are dropped, the rest land where they
 belong, any unwritten stretch plays as silence that `retire` already counts, and the resync counter reads ~0 in a
-race. The fix is patch 0023-audio-resync-counter's natural second half and shares its upstream case.
+race. The fix is patch 0024-audio-resync-counter's natural second half and shares its upstream case.
 
 ## Read first
 - CLAUDE.md, docs/tasks/079-audio-rate-match.md and docs/tasks/080-guest-budget-and-sink-grace.md (whole files:

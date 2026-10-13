@@ -36,7 +36,7 @@ run on the rig proves both the defect (the counter before the fix) and the cure 
 - README.md's switches table (where the new switch rows go), docs/verification.md
 
 ## Deliverable
-One vendor patch, `patches/0023-audio-resync-counter.patch`, its rows in patches/README.md, and the docs. Commits per
+One vendor patch, `patches/0024-audio-resync-counter.patch`, its rows in patches/README.md, and the docs. Commits per
 proven stage; the characterization commit comes before any fix.
 - **Characterize first:** add the missing counter — the stalled-producer jump increments `resyncs` (and a
   `resynced` frame count), both on the `[audio]` trace line and in the shutdown total. One swept race with
@@ -74,8 +74,8 @@ proven stage; the characterization commit comes before any fix.
 
 ## May touch
 - vendor/portablekit/host/audio/audio_sink.cpp (and audio_sink.hpp if the counters need it): only through
-  `tools/patches.sh export 0023-audio-resync-counter`; commit patches/, never vendor/
-- patches/0023-audio-resync-counter.patch (new), patches/README.md
+  `tools/patches.sh export 0024-audio-resync-counter`; commit patches/, never vendor/
+- patches/0024-audio-resync-counter.patch (new), patches/README.md
 - README.md, docs/windows.md, docs/verification.md, docs/tasks/079-audio-rate-match.md (the Result)
 
 ## Must not touch
@@ -139,7 +139,7 @@ second at 63%, and pitch-shifting through it would be audible. Rate-matching is 
 3. Erik's stutter in play is probably those dips (seconds at 63-95% speed), not a steady drift. A play log with
    this counter would show whether resyncs cluster in the slow seconds.
 
-Changed: patches/0023-audio-resync-counter.patch (new: the resync, resynced and lead counter only), patches/README.md
+Changed: patches/0024-audio-resync-counter.patch (new: the resync, resynced and lead counter only), patches/README.md
 (the table row and the paragraph, upstream candidate), README.md (the `PURE_TRACE_AUDIO` fields),
 docs/tasks/079-audio-rate-match.md (this Result). There is no fix, so docs/windows.md is unchanged and there is no
 `PURE_NO_RATE_MATCH`.
@@ -169,7 +169,7 @@ docs_check: 33 files, 0 findings: PASS
 ```
 
 Open questions:
-- Keep patch 0023's slug, or rename it (for example 0023-audio-resync-counter)? It holds only the counter, and its
+- Keep patch 0023's slug, or rename it (for example 0024-audio-resync-counter)? It holds only the counter, and its
   README row says so.
 - The task 077/078 race figures are "66 fps". This windowed sweep with sound and traces showed fps 52-56 and speed
   88.5%. Is that the harness's cost (pty stdout) or a regression? It decides whether the sweep can stand in for
@@ -178,7 +178,7 @@ Open questions:
 
 ## Review
 
-Merged 2026-10-12 as the counter it truthfully is (the patch renamed 0023-audio-resync-counter; no controller, no
+Merged 2026-10-12 as the counter it truthfully is (the patch renamed 0024-audio-resync-counter; no controller, no
 PURE_NO_RATE_MATCH). The block was correct and the characterization overturned the brief's premise with the primary
 measurement — the planning session's "1% fast device" was the perf trace's window arithmetic, not the DAC. What the
 figures actually say: the race's resyncs (5.18/s, ~1959 frames each) track the guest's lost real time, and Erik's

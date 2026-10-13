@@ -64,11 +64,11 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0019-game-option-rows | (task 070) | Missing feature | candidate | A game's own settings as menu rows: `GameProfile::options` (`GameOption`: key, label, choices, help, default, tab), each kept as an index in settings.ini (`game.<key>`), `<prefix>_<KEY>` deciding it for a run, `settings::game_option(key)` for the port, and a Game section at the end of the tab it names; no option, no section |
 | 0020-vulkan-texture-detail | (task 076) | Fidelity, enhancement | candidate, behind a profile field | Texture detail at the internal scale in the Vulkan renderer, as the Metal backend draws it: with the game option `GameProfile::texture_detail_option` names at 1, a draw that samples a texture with mip levels and is not a 2D draw has the GE's D lowered by 16 x log2 of its target's scale whatever the rule, and `ge.frag` samples that level through the coordinates' own gradients (`textureGrad`, `texture_params.x` bit 21) with an anisotropic sampler (`samplerAnisotropy`, at most 16 taps); no option named, or the option at 0, draws as before |
 | 0021-content-packs | (task 078-download-packs-menu, the Mac line) | Missing feature | candidate | Content packs among a game's save folders: `SaveFolder::content_pack` marks a folder the game loads as content (a download pack) and `GameProfile::content_packs_label` names the System tab's section for them, after Saves: how many the memory stick holds, each pack Installed or Not installed, and "Install <label>…", which opens Import's folder browser (`ui::open_import()`); Export and Back up saves leave content packs out; Import skips a content pack's SAVEDATA_FILE_LIST entry that is not a printable name; nothing marked and no label, nothing changes |
-| 0021-vulkan-async-readback | (task 077-vulkan-readback-stutter) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
-| 0022-vulkan-cached-window-capture | (task 078-vulkan-effect-slowdowns) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
-| 0023-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
-| 0024-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
-| 0025-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
+| 0022-vulkan-async-readback | (task 077-vulkan-readback-stutter) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
+| 0023-vulkan-cached-window-capture | (task 078-vulkan-effect-slowdowns) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
+| 0024-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
+| 0025-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
+| 0026-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -493,7 +493,7 @@ and a `button_row("Install " + the label in lower case + "…")` whose help says
 picker), disabled while the memory stick is unknown. A game that marks nothing and names no label gets no section, the
 same exports, backups and import checks. Our profile marks the twelve US packs and names "Download packs".
 
-### 0021-vulkan-async-readback
+### 0022-vulkan-async-readback
 Task 077 (077-vulkan-readback-stutter). On a discrete GPU (the rig's RTX 3080) a race lost 9 to 16 ms a frame to `perf::Stall::Readback`: not the
 block-transfer readback the stall's name suggests (`read_back_framebuffer` never runs in Wipeout Pure's race; its block
 transfers are all main RAM to VRAM), but `write_back_depth`, which at every GE SIGNAL with a screen-wide depth buffer
@@ -507,7 +507,7 @@ one frame that needs a bigger buffer than the first's drains as before. The conv
 restores exactly. The start-up line says which (`a frame late` or `synchronous`). Upstream: a candidate; the one-frame
 lag is what a game's CPU depth test sees, so a framework would want it per game or documented.
 
-### 0022-vulkan-cached-window-capture
+### 0023-vulkan-cached-window-capture
 Task 078 (078-vulkan-effect-slowdowns). The input script's `shot` (a window capture, `write_capture`) copied the swapchain image into a buffer from
 `find_memory_type(HOST_VISIBLE | HOST_COHERENT)`, the first such type, which on NVIDIA is uncached, and `write_bmp`
 then read it a byte at a time: 110 to 160 ms a capture on the rig, a long frame at every scripted shot (the "first-use
@@ -516,7 +516,7 @@ when the device has one (type 4 on the RTX 3080), else as before; no invalidate 
 Measured: fence wait 1.5 to 3.3 ms, read, convert and write 1.6 to 2.5 ms. The BMP is the same bytes. Upstream: a
 candidate; any discrete GPU's captures.
 
-### 0023-audio-resync-counter
+### 0024-audio-resync-counter
 Task 079, the characterization stage alone. `AudioSink::mix` snaps a producer's cursor that has fallen within 512
 frames of the device's read position (`kPrebufferFrames / 4`) forward to read position plus 2048. Each jump skips
 frames that the channel never wrote, so you hear a click, but the ring never runs dry, so `silent=` stays 0 and no
@@ -527,7 +527,7 @@ frames each, while emulation ran at 88% of real time. The menus, at 100% real ti
 skips track the producer's lost time, not a fast device clock, so the slug's rate-matching was not built (task 079's
 Result). Upstream: a candidate, since any port with a slow or bursty producer skips here without knowing it.
 
-### 0024-guest-time-split
+### 0025-guest-time-split
 Task 082. The guest thread's twin of the render split: where the [perf] line's guest milliseconds go. The timer sits
 in `HleRegistrar::bind` (host/hle/hle_common.cpp), the one place every implemented import is registered, so the
 recompiled code, the runtime's dispatch (src/) and the kernel are untouched and an untraced run registers the very
@@ -535,10 +535,10 @@ functions it did before. Module families: kernel (ThreadMan, Kernel_Library, Sys
 ModuleMgr, LoadExec, sceSuspend, sceDmac), io (IoFileMgr, sceUmd, Stdio), sas (sceSasCore), audio (sceAudio,
 sceAtrac, sceMp3, sceVaudio), ge (sceGe_), display (sceDisplay), other (the rest). Render time (display lists,
 presents) and pacing sleeps inside a call are subtracted, as the [perf] guest figure subtracts them; the depth store
-(patch 0021-vulkan-async-readback) runs inside a list's render time, so it is not guest time and shows as `store`. Unimplemented imports
+(patch 0022-vulkan-async-readback) runs inside a list's render time, so it is not guest time and shows as `store`. Unimplemented imports
 (`[hle-stub]`) are registered elsewhere and count as game. Measurements: docs/tasks/082-guest-frame-profile.md.
 
-### 0025-corpus-inlining
+### 0026-corpus-inlining
 Task 083. `cmake/PortableKit.cmake` passed `/Ob0` (no inlining) beside `/O${PSPRECOMP_GENERATED_OPT_LEVEL}` in its
 MSVC branch twice: the generated units' source property `COMPILE_OPTIONS` and the overlay target's compile options.
 Both are `/Ob2` now. A target-level `/Ob2` appended from a port's own CMakeLists is a no-op, since the source

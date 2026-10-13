@@ -50,7 +50,7 @@ PURE_TRACE_STALLS_MS=25 PURE_NO_AUDIO=0 PURE_SIXTY_FPS=1 PURE_SMOOTH_FLASHES=1 P
   (the tools and switches tables)
 
 ## Deliverable
-One vendor patch, `patches/0021-vulkan-async-readback.patch` (through `tools/patches.sh export`), its rows in
+One vendor patch, `patches/0022-vulkan-async-readback.patch` (through `tools/patches.sh export`), its rows in
 patches/README.md, a new check, and the docs. Commits per proven stage.
 - **First, characterize** (one run, before changing anything): the defaults probe above with
   `PURE_TRACE_FB_TEXTURES=1` and `PURE_TRACE_GE=1` long enough to see the race's two transfers: which framebuffer
@@ -101,8 +101,8 @@ patches/README.md, a new check, and the docs. Commits per proven stage.
 ## May touch
 - vendor/portablekit/host/gpu/vulkan_renderer.cpp, vendor/portablekit/host/gpu/vulkan_renderer.hpp,
   vendor/portablekit/host/gpu/vulkan_ge_backend.cpp: only through `tools/patches.sh export
-  0021-vulkan-async-readback`; commit patches/, never vendor/
-- patches/0021-vulkan-async-readback.patch (new), patches/README.md
+  0022-vulkan-async-readback`; commit patches/, never vendor/
+- patches/0022-vulkan-async-readback.patch (new), patches/README.md
 - tools/stutter_check.sh (new)
 - docs/windows.md, docs/verification.md, README.md, docs/tasks/077-vulkan-readback-stutter.md (the Result)
 
@@ -163,7 +163,7 @@ stutter_check: FAIL (232 of 232 seconds over 25 ms, readback 7.38 ms a frame; 23
 ```
 
 ### Changed
-- patches/0021-vulkan-async-readback.patch (new; vendor/portablekit/host/gpu/vulkan_renderer.cpp only), patches/README.md
+- patches/0022-vulkan-async-readback.patch (new; vendor/portablekit/host/gpu/vulkan_renderer.cpp only), patches/README.md
   (the series row, upstream: candidate; the section)
 - tools/stutter_check.sh (new)
 - README.md (tools row, `PURE_SYNC_READBACK` row), docs/verification.md (table row, "Which path" Vulkan row),

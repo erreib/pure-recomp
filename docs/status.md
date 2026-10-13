@@ -280,7 +280,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   backend shares the architecture but unified memory hides the wait. Task 077 (brief f918a4c) asks for the smallest
   fix that holds 60 fps without moving a suite pixel, a `PURE_SYNC_READBACK` switch back, and a stutter check (the
   task's deliverable), the wall-clock smoothness gate the suite never had; an upstream candidate. Fixed by patch
-  0021-vulkan-async-readback: the premise was wrong in one respect — the worker's characterization showed the stall
+  0022-vulkan-async-readback: the premise was wrong in one respect — the worker's characterization showed the stall
   is the lens flare's depth write-back (`write_back_depth` at its GE SIGNAL, once a frame; the game's CPU reads that
   depth 300 to 600 times a second), not a block transfer — and the one-frame-late design applied there. Readback
   7.38 ms a frame to 0.00, the race renders at 66 fps, `tools/stutter_check.sh` PASS 8 of 222 seconds (unfixed: FAIL
@@ -292,7 +292,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
 - **The effect slowdowns (task 078, merged bef8bda 2026-10-12: the probes' spikes were the harness's).** Erik still
   felt slowdowns after 077, worst with effects on screen, and the probes showed two classes — but both dissolve on
   characterization: the deterministic 100-160 ms present hitches were the sweep's own window captures (patch
-  0022-vulkan-cached-window-capture takes the capture buffer from host-cached memory: 4 ms now, every windowed tool
+  0023-vulkan-cached-window-capture takes the capture buffer from host-cached memory: 4 ms now, every windowed tool
   capture benefits), and the guest-time clusters at explosions are the game thread blocked writing stdout into the
   tools' pseudoconsole (up to 540 ms a line; conhost's processing, not tools/purelib's locking) — which a player's
   console-less release build never pays. stutter_check PASS 11 of 211 with the worst second down from 175 to 39 ms.
@@ -305,7 +305,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
 - **The stutter's true shape (task 079, merged 2026-10-12: the counter; the premise overturned).** The planning
   session read a "1% fast device" out of Erik's traced play and briefed rate-matching; the worker blocked on the
   brief's own escalation rule and was right — the ratio was the perf trace's window arithmetic (each `[perf]`
-  second runs about 1% long), and by its own frames the device is not fast. Patch 0023-audio-resync-counter makes
+  second runs about 1% long), and by its own frames the device is not fast. Patch 0024-audio-resync-counter makes
   the sink's silent cursor-jump visible at last (`resyncs`/`resynced` on the `[audio]` line; the race showed
   5.18/s of ~44 ms each, tracking the guest's lost real time). The real defect, one cause with two faces: in effect
   storms at 60 fps the guest time swells to 13-14 ms of the 16.7 ms budget in Erik's own play (speed dips to
@@ -335,7 +335,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   at the Windows corpus codegen flags may lower the floor; and 30 fps modes Original is the faithful mitigation on
   CPUs near the ceiling, worth a line in the Windows README once confirmed.
 - **The guest frame named; the ceiling story overturned (task 082, merged cb1194d 2026-10-12).** The guest split
-  (patch 0024-guest-time-split, `PURE_TRACE_GUEST=1`, a `[guest-split]` line a second) attributes the rig's 10.7 ms:
+  (patch 0025-guest-time-split, `PURE_TRACE_GUEST=1`, a `[guest-split]` line a second) attributes the rig's 10.7 ms:
   82% is the recompiled code, the storms swell exactly that bucket (+2.37 ms; SAS cleared at 0.13), all HLE 2.0 ms.
   AVX2 buys 1 to 3% (measured, reverted, not shipped). The yardstick: PPSSPP 1.20.4 runs the whole game in 6.5 ms a
   frame on the same i5-8600K, so the CPU is plenty and the port's Windows cost is anomalous — and the suspect is
@@ -357,7 +357,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   demoting 081's sink fork to polish. An upstream candidate of the first order: every Windows port of the
   framework pays this. The experiment's logs: out/ob2-baseline and out/ob2-probe on the rig.
 - **The flag shipped; the rig's stutter thread closed (task 083, merged ef413d9 2026-10-13).** Patch
-  0025-corpus-inlining: both `/Ob0` sites in the vendor cmake's MSVC branch are `/Ob2`. On a fresh boot the before
+  0026-corpus-inlining: both `/Ob0` sites in the vendor cmake's MSVC branch are `/Ob2`. On a fresh boot the before
   reproduced the night baseline (game 10.08 ms a frame, stutter_check FAIL 164 of 248 — the machine's state was
   never the cause) and the after reproduced the night probe (3.13 ms, PASS 2 of 197, then 0 of 194 in Verify; guest
   5.35 ms against PPSSPP's 6.5 on the same CPU). The full gates passed, 18/18 scenes unmoved, and the race's game

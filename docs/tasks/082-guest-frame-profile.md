@@ -39,7 +39,7 @@ split named the renderer's ([render-split]), three questions have numbers, and n
 ## Deliverable
 One vendor patch for the instrument, measurements committed as they land, and NO committed behaviour or flag
 change. Commits per proven stage.
-- **The instrument**, `patches/0024-guest-time-split.patch`: a guest-thread split behind `PURE_TRACE_GUEST=1` — a
+- **The instrument**, `patches/0025-guest-time-split.patch`: a guest-thread split behind `PURE_TRACE_GUEST=1` — a
   `[guest-split] ms per game frame: game X | kernel Y io Z sas W audio V ge U store T` line once a second, ticks
   taken at the HLE dispatch boundary (everything outside an HLE call is `game`, the recompiled code), the buckets
   by module family, the depth store's share where patch 0021 stores (its own bucket or inside `ge`: say which).
@@ -74,8 +74,8 @@ change. Commits per proven stage.
 ## May touch
 - vendor/portablekit/host/perf/frame_stats.cpp, frame_stats.hpp, and the HLE dispatch site the instrument needs
   (name it in the Result), vendor/portablekit/host/audio/sas_core.cpp only if a bucket needs a scope inside it:
-  all only through `tools/patches.sh export 0024-guest-time-split`; commit patches/, never vendor/
-- patches/0024-guest-time-split.patch (new), patches/README.md
+  all only through `tools/patches.sh export 0025-guest-time-split`; commit patches/, never vendor/
+- patches/0025-guest-time-split.patch (new), patches/README.md
 - README.md, docs/verification.md, docs/tasks/082-guest-frame-profile.md (the Result)
 - LOCAL only, reverted before finishing: the corpus /arch flag edit (CMakeLists.txt or the preset)
 
@@ -181,7 +181,7 @@ before, and the suite and the trace-on run passed earlier in the session. The ac
 the trace on" held once (out/082-on, 21/221) and failed once later (out/082-on2, 119/234, the rig degraded).
 
 ### Changed
-- patches/0024-guest-time-split.patch (new): vendor/portablekit/host/perf/frame_stats.hpp and .cpp (the `GuestPart`
+- patches/0025-guest-time-split.patch (new): vendor/portablekit/host/perf/frame_stats.hpp and .cpp (the `GuestPart`
   split, `guest_split_enabled`, `guest_excluded_time`, `add_guest_split`, the `[guest-split]` line beside
   `[render-split]`); the HLE dispatch site is **host/hle/hle_common.cpp `HleRegistrar::bind`**, which wraps each
   import in a timer only when `PURE_TRACE_GUEST` is set. Untouched: include/psprecomp/, src/runtime.cpp (the
