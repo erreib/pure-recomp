@@ -323,6 +323,14 @@ simplification task, then the enhancements. The session-by-session resume notes 
   or HLE backpressure (hle_media.cpp's queued_until_us — the territory the briefs have ruled out). The root above
   the fork: what swells the guest in the storms (the SAS voices are the suspect) — fix the dips and the sink's
   policy matters a tenth as often. Figures: docs/tasks/080 and 081, the probes in their worktrees' out/.
+- **The ceiling named (2026-10-12, the day's close).** Erik ran the Mac build with its Vulkan renderer: clean —
+  no audio issues, no visible stutter. The same renderer and the same sink are clean there, so what differs is the
+  machine: the rig's i5-8600K (2017) spends 9 to 11 ms a frame on the guest where the M4 Pro spends a fraction,
+  and the 60 fps budget is 16.7 ms. The stutter is the ceiling grazed in effect storms, not a defect of any one
+  change, which is why every revert felt the same. The plan from here: the sink's option 3 (one honest gap, then
+  an inaudible lead rebuild) makes the grazes quiet; the guest-swell characterization (the SAS voices) and a look
+  at the Windows corpus codegen flags may lower the floor; and 30 fps modes Original is the faithful mitigation on
+  CPUs near the ceiling, worth a line in the Windows README once confirmed.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
