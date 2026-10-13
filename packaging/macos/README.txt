@@ -3,8 +3,9 @@ Wipeout Pure for macOS (Apple Silicon)
 
 This is pure-recomp: the PSP game Wipeout Pure (2005), its code recompiled
 ahead of time into a native program for Apple Silicon Macs, drawn with
-Metal. It is not an emulator image and it contains no part of the game: no
-code, no graphics, no music, no keys. You play it from your own disc image.
+Metal. It is not an emulator. The program is a translation of the game's
+executable code into native code; it holds none of the game's data: no
+graphics, no music, no tracks, no keys. You play it from your own disc image.
 
 Needs: a Mac with Apple Silicon (M1 or newer), macOS @MINIMUM_SYSTEM_VERSION@ or newer, and a
 disc image (.iso) dumped from your own copy of Wipeout Pure, US Greatest Hits

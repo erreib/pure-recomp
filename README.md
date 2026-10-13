@@ -3,7 +3,9 @@
 **Wipeout Pure** (PSP, Studio Liverpool, 2005) as a native program for Apple Silicon Macs and 64-bit Windows, by
 static recompilation: the game's MIPS code is translated to C++ ahead of time and runs against a rewritten PSP OS
 layer, and the PSP's graphics engine is replaced by a native Metal backend on macOS and a Vulkan backend on Windows.
-It is not an emulator and it contains nothing from the game. You play it from your own disc image.
+It is not an emulator. This repository holds nothing from the game: the translated code is generated on your own
+machine from your disc image, and a release build carries that translation and none of the game's data (no graphics,
+music, tracks or keys). You play it from your own disc image.
 
 ## Download and play
 

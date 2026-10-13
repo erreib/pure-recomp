@@ -53,14 +53,14 @@ repo's bash tools run there as on macOS; `python3` resolves to a real Python 3.1
   `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ccache.Ccache_...\ccache-4.14.1-windows-x86_64` (the winget `Links`
   alias did not materialise here); `tools/env.sh` puts that directory on PATH.
 - **SDL3 3.4.18** (the `SDL3-devel-3.4.18-VC.zip` from libsdl-org's releases) unpacked to
-  `H:\errei\Documents\dev-stuff\deps\SDL3-3.4.18`; the preset's `SDL3_ROOT` points there and the framework copies
+  `<dev>\deps\SDL3-3.4.18`, `<dev>` the folder holding the checkout (the preset's `SDL3_ROOT` is `${sourceDir}/../deps/SDL3-3.4.18`) and the framework copies
   `SDL3.dll` next to the executable.
 - **FFmpeg**: nothing to install; on Windows the framework downloads BtbN's LGPL shared build of 7.1.5 at
   configure (cmake/FFmpeg.cmake) and stages the three DLLs into `build/win-x64/bin`.
 
 ## Traps on this machine
-- No Developer Mode, no admin: `ln -s` fails, so `disc.iso` is a **hard link** to the image in `H:\errei\Downloads`
-  (Downloads is redirected to H:, the repo's volume, so a hard link works); `tools/setup_game.sh` and
+- No Developer Mode, no admin: `ln -s` fails, so `disc.iso` is a **hard link** to the image in the Downloads folder
+  (redirected to the repo's volume on the rig, so a hard link works); `tools/setup_game.sh` and
   `tools/purelib/port.py` fall back to hard links when `disc.iso` is not a symlink.
 - `core.autocrlf=true` globally: the working tree is CRLF. Git Bash runs CRLF shell scripts, Python reads them
   fine, and `git apply` applies the patch series with "trailing whitespace" warnings that mean nothing.
@@ -85,7 +85,7 @@ reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tool
 ## Windows tools (task 055)
 - **PPSSPP 1.20.4** (the Mac's version), the official portable zip `https://www.ppsspp.org/files/1_20_4/ppsspp_win.zip`
   (SHA-256 a60f04ebdb0b5f1655422bd7f88349a46999b17ad5115d6ddb290c3934bd5163) unpacked to
-  `H:\errei\Documents\dev-stuff\deps\ppsspp-1.20.4`; no installer, no UAC. The executable is `PPSSPPWindows64.exe`
+  `<dev>\deps\ppsspp-1.20.4`, beside the checkout (`tools/ppsspp/ppsspp_ctl.py` looks there); no installer, no UAC. The executable is `PPSSPPWindows64.exe`
   (`tools/ppsspp/ppsspp_ctl.py`'s `APP` on Windows); portable mode puts the memory stick, the ini and the dumps in
   `memstick/` beside it. The debugger protocol is the Mac's: a scripted run of `routes/frontend.txt` with a
   screenshot (`memory.read` of VRAM) and a GE dump at frame 600 gave a `.ppdmp` byte-identical to `ref/frontend.ppdmp`

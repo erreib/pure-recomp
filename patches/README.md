@@ -7,7 +7,7 @@ changes, numbered above the last one. The series has one patch per framework top
 go upstream, what a pull request would carry and what it needs first: `docs/upstream.md`.
 
 ## Old numbers
-Task 052 (2026-10-07) regrouped the twenty patches of tasks 001 to 048 into the nine below, one per topic, without
+Task 052 (2026-10-07) regrouped the twenty patches of tasks 001 to 048 into nine, one per topic (the series has grown since; the table above is current), without
 changing a byte of the vendor tree. The task files (the record), a few strings the tools print, two config comments
 and three comments inside the vendor tree itself ("patch 0014", "patch 0017", "patch 0021") cite the old numbers;
 since task 053 the docs name the new patch with the task that made the change, and the history files under

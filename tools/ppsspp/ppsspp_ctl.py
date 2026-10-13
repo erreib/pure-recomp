@@ -36,7 +36,7 @@ WINDOWS = os.name == "nt"
 if WINDOWS:
     # Windows (task 055): the official portable zip of the same 1.20.4, unpacked beside the repo (docs/setup.md,
     # "Windows setup"). Portable mode (no installed.txt): the memory stick is memstick/ next to the executable.
-    APP = Path("H:/errei/Documents/dev-stuff/deps/ppsspp-1.20.4/PPSSPPWindows64.exe")
+    APP = (Path(__file__).resolve().parents[2].parent / "deps" / "ppsspp-1.20.4" / "PPSSPPWindows64.exe")
     MEMSTICK = APP.parent / "memstick"
 else:
     APP = Path("/Applications/PPSSPPSDL.app/Contents/MacOS/PPSSPPSDL")

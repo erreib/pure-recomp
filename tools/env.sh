@@ -12,7 +12,7 @@ MINGW*|MSYS*)
   # Python writes files and stdout in the locale encoding, cp1252 here, which cannot hold every character the game
   # prints (the menu dump's U+0393, the Controls tab's U+25B3). The Mac is UTF-8 everywhere; make Python match.
   export PYTHONUTF8=1
-  export CCACHE_DIR="${CCACHE_DIR:-H:/errei/Documents/dev-stuff/pure-recomp/.ccache}"   # the main checkout's, shared by every worktree
+  export CCACHE_DIR="${CCACHE_DIR:-$HOME/.cache/pure-recomp/ccache}"   # one cache for every checkout and worktree
   ;;
 *)
   export CC=/usr/bin/clang

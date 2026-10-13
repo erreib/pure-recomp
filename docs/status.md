@@ -123,7 +123,7 @@ simplification task, then the enhancements. The session-by-session resume notes 
   story, the two lines' concurrent 077/078 task numbers kept with their slugs and the Windows patches renumbered
   0022 to 0026, twenty-six patches by topic). `batch/m2` is the integration branch, equal to `main` at this point; every task branches
   from it (`git switch -c task/NNN-slug batch/m2`). Remote: `origin` = Erik's private GitLab
-  (https://dev.eriksmedia.com/erreib/pure-recomp.git); Erik alone pushes.
+  (a private remote, and GitHub from the first public release); Erik alone pushes.
 - **The gate.** `tools/verify_task.sh NNN` reruns a brief's Verify from the main checkout; `tools/frame_regress.sh`
   (headless, about 25 s) after any change, both window paths and `tools/hud_check.sh` before merging a renderer or
   shell change (docs/verification.md, "Which path for which change"); `python3 tools/docs_check.py` after a change

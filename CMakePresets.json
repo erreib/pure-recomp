@@ -35,7 +35,7 @@
         "CMAKE_MT": "C:/Program Files/LLVM/bin/llvm-mt.exe",
         "CMAKE_C_COMPILER_LAUNCHER": "ccache",
         "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
-        "SDL3_ROOT": "H:/errei/Documents/dev-stuff/deps/SDL3-3.4.18",
+        "SDL3_ROOT": "${sourceDir}/../deps/SDL3-3.4.18",
         "PORTABLEKIT_GLSLANG": "C:/VulkanSDK/1.4.363.0/Bin/glslangValidator.exe",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }

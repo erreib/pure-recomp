@@ -3,8 +3,9 @@ Wipeout Pure for Windows (x64)
 
 This is pure-recomp: the PSP game Wipeout Pure (2005), its code recompiled
 ahead of time into a native Windows program, drawn with Vulkan. It is not an
-emulator image and it contains no part of the game: no code, no graphics, no
-music, no keys. You play it from your own disc image.
+emulator. The program is a translation of the game's executable code into
+native code; it holds none of the game's data: no graphics, no music, no
+tracks, no keys. You play it from your own disc image.
 
 Needs: 64-bit Windows 10 or 11, a graphics card with a Vulkan driver
 (any current NVIDIA, AMD or Intel driver has one), and a disc image (.iso)
