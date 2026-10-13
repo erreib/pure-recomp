@@ -1,7 +1,7 @@
 # 081: The sink plays counted silence instead of skipping
 
 Milestone: Windows fidelity (Erik, 2026-10-12; tasks 079 and 080 both measured the skips) | Branch:
-task/081-audio-sink-grace | Status: OPEN
+task/081-audio-sink-grace | Status: MERGED (f5c81eb, 2026-10-12; BLOCKED as briefed, the finding kept)
 
 ## Goal
 When the audio producer falls briefly behind the device, `AudioSink`'s stalled-producer branch
@@ -154,3 +154,18 @@ Open questions:
   threshold itself firing on writes that would have played in time?
 - The after-run stutter_check FAIL (23/214 against 22/222 before) is one second over the bound. Is it noise? A
   re-run on the unfixed branch would tell.
+
+## Review
+
+Merged f5c81eb (2026-10-12). The block was right, and the attempt was worth its cost: the tried rule is kept in the
+worktree's out/081/ with its probe, and the Result's analysis is the day's keystone — the deficit of a producer
+below real time must surface somewhere, and every sink-side rule only chooses where. In Erik's play the deficit is
+transient (the dip seconds), so the lived experience is: a dip eats the channel's lead, the old branch re-arms it
+with a 46 ms silence — the click — and all is well until the next dip. The design fork for the next session:
+(a) a smaller jump (11.6 ms gaps, more often); (b) keep the content and gap only the true lateness — honest, but
+the channel then rides at zero lead and crackles on jitter unless the lead is rebuilt; (b+) rebuild it inaudibly by
+lowering the SDL stream ratio ~1% for a few seconds after a dip (rate-matching was the wrong cure for 079's
+imagined drift, but it is the right instrument for lead recovery); (c) HLE backpressure (hle_media.cpp's
+queued_until_us), which is the territory every brief so far has ruled out. The root above all of them stays open:
+what swells the guest 2.5 ms in effect storms (the SAS voices are the suspect) — fix the dips and the sink's
+policy matters a tenth as often. The sink is shared code, so the Mac session should weigh the fork too.
