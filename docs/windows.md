@@ -6,7 +6,7 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
 
 ## What transfers as it is
 
-- The framework (PortableKit, vendored at 8b0c3fe with our nine patches): it builds on Windows (Yakumo ships there);
+- The framework (PortableKit, vendored at 8b0c3fe with the patches in `patches/`): it builds on Windows (Yakumo ships there);
   `cmake/PortableKit.cmake` has the MSVC branches (`/O<level> /Ob2 /bigobj` since patch 0026-corpus-inlining, `/Ob0`
   before it; the 1 MiB default stack the comment
   near line 523 explains).
@@ -185,6 +185,9 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
    the icon and version resource and the eighth check, all eight PASS (out/071-verify-main.log). A pack from the
    current tree carries the icon. Still **open** from task 071: open the staged folder in Explorer once and look at the
    exe's icon and Properties > Details, and whether the running window and its taskbar button show the icon.
+   For a release, pack at the tag `v<version>` with a clean tree: the zip is then
+   `pure-recomp-<version>-windows-x64.zip` with no commit in its name, and a `v` tag at HEAD that disagrees with
+   CMakeLists.txt's version stops the pack (task 087; docs/release.md, "Publishing").
 6. **Record** the last lines of each open check in this section (or send them to the Mac session); the
    docs/status.md E3 follow-up row is cleared, the E6 bullet names the two open checks. Done 2026-10-12: every
    scripted check above is recorded in place; what stays **open** is by hand and Erik's — the Flashes race with the
