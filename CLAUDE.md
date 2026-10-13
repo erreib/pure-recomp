@@ -16,7 +16,7 @@ commit in `vendor/PIN` with the patches in `patches/`. Read `docs/vendor-map.md`
 - The compiler is `/usr/bin/clang` through `CMakePresets.json`. The `clang` first on PATH is an x86_64 clang 8
   from the Game Porting Toolkit and is wrong. `cmake`/`ninja` must be the arm64 ones from `/opt/homebrew`.
 - No PPSSPP source code is copied into this repo. Reading PPSSPP code and docs to learn behaviour is fine.
-- Work only on your branch (`task/NNN-slug`). Never touch `main`. Never push: the remote (`origin`, Erik's GitLab) is pushed by Erik alone.
+- Work only on your branch (`task/NNN-slug`). Never touch `main`. Never push: every remote is pushed by Erik alone.
 - Game data: `disc/` (extracted from `disc.iso`, a symlink into `~/Downloads`) for tools, and `game/` (EBOOT.ELF,
   disc.iso, ms0/; made by `tools/setup_game.sh`) for the runtime. If `disc.iso` dangles, stop and say so; do not go
   looking for the image elsewhere.

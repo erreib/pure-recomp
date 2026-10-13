@@ -1,31 +1,88 @@
 # pure-recomp
 
-A native macOS (arm64) build of **Wipeout Pure** (PSP, Studio Liverpool, 2005) by static recompilation. The game's
-MIPS Allegrex code is translated to C++ ahead of time and runs against a rewritten PSP OS layer; the PSP graphics
-engine is replaced by a native Metal backend, the default on macOS (D-008), and the Vulkan backend (through MoltenVK)
-that bootstrapped the port stays as the portable path. You need your own dump of the US Greatest Hits disc
-(UCUS-98612, v2.00, ISO CRC32 4502C588). Nothing from the game is in this repo.
+**Wipeout Pure** (PSP, Studio Liverpool, 2005) as a native program for Apple Silicon Macs and 64-bit Windows, by
+static recompilation: the game's MIPS code is translated to C++ ahead of time and runs against a rewritten PSP OS
+layer, and the PSP's graphics engine is replaced by a native Metal backend on macOS and a Vulkan backend on Windows.
+It is not an emulator and it contains nothing from the game. You play it from your own disc image.
 
-## Play
-`tools/bundle.sh` builds `out/release-macos/stage/Wipeout Pure.app` (a Release build, then the framework's packer:
-the app with its libraries, licences and icon, signed ad hoc, no game data). Open it from Finder; the first start asks
-for your disc image and sets the game up in `~/Library/Application Support/pure-recomp/PureNative/`, where the saves
-live too (docs/release.md, "First run: the setup"). How to build and bundle, what the app holds,
-the setup, the data directory, the Vulkan path from the app and `tools/bundle.sh --check`:
-[docs/release.md](docs/release.md). The player's read-me is `packaging/macos/README.txt`.
+## Download and play
 
-Framework: [TeamGDB/PortableKit](https://github.com/TeamGDB/PortableKit) (MIT), the
+Releases are on the [releases page](https://github.com/erreib/pure-recomp/releases): a macOS app
+(`pure-recomp-<version>-macos-arm64.zip`) and a Windows folder (`pure-recomp-<version>-windows-x64.zip`). Unpack,
+start, and the first run asks for your disc image, checks it, and sets the game up in its own data folder. Later
+starts go straight to the game. The read-me inside each archive has the details, including the one-time
+Gatekeeper or SmartScreen step, since the builds are not notarized or signed.
+
+What you need:
+
+- **Your own dump of the US Greatest Hits disc**, UCUS-98612 version 2.00 (ISO CRC32 4502C588). The setup refuses
+  other releases and regions, including the European and Japanese discs, whose executables differ.
+- **macOS**: an Apple Silicon Mac (M1 or newer), macOS 13 or newer (tested on macOS 15). **Windows**: 64-bit
+  Windows 10 or 11 and a graphics driver with Vulkan (any current NVIDIA, AMD or Intel driver).
+- A keyboard, or a gamepad: PlayStation and Xbox pads work as themselves ([docs/controls.md](docs/controls.md)).
+
+Press Esc in the game for the port's own menu: video (resolution, aspect ratio, the enhancements below), audio,
+controls (rebinding), and system (profiles, save backups, download packs).
+
+## What is in it
+
+- **The whole single-player game**: every mode, class, league and circuit, profiles and saves in the PSP's own format
+  (a save from a PSP or PPSSPP imports, and exports back), the movies, music and sound.
+- **The US download packs.** If you have the original DLC packs for this edition (the `UCUS98612D...` save folders
+  from a PSP memory stick), the System tab installs them and the game loads them as it always did: the Gamma,
+  Delta and Classic packs with their tracks and ships, and the four bonus ships ([docs/dlc.md](docs/dlc.md)).
+  Packs from other regions do not work with this edition yet.
+- **Enhancements, each a row in the menu and each switchable back to the original behaviour**: the picture at your
+  display's resolution instead of 480x272; the view at your window's shape, 21:9 included (Aspect ratio: Fill);
+  Time Trial, Free Play and Zone at 60 fps instead of the PSP's 30; the full-screen flashes smoothed; sharper
+  textures at distance; the menu art upscaled (off by default).
+- **Faithful by default.** The port's reference is the PSP's own output: the frame checks compare against PPSSPP
+  captures, and the behaviour differences found along the way are fixed or explained in
+  [docs/fidelity.md](docs/fidelity.md).
+
+Known limits: no ad hoc multiplayer and no in-game browser (the services are gone; the game shows them as
+unavailable); download packs from the EU and JP editions are not converted; the macOS app is signed ad hoc and the
+Windows build is unsigned. The current state of everything, with the checks that prove it, is in
+[docs/status.md](docs/status.md).
+
+## Building from source
+
+The developer reference below has the full setup. In short: macOS with the Homebrew packages named under "First-time
+setup", your disc image linked as `disc.iso`, then `tools/setup_game.sh`, `tools/regen.sh` (generates the C++ corpus
+from the game's executable, which is read from your image and never stored here) and `tools/build.sh profile`.
+Windows builds are described in [docs/windows.md](docs/windows.md). `tools/bundle.sh` and `tools/bundle_windows.sh`
+make the release archives ([docs/release.md](docs/release.md)).
+
+## How it is made
+
+The framework is [TeamGDB/PortableKit](https://github.com/TeamGDB/PortableKit) (MIT), the
 [PSPRecomp](https://github.com/jessicanataliagta/PSPRecomp) lineage's framework split out of
 [TeamGDB/Yakumo](https://github.com/TeamGDB/Yakumo), vendored at the commit in `vendor/PIN` under `vendor/portablekit`
-(D-001) and changed only through the nine patches in `patches/`, one per topic (patches/README.md; which could go
+(D-001) and changed only through the patches in `patches/`, one per topic (patches/README.md; which could go
 upstream: docs/upstream.md). Our game profile, the Metal backend and shell, and ge_replay live in `src/`, outside the
 vendor tree, and are built into the game's executable by `portablekit_add_game` (`CMakeLists.txt`).
 
-## Status
-See [docs/status.md](docs/status.md). Decisions: [docs/decisions.md](docs/decisions.md). Research:
-[docs/research.md](docs/research.md).
+The work was planned, mapped and reviewed by a Claude session (Fable), with briefed tasks carried out by Claude
+subagents (Opus); the rules every session follows are in `CLAUDE.md`, the agents' instructions in `.claude/agents/`,
+and every task is a file under `docs/tasks/` with one verification command, its Result and its Review. The decisions
+are in [docs/decisions.md](docs/decisions.md), the research behind them in [docs/research.md](docs/research.md), and
+[docs/approach.md](docs/approach.md) says how the project is run.
 
-## Layout
+Reverse engineering used Ghidra with [ghidra-allegrex](https://github.com/kotcrab/ghidra-allegrex), PPSSPP as the
+behavioural reference (no PPSSPP source is copied here) and [pspautotests](https://github.com/hrydgard/pspautotests)
+for the hardware's rules; the WAD, VEXX and DLC formats were already documented by
+[Thomas Perl](https://thp.io/2021/pure-dlc) and [vscode-wipeout](https://github.com/vscode-wipeout).
+
+## Licence
+
+Our code: GPL-2.0-or-later (`LICENSE`, the GPL v2 text). Vendored framework: MIT. FFmpeg: LGPL, linked dynamically.
+See `docs/decisions.md` D-006; what the archives bundle and under which licence: `packaging/THIRD_PARTY_NOTICES.md`.
+Wipeout Pure is a trademark of Sony Interactive Entertainment; this project is not affiliated with or endorsed by
+Sony, and distributes none of its material.
+
+## Developer reference
+
+### Layout
 | Path | What |
 |---|---|
 | `config/` | function map, labels, imports, NIDs the framework lacks, the Metal pre-warm list, pad scripts (routes and the sweep's steering tables). Addresses and names only |
@@ -36,7 +93,7 @@ See [docs/status.md](docs/status.md). Decisions: [docs/decisions.md](docs/decisi
 | `src/host/metal_shell.mm` | the Metal shell (task 027, `PURE_SHELL=metal`, `docs/metal-backend.md` "The Metal shell"): an SDL window with a `CAMetalLayer`, the shared SDL pad, the Metal backend's texture presented directly, the interface on Dear ImGui's Metal backend (`third_party/imgui_metal/`, the 1.92.9b files verbatim); since task 086 the Aspect ratio row's Fill (the backend's targets at the drawable's shape, the game told that shape: `docs/metal-backend.md` "Fill") and `PURE_WINDOW_SIZE` |
 | `src/host/pure_main.cpp` | our `main()` (task 022): `PureNative --replay ...` runs ge_replay, anything else the framework's main, compiled as `portablekit_main` (`HOST_MAIN_NAME` in `CMakeLists.txt`), so the game starts as before; on macOS it first sets `PURE_SHELL=metal` and `PURE_GE_BACKEND=metal` when they are unset (task 028, D-008) |
 | `src/tools/ge_replay.cpp` | ge_replay: `PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--compare] [--tol T] [--max-frac F] [--frames A[-B]] [--cut N] [--a NAME --b NAME [--first-diff]] [--quiet]` feeds a recording to any GE backend outside the game, compares each presented frame with the recorded image (as `tools/imgdiff.py` does) or two backends with each other, and bisects a failing frame to its first differing draw; `--cut N` (task 025) ends the last frame replayed after its Nth draw and presents and captures it there; exit 0 all compared frames pass, 1 one fails, 2 bad file or backend (docs/ge-backend.md, section 7) |
-| `patches/` | the changes to the vendored framework, nine patches one per topic, applied in numeric order (`tools/vendor_setup.sh`, `tools/patches.sh`; patches/README.md maps the old numbers tasks 001 to 048 cite) |
+| `patches/` | the changes to the vendored framework, one patch per topic, applied in numeric order (`tools/vendor_setup.sh`, `tools/patches.sh`; patches/README.md maps the old numbers tasks 001 to 048 cite) |
 | `packaging/` | what the framework's packer reads for the app (task 029, [docs/release.md](docs/release.md)): `release.env`, `THIRD_PARTY_NOTICES.md`, `macos/Wipeout Pure.icns` and `macos/README.txt`, the icon's `icon.png` and `make_icon.py` |
 | `third_party/imgui_metal/` | Dear ImGui's Metal renderer backend, the 1.92.9b files verbatim (MIT), for the Metal shell |
 | `tools/` | extraction, build, run, measurement, Ghidra and PPSSPP drivers: the tools table below |
@@ -46,7 +103,7 @@ See [docs/status.md](docs/status.md). Decisions: [docs/decisions.md](docs/decisi
 | `.claude/agents/` | the worker and reviewer agents' instructions |
 | `disc/`, `disc.iso`, `game/`, `generated/`, `vendor/`, `build/`, `out/`, `ref/*` captures, `ghidra_project/`, `.ccache/` | ignored: game data, generated code, third party, build output (`.gitignore`) |
 
-## Tools
+### Tools
 Every file under `tools/`, by what it is for.
 
 | Tool | What |
@@ -105,7 +162,7 @@ Every file under `tools/`, by what it is for.
 | `tools/ppsspp/ppsspp_ctl.py`, `tools/ppsspp/routes/` | PPSSPP (SDL build) driven through its WebSocket debugger with frame-exact input: captures, GE dumps, audio dumps, memory reads (docs/ppsspp.md); the routes are its input scripts |
 | `tools/ppsspp/ppdmp.py` | reads PPSSPP GE dumps (`.ppdmp`) and prints what a frame draws (docs/ge-effects.md) |
 
-## First-time setup
+### First-time setup
 ```
 brew install cmake ninja ccache pkgconf sdl3 molten-vk vulkan-loader vulkan-headers glslang vulkan-validationlayers ghidra
 brew install --cask ppsspp-emulator
@@ -115,7 +172,7 @@ tools/check_env.sh
 ```
 Details and machine traps: [docs/setup.md](docs/setup.md). Ghidra: `tools/ghidra_headless.sh import` then `export`.
 
-## Running
+### Running
 `tools/setup_game.sh` lays out `game/` (EBOOT.ELF = the disc's plain BOOT.BIN, `disc.iso`, `ms0/`). `tools/regen.sh`
 generates the corpus into `generated/` (85 s) and `tools/build.sh profile` compiles it (8 min cold, seconds after).
 `build/arm64/bin/PureNative` runs the game; `tools/run_boot.py` wraps it with a deadline and a folded log. The game
@@ -203,7 +260,7 @@ hooks").
 | `PURE_TRACE_RAND=1` | test-only. (task 046) `rand()` (FUN_088E0568) runs as a native copy that counts its callers; each flip prints `[pure] rand calls frame N: 0xRA*n ...`. The copy's extra dispatches move the virtual clock, so the run's frame times (and with them the race) change unless `PURE_TEST_RACE_CLOCK` replays them |
 | `PURE_TRACE_CALLS=lib:0xNID[,lib:0xNID...]` | test-only. (task 005) wraps the named HLE calls (NIDs from `config/imports.csv`) and prints each call's arguments, result and virtual time: `[call] lib:0xNID a0=... a1=... a2=... a3=... v0=... t=...` (the registers in hex), or `[pure] TRACE_CALLS: nothing bound for lib:0xNID` when nothing is bound there. A probe for whatever is chased: `tools/scorecard.py` counts the flips with `sceDisplay:0x289D82FE`, `tools/sas_reverb_check.sh` the SAS mixes with `sceSasCore:0xD5A229C9`. It wraps the profile's flip counter and the race clock's frame timer when it names them; `sceKernelGetGPI` and the `PURE_AUDIO_WAV` capture are bound after it |
 
-### Test switches (never for play)
+#### Test switches (never for play)
 Instruments for the tools. Each one changes the game's rules, prints a `[pure] TEST SWITCH: ...` line at start-up,
 and is off unless set.
 
@@ -218,12 +275,3 @@ and is off unless set.
 Routes that reach known screens, as input scripts in `config/pad_scripts/` (frames from a cold start at the default
 pacing): `frontend.txt` confirms the language at 700, skips the loading page at 1600, clears the memory-stick notice
 at 1650 and skips the intro movie with Start at 1800; the title is up from 1810 (shots `lang`, `notice`, `title`).
-
-## Working with Claude
-This repo is worked on by a Fable session that plans, maps the hard parts and reviews, and by Opus subagents that
-carry out briefed tasks (`.claude/agents/`). The rules every session follows are in `CLAUDE.md`; each task is a
-file under `docs/tasks/` with one verification command.
-
-## Licence
-Our code: GPL-2.0-or-later (`LICENSE`, the GPL v2 text). Vendored framework: MIT. FFmpeg: LGPL, linked dynamically.
-See `docs/decisions.md` D-006; what the app bundles and under which licence: `packaging/THIRD_PARTY_NOTICES.md`.
