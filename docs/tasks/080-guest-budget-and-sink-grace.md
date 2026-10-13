@@ -98,3 +98,57 @@ Characterize-then-fix per patch; commits per proven stage.
 - B's grace changes flash_check or stutter_check beyond their bounds
 - the baseline probe shows the guest dips are NOT dominated by the store (report the split; the brief's A targets
   the wrong slice then)
+
+## Result
+Status: BLOCKED. The brief's last escalation condition fired: the guest time is not dominated by the depth store.
+The baseline probe is done and its figures are below. No patch was written, nothing under vendor/ changed, and
+patches 0024 and 0025 do not exist.
+
+**The baseline probe.** I ran `PURE_TRACE_AUDIO=1 [PURE_INTERNAL_SCALE=4] tools/stutter_check.sh --out
+out/080/base-{4x,2x}`. That is the gate's own environment: sound on, `PURE_PERF=log PURE_TRACE_STALLS=1`,
+`PURE_SIXTY_FPS=1` and the other shipped defaults. Logs are in this worktree's out/080/. Figures are means per
+frame over the `[perf]`/`[stalls]` seconds from the paced flip, with the results screen's tail left out:
+
+| | race s | speed | fps | guest | render | wait | gpu | store | fence | copy | resyncs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 4x | 231 | 78.7% | 47.2 | 11.03 | 5.74 | 4.75 | 6.18 | 0.519 | 3.93 | 0.198 | 17.4/s |
+| 2x | 209 | 89.5% | 53.6 | 10.84 | 5.43 | 2.45 | 3.95 | 0.487 | 1.97 | 0.131 | 17.4/s |
+| Erik's play-trace.log, race | 153 | | 60 | 9.20 | 3.79 | 3.94 | ~5 | 0.505 | 3.24 | 0.174 | (no counter) |
+| the same, dip seconds (speed < 96%) | 23 | 63-95% | | 11.69 | 4.04 | 3.51 | | 0.507 | 3.01 | 0.177 | |
+
+(play-trace-100hz.log reads the same: race guest 9.24 and store 0.509; dips guest 11.37 and store 0.508.)
+- stutter_check: 4x FAIL (49 of 239 seconds over 25 ms, readback 0.00). 2x PASS (18 of 217, readback 0.00).
+- `[audio] total`: 4x `frames=24182144 silent=0 dropped=0 resyncs=7077 resynced=27195008`; 2x
+  `frames=24641920 silent=0 dropped=0 resyncs=7258 resynced=27552640`.
+
+**Why I stopped.**
+1. The store costs about 0.5 ms a frame at both scales (0.519 at 4x, 0.487 at 2x), and the same in Erik's play.
+   That is about 5% of the guest's 11 ms. In Erik's dip seconds the guest time rises by about 2.5 ms (9.2 to
+   11.7) while the store stays at 0.51. The dips do not come from the store.
+2. The code agrees, and the brief's premise is wrong here. `store_depth` (vulkan_renderer.cpp ~7382) already reads
+   only the 480x272 centre texels (`centre_texel` for each row and column). It does not convert the target's full
+   1920x1088. A GPU reduction to 480x272 would save at most the 0.5 ms, and the cache misses behind that cost are
+   mostly the same at both scales. What does grow at 4x is the full-extent `vkCmdCopyImageToBuffer`, which is GPU
+   time (copy 0.13 to 0.20 ms), not guest time.
+3. What grows with scale is the GPU. `gpu` goes from 3.95 to 6.18 ms. The `fence` stall goes from 1.97 to 3.93 ms:
+   this is write_back_depth waiting for the frame before's fence (`wait_fence(ready->fence, ...)`). frame_stats
+   counts it under `wait` (`add_wait_time`), not `guest`. The guest figure barely moves with scale (10.84 to 11.03),
+   so the brief's goal of making 4x converge on 2x does not depend on the guest's slice.
+
+**On B (not started, because the caller said to stop at this condition).** The probe makes the sink's case
+stronger. Resyncs run at 17.4/s at both scales, against 5.18/s in 079's run, with `silent=0`: every shortfall is an
+uncounted skip. B does not depend on A and could go ahead as its own task.
+
+Changed: docs/tasks/080-guest-budget-and-sink-grace.md (this Result). Nothing else.
+
+Verify output: not run. The task stopped at the escalation condition with no change to verify. The baseline's own
+gate runs are above (stutter_check 4x FAIL, 2x PASS).
+
+Open questions:
+- What should the 4x slice target? The fence wait for the frame before (a full frame of GPU at 4x), which would
+  mean the depth copy two frames late or the write-back on another thread? The GPU frame cost at 4x? Or the guest's
+  scale-independent ~11 ms, and what in the effect storms swells it (a profile of the guest thread, not the
+  renderer)?
+- Should B be re-briefed alone as 0024-audio-sink-grace?
+- The sweep's race runs at 78.7% (4x) and 89.5% (2x) speed, against Erik's 98 to 99% in play. The harness's cost,
+  noted in 079, still makes the sweep a pessimistic stand-in.
