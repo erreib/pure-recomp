@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased, the first public release)
+## 0.1.0 (2026-10-13, the first public release)
 
 The whole single-player game on Apple Silicon Macs (Metal) and 64-bit Windows (Vulkan), from the player's own US
 Greatest Hits disc image (UCUS-98612 v2.00).
