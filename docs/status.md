@@ -353,6 +353,17 @@ simplification task, then the enhancements. The session-by-session resume notes 
   guest split before/after), the restage, and Erik's ears; expect the audio clicks to mostly vanish with the dips,
   demoting 081's sink fork to polish. An upstream candidate of the first order: every Windows port of the
   framework pays this. The experiment's logs: out/ob2-baseline and out/ob2-probe on the rig.
+- **The flag shipped; the rig's stutter thread closed (task 083, merged ef413d9 2026-10-13).** Patch
+  0025-corpus-inlining: both `/Ob0` sites in the vendor cmake's MSVC branch are `/Ob2`. On a fresh boot the before
+  reproduced the night baseline (game 10.08 ms a frame, stutter_check FAIL 164 of 248 — the machine's state was
+  never the cause) and the after reproduced the night probe (3.13 ms, PASS 2 of 197, then 0 of 194 in Verify; guest
+  5.35 ms against PPSSPP's 6.5 on the same CPU). The full gates passed, 18/18 scenes unmoved, and the race's game
+  clock runs 0.9993/1.0002 s per second against task 077's 0.9919/0.9946: the slowdown that starved the audio sink
+  is gone, so the clicks should go with the dips — Erik's ears judge, and task 081's sink fork is hereby demoted to
+  polish. Two wobbles explained in the Review (zone_change's windowed swing; a first run of a freshly linked binary
+  stalls in `display` while the scanner reads it — run twice before believing a first run). FP contraction stays
+  clang-only by design; any future FMA-enabling flag must bring `-ffp-contract=off`. Upstream candidate of the
+  first order: every Windows port of the framework compiled its corpus without inlining until this patch.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
