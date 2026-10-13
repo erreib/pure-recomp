@@ -69,6 +69,25 @@ The read-me inside each archive has the details.
 A gamepad is positional: Cross is the bottom button on a PlayStation pad, A on an Xbox pad. Rebinding and a
 classic keyboard-only layout are in the Esc menu's Controls tab ([docs/controls.md](docs/controls.md)).
 
+## The Esc menu
+
+Press **Esc** at any time (L3+R3 on a gamepad) for the port's own menu over the game; Esc again, or Resume, goes
+back. The game pauses while it is open, unless you tell the System tab otherwise. Everything here is saved to
+`settings.ini` in the data folder, and each tab has a row that restores its defaults.
+
+- **Video.** Resolution (Auto follows the window; or a multiple of the PSP's 480x272), Display and Window size,
+  Aspect ratio (Original keeps the PSP's shape with bars, Stretch fills the window, Fill draws the view at the
+  window's shape: the ultrawide option), Scaling filter, Vsync, Game speed and Fast loading, and on Windows the
+  Frame rate row (frame interpolation) and texture filtering and packs. At the end of the tab, the game's own
+  enhancements: **30 fps modes** (60 fps, or the PSP's 30), **Flashes** (smoothed, or the original), **Text and
+  sprites** (original, or upscaled), **Texture detail** (enhanced, or the original).
+- **Audio.** Volume, mute, the output device.
+- **Controls.** The connected gamepad, the confirm button (Cross as the bottom button, or the right one), dead
+  zones, every binding for the keyboard, mouse and pad, and the classic keyboard-only layout.
+- **System.** Resume, pausing, open the data folder, set up the game data again (another disc image), quit; your
+  profiles with import, export and backups; the download packs, how many are installed and a button to install
+  more; and what build you are running.
+
 ## Known issues
 
 - The macOS app is not notarized and the Windows build is not signed (the one-time step above).
