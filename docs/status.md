@@ -543,8 +543,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   pack installed the Text and sprites upscale is redundant and Texture detail applies to the pack's own levels.
 - **The rig on the 2026-10-14 pull (0029-windows-file-url, 0030-vblank-period, E8, the overlay, task 088).** 30 patches reproduce vendor,
   the rebuild incremental; `tools/menu_check.sh --shell vulkan` PASS with the Video tab at 21 rows (Display rate
-  present) and `PURE_DISPLAY_RATE=1 tools/stutter_check.sh` PASS at the 100 Hz budget (8 of 189 seconds over 25 ms,
-  readback 0.00) — the inlining fix is what affords the 10 ms frame. Erik's by hand: the Esc menu's folder buttons
+  present) and `PURE_DISPLAY_RATE=1 tools/stutter_check.sh` PASS (8 of 189 seconds over 25 ms, readback 0.00) — but task
+  091 later read this run's log: `display rate: off`, 60 Hz (the shell's refresh follows the monitor's state at
+  launch), so this gate never ran at 100 Hz; the real 100 Hz figures are 091's. Erik's by hand: the Esc menu's folder buttons
   (patch 0029-windows-file-url) and a race with Display rate at Display (expect 100 fps in the race, 30 in the
   menus). Task 088 (the VR stereo spike, this rig, the Quest over Link) is OPEN and undispatched.
 - **The storms against the 10 ms budget (task 091, briefed 2026-10-14).** Erik raced at the Display rate on the
@@ -552,6 +553,18 @@ simplification task, then the enhancements. The session-by-session resume notes 
   (082's storm swell plus render against a 10 ms frame instead of 16.7); task 091 profiles the storms at both
   rates with the guest split and either lands a single-cause fix or writes the honest windows.md line: the
   Display rate wants headroom, Original is the smooth setting when it matters. Dispatched to a worker.
+- **The storms named: the whole race misses 10 ms (task 091 merged, 2026-10-14).** The verdict is the
+  characterization, no patch: a race frame costs about 11.7 ms of host work at either rate (game 3.3, sceDisplay's
+  host work 2.1, render 4.3, fence 1.6), so the 100 Hz race holds 85 fps at 85% speed and the storms (game +0.7 ms,
+  082's swell) dip it to 76–80% — the stutters Erik saw are the dips a 10 ms budget can no longer hide. Nothing
+  grows per frame at 100 Hz (the fence wait shrinks), so no single owner and no fix within the brief;
+  docs/windows.md's E8 entry carries the figures and the headroom statement (about 2.5 ms a frame, 25%). Three
+  follow-ups from the Result's Open questions: the E8 gate must pin `PURE_DISPLAY_HZ=100` before its PASS is
+  believed (tools change); the 100 Hz race runs slow, not just uneven — drop-vblanks vs slow-down (or auto-fallback
+  under ~95% speed) is a pacer design call for docs/decisions.md; worktree builds on the rig lose the renderer
+  (`SDL3_ROOT` resolves wrong under .claude/worktrees/ — worktree_init.sh or the preset should fix it, the Result
+  records the cmake -D workaround). A one-off mid-race 250 ms stall in sceDisplay's host work (seconds #179–184 of
+  the 100 Hz probe) did not recur; its own problem if it ever does.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream

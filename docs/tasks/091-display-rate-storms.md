@@ -230,3 +230,24 @@ docs_check: 35 files, 0 findings: PASS
   back, but only after measuring how much of it a player's build (no input script) pays.
 - The one-off display stall of seconds #179 to #184 (250 ms frames inside sceDisplay's host work, mid-race, not a
   first run) did not recur. If it recurs in play, it is its own problem, separate from the storms.
+
+## Review (Fable, 2026-10-14)
+
+Merged c2c66b9 into batch/m2. The verdict stands: the characterization, no patch. The attribution holds — the
+per-bucket sum (game 3.25 + HLE 2.36 + render 4.31 + fence 1.65 + pacing 0.16 + present ~0.2) reproduces the
+11.9 ms measured frame, nothing grows per frame at 100 Hz, and the fence wait shrinks there, so the brief's
+escalation conditions (pacer, kernel, GPU-side growth) do not hold. The 250 ms display-bucket episode of seconds
+#179 to #184 is rightly kept apart from the storm story: same bucket as the first-run scanner stall, did not recur.
+The extra probes (norender, the display-rate-off first run) were earned, not scope creep — the off run exposed
+that the shell's refresh follows the monitor's state at launch, which invalidates the 2026-10-14 status row's
+"PASS at the 100 Hz budget" (that gate ran at 60; the status row is corrected today).
+
+Three Open questions are now the planning session's:
+1. The E8 gate must pin `PURE_DISPLAY_HZ=100` (or assert the `display rate:` log line) before its PASS is believed
+   — a tools/stutter_check.sh change, to be folded into the next tools task.
+2. The 100 Hz race runs slow (85% speed), not just unevenly — whether the Display rate should drop vblanks or
+   slow down, and whether to auto-fall-back to Original under ~95% speed, is a design call for docs/decisions.md
+   before any pacer work is briefed.
+3. Worktree builds on the rig lose the renderer (`SDL3_ROOT=${sourceDir}/../deps/...` resolves wrong under
+   .claude/worktrees/) — tools/worktree_init.sh or the preset should pass the absolute path; until then every
+   rig worker needs the cmake -D workaround this Result records.
