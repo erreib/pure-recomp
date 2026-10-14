@@ -547,6 +547,11 @@ simplification task, then the enhancements. The session-by-session resume notes 
   readback 0.00) — the inlining fix is what affords the 10 ms frame. Erik's by hand: the Esc menu's folder buttons
   (patch 0029-windows-file-url) and a race with Display rate at Display (expect 100 fps in the race, 30 in the
   menus). Task 088 (the VR stereo spike, this rig, the Quest over Link) is OPEN and undispatched.
+- **The storms against the 10 ms budget (task 091, briefed 2026-10-14).** Erik raced at the Display rate on the
+  rig: mostly clean, but effect-heavy moments stutter where the capped mode does not. The arithmetic predicts it
+  (082's storm swell plus render against a 10 ms frame instead of 16.7); task 091 profiles the storms at both
+  rates with the guest split and either lands a single-cause fix or writes the honest windows.md line: the
+  Display rate wants headroom, Original is the smooth setting when it matters. Dispatched to a worker.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
