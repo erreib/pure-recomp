@@ -12,7 +12,10 @@
 # the enhancements named here, since every tool run has them off unless its caller names them (tools/purelib/port.py's
 # ENHANCEMENTS_OFF): PURE_SIXTY_FPS=1, PURE_SMOOTH_FLASHES=1, PURE_TEXTURE_DETAIL=1 (the player's defaults) and
 # PURE_SPRITE_UPSCALE=0 (Original, the default since D-018 as amended). That is the planning session's probe of task
-# 077. About 6 minutes. The log is read from the race's first paced flip (`[pure] paced from frame N`) to its end:
+# 077. The Display rate row (E8, task 089) stays at tools/purelib/port.py's pin (Original) unless the environment names
+# PURE_DISPLAY_RATE; with PURE_DISPLAY_RATE=1 the race runs at the display's refresh, so the cell's flip budget (13000,
+# counted at 60 flips a second) is doubled with --frames 26000, a ceiling for a display up to 120 Hz: the race still
+# ends at its results screen. About 6 minutes. The log is read from the race's first paced flip (`[pure] paced from frame N`) to its end:
 # PASS when (a) at most 1 in 10 of those seconds has a frame over SLOW_MS (its `[slow-frame]` lines between the
 # second's `[perf]` lines) after the frame's own pacing sleeps are taken off (the pacer sleeps only when the game is
 # ahead of real time, so that part of a long frame is the schedule holding, not a stutter), the flips that are a
@@ -75,10 +78,12 @@ python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
 sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("stutter_check: " + m, flush=True),
                               limit=600) else 2)' || exit 2
 t0=$SECONDS
+FRAMES=()
+[ "${PURE_DISPLAY_RATE:-0}" = 1 ] && FRAMES=(--frames 26000)
 PURE_PERF=log PURE_TRACE_STALLS=1 PURE_TRACE_STALLS_MS=$SLOW_MS PURE_NO_AUDIO=0 PURE_SIXTY_FPS=1 \
   PURE_SMOOTH_FLASHES=1 PURE_TEXTURE_DETAIL=1 PURE_SPRITE_UPSCALE=0 \
   python3 tools/campaign_sweep.py single_race vineta_k --no-damage --out "$OUT/race" --shell "$SHELL_NAME" \
-  --backend "$BACKEND" > "$OUT/race.stdout" 2>&1
+  --backend "$BACKEND" ${FRAMES[@]+"${FRAMES[@]}"} > "$OUT/race.stdout" 2>&1
 echo "stutter_check: campaign_sweep exit $?, $((SECONDS - t0)) s, log $OUT/race/single_race-vineta_k.log"
 
 python3 - "$OUT" $SLOW_MS $MAX_SLOW_FRACTION $MAX_READBACK_MS <<'EOF' | tee "$OUT/summary.txt"

@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <optional>
+#include <utility>
 
 namespace portablekit::enhancements {
 namespace {
@@ -64,10 +65,12 @@ const char *const kTextureDetailChoices[] = {"Original", "Enhanced"};
 // a frame, the frontend and the 30-fps modes at Original two. The kernel ticks the vblank at the PSP's 59.94 Hz
 // (kVBlankPeriodUs) unless told another period (patch 0030-vblank-period: Kernel::set_vblank_period_us, which the
 // tick, the media HLE's vblank arithmetic, the pacer's game frame and the Metal shell's present timing follow). Display
-// sets the period from the display's refresh when that is above 60.5 Hz: round(1e6 / rate), the rate clamped to 240
-// Hz. The game's speed does not change: its frame timer FUN_08804390 measures dt from the system clock and every object
-// integrates it (docs/timing.md, "The game's clock in a race"). What counts frames is measured by
-// tools/display_rate_check.sh (docs/timing.md, "E8").
+// sets the period from the display's refresh when that is above 60.5 Hz, round(1e6 / rate) with the rate clamped to
+// 240 Hz, while the race backend lives (DAT_08a8c5f4 and the frame object in user RAM: E4's gate), and the PSP's
+// period outside it; a change applies from the next vblank. The race's speed does not change: its frame timer
+// FUN_08804390 measures dt from the system clock and every object integrates it (docs/timing.md, "The game's clock in a
+// race"). The frontend stays at the PSP's cadence because its screens' build-in and build-out transitions count frames
+// and ran at twice the speed at 120 (task 089's measurement, docs/timing.md "E8"; the decision's review, 2026-10-14).
 const char *const kDisplayRateChoices[] = {"Original", "Display"};
 
 const GameOption kOptions[] = {
@@ -109,9 +112,10 @@ const GameOption kOptions[] = {
      .label = "Display rate",
      .choices = kDisplayRateChoices,
      .description = "The game draws a frame every one or two refreshes of the PSP's 60 Hz display. Display runs that "
-                    "refresh at your display's rate when it is above 60 Hz: on a 120 Hz display the races draw 120 "
-                    "frames a second and the menus 60. The 30 fps modes row's Original is then half the display's "
-                    "rate and 60 fps the full rate. The game's speed is the same either way (it measures time).",
+                    "refresh at your display's rate in a race when it is above 60 Hz: on a 120 Hz display Single "
+                    "Race and Tournament draw 120 frames a second, and Time Trial, Free Play and Zone 120 with the "
+                    "30 fps modes row at 60 fps or 60 at Original. The menus keep the PSP's pace. The race's speed is "
+                    "the same either way (it measures time).",
      .default_choice = 1u,
      .tab = MenuTab::Video},
 };
@@ -170,37 +174,56 @@ double display_hz() {
     return 0.0;
 }
 
-// E8: the kernel's vblank period from the option and the display's rate, set and announced when it changes: at start
-// and at every frame's GE sync (the row changed in the menu, the window moved to another display).
-void display_rate() {
+// E8: whether the race backend lives, E4's gate: DAT_08a8c5f4 (set by the backend's constructor during the race load,
+// zeroed by its destructor) and the frame object both in user RAM. Every race mode, whatever the lock byte +0x116c says
+// (0 in the 30-fps modes at Original and while the save dialog runs, 1 otherwise).
+bool race_backend(const psprecomp::GuestMemory &m) {
+    const std::uint32_t backend = m.load32(kBackendPtr);
+    const std::uint32_t frame = m.load32(kFrameObjectPtr);
+    return backend >= kUserBase && backend < kUserEnd && frame >= kUserBase && frame < kUserEnd;
+}
+
+// E8: the kernel's vblank period from the option, the display's rate and the race backend, set and announced when it
+// changes: at start (no backend) and at every frame's GE sync (the race load and its end, the row changed in the menu,
+// the window moved to another display). A line a change, not a flip: `off` (Original, or no display above 60.5 Hz),
+// `120 Hz in a race, the PSP's 59.94 Hz outside one` (Display, outside a race) and `120 Hz (8333 us a vblank)` (in one).
+void display_rate(const psprecomp::GuestMemory *m) {
     double hz = 0.0;
     if (settings::game_option("display_rate") == 1u) hz = display_hz();
     std::uint64_t period = kVBlankPeriodUs;
+    enum class State { Off, Outside, Race } state = State::Off;
     if (hz > kMinDisplayHz) {
         hz = std::min(hz, kMaxDisplayHz);
-        period = static_cast<std::uint64_t>(std::llround(1e6 / hz));
+        state = m != nullptr && race_backend(*m) ? State::Race : State::Outside;
+        if (state == State::Race) period = static_cast<std::uint64_t>(std::llround(1e6 / hz));
     }
-    static std::optional<std::uint64_t> applied;
-    if (applied && *applied == period) return;
-    applied = period;
+    static std::optional<std::pair<State, std::uint64_t>> applied;
+    const std::uint64_t display_period = hz > kMinDisplayHz ? static_cast<std::uint64_t>(std::llround(1e6 / hz)) : 0u;
+    if (applied && applied->first == state && applied->second == display_period) return;
+    applied = std::pair{state, display_period};
     kernel().set_vblank_period_us(period);
-    if (period == kVBlankPeriodUs)
-        std::cout << "[pure] display rate: off\n";
-    else
+    switch (state) {
+    case State::Off: std::cout << "[pure] display rate: off\n"; break;
+    case State::Outside:
+        std::cout << "[pure] display rate: " << std::lround(hz) << " Hz in a race, the PSP's 59.94 Hz outside one\n";
+        break;
+    case State::Race:
         std::cout << "[pure] display rate: " << std::lround(hz) << " Hz (" << period << " us a vblank)\n";
+        break;
+    }
 }
 
-// All at the end-of-frame routine's GE sync (step 1, before step 5 reads the two fields): E8's period first, then E4,
-// then E6.
+// All at the end-of-frame routine's GE sync (step 1, before step 5 reads the two fields): E8's period first (it reads
+// the backend, not the byte E4 writes), then E4, then E6.
 void wrap_draw_sync(HleRegistrar &hle) {
     static HleFunction original = hle.bound_function("sceGe_user", kNidSceGeDrawSync);
     if (!original) return;
     if (settings::game_option("sixty_fps") == 0u) std::cout << "[pure] sixty fps: off\n";
     if (settings::game_option("smooth_flashes") == 0u) std::cout << "[pure] smooth flashes: off\n";
-    display_rate();
+    display_rate(nullptr);
     hle.bind("sceGe_user", kNidSceGeDrawSync, [](Runtime &rt, AllegrexContext &ctx) {
         auto &m = rt.memory();
-        display_rate();
+        display_rate(&m);
         if (settings::game_option("sixty_fps") == 1u) sixty_fps(m);
         if (settings::game_option("smooth_flashes") == 1u) smooth_flashes(m);
         original(rt, ctx);

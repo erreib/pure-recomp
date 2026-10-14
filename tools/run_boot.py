@@ -30,7 +30,8 @@ The clock (task 050): a run without a window and without --sound gets PURE_NO_BU
 busy-time charge off, so the run does not depend on the machine's load), unless the environment (or --env) names
 it; a window or --sound keeps the framework's charge, as a player has it.
 The enhancements (task 070, D-016; task 072, D-017; task 073, D-018; task 075, D-019): every run has PURE_SIXTY_FPS=0,
-PURE_SMOOTH_FLASHES=0, PURE_SPRITE_UPSCALE=0 and PURE_TEXTURE_DETAIL=0 (purelib.port.original_pacing: Time Trial,
+PURE_SMOOTH_FLASHES=0, PURE_SPRITE_UPSCALE=0, PURE_TEXTURE_DETAIL=0 and PURE_DISPLAY_RATE=0 (task 089, D-022: the
+vblank at the PSP's 59.94 Hz whatever the display) (purelib.port.original_pacing: Time Trial,
 Free Play and Zone, and the full-screen flashes, at the PSP's two vblanks a frame, the menus' and the HUD's bitmaps
 drawn as the PSP's texels and the mipmapped textures at the PSP's levels, as the checks were measured) unless the
 environment (or --env) names them, so --env PURE_SIXTY_FPS=1 runs the 30-fps modes free, --env PURE_SMOOTH_FLASHES=1
