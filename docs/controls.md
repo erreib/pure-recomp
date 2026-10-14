@@ -165,7 +165,7 @@ PURE_..." beside it.
    defaults" puts every binding and every row of the tab back (rows an environment variable decides excepted).
 
 The Video tab ends with a Game section (since task 070, patch 0019-game-option-rows: the options our profile lists in
-`GameProfile::options`, `src/profile/enhancements.cpp`). It holds four rows. 30 fps modes (since task 072): 60 fps (the
+`GameProfile::options`, `src/profile/enhancements.cpp`). It holds five rows. 30 fps modes (since task 072): 60 fps (the
 default) runs Time Trial, Free Play and Zone at the display's rate, as Single Race and Tournament already run;
 Original keeps them at 30 fps, as the PSP does (E4, D-017; docs/timing.md, "E4"). The menus run at 30 fps either way.
 (The row is not called Frame rate: under the Vulkan shell that is the renderer's frame-rate cap, higher up.) Flashes:
@@ -179,9 +179,13 @@ the renderer draw the mipmapped textures, the track ahead, the walls, the scener
 detail for the pixels drawn rather than the PSP's 480x272, and angled surfaces anisotropically; the difference shows
 above Resolution x1. Original picks the level as the PSP does (E5, D-019; docs/metal-backend.md, "Texture detail"). Both
 renderers draw it, the Metal backend since task 075 and the Vulkan renderer since task 076 (patch
-0020-vulkan-texture-detail), as its help says. "Restore video defaults" puts all four back to their defaults;
-`PURE_SIXTY_FPS`, `PURE_SMOOTH_FLASHES`, `PURE_SPRITE_UPSCALE` and `PURE_TEXTURE_DETAIL` lock them for a run ("Set by
-PURE_SIXTY_FPS"), as every tool run does.
+0020-vulkan-texture-detail), as its help says. Display rate (since task 089): Display (the default) runs the race's
+vblank at the display's refresh when that is above 60 Hz, so on a 120 Hz display Single Race and Tournament draw 120
+frames a second, and Time Trial, Free Play and Zone 120 with the 30 fps modes row at 60 fps or 60 at Original; the
+menus keep the PSP's pace, and on a 60 Hz display nothing changes. Original keeps the PSP's 59.94 Hz everywhere (E8,
+D-022; docs/timing.md, "E8"). "Restore video defaults" puts all five back to their defaults; `PURE_SIXTY_FPS`,
+`PURE_SMOOTH_FLASHES`, `PURE_SPRITE_UPSCALE`, `PURE_TEXTURE_DETAIL` and `PURE_DISPLAY_RATE` lock them for a run ("Set
+by PURE_SIXTY_FPS"), as every tool run does.
 
 The System tab holds, in order: the Game section (Resume, Pause the game when the menu opens, Open the data folder,
 Set up game data again…, Quit game), Saves (Import save…, Export save…, Back up saves…, Open the saves folder, Open the
@@ -244,7 +248,8 @@ driver), the name's `input.name_entry` and `input.name`, and the touch controls'
 The game's own options are `game.<key>=<index>`, the index of the row's choice: `game.sixty_fps=1` (30 fps modes:
 60 fps, the default) or `0` (Original), `game.smooth_flashes=1` (Flashes: Smooth, the default) or `0` (Original),
 `game.sprite_upscale=1` (Text and sprites: Upscaled) or `0` (Original, the default since 2026-10-12), and
-`game.texture_detail=1` (Texture detail: Enhanced, the default) or `0` (Original).
+`game.texture_detail=1` (Texture detail: Enhanced, the default) or `0` (Original), and `game.display_rate=1`
+(Display rate: Display, the default) or `0` (Original).
 An index out of range is ignored with `[settings] ignoring KEY=VALUE` and reads as the default, and a `game.` key
 this port has no option for is dropped when the file is next written.
 

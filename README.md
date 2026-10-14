@@ -43,7 +43,8 @@ The read-me inside each archive has the details.
 - **Enhancements, each one choice away from the original behaviour**, in the menu that Esc opens:
   - the picture at your display's resolution instead of 480x272;
   - the view at your window's shape, ultrawide included (Aspect ratio: Fill);
-  - Time Trial, Free Play and Zone at 60 fps instead of the PSP's 30;
+  - Time Trial, Free Play and Zone at 60 fps instead of the PSP's 30, and every race at your display's rate (120 fps
+    on a 120 Hz display);
   - the full-screen flashes smoothed;
   - sharper textures at distance (mipmap detail at the internal resolution);
   - the menu art upscaled (off by default).
@@ -80,7 +81,8 @@ back. The game pauses while it is open, unless you tell the System tab otherwise
   window's shape: the ultrawide option), Scaling filter, Vsync, Game speed and Fast loading, and on Windows the
   Frame rate row (frame interpolation) and texture filtering and packs. At the end of the tab, the game's own
   enhancements: **30 fps modes** (60 fps, or the PSP's 30), **Flashes** (smoothed, or the original), **Text and
-  sprites** (original, or upscaled), **Texture detail** (enhanced, or the original).
+  sprites** (original, or upscaled), **Texture detail** (enhanced, or the original), **Display rate** (the races at
+  your display's refresh, or the PSP's 60).
 - **Audio.** Volume, mute, the output device.
 - **Controls.** The connected gamepad, the confirm button (Cross as the bottom button, or the right one), dead
   zones, every binding for the keyboard, mouse and pad, and the classic keyboard-only layout.

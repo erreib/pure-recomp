@@ -115,6 +115,66 @@ code changes.
   10 km/h; the first speed pad is at about 2.2 s); laps of 77.1, 69.8 and 65.2 s with 68 contacts against 65.5, 58.7 and 59.7 s with 44 (the follower reads
   its steering every 10 flips, twice as often at 60: its doing, not the game's speed).
 
+## E8: the display rate (task 089)
+D-022, as task 089's review amended it (2026-10-14): the Esc menu's Display rate row (Video tab, Game section, after
+Texture detail; `game.display_rate`, `PURE_DISPLAY_RATE`; patch 0019-game-option-rows), Display by default, runs the
+race's vblank at the display's refresh. Patch 0030-vblank-period makes the kernel's vblank period a runtime value
+(`Kernel::set_vblank_period_us`, default `kVBlankPeriodUs`, 16683 us; a change applies from the next vblank, which
+stays where it was due, and the count of vblanks stands), read by the tick, `last_vblank_us()`, the media HLE's frame
+grid, vblank duration, hcount and vblank flag, and frame interpolation's game frame and rate (passed on at each flip);
+the Metal shell asks for each picture one period after its frame's vblank. In E6's `sceGeDrawSync` wrap, before E4 and
+E6, `src/profile/enhancements.cpp` sets the period to `round(1e6 / rate)` (the rate clamped to 240 Hz) when the row is
+Display, the display's refresh (the window shell's `display_refresh()`, or the test switch `PURE_DISPLAY_HZ=N`) is
+above 60.5 Hz and the race backend lives, and to the PSP's otherwise. "The race backend lives" is E4's gate:
+`DAT_08a8c5f4` (0x08A8C5F4, stored by the backend's constructor in the race load, zeroed by its destructor) and the
+frame object (`*0x08A8E960`) both in user RAM; not the lock byte `+0x116c`, which is 0 in the 30-fps modes at Original
+and while the save dialog runs. So Single Race and Tournament run at the display's rate, Time Trial, Free Play and Zone
+at it with the 30 fps modes row at 60 fps and at half of it at Original (two vblanks of the display's period: 60 on a
+120 Hz display), and the frontend and the save dialog keep the PSP's cadence. One line a change, not a flip: `[pure]
+display rate: off` (Original, or no display above 60.5 Hz), `[pure] display rate: 120 Hz in a race, the PSP's 59.94 Hz
+outside one` (Display, outside a race: at start) and `[pure] display rate: 120 Hz (8333 us a vblank)` (the race load:
+after flip 5700 on the Time Trial route). The game's speed is unchanged because its frame timer integrates measured dt
+("The game's clock in a race", below).
+- Why the frontend keeps the PSP's rate: task 089 first ran the period at the display's everywhere and compared shots
+  at the same flip and at the same virtual time in both lanes of the main-menu route (out/e8probe/ on the Mac). Time
+  drives the boot cards (SCEA, Studio Liverpool), the language screen's build-in, the flashing after the profile
+  save's confirm (roughly) and the menus' typed help line: they match at the same virtual time. Frames drive the
+  screens' build-in and build-out transitions: identical at the same flip at both rates, so twice as fast at 120. For
+  example MAIN MENU's after the profile save, flips 4315 to 4341, is 0.90 s at 59.94 Hz and 0.45 s at 120. The frame
+  count the timer keeps at `DAT_08a8c3d8` has two references in the corpus (its load and store in `FUN_08804390`) and
+  is not passed on, so no one field slows the transitions; the review chose the race-only period instead.
+- The race-start fade needs no hook: its two-vblank stretch doubles in flips and keeps its time. 1.902 s in 57 flips
+  at 59.94; at 120, 1.883 s in 113 flips with the race-only period (the switch lands in the load, flips before the
+  fade), 1.900 s in 114 with the period everywhere. FxScreen re-arms the countdown on every frame of a fade that dt
+  times, so the countdown never halves it.
+- On the Time Trial route (`tools/display_rate_check.sh`): the frontend's flips 4000 to 5000 have a median of 33.37 ms
+  and 29.84 flips a virtual second in both lanes; the race's (race clock 1 to 6 s) 16.68 ms and 59.96 flips a
+  race-clock second at 59.94, 8.33 ms and 120.00 at 120.
+- A swept Time Trial of Vineta K (`tools/display_rate_check.sh --race`, three runs a lane in task 089, two of them with
+  the period everywhere): 59.95 to 59.96 against 119.67 to 120.02 flips a race-clock second. The game clock
+  (`DAT_08a8c3dc`) advances 1.0001 s a virtual second at 60 and 0.9962 at 120 (a guess, not checked: the float sum near
+  1000 s rounds each 8.3 ms step down). The standing start is the same to 1.5 s (39.3, 77.5 and 121.1 km/h at 0.5, 1.0
+  and 1.5 s against 38.9 to 39.2, 76.9 to 77.0 and 120.1 to 120.8). The first speed pad is not: its boost starts at
+  2.152 s and 1266.83 m of track at 60, 2.144 s and 1266.32 m at 90 (one cell with `PURE_DISPLAY_HZ=90`), and 2.057 to
+  2.067 s and 1262.20 to 1262.62 m at 120, on the same lateral line (z -96.8): 0.1 s and 4.6 m early at 120, the same
+  in every run, and not a fixed frame-count lag (that would put 90 at about 2.10 s); not traced further. The 2.0 s bin
+  then reads 168.2 km/h at 60 against 183.9 to 189.0 at 120. Mean laps of 61.97, 61.70 and 59.73 s at 60 against 58.70,
+  57.03 and 58.70 at 120 (-5.3%, -7.6% and -1.7%), with 13.3 to 16.0 contacts a lap in both: the follower reads its
+  steering every 10 flips, twice as often at 120, and its laps differ by 9% from run to run at one rate (lap 1: 60.5 and
+  65.9 s). So the check bounds the flips, the game clock, the start to 1.5 s and the contacts, and reports the 2.0 s
+  bin, the pad and the laps.
+- In the window, on this Mac's 120 Hz display (`PURE_DISPLAY_RATE=1 tools/stutter_check.sh`, its budget doubled):
+  PASS, 10 of 195 seconds with a frame over 25 ms, nine of them the sweep's results-panel shots every 30 flips after
+  the race (165 to 199 ms each) and one in the race (25.9 ms, render). The `[perf]` lines of the race: 120.0 flips a
+  second, frame avg 8.3 ms, max 9.5 ms at the median second and 13.2 at the 90th percentile, guest 1.4 and render
+  6.9 ms. The Metal shell's `frame_rate_now` counts the last second's presents: 120.
+- The Vulkan renderer's Frame rate row follows `game_rate()`: in a race at 120 it offers the game's own "120" and
+  "Match display 120 Hz", nothing between (help: "Frames between the game's 120 a second"); outside a race, at the PSP's
+  rate, its usual rates.
+- Open: `kIdleVBlankLimit` (the kernel's deadlock report after 18000 vblanks with no thread to run) still counts
+  vblanks, so in a race at 120 it comes after 2.5 minutes instead of 5; `sceDisplayGetFramePerSec` still answers 59.94
+  (this game does not import it). Both are left as they are (scheduler code; no caller here).
+
 ## Frame structure (from `out/frame.txt`)
 - `FUN_088ed190` is the GE init: `sceGeEdramGetAddr`, `sceKernelCreateEventFlag`, `sceGeSetCallback` (one callback
   set with signal/finish handlers that set the event flag), then an initial `sceGeListEnQueue` + `sceGeListSync`.
