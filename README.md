@@ -78,7 +78,8 @@ back. The game pauses while it is open, unless you tell the System tab otherwise
 
 - **Video.** Resolution (Auto follows the window; or a multiple of the PSP's 480x272), Display and Window size,
   Aspect ratio (Original keeps the PSP's shape with bars, Stretch fills the window, Fill draws the view at the
-  window's shape: the ultrawide option), Scaling filter, Vsync, Game speed and Fast loading, and on Windows the
+  window's shape: the ultrawide option), Scaling filter, Vsync, Game speed and Fast loading, **Performance** (the
+  frame rate and frame times in the top-left corner; F3 shows or hides it), and on Windows the
   Frame rate row (frame interpolation) and texture filtering and packs. At the end of the tab, the game's own
   enhancements: **30 fps modes** (60 fps, or the PSP's 30), **Flashes** (smoothed, or the original), **Text and
   sprites** (original, or upscaled), **Texture detail** (enhanced, or the original), **Display rate** (the races at

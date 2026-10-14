@@ -67,8 +67,8 @@ with `input.right_stick=dpad` the camera keys press the D-pad instead and with `
 The Wipeout Pure column holds only what a run showed: the game's controls screen, the frontend's prompts, and the
 routes in `config/pad_scripts/` (Start at the title and over the intro movie, `dpdown` and `dpup` in the menus, the
 sweep's steering). A key the stick actions press pushes the stick fully (127 from the centre); two opposite keys
-cancel out. Outside the bindings, Esc opens the menu and F3 toggles the performance overlay (which the Metal shell does
-not draw); neither can be bound.
+cancel out. Outside the bindings, Esc opens the menu and F3 toggles the performance overlay (in both shells, the
+Metal shell's since task 090); neither can be bound.
 
 ## The mouse
 
@@ -155,7 +155,7 @@ PURE_..." beside it.
    edited, closes the menu. The Controls tab holds, in order: the Gamepad section (Connected, Confirm button, Stick
    dead zone, Trigger point, Right stick with D-pad and Off, Right stick D-pad point), the Pilot name section (when
    the game asks for a name, the name), Keyboard and mouse (one row per action in the order of the table above, the
-   Esc line, and under the Vulkan shell the F3 line), "Restore control defaults", under the Vulkan shell the Touch
+   Esc line and the F3 line), "Restore control defaults", under the Vulkan shell the Touch
    screen section, and "Use the classic keyboard layout". Disabled rows still take the focus: from Confirm button,
    the first row focused, it is 7 Downs to Move forward and 13 to × (back).
 4. Enter on an action's row: its value reads "Press a key or a mouse button". The next key or mouse button pressed
@@ -210,8 +210,9 @@ sends the stick to the two bytes after the PSP's own, which the game never reads
 gone; no mouse camera, so Mouse, Mouse sensitivity and the two mouse invert rows are gone (the pointer is still
 captured by `input.mouse`, and the mouse's buttons bind as before); no ad hoc play, so the Network tab and the System
 tab's "Pause during multiplayer" are gone and opening the menu turns `network.adhoc` off. The Metal shell has no
-touch controls and no performance overlay, so the Touch screen section and the F3 line are gone there (the Vulkan
-shell keeps them). The Video tab's Aspect ratio row offers Original, Stretch and Fill in both shells: Fill needs a game
+touch controls, so the Touch screen section is gone there (the Vulkan shell keeps it). Since task 090 the Metal shell
+draws the performance overlay, so the Video tab's Performance row and the Controls tab's F3 line are in both shells
+(before, the Metal shell left them out). The Video tab's Aspect ratio row offers Original, Stretch and Fill in both shells: Fill needs a game
 that widens its own view, which this one does since task 084 (D-020), and the Metal shell draws it since task 086
 (before, it left Fill out). A hidden row keeps its settings.ini key and value; "Restore control defaults" still puts the hidden
 rows' settings back too. `tools/menu_check.sh` checks the lists (docs/verification.md).

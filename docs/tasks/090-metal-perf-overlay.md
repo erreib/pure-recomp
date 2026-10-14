@@ -83,7 +83,117 @@ Today the Metal shell answers `supports_perf_overlay()` false and the menu hides
 - Anything would touch vendor/.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+
+**Status: DONE.** The Metal shell draws the framework's performance overlay. The Esc menu's Performance row and F3
+work on the Metal shell, and `tools/menu_check.sh` lists both on both shells. Verify passes. No vendor change.
+
+**How it is drawn** (src/host/metal_shell.mm):
+- `supports_perf_overlay()` is true, and `set_perf_overlay(bool)` keeps the flag. The flag starts from
+  `perf::options().overlay` in `initialize`, since the menu calls `set_perf_overlay` only when the row changes, as
+  the Vulkan renderer does at creation.
+- F3 is handled in `pump_events` after the interface's event hook, as in the Vulkan renderer's pump.
+- In `draw()`, on a game present (`present()`, not `present_ui`), when the flag is set and a picture is drawn:
+  - `perf::draw_overlay` fills a CPU buffer.
+  - The buffer goes by `replaceRegion` into a 196x72 `MTLPixelFormatRGBA8Unorm` texture in shared storage.
+  - The picture's own pipeline draws it with `nearest_` into a viewport at the drawable's top-left corner: inset
+    4 x scale, 196 x scale by 72 x scale, scale = `perf::overlay_scale(drawable height)`. That is 3 in a 1920x1088
+    drawable, so the rectangle is 588x216 at 12,12.
+  - It is opaque, drawn after the picture and before ImGui, and timed with `perf::add_overlay_time`.
+- The window capture copies the drawable, so a `shot` shows the overlay. With the flag off nothing is drawn or
+  allocated.
+
+**Escalation conditions:**
+- The numbers are there. `end_frame` and the time split come from hle_media.cpp, and the shell already called
+  `set_display_info`, so no renderer hook was missing.
+- No second pipeline was needed.
+- The texture is double-buffered, as the brief allows. With one texture, the CPU's `replaceRegion` could rewrite
+  pixels that a present still queued on a GPU running behind is sampling. Metal does not order CPU writes to shared
+  memory against GPU reads. So the shell has two textures, used in turn (`kOverlaySlots`). Before a slot is
+  rewritten, the shell waits for the command buffer that last sampled it, which in practice has finished long before.
+
+**By hand.** What the captures showed, read from each capture's top-left rectangle. The race_hud route in the Metal
+window ran with `video.performance=overlay`, paced from 5716, on a fresh stick, with the shot well into the race:
+- Display rate at Display (`PURE_DISPLAY_RATE=1`, `[pure] display rate: 120 Hz (8333 us a vblank)`), flip 7900:
+  `FPS 120.0 GAME 120.1 SPD 100%`, `FRAME 8.3 MAX 10.4 MS`, `GUEST 1.3 RENDER 3.9 WAIT 3.1`, `FIFO 120HZ 1920X1088`.
+- At Original (`PURE_DISPLAY_RATE=0`), flip 6900: `FPS 59.9 GAME 59.9 SPD 100%`, `FRAME 16.7 MAX 18.3 MS`.
+- F3: with `video.performance=off`, `key F3` at 5990 showed the overlay at 6016, and `key F3` at 6020 hid it again
+  at 6046 (the CURRENT label and lap clock visible again).
+- The menu row: `key Escape`, eight Downs and a Right set the Video tab's Performance row to Overlay (the menu's
+  shot shows the row and its description). settings.ini then held `video.performance=overlay`, and the race after
+  Esc showed the overlay.
+
+### Changed
+- src/host/metal_shell.mm: the overlay (`draw_overlay`, two shared textures, the flag, F3, `supports_perf_overlay`
+  true); the header comment's `overlay` and `captures` lines and the menu-capability comment.
+- tools/overlay_check.sh (new): the check, described in its header.
+- tools/menu_check.sh: Metal's Video rows gain "Performance" after "Fast loading" and its Controls rows gain "F3"
+  after "Esc", as the Vulkan lists have them; header comments updated.
+- docs/controls.md: the F3 sentence, the Controls tab's order, and "Rows the menu leaves out".
+- docs/metal-backend.md: "The Metal shell" gets a Performance overlay row; the Captures row says the overlay is
+  included; "What it leaves out" and the capability sentence are updated; "What is not done yet" loses the
+  performance overlay, and also the stale "the Fill aspect" (done since task 086) in the same line.
+- docs/status.md: the folder-buttons bullet becomes a "Menu refinements" bullet holding patch 0029-windows-file-url
+  and this task.
+- docs/verification.md: the check's row, the menu check's row, and the Metal shell row of "Which path for which
+  change".
+- README.md: the Esc menu's Video line (Performance; F3 shows or hides it).
+- docs/developing.md: the tool's row.
+- docs/tasks/090-metal-perf-overlay.md: this Result.
+
+Also run, outside Verify:
+- `tools/menu_check.sh --shell vulkan` PASS (Video 21, Controls 37).
+- `tools/frame_regress.sh --shell metal --backend metal` 7/7: title 0.0002, main_menu 0.0106, race_hud 0.0149,
+  tt_hud 0.0089, fp_hud 0.0115, zone_hud 0.0122, zone_change 0.0369. tt_hud came back at 0.0112 on a rerun of the
+  same build (race_hud 0.0148), so the 0.0089 is the window's run-to-run wobble, not this change.
+- `tools/hud_check.sh` 61 of 61.
+- `python3 tools/controls_check.py` OK.
+
+overlay_check's figures in the Verify run: the rectangle is 0.9637 changed at tol 24; 29664 of its pixels (0.2336)
+are not black; the rest of the capture is 0.0000 apart at tol 32. The HUD: off lane CURRENT 2000 and LAP 688 yellow;
+overlay lane CURRENT 0 (88% of its region is under the rectangle) and LAP 688. The overlay reads
+`FPS 60.0 GAME 59.9 SPD 100% | FRAME 16.7 MAX 19.4 MS | GUEST 2.1 RENDER 3.4 WAIT 11.1 | FIFO 120HZ 1920X1088`, and all
+of its 3x3 blocks are one colour. 20 s in all.
+
+### Verify output (last 20 lines)
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 22s)
+docs_check: 35 files, 0 findings: PASS
+```
+
+### Open questions
+- **The brief's "the HUD found in both" cannot hold as written.** The overlay covers the HUD's CURRENT label: 88% of
+  `tools/hud_check.py`'s CURRENT region lies under the rectangle, and the label reads 0 yellow there. The Vulkan
+  renderer's 196x72 at 4,4 in its 960x544 window covers it the same way. So the check requires both labels in the
+  lane without the overlay, and in the overlay lane only the labels outside the rectangle (LAP), printing CURRENT's
+  count and how much of it is covered. The masked comparison (c) shows the rest of the HUD unchanged.
+- **The overlay is drawn on game presents only, not on `present_ui`.** This is the Vulkan renderer's rule
+  (`submit_and_present`'s `game_frame`): behind the paused menu the overlay is gone and comes back when the menu
+  closes. The brief's "when a picture is drawn" could also be read to include the paused menu's held picture. Say if
+  the Metal shell should draw it there too (one argument).
+- The Metal shell times no GPU work, so the second line is `FRAME x MAX y MS` with no `GPU` figure, the framework's
+  form when `gpu_valid` is false.
+- The by-hand runs set the rate with `PURE_DISPLAY_RATE`, which the row then shows as "Set by PURE_DISPLAY_RATE",
+  instead of driving the Display rate row itself. The overlay setting was driven through the menu row in a separate
+  run.
+
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

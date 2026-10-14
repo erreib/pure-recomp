@@ -27,7 +27,11 @@
 //              flip a millisecond late or early then no longer shows one picture for three refreshes of a 120 Hz
 //              display and the next for one (task 033). The vblank is the kernel's: the PSP's 59.94 Hz, or the
 //              display's refresh under the Display rate row (E8, task 089), when a picture is due every refresh.
-//   captures   capture_window: the next presented drawable, interface included, read back as a BMP.
+//   overlay    the performance overlay (task 090; the Performance row, `video.performance`, and F3): the framework's
+//              perf::draw_overlay image, 196x72, drawn by the picture's pipeline over the drawable's top-left corner at
+//              perf::overlay_scale(drawable height), opaque, on game presents only, before the interface, as the
+//              Vulkan renderer draws it over its window.
+//   captures   capture_window: the next presented drawable, interface and overlay included, read back as a BMP.
 //   trace      with PURE_METAL_TRACE (task 033), each present of a game picture tells the backend's frame trace its
 //              CPU time, the wait in nextDrawable, and (from the drawable's presented handler) when the picture
 //              reached the screen, through the hook in metal_device.hpp.
@@ -45,6 +49,7 @@
 #include "gpu/ge_backend.hpp"
 #include "kernel/kernel.hpp"
 #include "perf/frame_stats.hpp"
+#include "perf/perf_overlay.hpp"
 #include "portablekit_build_label.hpp"
 #include "profile.hpp"
 #include "settings/settings.hpp"
@@ -90,6 +95,9 @@ constexpr std::uint32_t kPspHeight = pk::gpu::kScreenHeight;
 constexpr auto kFastForwardInterval = std::chrono::milliseconds(33);
 // Behind the setup screens, as in the Vulkan shell: the dark brown of the project's logo.
 constexpr double kBackground[3] = {0.075, 0.055, 0.045};
+// The performance overlay's textures, written by the CPU and sampled by the GPU: one is rewritten while the GPU may
+// still sample the other, so a present never changes the pixels of one in flight (task 090).
+constexpr std::size_t kOverlaySlots = 2u;
 
 // One triangle over the viewport, sampling the game's picture. The viewport is the letterboxed rectangle.
 constexpr const char *kShaderSource = R"(
@@ -257,6 +265,8 @@ public:
             ui_pass_.colorAttachments[0].texture = [device_ newTextureWithDescriptor:probe];
 
             update_display_info();
+            // The Performance row's overlay at start-up; the menu and F3 change it afterwards.
+            overlay_visible_ = pk::perf::options().overlay;
             ready_ = true;
             std::cout << "[shell] metal: " << device_.name.UTF8String << ", window " << window_size() << ", "
                       << (layer_.displaySyncEnabled ? "vsync" : "no vsync") << std::endl;
@@ -278,6 +288,10 @@ public:
             held_ = nil;
             upload_ = nil;
             capture_buffer_ = nil;
+            for (std::size_t slot = 0; slot < kOverlaySlots; ++slot) {
+                overlay_textures_[slot] = nil;
+                overlay_users_[slot] = nil;
+            }
             ui_pass_ = nil;
             picture_pipeline_ = nil;
             nearest_ = nil;
@@ -330,6 +344,9 @@ public:
             if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button < 32u)
                 mouse_buttons_ &= ~(1u << event.button.button);
             if (event_hook_ && event_hook_(event)) continue;
+            // F3 shows or hides the performance overlay, as in the Vulkan renderer's pump; no pad combination.
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F3 && !event.key.repeat)
+                overlay_visible_ = !overlay_visible_;
         }
         // Only sampled while the window has focus: a key still down when focus is lost stays down in SDL's
         // snapshot, which the guest would see as held for ever.
@@ -405,7 +422,8 @@ public:
                 fast_forward_shown_ = now;
             }
             // The frame's moment is known only while the game is held to real time; then its pictures are paced.
-            const bool shown = draw(holding_ ? held_ : game, kBlack, trace.on ? &trace : nullptr, present_time(moment));
+            const bool shown =
+                draw(holding_ ? held_ : game, kBlack, true, trace.on ? &trace : nullptr, present_time(moment));
             report(trace, shown);
             if (shown) {
                 presents_.push_back(now);
@@ -501,14 +519,14 @@ public:
         pure::metal::set_fill(aspect_ == pk::settings::Aspect::Fill);
     }
     void set_sharp_screen(bool sharp) override { sharp_ = sharp; }
-    void set_perf_overlay(bool) override {}
+    void set_perf_overlay(bool visible) override { overlay_visible_ = visible; }
     std::string device_name() const override { return device_ != nil ? std::string(device_.name.UTF8String) : std::string{}; }
     // What the menu offers of this shell (patch 0016-menu-rows-by-capability): it leaves out the Frame rate and Lower
-    // when behind rows (no interpolation), Performance and F3 (no overlay; PURE_PERF=log still prints) and the Touch
-    // screen rows (no touch controls), and says "Metal on <device>". Every aspect: Fill since task 086 (the menu offers
-    // it only to a game that widens its view).
+    // when behind rows (no interpolation) and the Touch screen rows (no touch controls), and says "Metal on <device>".
+    // Every aspect: Fill since task 086 (the menu offers it only to a game that widens its view). The Performance row
+    // and the F3 line since task 090 (the overlay, draw_overlay()).
     bool supports_frame_interpolation() const noexcept override { return false; }
-    bool supports_perf_overlay() const noexcept override { return false; }
+    bool supports_perf_overlay() const noexcept override { return true; }
     bool supports_aspect(pk::settings::Aspect) const noexcept override { return true; }
     bool supports_touch() const noexcept override { return false; }
     std::string api_name() const override { return "Metal"; }
@@ -557,7 +575,7 @@ public:
         if (!ready_) return;
         @autoreleasepool {
             id<MTLTexture> game = show_game ? (holding_ ? held_ : last_game_) : nil;
-            draw(game, game != nil ? kBlack : kBackground);
+            draw(game, game != nil ? kBlack : kBackground, false);
         }
     }
 
@@ -728,12 +746,14 @@ private:
         return CACurrentMediaTime() + ahead;
     }
 
-    // One present: `picture` letterboxed over `clear` (or `clear` alone without one), the interface over it, a
+    // One present: `picture` letterboxed over `clear` (or `clear` alone without one), on a `game_frame` (a flip's
+    // present, not the interface's present_ui) the performance overlay when it is shown, the interface over them, a
     // window capture when one is pending, then presentDrawable and commit. False when there was no drawable. With `at`
     // above 0 the drawable is shown at that time (CACurrentMediaTime's seconds), else as soon as it can be. With
     // `trace`, the wait for the drawable is timed and the drawable's presented handler reports when it reached the
     // screen.
-    bool draw(id<MTLTexture> picture, const double (&clear)[3], Trace *trace = nullptr, double at = 0.0) {
+    bool draw(id<MTLTexture> picture, const double (&clear)[3], bool game_frame, Trace *trace = nullptr,
+              double at = 0.0) {
         ImDrawData *ui = ui_ready_ ? ui_draw_data_ : nullptr;
         ui_draw_data_ = nullptr;
         const Clock::time_point asked = trace != nullptr ? Clock::now() : Clock::time_point{};
@@ -766,6 +786,12 @@ private:
             [encoder setFragmentTexture:picture atIndex:0];
             [encoder setFragmentSamplerState:sampler_for(picture, viewport) atIndex:0];
             [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+            if (game_frame && overlay_visible_) {
+                const Clock::time_point overlay_start = Clock::now();
+                draw_overlay(encoder, commands, static_cast<std::uint32_t>(target.width),
+                             static_cast<std::uint32_t>(target.height));
+                pk::perf::add_overlay_time(Clock::now() - overlay_start);
+            }
         }
         if (ui != nullptr && ui->CmdListsCount > 0) {
             // ImGui sets its own viewport (the whole window) and scissors.
@@ -797,6 +823,54 @@ private:
         if (!capture.empty()) write_capture(commands, capture, static_cast<std::uint32_t>(target.width),
                                             static_cast<std::uint32_t>(target.height));
         return true;
+    }
+
+    // The performance overlay (task 090), as the Vulkan renderer's record_overlay draws it over its window: the
+    // framework's 196x72 image of the last second's numbers and the recent frame times (perf::draw_overlay, red in the
+    // low byte, so an RGBA8Unorm texture reads it as is), scaled by perf::overlay_scale of the drawable's height into
+    // the drawable's top-left corner, inset 4 x scale, with the picture's pipeline and the nearest sampler: opaque,
+    // each of its pixels scale x scale of the drawable's. Not drawn when the drawable is too small to hold it. The
+    // texture written is the slot after the last one drawn, and the present that last sampled it has finished first
+    // (kOverlaySlots).
+    void draw_overlay(id<MTLRenderCommandEncoder> encoder, id<MTLCommandBuffer> commands, std::uint32_t width,
+                      std::uint32_t height) {
+        const std::uint32_t scale = pk::perf::overlay_scale(height);
+        const std::uint32_t inset = 4u * scale;
+        const std::uint32_t shown_width = pk::perf::kOverlayWidth * scale;
+        const std::uint32_t shown_height = pk::perf::kOverlayHeight * scale;
+        if (inset + shown_width > width || inset + shown_height > height) return;
+        overlay_slot_ = (overlay_slot_ + 1u) % kOverlaySlots;
+        if (overlay_textures_[overlay_slot_] == nil) {
+            MTLTextureDescriptor *descriptor =
+                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                   width:pk::perf::kOverlayWidth
+                                                                  height:pk::perf::kOverlayHeight
+                                                               mipmapped:NO];
+            descriptor.usage = MTLTextureUsageShaderRead;
+            descriptor.storageMode = MTLStorageModeShared;
+            overlay_textures_[overlay_slot_] = [device_ newTextureWithDescriptor:descriptor];
+            if (overlay_textures_[overlay_slot_] == nil) return;
+        }
+        id<MTLTexture> texture = overlay_textures_[overlay_slot_];
+        if (overlay_users_[overlay_slot_] != nil) [overlay_users_[overlay_slot_] waitUntilCompleted];
+        overlay_pixels_.resize(static_cast<std::size_t>(pk::perf::kOverlayWidth) * pk::perf::kOverlayHeight);
+        pk::perf::draw_overlay(overlay_pixels_.data());
+        [texture replaceRegion:MTLRegionMake2D(0, 0, pk::perf::kOverlayWidth, pk::perf::kOverlayHeight)
+                   mipmapLevel:0
+                     withBytes:overlay_pixels_.data()
+                   bytesPerRow:static_cast<NSUInteger>(pk::perf::kOverlayWidth) * 4u];
+        overlay_users_[overlay_slot_] = commands;
+        MTLViewport viewport{};
+        viewport.originX = static_cast<double>(inset);
+        viewport.originY = static_cast<double>(inset);
+        viewport.width = static_cast<double>(shown_width);
+        viewport.height = static_cast<double>(shown_height);
+        viewport.znear = 0.0;
+        viewport.zfar = 1.0;
+        [encoder setViewport:viewport];
+        [encoder setFragmentTexture:texture atIndex:0];
+        [encoder setFragmentSamplerState:nearest_ atIndex:0];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     }
 
     // The drawable read back by draw(): BGRA, as the layer holds it, written as the RGBA BMP every capture is.
@@ -871,6 +945,14 @@ private:
 
     std::string capture_path_;
     id<MTLBuffer> capture_buffer_{};
+
+    // The performance overlay (draw_overlay): shown or not (the Performance row, F3), the CPU image, and its textures
+    // with the present that last sampled each.
+    bool overlay_visible_{};
+    std::vector<std::uint32_t> overlay_pixels_;
+    std::size_t overlay_slot_{};
+    id<MTLTexture> overlay_textures_[kOverlaySlots]{};
+    id<MTLCommandBuffer> overlay_users_[kOverlaySlots]{};
 
     bool ui_ready_{};
     MTLRenderPassDescriptor *ui_pass_{};
