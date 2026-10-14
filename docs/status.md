@@ -541,6 +541,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   (the size of the sprite upscale's plumbing). Two tasks when picked: the decoder with the pack as the test subject
   on Vulkan, then the Metal loader; each with a check counting replacements on the race and menu routes. With a
   pack installed the Text and sprites upscale is redundant and Texture detail applies to the pack's own levels.
+- **The rig on the 2026-10-14 pull (0029-windows-file-url, 0030-vblank-period, E8, the overlay, task 088).** 30 patches reproduce vendor,
+  the rebuild incremental; `tools/menu_check.sh --shell vulkan` PASS with the Video tab at 21 rows (Display rate
+  present) and `PURE_DISPLAY_RATE=1 tools/stutter_check.sh` PASS at the 100 Hz budget (8 of 189 seconds over 25 ms,
+  readback 0.00) — the inlining fix is what affords the 10 ms frame. Erik's by hand: the Esc menu's folder buttons
+  (patch 0029-windows-file-url) and a race with Display rate at Display (expect 100 fps in the race, 30 in the
+  menus). Task 088 (the VR stereo spike, this rig, the Quest over Link) is OPEN and undispatched.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
