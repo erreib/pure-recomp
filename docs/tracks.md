@@ -84,7 +84,7 @@ reads other GPI bits (0x20, 0x40, 0x80; docs/timing.md), and FUN_08804390 copies
 framework ignores. Retail reads 0, and so does our HLE.
 
 `PURE_TEST_UNLOCK_ALL=1` makes the profile's `sceKernelGetGPI` return 1 (bit 0 only) and prints `[pure] TEST SWITCH:
-unlock all` at start-up. It is a test switch like `PURE_TEST_NO_DAMAGE` (README.md, "Test switches"): the sweep sets
+unlock all` at start-up. It is a test switch like `PURE_TEST_NO_DAMAGE` (docs/developing.md, "Test switches"): the sweep sets
 it for the cells a new profile cannot reach, never by default. What it opens, from a new profile (headless runs on
 the Metal backend, 2026-10-06, `out/032/h/`):
 
@@ -283,7 +283,7 @@ the race records (task 016 looked there with `tools/pp_lines.py --dump` and foun
 | FUN_0892195c (Player.cpp) | copies the shield and its maximum into the player's HUD data each frame |
 | FUN_0881ebd8 (HUD.cpp) | the bar (`Shield3D`): eases towards shield / maximum; red and blinking under 20 |
 
-`PURE_WATCH_SHIP=1` prints it as `shield=` and `PURE_TEST_NO_DAMAGE=1` (a test switch, `README.md`) refills it
+`PURE_WATCH_SHIP=1` prints it as `shield=` and `PURE_TEST_NO_DAMAGE=1` (a test switch, docs/developing.md) refills it
 every flip; a local build that wrote 1 instead destroyed the ship at its first wall, which is what showed the
 field is the shield and not a copy.
 

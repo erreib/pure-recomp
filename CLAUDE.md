@@ -33,7 +33,7 @@ Environment switches take the framework's names with our prefix: `PURE_NO_RENDER
 `PURE_TRACE_SYNC`, `PURE_TRACE_MPEG`, `PURE_TRACE_ATRAC`, `PURE_TRACE_SAS`, `PURE_TRACE_AUDIO`, `PURE_TRACE_SAVEDATA`,
 `PURE_TRACE_PAD`, `PURE_TRACE_PACING`, `PURE_GAME_DIR`, plus the framework-wide `PSPRECOMP_NO_INTERPRETER=1`,
 `PSPRECOMP_MAX_DISPATCHES=N`, `PSPRECOMP_INTERPRETER_WATCH=addr,...`. Guest stdout/stderr appear as `[guest]` lines.
-Switches this repo adds are listed in `README.md`.
+Switches this repo adds are listed in docs/developing.md.
 
 ## Task protocol (subagents)
 0. Your worktree may start on `main`, which lags the integration branch. Before anything else:
