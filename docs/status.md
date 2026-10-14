@@ -500,6 +500,18 @@ simplification task, then the enhancements. The session-by-session resume notes 
   (macOS unchanged: `file:///Users/...`, checked by a compile of the helper on both shapes). Verified on the rig by
   hand (docs/windows.md "Updating the rig"); `tools/menu_check.sh` unchanged on the Mac. Next refinements are
   Erik's to name.
+- **Roadmap: the HD texture pack (Erik, 2026-10-14; not scheduled).** NR74W's WipEout Pure HD texture pack, kept
+  at github.com/0xf0xx0/WipEout-Pure-HD-Texture-Pack: 1331 textures (927 in-game, 368 menu, 20 font, 16 intro),
+  a `textures.ini` in PPSSPP's replacement format with the xxh64 keys the framework's loader already matches
+  (`ignoreAddress`, `ignoreMipmap`), every edition of the game listed, about a gigabyte, no licence stated
+  (derived art: never in this repository or an archive; a player installs it through the menu's texture pack
+  import). Two gaps: the files are ZIM (PPSSPP's image container: a `ZIMG` header with the size and a format word,
+  the pixels compressed), and the loader decodes PNG only, so a ZIM decoder in host/gpu/texture_pack.cpp (a vendor
+  patch written from the format's description, with its compression library) or a conversion to PNG at import;
+  and the Metal backend has no pack loader, so a Metal one using the framework's backend-neutral hashing and lookup
+  (the size of the sprite upscale's plumbing). Two tasks when picked: the decoder with the pack as the test subject
+  on Vulkan, then the Metal loader; each with a check counting replacements on the race and menu routes. With a
+  pack installed the Text and sprites upscale is redundant and Texture detail applies to the pack's own levels.
 - **Open calls for Erik.** A finer virtual-time answer than the kernel's 1 ms starvation tick (task 046, a kernel
   patch); the vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`); recorded laps of
   Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there; offering the upstream
