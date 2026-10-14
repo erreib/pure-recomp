@@ -113,7 +113,10 @@ simplification task, then the enhancements. The session-by-session resume notes 
 
 ## Resume
 
-- **Branches.** `main` = the commit below (Erik's twenty-fourth fast-forward, 2026-10-13: the first public release's
+- **Branches.** `main` = the commit below (Erik's twenty-fifth fast-forward, 2026-10-14: E8 the display rate (task
+  089, D-022, patch 0030-vblank-period), the performance overlay on Metal (task 090), the folder buttons on Windows
+  (patch 0029-windows-file-url), the VR brief parked (D-021, task 088), the HD texture pack on the roadmap; the
+  twenty-fourth, 2026-10-13: the first public release's
   preparation, R1: the public README and CHANGELOG, `tools/release_check.sh` and the tagged version naming (task
   087), the read-mes' wording, no machine paths; the twenty-third: everything of the
   twenty-second plus E2, the view at the window's shape on both renderers (tasks 084 to 086, D-020, patches 0027-window-size-switch
