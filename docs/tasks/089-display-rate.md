@@ -1,6 +1,6 @@
 # 089: The display rate (E8: the game's vblank at the display's refresh)
 
-Milestone: E8 | Branch: task/089-display-rate | Status: OPEN
+Milestone: E8 | Branch: task/089-display-rate | Status: MERGED
 
 ## Goal
 A "Display rate" row in the Esc menu runs the game's own vblank at the display's refresh rate, so on a 120 Hz
@@ -292,4 +292,20 @@ race at 120, the menus at 30) and the probe's shots. Erik's look is still owed.
 - **D-022** wants the review's amendment: the period is race-only, and the frontend stays at the PSP's rate.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged 0d5790c into batch/m2 (2026-10-14) after one BLOCKED round, the review's decision being the race-only
+period (the Result says which condition), the standing start bounded through 1.5 s with the lap mean and the pad
+reported, and the stutter check's budget scaled; D-022 amended in 989bbb9. Verify rerun on the merge from the main
+checkout (out/089_gate.log): display_rate_check PASS (frontend 29.84 flips a second in both lanes, the race 59.96
+against 120.00, the fade 1.90 against 1.88 s), the headless suite 18/18, framerate_check and menu_check PASS,
+patches 30, docs_check PASS; then the Vulkan window suite 7/7, flash_check PASS, `PURE_DISPLAY_RATE=1
+tools/stutter_check.sh` PASS (8 of 198 seconds over 25 ms, the results-panel shots as the worker found, readback
+0.00) and `--race` PASS (the start 39.2/76.9/120.1 against 39.3/77.5/121.1 km/h, the game clock 0.9962 against
+1.0001, mean lap 58.67 against 61.17 s reported, 120.02 flips a race-clock second). Spot-read:
+patches/0030-vblank-period.patch (the kernel's setter and tick, the media HLE's grid restart, the pacer's rate),
+src/profile/enhancements.cpp (`race_backend`, `display_rate`, the line per change), src/host/metal_shell.mm
+(`present_time` on the period), tools/display_rate_check.sh. The worker's audit of what counts frames is the
+value of this task beyond the row: docs/timing.md "E8". Open, carried in status: the speed pad's early trigger at
+120 (a per-frame test, untraced), a save dialog while the race backend lives (the ghost's auto-load) at the
+display's period, `kIdleVBlankLimit` and `sceDisplayGetFramePerSec` untouched, the rig at 100 Hz untried, Erik's
+eye on a 120 Hz race. metal_check's failure on fresh recordings is batch/m2's owed recording refresh, not this
+task's.
