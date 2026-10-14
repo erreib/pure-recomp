@@ -237,7 +237,7 @@ const GameProfile &game() {
 
         // The enhancements, each a row of the menu's Game section (patch 0019-game-option-rows; enhancements.cpp): E4,
         // the 30 fps modes row (D-017, task 072), game.sixty_fps, default 60 fps; E6, Flashes (D-016, task 070),
-        // game.smooth_flashes, default Smooth.
+        // game.smooth_flashes, default Smooth; E8, Display rate (D-022, task 089), game.display_rate, default Display.
         .options = enhancements::options(),
         // E5, Texture detail (D-019): the row the Vulkan renderer reads for the level shift and the anisotropic
         // sampling (patch 0020-vulkan-texture-detail, task 076); the Metal backend reads it itself (task 075).

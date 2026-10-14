@@ -121,9 +121,9 @@ record() {
 replay() {
   local log=$1
   shift
-  # Tasks 073 and 075: the sprite upscale and the texture detail off (the PSP's texels and levels, as
-  # tools/purelib/port.py pins every other run), not settings.ini's.
-  PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 "$BIN" --replay "$@" > "$log" 2>&1
+  # Tasks 073, 075 and 089: the sprite upscale, the texture detail and the display rate off (the PSP's texels, levels
+  # and vblank, as tools/purelib/port.py pins every other run), not settings.ini's.
+  PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0 "$BIN" --replay "$@" > "$log" 2>&1
   rc=$?
   grep -E '^\[replay\]|^  [a-z]' "$log"
 }

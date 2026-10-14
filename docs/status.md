@@ -325,6 +325,20 @@ simplification task, then the enhancements. The session-by-session resume notes 
   (the Aspect ratio row offers Fill), the suite 18/18 (zone_change 0.0756 this run against 0.0185 to 0.0289 the day
   before — the documented 0.025 to 0.108 swing, both directions). Erik's eye still owes E2 the culling look: a wide
   window, Fill, and the track edges for late objects.
+- **E8, the display rate** (D-022, 2026-10-14; Erik's pick: frame rates beyond 60 on his 120 Hz display). **Task
+  089.** Patch 0030-vblank-period makes the kernel's vblank period a runtime value, which the tick, the media HLE, the
+  pacer and the Metal shell's present timing follow; the Esc menu's Display rate row (Display by default,
+  `game.display_rate`, `PURE_DISPLAY_RATE`, the test switch `PURE_DISPLAY_HZ`) sets it to the display's refresh above
+  60 Hz while the race backend lives (E4's gate), so on this Mac the races run at 120 and the menus keep the PSP's 30:
+  their screen transitions count frames and ran at twice the speed with the period everywhere (the review's amendment
+  of D-022). `tools/display_rate_check.sh` PASS (the frontend 29.84 flips a second in both lanes, the race 59.96
+  against 120.00 a race-clock second, the race-start fade 1.90 and 1.88 s in 57 and 113 flips) and `--race` PASS (the
+  start the same to 1.5 s, the game clock 1.0001 and 0.9962, laps and the first speed pad reported: the pad fires
+  0.1 s and 4.6 m early at 120, not traced); the PSP-rate checks unchanged; `PURE_DISPLAY_RATE=1
+  tools/stutter_check.sh` PASS in the window at 120 (frame avg 8.3 ms). docs/timing.md, "E8". Open: the pad's
+  mechanism; `kIdleVBlankLimit` and `sceDisplayGetFramePerSec` (docs/timing.md); the rig's 100 Hz race
+  (docs/windows.md); Erik's eye on the race at 120 and the menus. `tools/gerec/metal_check.sh` fails on fresh
+  recordings with batch/m2's code too (the owed recording refresh above), not task 089's.
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race

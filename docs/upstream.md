@@ -194,6 +194,16 @@ picture meant as a backdrop would be fitted too, with the clear colour beside it
 for that before it takes the rule. `<prefix>_NO_ORTHOGRAPHIC_FIT` restores the through-only fit. Needs 0010; offer it
 after 0010 and 0020.
 
+### 0030-vblank-period: candidate
+The kernel's vblank period a runtime value (task 089): `Kernel::vblank_period_us()` and `set_vblank_period_us()`,
+the PSP's 16683 us by default, read by the tick, `last_vblank_us()`, the media HLE's frame grid, vblank duration,
+hcount and vblank flag, and frame interpolation's game frame and rate (passed on at each flip). Nothing changes at the
+default. A port that wants its game's frame rate at the display's refresh sets the period from its own option, as our
+profile's Display rate row does; the game must measure time rather than count frames for its speed to stay the same,
+which is the port's question to answer, not the framework's. VR's 72 and 90 Hz want the same control. It touches
+files earlier patches change (kernel.cpp, hle_media.cpp, frame_pacing.cpp); offer it after 0005, whose pacing it
+shares.
+
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
 readers for early recordings (0004); comments that cite this repo's tasks, fidelity differences and old patch

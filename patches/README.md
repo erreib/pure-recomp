@@ -72,6 +72,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0027-window-size-switch | (task 084) | Tooling | candidate | `<prefix>_WINDOW_SIZE=WxH` opens the Vulkan renderer's window at W x H instead of 480x272 times `video.window_scale`, so a check can run a window of another shape (21:9 for `tools/aspect_check.sh`, the Fill aspect of D-020); unset or malformed, the window is as before |
 | 0028-vulkan-orthographic-fit | (task 085) | Behaviour | candidate | Under the Fill aspect the Vulkan renderer's interface fit (2D draws into the shown framebuffer pulled in about the screen's centre to square pixels) takes transformed draws under an orthographic projection with lighting off too, not only through mode: their clip x and y scaled after `viewport_into_clip`, in the draw's transform and in its frame-interpolation summary alike; a draw at least 470 of the 480 PSP pixels wide through its transform stays spread unless it is textured and lies within the screen (2 PSP pixels of margin each side: a layer of interface art); `<prefix>_NO_ORTHOGRAPHIC_FIT` fits through-mode draws alone, as before; Original and Stretch draw as before |
 | 0029-windows-file-url | (the planning session, 2026-10-13, after Erik's Windows play) | Bug fix | **candidate of the first order (every Windows port's folder buttons)** | The menu's folder buttons (Open the data folder, the saves, backups, textures and fonts folders) build a `file://` URL for `SDL_OpenURL` by percent-encoding the whole path, so a Windows path came out `file://C%3A%5CUsers%5C...`, which Explorer refuses: nothing opened. The three copies of `file_url` (menu.cpp, font_menu.cpp, save_screen.cpp) now put three slashes before an absolute path, keep the drive's colon and turn backslashes into slashes: `file:///C:/Users/...`; macOS and Linux paths come out as before (`file:///Users/...`) |
+| 0030-vblank-period | (task 089) | Behaviour | candidate | The kernel's vblank period a runtime value: `Kernel::vblank_period_us()` and `set_vblank_period_us()` (default `kVBlankPeriodUs`, the PSP's 16683 us; a new period applies from the next vblank, which stays where it was due, and the count of vblanks stands), read by the tick (`process_timers`), `last_vblank_us()` (now the vblank's own time, kept at the tick), the media HLE's frame grid (`frame_start_us`'s step), vblank duration, hcount and vblank flag, and frame interpolation's game frame (`pacing::set_vblank_period_us`, passed on at each flip; `game_frame_us()` and `game_rate()` follow it, 60 at the PSP's period as before, 120 for a game at 60 whose vblank runs at 120 Hz, and a present clock follows a change at its next flip). Nothing moves at the default period |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -598,3 +599,23 @@ the path, `file://` giving the other two), wrong for `C:\Users\...`, whose colon
 compile of the helper on three paths (macOS unchanged, two Windows drives) and by the rig by hand. Upstream: a
 candidate of the first order, every Windows port of the framework has dead folder buttons today.
 
+### 0030-vblank-period
+Task 089 (D-022, the enhancement E8): the game's vblank at a display's refresh. The kernel ticked the vblank at the
+PSP's 59.94 Hz, one constant, `kVBlankPeriodUs`, read by the tick, `last_vblank_us()` (the next vblank less the
+constant), the media HLE (the frame grid's step in `frame_start_us`, the vertical blank's 14 of 286 lines, the
+hcount and the vblank flag, whose two `16683` literals were the same constant) and, as `kGameFrameUs`, frame
+interpolation's game frame. The period is now the kernel's `vblank_period_us()`, set by `set_vblank_period_us()`
+(0 restores the PSP's); `last_vblank_us()` is kept at the tick, so a change of period leaves it the vblank's own
+time; a change applies from the next vblank, which stays where it was due (never moved into the past), and the count
+of vblanks so far stands. The media HLE passes the period to `gpu::pacing::set_vblank_period_us()` at each flip
+(frame_pacing.cpp is in the renderer's sources, which the kernel does not link): `game_frame_us()` is the period
+times the game's frame in vblanks and `game_rate()` 60 x 16683 / period / that count, exactly 30 or 60 at the PSP's
+period as before, so the menu's Frame rate row, which offers only rates above `game_rate()`, offers the game's own
+rate and Match display when a game at 60 runs its vblank at 120 Hz. A present clock whose frame no longer matches
+`game_frame_us()` takes the new frame and starts its grid over at the next flip. The kernel's scheduler, waits,
+starvation quantum and hold to real time are untouched (the hold compares emulated with real time, not vblanks);
+`kIdleVBlankLimit` still counts vblanks, so the deadlock report comes after 2.5 minutes of a 120 Hz vblank with no
+thread to run instead of 5, and `sceDisplayGetFramePerSec` still answers 59.94. Our profile sets the period from the
+Esc menu's Display rate row (`src/profile/enhancements.cpp`). At the default period nothing moves: the headless
+suite 18/18, the Vulkan window suite 7/7, framerate_check, flash_check and menu_check on both shells as before.
+Upstream: a candidate; any port that wants a game's frame rate at a display's refresh (or VR's 72 or 90 Hz) needs it.

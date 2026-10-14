@@ -22,10 +22,11 @@
 //              nothing. Under the Fill aspect (task 086, for a game that widens its view) the Metal backend draws
 //              its screen-wide targets at the drawable's shape (metal_device.hpp's set_fill), the picture covers the
 //              whole drawable, and game_aspect() hands the game the targets' shape for its next frame.
-//   pacing     while the game is held to real time, each picture is presented at the real time of the PSP vblank
-//              after the one its frame began from (presentDrawable:atTime:), as the PSP shows a flip at the next
-//              vblank: a flip a millisecond late or early then no longer shows one picture for three refreshes of a
-//              120 Hz display and the next for one (task 033).
+//   pacing     while the game is held to real time, each picture is presented at the real time of the vblank after
+//              the one its frame began from (presentDrawable:atTime:), as the PSP shows a flip at the next vblank: a
+//              flip a millisecond late or early then no longer shows one picture for three refreshes of a 120 Hz
+//              display and the next for one (task 033). The vblank is the kernel's: the PSP's 59.94 Hz, or the
+//              display's refresh under the Display rate row (E8, task 089), when a picture is due every refresh.
 //   captures   capture_window: the next presented drawable, interface included, read back as a BMP.
 //   trace      with PURE_METAL_TRACE (task 033), each present of a game picture tells the backend's frame trace its
 //              CPU time, the wait in nextDrawable, and (from the drawable's presented handler) when the picture
@@ -42,6 +43,7 @@
 #include "shell/shell.hpp"
 
 #include "gpu/ge_backend.hpp"
+#include "kernel/kernel.hpp"
 #include "perf/frame_stats.hpp"
 #include "portablekit_build_label.hpp"
 #include "profile.hpp"
@@ -83,8 +85,6 @@ using Clock = std::chrono::steady_clock;
 
 constexpr std::uint32_t kPspWidth = pk::gpu::kScreenWidth;
 constexpr std::uint32_t kPspHeight = pk::gpu::kScreenHeight;
-// The PSP's display: a vblank every 1001/60000 s (59.94 Hz), the shortest a game frame lasts.
-constexpr double kPspFrameSeconds = 1001.0 / 60000.0;
 // A load running faster than real time shows a flip only when the window has not had one for this long, about 30
 // times a second (the Vulkan renderer's kFastForwardPresentInterval), so vsync never holds the load back.
 constexpr auto kFastForwardInterval = std::chrono::milliseconds(33);
@@ -708,22 +708,23 @@ private:
 
     // When a game picture is to reach the screen, in CACurrentMediaTime's seconds, or 0 for as soon as it can.
     //
-    // The game flips at the PSP's 59.94 Hz, held to real time by the kernel's sleeps, which wake a millisecond or two
+    // The game flips at its vblank's rate (the PSP's 59.94 Hz, or the display's refresh under the Display rate row:
+    // the kernel's period, task 089), held to real time by the kernel's sleeps, which wake a millisecond or two
     // early or late. Shown at the first refresh after its flip, on a 120 Hz display a picture whose flip's phase lies
     // near a refresh boundary alternately catches and misses it: one stays three refreshes (25 ms), the next one
     // (8.3 ms). The trace of a race counted that for 9% of its pictures (task 033, docs/metal-backend.md "Frame
     // times"). The PSP shows a frame at the vblank after the one the frame began from (sceDisplaySetFrameBuf's next
     // frame), so each picture is asked for at that vblank's real time: the frame's moment (the real time of the vblank
-    // it began from, which the HLE passes while emulated time is held to real time) plus one PSP frame. Those times
-    // carry no host jitter. Without a moment (a load running fast, an unpaced run), without vsync, or when the time
+    // it began from, which the HLE passes while emulated time is held to real time) plus one vblank of the kernel's
+    // period (emulated time is real time while it is held). Those times carry no host jitter. Without a moment (a load running fast, an unpaced run), without vsync, or when the time
     // has passed, the picture is shown at once.
     double present_time(const std::optional<Clock::time_point> &moment) const {
         if (!moment || fast_forward_ || !pace_pictures_ || layer_ == nil || !layer_.displaySyncEnabled) return 0.0;
-        const Clock::time_point due =
-            *moment + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(kPspFrameSeconds));
+        const auto vblank = std::chrono::microseconds(pk::kernel().vblank_period_us());
+        const Clock::time_point due = *moment + vblank;
         const double ahead = std::chrono::duration<double>(due - Clock::now()).count();
         // Late, or further ahead than a frame and a half: shown at once.
-        if (ahead <= 0.0 || ahead > 1.5 * kPspFrameSeconds) return 0.0;
+        if (ahead <= 0.0 || ahead > 1.5 * std::chrono::duration<double>(vblank).count()) return 0.0;
         return CACurrentMediaTime() + ahead;
     }
 
