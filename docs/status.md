@@ -510,13 +510,20 @@ simplification task, then the enhancements. The session-by-session resume notes 
   pure-recomp-0.1.0-windows-x64.zip (sha256 80f6d8f2...) uploaded to the GitHub release by `gh` (installed and
   authenticated on the rig this day); the release's SHA256SUMS re-uploaded with the Windows line appended, since the
   Mac's copy carried only its own zip and the FFmpeg source.
-- **The Esc menu's folder buttons on Windows (patch 0029-windows-file-url, 2026-10-13).** Erik's first refinement
-  pick after the release: "Open the data folder" and its siblings did nothing on Windows. The menus hand
-  `SDL_OpenURL` a `file://` URL made by percent-encoding the path, which on Windows encoded the drive's colon and
-  the backslashes with only two slashes before them. The three copies of the helper now make `file:///C:/Users/...`
-  (macOS unchanged: `file:///Users/...`, checked by a compile of the helper on both shapes). Verified on the rig by
-  hand (docs/windows.md "Updating the rig"); `tools/menu_check.sh` unchanged on the Mac. Next refinements are
-  Erik's to name.
+- **Menu refinements (Erik's picks after the release, from 2026-10-13).** First, the Esc menu's folder buttons on
+  Windows (patch 0029-windows-file-url, 2026-10-13): "Open the data folder" and its siblings did nothing on Windows.
+  The menus hand `SDL_OpenURL` a `file://` URL made by percent-encoding the path, which on Windows encoded the
+  drive's colon and the backslashes with only two slashes before them. The three copies of the helper now make
+  `file:///C:/Users/...` (macOS unchanged: `file:///Users/...`, checked by a compile of the helper on both shapes).
+  Verified on the rig by hand (docs/windows.md "Updating the rig"); `tools/menu_check.sh` unchanged on the Mac.
+  Then the performance overlay on the Metal shell (task 090, 2026-10-14), so a player can see the race at 120
+  against 60 (E8) rather than guess: the Video tab's Performance row and F3 work on the Mac's default path, the
+  framework's overlay (fps, the game's rate, frame times, a graph of recent frames) drawn by `src/host/metal_shell.mm`
+  over the window's top-left corner as the Vulkan renderer draws it (docs/metal-backend.md, "The Metal shell").
+  `tools/overlay_check.sh` PASS (the rectangle 0.96 changed, the rest of the race_hud capture 0.0000 apart, the HUD's
+  LAP label in both, the overlay reading `FPS 60.0 GAME 59.9 SPD 100%`); by hand at Display rate Display the race read
+  `FPS 120.0 GAME 120.1`, at Original `FPS 59.9 GAME 59.9`. `tools/menu_check.sh` lists Performance and F3 on both
+  shells now. Next refinements are Erik's to name.
 - **Roadmap: the HD texture pack (Erik, 2026-10-14; not scheduled).** NR74W's WipEout Pure HD texture pack, kept
   at github.com/0xf0xx0/WipEout-Pure-HD-Texture-Pack: 1331 textures (927 in-game, 368 menu, 20 font, 16 intro),
   a `textures.ini` in PPSSPP's replacement format with the xxh64 keys the framework's loader already matches
