@@ -622,5 +622,17 @@ double speed on a 120 Hz display with the row on, which the Original choice undo
 Metal shell has none. Decoupling the game's logic from the vblank (a separate render loop) would be a rewrite of
 how the game draws.
 
-**Status.** Accepted 2026-10-14. Task 089.
+**Amended 2026-10-14 (task 089's finding).** The period follows the display only while the race backend lives
+(the backend pointer at 0x08a8c5f4 and the frame object both in user RAM, E4's gate; not the lock byte, which is
+0 in the 30 fps modes at Original); outside a race it is the PSP's. The frontend's screen transitions count frames
+(27 flips a build-in whatever the rate), so at the display's rate the menus would run at twice their speed, while
+the boot cards, the language screen's build-in, the save confirm's flashing and the typed help line follow time;
+the fade needs no hook (FxScreen re-arms it from measured time: 1.88 s in 113 flips at 120, 1.90 s in 57 at
+59.94); the physics holds (the standing start matches through 1.5 s within a tenth of a km/h); one speed pad fires
+0.085 to 0.1 s and 4.2 to 4.6 m early at 120 (a per-frame trigger test, reported, not bounded); the test follower's
+per-flip steering moves the lap mean more than the race does. Points 3 and 5's "the frontend at half the
+display's rate" are withdrawn: the frontend stays at the PSP's cadence, and the 30 fps modes row keeps its meaning
+inside a race at the display's rate (Original: two vblanks of the display's period).
+
+**Status.** Accepted 2026-10-14, amended the same day. Task 089.
 
