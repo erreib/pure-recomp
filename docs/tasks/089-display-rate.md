@@ -118,97 +118,64 @@ one command's ten minutes together)
 
 ## Result
 
-**Status: BLOCKED.** The brief's escalation condition came up in `tools/display_rate_check.sh --race`. The route
-check passes, and nothing moves at the PSP's rate. The swept Time Trial at 120 is not the same race as at 60:
+**Status: DONE.** This finishes on the review's changes, after the first run was BLOCKED. The route check, the race
+check with its new bounds and the checks at the PSP's rate all pass.
 
-1. **The first speed pad fires early at 120.** The boost starts about 0.1 s and 4.6 m earlier along the track. The
-   ship holds the same lateral line (z -96.8). Both runs of each lane gave the same figures to the digit:
+**What the period follows.** The period follows the display only while the race backend lives. The condition is E4's
+gate:
+- `DAT_08a8c5f4` (0x08A8C5F4, the race backend: stored by `BackendRoot_cpp__0880c068` in the race load, zeroed by its
+  destructor) is in user RAM (0x08800000 to 0x0A000000);
+- and so is the frame object `*0x08A8E960`.
 
-   | Rate | Boost starts (race clock) | Distance |
-   |---|---|---|
-   | 60 | 2.152 to 2.168 s | 1266.83 m |
-   | 90 (one probe cell, `PURE_DISPLAY_HZ=90`) | 2.144 to 2.155 s | 1266.32 m |
-   | 120 | 2.057 to 2.066 s | 1262.20 m |
+It is not the lock byte `+0x116c`. That byte is 0 in the 30-fps modes at Original and while the save dialog runs, so
+gating on it would leave those races at the PSP's rate.
 
-   The standing start matches up to 1.5 s. In the 2.0 s bin it does not:
+The check is made in the `sceGeDrawSync` wrap, before E4 and E6. With Display, a rate above 60.5 Hz and a live
+backend, the period is the display's. Otherwise it is the PSP's. A change applies from the next vblank.
 
-   | Bin | 0.5 s | 1.0 s | 1.5 s | 2.0 s |
-   |---|---|---|---|---|
-   | 60 | 39.3 | 77.5 | 121.1 | 168.2 km/h |
-   | 120 | 38.9 | 77.0 | 120.8 | 189.0 km/h |
-
-   The 2.0 bin is 12% over, outside the brief's 5% or 10 km/h.
-
-   The early boost does not fit a fixed frame-count delay: such a delay would put 90 at about 2.10 s. I did not find
-   the mechanism or a one-field write that would undo it.
-2. **The mean lap is beyond 1%.** Two runs of each lane:
-
-   | Run | 60 | 120 | Change |
-   |---|---|---|---|
-   | 1 | 60.50, 61.30, 64.10 (mean 61.97 s), 40 contacts | 60.50, 57.40, 58.20 (mean 58.70 s), 41 contacts | -5.27% |
-   | 2 | 65.90, 61.20, 58.00 (mean 61.70 s), 48 contacts | 58.80, 56.90, 55.40 (mean 57.03 s), 44 contacts | -7.56% |
-
-   Contacts a lap are within the 50% bound (13.3 and 13.7, then 16.0 and 14.7). The two causes are mixed together:
-   - The follower reads its steering every 10 flips (vendor `headless_shell.cpp`, outside May touch), so it reads
-     twice as often at 120. E4 saw the same effect at 30 against 60.
-   - The lane at 60 alone moves a lap by 9% between runs (lap 1: 60.5 s, then 65.9 s).
-
-   So a 1% bound on this follower's mean lap is tighter than its own repeatability. The review decides.
-
-Everything else holds:
-- Flips at 120: 120.02 and 120.01 a race-clock second, against 59.95 and 59.96 at 60.
-- The game clock (`DAT_08a8c3dc`) runs 0.9962 s a virtual second at 120 against 1.0001 at 60, inside 0.99 to 1.01.
-  My guess, not checked: a float sum at about 1000 s cannot hold an 8.3 ms step exactly.
-- The `[pure] display rate` lines are as expected in both lanes.
-
-Since the run is blocked, these docs are not written: docs/timing.md "E8", docs/controls.md, docs/status.md,
-docs/verification.md, docs/windows.md and README.md. They wait for the review's decision. The patch's own rows are
-written: patches/README.md and docs/upstream.md.
+One `[pure] display rate` line is printed for each change:
+- `off` for Original, or no display above 60.5 Hz;
+- `120 Hz in a race, the PSP's 59.94 Hz outside one` for Display outside a race (at start, and after a race);
+- `120 Hz (8333 us a vblank)` at the race load. On the Time Trial route it comes after flip 5700.
 
 ### Changed
-- **patches/0030-vblank-period.patch** (vendor, exported; `tools/patches.sh check`: 30). It touches
+- **patches/0030-vblank-period.patch** (vendor; `tools/patches.sh check`: 30). It touches
   host/kernel/kernel.{hpp,cpp}, host/hle/hle_media.cpp and host/gpu/frame_pacing.{hpp,cpp}.
-  - The kernel: `Kernel::vblank_period_us()` and `set_vblank_period_us()`, default `kVBlankPeriodUs`; 0 restores
-    the PSP's period.
-    - `last_vblank_us_` is kept at the tick, so a change leaves `last_vblank_us()` exact.
-    - A change applies from the next vblank. `next_vblank_us_` is never moved, and the vblank count stands.
-  - The media HLE:
-    - `frame_start_us`'s step comes from the period, and its grid restarts when the step changes.
-    - `vblank_duration_us()`, the hcount and the vblank flag read the period (the two `16683` literals are gone).
-    - At each flip it passes the period to `gpu::pacing::set_vblank_period_us()`, under `PORTABLEKIT_HAS_RENDERER`.
-      The kernel cannot do this itself: frame_pacing.cpp is a renderer source, and the interpolation tests link it
-      alone.
-  - frame_pacing:
-    - `game_frame_us()` is the period times the game's frame in vblanks.
-    - `game_rate()` is 60 × 16683 / period / that count, exactly 60 at the default.
-    - A `PresentClock` takes a changed frame and restarts its grid at its next flip.
-  - `kGameFrameUs` is kept, because the vendor's interpolation tests use it.
-  - vulkan_renderer.cpp and menu.cpp are not touched. The renderer asks for a new rate at each flip from
-    `game_rate()`, and the menu row filters by it.
-- **src/profile/enhancements.{cpp,hpp}**: the row `display_rate` ("Display rate", Original / Display, default
-  Display, Video tab, after Texture detail), with the help text of D-022 point 3.
-  - `display_rate()` runs at install and in the `sceGeDrawSync` wrap before E4 and E6.
-  - With Display, it reads `PURE_DISPLAY_HZ` or the window shell's `display_refresh()` (through `ui::Layer`). Above
-    60.5 Hz it sets the period to `round(1e6 / rate)`, with the rate clamped to 240; otherwise it keeps the PSP's.
-  - It prints `[pure] display rate: 120 Hz (8333 us a vblank)` or `[pure] display rate: off` once at start and at
-    each change.
-  - `PURE_DISPLAY_RATE` comes from patch 0019. `PURE_DISPLAY_HZ` is the test switch. Its README row is not written
-    (above).
+  - The kernel: `Kernel::vblank_period_us()` and `set_vblank_period_us()`, default `kVBlankPeriodUs`.
+    - `last_vblank_us()` is kept at the tick.
+    - A change applies from the next vblank. `next_vblank_us_` is never moved into the past, and the count stands.
+  - The media HLE: `frame_start_us`'s step (its grid restarts on a change), the vblank duration, the hcount and the
+    vblank flag read the period, and the period is passed to `gpu::pacing` at each flip.
+  - frame_pacing: `game_frame_us()` and `game_rate()` follow the period, exactly 60 at the default. A
+    `PresentClock` follows a change at its next flip.
+  - vulkan_renderer.cpp and menu.cpp are not touched. The renderer asks for a new rate from `game_rate()` at each
+    flip, and the menu row filters by it.
+- **src/profile/enhancements.{cpp,hpp}**: the Display rate row and its help text, which now says the menus keep the
+  PSP's pace. Also `race_backend()` and `display_rate()`: the period, gated as above, with its line printed at each
+  change.
 - **src/profile/pure_profile.cpp**: a comment only.
-- **src/host/metal_shell.mm**: `present_time` uses `pk::kernel().vblank_period_us()` in place of
-  `kPspFrameSeconds`, which is removed. The picture is still due one vblank after its frame's vblank. At the default
-  that moves the due time by 0.33 µs (16683 against 16683.3).
-- **tools/display_rate_check.sh** (new), route and `--race`, as briefed.
-  - The route runs the same flips in both lanes. Each lane has its own end and HUD shot (7000/6900 and 8000/7900).
-  - The frontend is measured in flips a virtual second (it has no race clock). The race is measured in flips a
-    race-clock second over clock 1 to 6 s.
-  - The fade is the longest run of flips over 1.5 vblank periods, between flip 5600 and the race clock's start.
-- **tools/purelib/port.py**: `ENHANCEMENTS_OFF` gains `PURE_DISPLAY_RATE`; `SCRATCH_SETTINGS` gains
-  `game.display_rate=0`.
-- **tools/gerec/metal_check.sh**: `PURE_DISPLAY_RATE=0` on its replay line.
+- **src/host/metal_shell.mm**: `present_time` uses the kernel's period, and `kPspFrameSeconds` is removed.
+- **tools/display_rate_check.sh** (new).
+  - Route: the frontend must read 29 to 31 flips a second in both lanes. The 120 lane must print the line outside a
+    race before flip 0, and the race line once, from flip 5700 and before the fade.
+  - `--race`: bounded are the cells' PASS, the flips a race-clock second, both game clocks, the start bins up to
+    1.5 s (5% or 10 km/h) and the contacts a lap (50%). Printed but not bounded: the 2.0 s bin, the first speed pad
+    (its race clock and distance) and the mean lap.
+- **tools/stutter_check.sh**: `--frames 26000` (twice the cell's budget) when `PURE_DISPLAY_RATE=1`.
+- **tools/purelib/port.py**: `ENHANCEMENTS_OFF` and `SCRATCH_SETTINGS`.
+- **tools/run_boot.py**: the docstring's pinned list.
+- **tools/gerec/metal_check.sh**: the replay pin.
 - **tools/menu_check.sh**: the Video rows end "..., Texture detail, Display rate".
-- **patches/README.md**: the row and the section for 0030.
-- **docs/upstream.md**: the 0030 section.
+- **Docs:**
+  - docs/timing.md "E8": the measurements, the race-only gate and why, and the two open items.
+  - docs/controls.md: the row and `game.display_rate`.
+  - docs/status.md: the E8 bullet.
+  - docs/verification.md: the check's row, the enhancements-off bullet and the "Which path" line.
+  - docs/windows.md: the rig's 100 Hz item.
+  - README.md: the features line and the Esc menu's Video list.
+  - docs/developing.md: the rows for `PURE_DISPLAY_RATE` and `PURE_DISPLAY_HZ` (test-only), and a row for the check.
+    The switch tables live there, not in README.md, so this is where the brief's "README row" went.
+  - patches/README.md and docs/upstream.md: the 0030 entries.
 
 ### Verify output (last 20 lines)
 ```
@@ -222,7 +189,7 @@ PURE_SIXTY_FPS=0: frontend flips 4000-5000 median 33.37 ms; race flips 6300-6900
 PURE_SIXTY_FPS=1: frontend flips 4000-5000 median 33.37 ms; race flips 6300-6900 median 16.68 ms, 59.94 flips a race-clock second; lines ['[pure] sixty fps: on (game.sixty_fps) (after flip 5704)']; hud_check: 1 of 1 shots have the HUD; 6 s
 framerate_check: PASS (frontend 33.4/33.4 ms, race 33.4/16.7 ms and 29.97/59.94 flips a second, off/on; the HUD drawn at 60)
 menu_check: shell metal, out out/menu_check/metal
-menu_check: run_boot exit 0, 25 s, log out/menu_check/metal/run.log
+menu_check: run_boot exit 0, 9 s, log out/menu_check/metal/run.log
 tabs: ok (4)
 Video: ok (15)
 Audio: ok (4)
@@ -233,101 +200,96 @@ ok: 30 patch(es) reproduce vendor/portablekit at 8b0c3fe
 docs_check: 35 files, 0 findings: PASS
 verify 089: PASS
 ```
-The Verify line's first command: `display_rate_check: PASS (frontend 29.84/58.28 and race 59.96/120.02 flips a
-second, PSP/120; fade 1.90 and 1.90 s (-0.1%), 57 and 114 flips (x2.00); the HUD drawn at both)`.
+The Verify line's first command: `display_rate_check: PASS (frontend 29.84/29.84 and race 59.96/120.00 flips a
+second, PSP/120; fade 1.90 and 1.88 s (-1.0%), 57 and 113 flips (x1.98); the HUD drawn at both)`.
 
-### Figures of the checks the brief names
+### Figures
 **`tools/display_rate_check.sh`: PASS.**
 
-| Lane | Frontend median | Frontend flips a virtual second | Race median | Race flips a race-clock second | Fade |
-|---|---|---|---|---|---|
-| PSP | 33.37 ms | 29.84 | 16.68 ms | 59.96 | flips 5708-5764, 57 flips, 1.902 s |
-| 120 | 16.67 ms | 58.28 | 8.33 ms | 120.02 | flips 5709-5822, 114 flips, 1.900 s |
+| Lane | Frontend median | Frontend flips a virtual second | Race median | Race flips a race-clock second | Race clock starts | Fade |
+|---|---|---|---|---|---|---|
+| PSP | 33.37 ms | 29.84 | 16.68 ms | 59.96 | flip 6175 | flips 5708-5764, 57 flips, 1.902 s |
+| 120 | 33.37 ms | 29.84 | 8.33 ms | 120.00 | flip 6446 | flips 5710-5822, 113 flips, 1.883 s |
 
-- The race clock starts at flip 6175 at the PSP's rate and 6447 at 120.
-- The `[pure] display rate` lines are as expected, the 120 one before flip 0.
+- Lines: the PSP lane printed `off` (flip 0). The 120 lane printed the line outside a race (flip 0), then
+  `120 Hz (8333 us a vblank)` after flip 5700.
 - The HUD is drawn in both lanes.
 
-**`tools/display_rate_check.sh --race`: FAIL**, twice (figures above).
+**`tools/display_rate_check.sh --race`: PASS.**
 
-**The fade's countdown: no hook written.** At 120 the race-start fade lasts the same game time without one:
-1.900 s in 114 flips, against 1.902 s in 57. Its two-vblank stretch doubles in flips, so the countdown does not
-halve the fade. FxScreen re-arms it on every frame of a fade that dt times.
+| Lane | Cell | Laps | Contacts | Flips a race-clock second | Game clock | Start, km/h at 0.5/1.0/1.5/2.0 s | First speed pad |
+|---|---|---|---|---|---|---|---|
+| PSP | PASS | 58.40, 63.80, 57.00 (mean 59.73 s) | 43 (14.3 a lap) | 59.95 | 1.0001 | 39.3/77.5/121.1/168.2 | 2.152 s at 1266.83 m |
+| 120 | PASS | 58.90, 61.80, 55.40 (mean 58.70 s) | 48 (16.0 a lap) | 119.67 | 0.9962 | 39.2/76.9/120.1/183.9 | 2.067 s at 1262.62 m |
 
-**The frontend and the save dialog, measured.** I took shots at the same flips and at the same virtual times in both
-lanes (out/e8probe/). Nothing is hooked, because no one-field write fixes these:
-- **These follow time (they match at the same virtual time):**
-  - the boot cards (SCEA, Studio Liverpool);
-  - the language screen's build-in;
-  - the flashing after the save confirm (roughly);
-  - the menus' typed help line.
-- **These count frames (identical at the same flip number):** the screens' build-in and build-out transitions.
-  - Example: MAIN MENU's build-in after the profile save, flips 4315 to 4341. That is 27 flips: 0.90 s at the PSP's
-    vblank and 0.45 s at 120.
-  - So with Display on a 120 Hz display, the frontend's transitions run at twice the speed.
-- **The frame counter is not the cause.** `DAT_08a8c3d8` has two references in the corpus, the frame timer's load
-  and store, and is not passed on as the update's a1.
-- **The route still works.** The pad script's presses land on the same screens at both rates.
-- **240 Hz probe:** the menu route did not reach the race. The flip-indexed presses come at a quarter of the time,
-  and the time-based intro is not over by then. The fault is in the route, not a player's game.
+Reported, not bounded:
+- The mean lap: -1.73% at 120. In the blocked run's two pairs it was -5.27% and -7.56%.
+- The 2.0 s bin: 168.2 against 183.9 km/h.
+- The first speed pad: 0.085 s and 4.21 m earlier at 120.
 
-**Other checks at the PSP's rate:**
+Earlier probes of the pad, for the record (docs/timing.md "E8"):
+- With the period everywhere, it fired at 2.057 s and 1262.20 m, the same in both runs.
+- At 90 Hz (`PURE_DISPLAY_HZ=90`, one cell) it fired at 2.144 s and 1266.32 m.
+
+**The frontend and the save dialog.** They now keep the PSP's cadence:
+- The route's frontend reads 29.84 flips a second in both lanes.
+- In the Metal window at Display, the title's `[perf]` line reads `game 30.0`, with the line `120 Hz in a race, the
+  PSP's 59.94 Hz outside one`.
+
+The audit that led to the gate (with the period everywhere), in docs/timing.md "E8":
+- Time drives the boot cards, the language screen's build-in, the flashing after the profile save, and the typed
+  help line.
+- Frames drive the screens' build-in and build-out transitions. MAIN MENU's after the profile save is flips 4315 to
+  4341: 0.90 s at 59.94 Hz and 0.45 s at 120.
+
+**The fade's countdown needs no hook.** At 120 the fade keeps its time and doubles its flips: 1.883 s in 113 flips,
+against 1.902 s in 57.
+
+**`PURE_DISPLAY_RATE=1 tools/stutter_check.sh` (the Metal window, this Mac's 120 Hz display): PASS**, 10 of 195
+seconds with a frame over 25 ms, readback 0.00 ms.
+- Nine of those ten seconds are the sweep's results-panel shots, taken every 30 flips after the race ends (165 to
+  199 ms each).
+- One is in the race: flip 15823, 25.9 ms, all render.
+- The race's `[perf]` lines: game 120.0, frame avg 8.3 ms. Frame max is 9.5 ms in the median second and 13.2 ms at
+  the 90th percentile. Guest 1.4 ms, render 6.9 ms.
+- The cell passed at flip 23083 of its doubled budget.
+- The Metal shell's `[shell]` line, `metal: Apple M4 Pro, window 960x544 points, 1920x1088 pixels, 2x, vsync`, is
+  printed at start and does not change with the rate.
+- `frame_rate_now` counts the last second's presents: 120 in the race, 30 in the menus.
+
+**Checks at the PSP's rate**, all run after the gate:
 
 | Check | Result | Figures |
 |---|---|---|
 | `tools/frame_regress.sh` | PASS | 18/18 |
 | `tools/frame_regress.sh --shell vulkan --backend vulkan` | PASS | 7/7 |
-| `tools/framerate_check.sh` | PASS | 29.97/59.94, medians 33.37/16.68 ms, as in task 072 |
-| `tools/flash_check.sh` | PASS | fade 57 flips 1.90 s off, 0 on; race clock at 6253/6309, as in task 070 |
+| `tools/framerate_check.sh` | PASS | 29.97/59.94, medians 33.37/16.68 ms |
+| `tools/flash_check.sh` | PASS | fade 57 flips off, 0 on |
 | `tools/menu_check.sh` | PASS | both shells |
-| `tools/patches.sh check` | ok | 30 |
-| `python3 tools/docs_check.py` | PASS | |
+| `tools/framerate_check.sh --shell metal` at Original | PASS | 29.97/59.94, medians 33.4/16.7 ms |
 
-**`tools/gerec/metal_check.sh`: FAIL, and it fails the same way before my change.**
-- Team frames 5650-5651: diff 0.051654 (6744 px).
-- Race_1x frame 6016: the first difference at draw 305 of 852 (0.022235).
-- I reverted my sources and the patch, rebuilt, and replayed the same fresh recordings with batch/m2's code. The
-  figures were identical to the digit: team 0.051654, race draw 305 0.022235.
-- So the A/B fails on batch/m2 as well. status.md lists "fresh recordings for metal_check" as owed.
+**`tools/gerec/metal_check.sh`: FAIL, not this task's.**
+- It fails on fresh recordings: team frames 5650-5651 at 0.051654, race frame 6016 at draw 305 (0.022235).
+- batch/m2's code gives the same figures to the digit on the same recordings.
+- This is status.md's owed recording refresh.
 
-**`PURE_DISPLAY_RATE=1 tools/stutter_check.sh` (the Metal window, this Mac's 120 Hz display): FAIL**, on the cell
-only.
-- Frames: 0 of 107 seconds have a frame over 25 ms, and readback is 0.00 ms a frame.
-- The cell timed out. Its flip budget is set for 60 flips a second, and the race used it up at flip 12913.
-  `stutter_check.sh` has no `--frames` and is outside May touch.
-- The `[perf]` lines: `fps 120.0 game 120.0 speed 100% | frame avg 8.3 max 9.6 ms | guest 1.4 render 3.7 wait 3.3
-  ms`; the worst max in the race was 12.3 ms.
-- The Metal shell's `[shell]` line, `metal: Apple M4 Pro, window 960x544 points, 1920x1088 pixels, 2x, vsync`, is
-  printed at start and says nothing of the rate.
-- `frame_rate_now` counts the presents of the last second: 120 at Display, which is the `[perf]` fps.
+**The Vulkan Frame rate row.**
+- In a race at 120 it offers "120" (the game's own) and "Match display 120 Hz" only, with the help "Frames between
+  the game's 120 a second". I checked this by cycling the row while the period was at 120.
+- Outside a race the period is the PSP's, so the row offers its usual rates.
+- On the rig's 100 Hz display the race should get "100" and "Match display 100 Hz" (docs/windows.md item).
 
-**`tools/framerate_check.sh --shell metal` at Original: PASS** (29.97/59.94, medians 33.37/16.68 ms).
-
-**The Vulkan Frame rate row at 120.**
-- The window run on this Mac's 120 Hz display printed `[pure] display rate: 120 Hz (8333 us a vblank)`, read from
-  the shell's `display_refresh()`.
-- At the title the `[perf]` line read fps 60.4, game 61.0.
-- The row offers only "120" (the game's own) and "Match display 120 Hz". 45, 60, 90 and 120 are not offered. The
-  help reads "Frames between the game's 120 a second".
-- I checked this by cycling the row (out/e8probe/vkmenu/rates.png).
-
-**By eye: not done.** I cannot watch the window. What I have in its place are the window's figures above and the
-probe's shots.
+**By eye: not done.** I cannot watch the window. In its place I have the window's `[perf]` and `[pure]` lines (the
+race at 120, the menus at 30) and the probe's shots. Erik's look is still owed.
 
 ### Open questions
-- **The escalation.** Is the speed pad's early boost at 120 acceptable, given its distance (1262.2 m against
-  1266.8 m) and its time (0.1 s)? Does the mean-lap bound need a follower that reads its steering by time rather
-  than every 10 flips? With today's follower the bound is below its run-to-run spread. And the frontend's
-  frame-counted transitions run at twice the speed. Should the period follow the display only while the race backend
-  lives? That is not a one-field write, and D-022 point 3 says the frontend at 60 comes with the option.
-- **Left as they are:**
-  - `kIdleVBlankLimit` still counts vblanks, so the deadlock report comes after 2.5 minutes at 120 instead of 5.
-    It is scheduler code, which this task may not touch.
-  - `sceDisplayGetFramePerSec` still answers 59.94. Wipeout Pure does not import it.
-- **Outside May touch:**
-  - `tools/run_boot.py`'s docstring lists the pinned enhancements without `PURE_DISPLAY_RATE`.
-  - `stutter_check.sh` needs its budget doubled to pass at 120.
-- **The game clock at 120** reads 0.9962 s a second. It is inside the bound; it might be worth a word in E8's notes.
+- **The first speed pad** fires 0.085 to 0.1 s and 4.2 to 4.6 m early at 120 (not traced). It is reported, not
+  bounded, as the review decided.
+- **Unmeasured: a save dialog while the race backend lives** runs at the display's period: the Time Trial ghost's
+  auto-load (`GhostShip_etc__0891e4cc`). Its two vblanks a frame are then 16.7 ms on a 120 Hz display.
+- **Left as they are, noted open in docs/timing.md "E8":** `kIdleVBlankLimit` (2.5 minutes at 120 instead of 5) and
+  `sceDisplayGetFramePerSec` (still 59.94).
+- **D-022** wants the review's amendment: the period is race-only, and the frontend stays at the PSP's rate.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
