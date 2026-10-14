@@ -23,6 +23,7 @@
 | D-019 | 2026-10-12 | E5: texture detail at the internal scale: the mip level picked for the pixels drawn rather than the PSP's, anisotropic sampling on the mipmapped draws, a "Texture detail" row in the Esc menu, on by default; the checks run with it off; Metal first, the Vulkan renderer second | accepted (Erik) |
 | D-020 | 2026-10-13 | E2: the 3D view at the window's shape (the framework's Fill aspect) through a profile hook on the game's perspective builder and its horizontal half-FOV, since the game bakes 480/272 into code; the 2D interface at square pixels about the centre; Vulkan first, the Metal shell's Fill after | accepted |
 | D-021 | 2026-10-13 | VR, Windows only: an OpenXR shell on the Vulkan renderer, each game frame replayed once per eye through the frame interpolation's replay path with the headset's view and projection, the 2D interface on a panel in front; a Quest over Link on the rig; a stereo spike first (task 088), the milestone after it only if the spike holds 72 Hz | accepted |
+| D-022 | 2026-10-14 | E8: the display rate. The kernel's vblank period becomes settable and a "Display rate" row (Original 59.94 Hz, or the display's refresh) runs the game's own vblank at the display's rate, so the free-running modes draw at 120 fps on a 120 Hz display and the two-vblank screens at 60; the game's step stays measured time; per-frame counters audited by a check | accepted |
 
 ## D-001  2026-10-05  Vendor base
 Context: the research named Yakumo (MIT, complete MHP3rd port) as the base and asked to check TeamGDB/PortableKit
@@ -570,4 +571,56 @@ desktop view without stereo is a smaller first step but proves nothing about the
 runtime: none is announced.
 
 **Status.** Accepted 2026-10-13. Task 088 the spike, on the rig.
+
+## D-022  2026-10-14  E8: the display rate (the vblank at the display's refresh)
+
+**Context.** Erik's pick (2026-10-14): frame rates beyond 60. The game's frame rate is its vblank rate: Single
+Race and Tournament wait one vblank a frame, the modes E4 freed do the same, the frontend and the two-vblank
+screens wait two. The port's kernel ticks that vblank at the PSP's 59.94 Hz, one constant, `kVBlankPeriodUs =
+16'683` (host/kernel/kernel.hpp:86, advanced at kernel.cpp:538). The game's speed is measured time, not frames:
+its frame timer (docs/timing.md, "The game's clock in a race") takes `sceKernelGetSystemTimeWide`'s difference,
+clamped to 0.067 s, and every object integrates that dt, so a vblank of 8.3 ms gives half-size steps, as a
+dropped frame today gives double ones. E4's audit found no per-frame logic in the race beyond the frame object's
+lock byte. What does count frames: the race-start fade's countdown (`+0x117c`, decremented a frame; D-016) and,
+unaudited, the frontend's animations and the save dialog. The framework's "Frame rate" row on Vulkan is frame
+interpolation (blended pictures), not the game running faster, and the Metal shell has no such row. Other uses
+of the constant: the media HLE's hcount and vblank-flag arithmetic and its movie-frame step (hle_media.cpp), the
+pacer's game frame (frame_pacing.hpp `kGameFrameUs`), and the Metal shell's present timing (`kPspFrameSeconds`:
+a picture is asked for at its vblank's real time plus one PSP frame). The race costs about 3 ms of CPU and GPU a
+frame at scale 4 on this Mac, inside a 120 Hz frame's 8.3 ms; Erik's display is 120 Hz.
+
+**Decision.**
+1. The kernel's vblank period becomes a runtime value with the PSP's as its default: `Kernel::vblank_period_us()`
+   and `set_vblank_period_us()`, used by the tick, `last_vblank_us()`, the media HLE's hcount, vblank flag and
+   movie step, the pacer's game frame and the Metal shell's present timing (a vendor patch, the task names it, plus
+   the shell, ours). A change takes effect at the next vblank; the count of vblanks so far stands.
+2. A game option, `display_rate`, the row "Display rate" (Original, Display) after Texture detail: Original is
+   59.94 Hz; Display sets the period from the shell's `display_refresh()` when that is above 60 Hz, else nothing
+   changes (a 60 Hz display plays as before). `PURE_DISPLAY_RATE=0|1` the run-control switch, and a test-only
+   `PURE_DISPLAY_HZ=N` that names the rate when no display is there (headless) or to try one. Default Display,
+   Erik's wish; the checks pin Original (`ENHANCEMENTS_OFF`, `SCRATCH_SETTINGS`), as for every enhancement.
+3. What it means for the other rows: at the display's rate the "30 fps modes" row's Original (two vblanks) is half
+   the display's rate, 60 on a 120 Hz display, and 60 fps (one vblank) the display's rate; the frontend runs at
+   half the display's rate. The row's help says so. The Vulkan "Frame rate" row keeps its meaning (interpolation
+   at or above the game's rate, which is now the display's).
+4. Per-frame logic is measured, not assumed: a check runs the Time Trial route and the swept race at 59.94 and at
+   120 (`PURE_DISPLAY_HZ=120`, headless) and compares what the game does per second of its own clock: flips (60
+   against 120 in the race, 30 against 60 in the menus), the lap time and the standing start (physics at the
+   finer step), the race-start fade's duration in race-clock time (the countdown is per frame: if it halves, a
+   hook doubles the countdown at a faster vblank, the E4 way, in the same task), and the menus' and the save
+   dialog's behaviour by eye. A finding the task cannot close by a hook is reported, not worked around.
+5. The window: on this Mac's 120 Hz display the Metal shell presents every refresh at the display rate (the
+   stutter check at 120 says whether the 8.3 ms budget holds); on the rig's 100 Hz display the game runs at 100.
+
+**Consequences.** The frontend at 60 comes with it. VR (D-021) wants the same control for 72 or 90 Hz. The
+pacer's constants and the Metal shell's present timing follow the period, which the frame-rate and stutter
+checks at the PSP's rate must show unchanged. The media HLE's hcount arithmetic scales with the period (286 lines
+a vblank), untraced by any game here. A per-frame counter missed by the check shows as something running at
+double speed on a 120 Hz display with the row on, which the Original choice undoes.
+
+**Alternatives.** Frame interpolation (the Vulkan row) is smoother motion, not the game running faster, and the
+Metal shell has none. Decoupling the game's logic from the vblank (a separate render loop) would be a rewrite of
+how the game draws.
+
+**Status.** Accepted 2026-10-14. Task 089.
 
