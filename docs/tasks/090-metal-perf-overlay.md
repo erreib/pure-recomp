@@ -1,6 +1,6 @@
 # 090: The performance overlay on the Metal shell
 
-Milestone: menu refinements | Branch: task/090-metal-perf-overlay | Status: OPEN
+Milestone: menu refinements | Branch: task/090-metal-perf-overlay | Status: MERGED
 
 ## Goal
 The Esc menu's Performance row and its F3 toggle work on the Metal shell: the framework's overlay (fps, the game's
@@ -196,4 +196,10 @@ docs_check: 35 files, 0 findings: PASS
 
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged 9b97eb9 into batch/m2 (2026-10-14). Verify rerun on the merge from the main checkout (out/090_gate.log):
+overlay_check PASS, menu_check PASS, the headless suite 18/18, docs_check PASS; then the Metal window suite 7/7
+and hud_check 61 of 61. Spot-read: src/host/metal_shell.mm (the two shared textures used in turn with the wait
+before a rewrite, the viewport at the inset, F3 in the pump), tools/overlay_check.sh. The worker's reading of the
+brief's "HUD found in both" is right: the overlay covers the CURRENT label on Vulkan too, so the check asks for the
+labels outside the rectangle. The overlay on game presents only, as the Vulkan renderer does, stands. Open: no GPU
+figure on Metal (the shell times no GPU work).
