@@ -178,6 +178,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   Repacked again 2026-10-13 from bb9b090, E2 complete (`--check out/086-bundle` PASS; out/repack-086.log):
   Wipeout Pure 0.1.0-bb9b090 at out/release-macos/stage offers Fill in the Aspect ratio row on both shells; drag
   the window to 21:9 or go full screen on such a display and choose Fill.
+  Repacked 2026-10-14 from b5dbea8 with E8 (`--check out/089-bundle` PASS; out/repack-089.log): Wipeout Pure
+  0.1.0-b5dbea8 at out/release-macos/stage has the Display rate row, Display by default: a race on this Mac's 120 Hz
+  display runs at 120.
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
