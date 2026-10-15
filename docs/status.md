@@ -186,6 +186,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   display runs at 120.
   Repacked 2026-10-14 from 76d3131 with the Performance overlay on Metal (task 090; `--check out/090-bundle` PASS;
   out/repack-090.log): Wipeout Pure 0.1.0-76d3131 at out/release-macos/stage.
+  Repacked 2026-10-15 from bc0a86a with the display rate's margin (task 091; `--check out/release-macos/stage`
+  PASS, its files removed after; out/repack-091.log): Wipeout Pure 0.1.0-bc0a86a at out/release-macos/stage, the
+  race at Display on a 120 Hz display at 119.40 Hz with the sound whole.
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
