@@ -236,6 +236,7 @@ presents = statistics.median(fps) if fps else max(float(hz) * held_by * 10, 1.0)
 print(start + math.ceil(seconds * float(rate)), presents, "yes" if presents <= held_by * float(hz) else "no")
 EOF
 )
+  SHOWN=${SHOWN%$'\r'}  # Windows Python ends its line \r\n, and read keeps the \r
   [ -n "${END:-}" ] || { echo "display_rate_check: cannot read the probe: $probe (log $OUT/probe.log)"; exit 2; }
   echo "display_rate_check: probe: $probe; the unpaced boot presents $PRESENTS a second; the run ends at flip $END"
   if [ "$SHOWN" != yes ]; then
