@@ -1,6 +1,6 @@
 # 091: The display rate's margin (E8: no audio skips at the display's rate)
 
-Milestone: E8 | Branch: task/091-display-rate-margin | Status: OPEN
+Milestone: E8 | Branch: task/091-display-rate-margin | Status: MERGED
 
 ## Goal
 At the Display rate the game runs a small margin under the display's refresh instead of exactly at it, so a race at
@@ -335,4 +335,15 @@ Earlier in the same Verify:
   mid-run, would be a follow-up.
 
 ## Review
-(Fills at review) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged 173991c into batch/m2 as 04362b8 (2026-10-15). Verify rerun on the merge from the main checkout
+(out/091_gate.log): the route PASS (race 119.41 flips a race-clock second, margin 0.005), `--audio` PASS on Metal
+(1 resync, 0 seconds under 95%, 2 under 99%) and on Vulkan (the same; presents 119.7), the probe's pass path at
+120.0 unpaced presents a second on both, the headless suite 18/18, framerate_check, menu_check and docs_check PASS;
+game/ms0 unchanged. Spot-read: src/profile/enhancements.cpp (`display_margin()` read once, the period and the lines
+from the same `display_period`, the applied state keyed on it), tools/display_rate_check.sh (fresh stick and
+PURE_GAME_DIR for the audio run, the window guard), tools/winwatch.m (reads the window list only). The pass bound
+(at most 1 resync, no second under 95%; the seconds under 99% reported) was the review's call during the sweep: the
+goal is the sound, and the 96 to 98% seconds are slips the sink's lead absorbs. The diagnosis's clean lanes were
+off screen (the worker's finding), so the sweep's table replaces them. D-022 amended (2026-10-15). Open: the sink's
+tolerance of a late producer (task 081's fork, the next candidate), Vulkan's swapchain, the rig's 100 Hz run
+(docs/windows.md), Erik's eye on the repeated refresh.
