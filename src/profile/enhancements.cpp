@@ -12,8 +12,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <utility>
 
 namespace portablekit::enhancements {
@@ -65,9 +67,14 @@ const char *const kTextureDetailChoices[] = {"Original", "Enhanced"};
 // a frame, the frontend and the 30-fps modes at Original two. The kernel ticks the vblank at the PSP's 59.94 Hz
 // (kVBlankPeriodUs) unless told another period (patch 0030-vblank-period: Kernel::set_vblank_period_us, which the
 // tick, the media HLE's vblank arithmetic, the pacer's game frame and the Metal shell's present timing follow). Display
-// sets the period from the display's refresh when that is above 60.5 Hz, round(1e6 / rate) with the rate clamped to
-// 240 Hz, while the race backend lives (DAT_08a8c5f4 and the frame object in user RAM: E4's gate), and the PSP's
-// period outside it; a change applies from the next vblank. The race's speed does not change: its frame timer
+// sets the period from the display's refresh when that is above 60.5 Hz, round(1e6 / (rate x (1 - margin))) with the
+// rate clamped to 240 Hz, while the race backend lives (DAT_08a8c5f4 and the frame object in user RAM: E4's gate), and
+// the PSP's period outside it; a change applies from the next vblank. The margin (task 091): at exactly the display's
+// refresh vsync is the clock that paces the game, so a frame that misses its refresh is real time lost for good (the
+// game can never present faster than the display to make it up), and the sound, made on the game's clock, falls
+// behind until the audio sink skips. A game a little slower than the display has room to catch up (docs/timing.md
+// "E8"); kDisplayMargin is the smallest that kept a race's sound whole on both renderers. The race's speed does not
+// change: its frame timer
 // FUN_08804390 measures dt from the system clock and every object integrates it (docs/timing.md, "The game's clock in a
 // race"). The frontend stays at the PSP's cadence because its screens' build-in and build-out transitions count frames
 // and ran at twice the speed at 120 (task 089's measurement, docs/timing.md "E8"; the decision's review, 2026-10-14).
@@ -114,8 +121,9 @@ const GameOption kOptions[] = {
      .description = "The game draws a frame every one or two refreshes of the PSP's 60 Hz display. Display runs that "
                     "refresh at your display's rate in a race when it is above 60 Hz: on a 120 Hz display Single "
                     "Race and Tournament draw 120 frames a second, and Time Trial, Free Play and Zone 120 with the "
-                    "30 fps modes row at 60 fps or 60 at Original. The menus keep the PSP's pace. The race's speed is "
-                    "the same either way (it measures time).",
+                    "30 fps modes row at 60 fps or 60 at Original, a fraction under the display's rate so the sound "
+                    "stays continuous. The menus keep the PSP's pace. The race's speed is the same either way (it "
+                    "measures time).",
      .default_choice = 1u,
      .tab = MenuTab::Video},
 };
@@ -131,6 +139,8 @@ constexpr std::uint32_t kFlashCountdown = 0x117Cu;      // s32: FxScreen's count
 constexpr std::uint32_t kUserBase = 0x08800000u, kUserEnd = 0x0A000000u;
 constexpr double kMinDisplayHz = 60.5;   // E8: a display at 60 Hz (59.94 or 60) keeps the PSP's period
 constexpr double kMaxDisplayHz = 240.0;  // and one above 240 Hz runs the vblank at 240
+// E8: the race's vblank runs this fraction under the display's refresh (task 091's measurement: docs/timing.md "E8").
+constexpr double kDisplayMargin = 0.005;
 
 // E4: the 30-fps modes' byte set back to 1 while the race backend lives.
 void sixty_fps(psprecomp::GuestMemory &m) {
@@ -174,6 +184,19 @@ double display_hz() {
     return 0.0;
 }
 
+// E8: the margin under the display's refresh, kDisplayMargin unless the test switch PURE_DISPLAY_MARGIN=F names a
+// fraction from 0 (the exact display rate, for the comparison) to below 0.5.
+double display_margin() {
+    static const double margin = [] {
+        const char *v = env("DISPLAY_MARGIN");
+        if (v == nullptr) return kDisplayMargin;
+        char *end = nullptr;
+        const double named = std::strtod(v, &end);
+        return end != v && named >= 0.0 && named < 0.5 ? named : kDisplayMargin;
+    }();
+    return margin;
+}
+
 // E8: whether the race backend lives, E4's gate: DAT_08a8c5f4 (set by the backend's constructor during the race load,
 // zeroed by its destructor) and the frame object both in user RAM. Every race mode, whatever the lock byte +0x116c says
 // (0 in the 30-fps modes at Original and while the save dialog runs, 1 otherwise).
@@ -183,34 +206,41 @@ bool race_backend(const psprecomp::GuestMemory &m) {
     return backend >= kUserBase && backend < kUserEnd && frame >= kUserBase && frame < kUserEnd;
 }
 
-// E8: the kernel's vblank period from the option, the display's rate and the race backend, set and announced when it
-// changes: at start (no backend) and at every frame's GE sync (the race load and its end, the row changed in the menu,
-// the window moved to another display). A line a change, not a flip: `off` (Original, or no display above 60.5 Hz),
-// `120 Hz in a race, the PSP's 59.94 Hz outside one` (Display, outside a race) and `120 Hz (8333 us a vblank)` (in one).
+// E8: the kernel's vblank period from the option, the display's rate, the margin and the race backend, set and
+// announced when it changes: at start (no backend) and at every frame's GE sync (the race load and its end, the row
+// changed in the menu, the window moved to another display). A line a change, not a flip: `off` (Original, or no
+// display above 60.5 Hz), `120 Hz display, the game at 119.40 Hz in a race (margin 0.005), the PSP's 59.94 Hz outside
+// one` (Display, outside a race) and `120 Hz display, the game at 119.40 Hz (margin 0.005, 8375 us a vblank)` (in
+// one); the game's rate is 1e6 over the period.
 void display_rate(const psprecomp::GuestMemory *m) {
     double hz = 0.0;
     if (settings::game_option("display_rate") == 1u) hz = display_hz();
     std::uint64_t period = kVBlankPeriodUs;
+    std::uint64_t display_period = 0u;
     enum class State { Off, Outside, Race } state = State::Off;
     if (hz > kMinDisplayHz) {
         hz = std::min(hz, kMaxDisplayHz);
+        display_period = static_cast<std::uint64_t>(std::llround(1e6 / (hz * (1.0 - display_margin()))));
         state = m != nullptr && race_backend(*m) ? State::Race : State::Outside;
-        if (state == State::Race) period = static_cast<std::uint64_t>(std::llround(1e6 / hz));
+        if (state == State::Race) period = display_period;
     }
     static std::optional<std::pair<State, std::uint64_t>> applied;
-    const std::uint64_t display_period = hz > kMinDisplayHz ? static_cast<std::uint64_t>(std::llround(1e6 / hz)) : 0u;
     if (applied && applied->first == state && applied->second == display_period) return;
     applied = std::pair{state, display_period};
     kernel().set_vblank_period_us(period);
-    switch (state) {
-    case State::Off: std::cout << "[pure] display rate: off\n"; break;
-    case State::Outside:
-        std::cout << "[pure] display rate: " << std::lround(hz) << " Hz in a race, the PSP's 59.94 Hz outside one\n";
-        break;
-    case State::Race:
-        std::cout << "[pure] display rate: " << std::lround(hz) << " Hz (" << period << " us a vblank)\n";
-        break;
+    std::ostringstream line;
+    line << "[pure] display rate: ";
+    if (state == State::Off) {
+        line << "off";
+    } else {
+        line << std::lround(hz) << " Hz display, the game at " << std::fixed << std::setprecision(2)
+             << 1e6 / static_cast<double>(display_period) << " Hz" << std::defaultfloat << std::setprecision(6);
+        if (state == State::Outside)
+            line << " in a race (margin " << display_margin() << "), the PSP's 59.94 Hz outside one";
+        else
+            line << " (margin " << display_margin() << ", " << period << " us a vblank)";
     }
+    std::cout << line.str() << "\n";
 }
 
 // All at the end-of-frame routine's GE sync (step 1, before step 5 reads the two fields): E8's period first (it reads
