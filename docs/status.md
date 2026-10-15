@@ -347,6 +347,24 @@ simplification task, then the enhancements. The session-by-session resume notes 
   mechanism; `kIdleVBlankLimit` and `sceDisplayGetFramePerSec` (docs/timing.md); the rig's 100 Hz race
   (docs/windows.md); Erik's eye on the race at 120 and the menus. `tools/gerec/metal_check.sh` fails on fresh
   recordings with batch/m2's code too (the owed recording refresh above), not task 089's.
+  **Task 091, the margin** (2026-10-15).
+  - The problem: Erik heard the sound stutter on Vulkan at Display. At exactly the display's rate, vsync paces the game,
+    so a missed refresh is never won back and the audio sink skips. The diagnosis measured 13 resyncs on Vulkan and 33 on
+    Metal in 75 s of race.
+  - The fix: the race now runs 0.5% under the display (`kDisplayMargin` 0.005: 119.40 Hz, 8375 us a vblank on a
+    120 Hz display; the test switch `PURE_DISPLAY_MARGIN`).
+  - The check: `tools/display_rate_check.sh --audio [--shell vulkan]` counts the sink's resyncs over a race with sound
+    in the window. The bound is the review's: at most 1 resync and no second under 95%, the seconds under 99% reported.
+  - The results, on this Mac's 120 Hz display at internal scale Auto:
+    - 0.005 passes twice on each shell: 1 resync each run, 2 to 4 seconds under 99%.
+    - 0.0025 passes on Metal but fails twice on Vulkan (4 and 5 resyncs).
+    - Margin 0 fails on Vulkan (9 resyncs).
+  - The route and `--race` pass at 0.005: 119.41 flips a race-clock second, the game clock 1.0011.
+  - Found on the way: a window that is covered presents without vsync, so its run measures nothing. Most first runs had
+    a browser window over the game's, and so had the diagnosis's clean 119.4 lanes. The check now refuses or FAILs such
+    runs, and `tools/winwatch.m` says what covers the window. docs/timing.md "E8", "The margin (task 091)".
+  - Open: the rig's 100 Hz run (docs/windows.md), and the swapchain and presents that hold the game thread on a miss (a
+    renderer question).
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race

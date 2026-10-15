@@ -181,8 +181,10 @@ above Resolution x1. Original picks the level as the PSP does (E5, D-019; docs/m
 renderers draw it, the Metal backend since task 075 and the Vulkan renderer since task 076 (patch
 0020-vulkan-texture-detail), as its help says. Display rate (since task 089): Display (the default) runs the race's
 vblank at the display's refresh when that is above 60 Hz, so on a 120 Hz display Single Race and Tournament draw 120
-frames a second, and Time Trial, Free Play and Zone 120 with the 30 fps modes row at 60 fps or 60 at Original; the
-menus keep the PSP's pace, and on a 60 Hz display nothing changes. Original keeps the PSP's 59.94 Hz everywhere (E8,
+frames a second, and Time Trial, Free Play and Zone 120 with the 30 fps modes row at 60 fps or 60 at Original. The
+race runs a fraction under the display's rate (0.5%: 119.4 on a 120 Hz display, since task 091) so that a frame
+that misses the display's refresh can be won back and the sound stays continuous; the help says so. The menus keep
+the PSP's pace, and on a 60 Hz display nothing changes. Original keeps the PSP's 59.94 Hz everywhere (E8,
 D-022; docs/timing.md, "E8"). "Restore video defaults" puts all five back to their defaults; `PURE_SIXTY_FPS`,
 `PURE_SMOOTH_FLASHES`, `PURE_SPRITE_UPSCALE`, `PURE_TEXTURE_DETAIL` and `PURE_DISPLAY_RATE` lock them for a run ("Set
 by PURE_SIXTY_FPS"), as every tool run does.

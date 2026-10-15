@@ -187,11 +187,18 @@ the suite of step 4 and step 5 (and task 071 on top); what is left is marked **o
    - **open** (task 089, E8; patch 0030-vblank-period): after `tools/patches.sh check` reports 30 and a rebuild,
      the rig's 100 Hz display. `tools/menu_check.sh --shell vulkan` [`menu_check: PASS`; the Video tab now ends
      `..., Texture detail, Display rate`]. A race by hand with the Display rate row at Display (the default): the log
-     has `[pure] display rate: 100 Hz in a race, the PSP's 59.94 Hz outside one` at start and `[pure] display rate: 100
-     Hz (10000 us a vblank)` at the race load, the Performance overlay reads game 100 in the race and 30 in the menus,
-     and the Esc menu's Frame rate row opened during the race offers "100" (the game's own) and "Match display 100 Hz"
-     only. `PURE_DISPLAY_RATE=1 tools/stutter_check.sh` [`stutter_check: PASS`; its budget doubled for the faster
+     has the two `[pure] display rate` lines of the item below (task 091's margin: the game at 99.50 Hz, 10050 us a
+     vblank), the Performance overlay reads game 99.5 in the race and 30 in the menus, and the Esc menu's Frame rate
+     row opened during the race offers the game's own rate and "Match display 100 Hz" only (say what it shows). `PURE_DISPLAY_RATE=1 tools/stutter_check.sh` [`stutter_check: PASS`; its budget doubled for the faster
      race] for the 10 ms budget. With the row at Original the race runs at 60 as before.
+   - **open** (task 091, E8's margin; no patch, a rebuild): the race now runs 0.5% under the display, so at the
+     rig's 100 Hz the lines read `[pure] display rate: 100 Hz display, the game at 99.50 Hz in a race (margin
+     0.005), the PSP's 59.94 Hz outside one` at start and `[pure] display rate: 100 Hz display, the game at
+     99.50 Hz (margin 0.005, 10050 us a vblank)` at the race load. With the game window in front and nothing
+     over it, `tools/display_rate_check.sh --audio --shell vulkan` [`display_rate_check: PASS (audio, vulkan,
+     margin 0.005, 10050 us a vblank: 1 resync, 0 seconds under 95% ...)`; about 2.5 minutes; the probe
+     refuses with exit 2 when the window is covered]. Say the seconds under 99% it reports. For the comparison,
+     `--audio --shell vulkan --margin 0` (on this Mac's 120 Hz display it FAILed with 9 resyncs).
 5. **Package:** `tools/bundle_windows.sh --zip` (rebuilds the Release binary when stale: 15 to 25 minutes cold), then
    `tools/bundle_windows.sh --check out/repack-win-070` [`bundle check: PASS`]. Done 2026-10-11: the zip
    pure-recomp-0.1.0-6393b67-windows-x64.zip, seven checks PASS (out/repack-071.log on the rig); then task 071 added
