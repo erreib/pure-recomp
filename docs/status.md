@@ -375,7 +375,8 @@ simplification task, then the enhancements. The session-by-session resume notes 
     late producer (task 081's fork) is the candidate. Also notable: this route held full speed at 100 Hz where task
     091-display-rate-storms' stutter_check route measured 85%; the difference (stutter_check's tracing and live-file
     harness, the route, internal scale Auto here) is unexplained and wants a look before the storms' verdict is
-    quoted to players. The probe needed a fix to run on Windows at all: its Python prints `yes\r\n`, `read` kept the
+    quoted to players. Erik's ear on the staged build (2026-10-15): "betterish", but more audio hiccups than the
+    Mac build. Parked for now. The probe needed a fix to run on Windows at all: its Python prints `yes\r\n`, `read` kept the
     `\r`, and every run refused as "not on screen" (tools/display_rate_check.sh, one line).
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
