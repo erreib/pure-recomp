@@ -366,8 +366,17 @@ simplification task, then the enhancements. The session-by-session resume notes 
   - Found on the way: a window that is covered presents without vsync, so its run measures nothing. Most first runs had
     a browser window over the game's, and so had the diagnosis's clean 119.4 lanes. The check now refuses or FAILs such
     runs, and `tools/winwatch.m` says what covers the window. docs/timing.md "E8", "The margin (task 091-display-rate-margin)".
-  - Open: the rig's 100 Hz run (docs/windows.md), and the swapchain and presents that hold the game thread on a miss (a
-    renderer question).
+  - Open: the swapchain and presents that hold the game thread on a miss (a renderer question).
+  - The rig's 100 Hz run (2026-10-15, e4f1fb7 plus the probe's CR fix): `--audio --shell vulkan` FAIL, 4 resyncs at
+    the margin 0.005 and 3 at margin 0, at the same audio seconds both times (the race load, then about 4 and 9 s
+    into the race; clean after). Speed held: medians 99.5 (100.0) presents and game flips a second, no second under
+    95%. So the rig's skips are not the margin's mechanism (no time lost to misses) but an early-race settling: the
+    sink's lead falls from about 7400 frames in the menus to 1000 to 3000 at the race start. The sink's tolerance of a
+    late producer (task 081's fork) is the candidate. Also notable: this route held full speed at 100 Hz where task
+    091-display-rate-storms' stutter_check route measured 85%; the difference (stutter_check's tracing and live-file
+    harness, the route, internal scale Auto here) is unexplained and wants a look before the storms' verdict is
+    quoted to players. The probe needed a fix to run on Windows at all: its Python prints `yes\r\n`, `read` kept the
+    `\r`, and every run refused as "not on screen" (tools/display_rate_check.sh, one line).
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
