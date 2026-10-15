@@ -4,8 +4,8 @@
 // E7 (D-018, task 073): Text and sprites, game.sprite_upscale, PURE_SPRITE_UPSCALE, which the Metal backend reads itself.
 // E5 (D-019, tasks 075 and 076): Texture detail, game.texture_detail, PURE_TEXTURE_DETAIL, which the Metal backend
 // reads itself and the Vulkan renderer through GameProfile::texture_detail_option (patch 0020). E8 (D-022, task 089):
-// Display rate, game.display_rate, PURE_DISPLAY_RATE (and the test switch PURE_DISPLAY_HZ), the kernel's vblank period
-// at the display's refresh (patch 0030-vblank-period).
+// Display rate, game.display_rate, PURE_DISPLAY_RATE (and the test switches PURE_DISPLAY_HZ and, task 091,
+// PURE_DISPLAY_MARGIN), the kernel's vblank period a margin under the display's refresh (patch 0030-vblank-period).
 // Every tool run has them off unless it names them (tools/purelib/port.py), so the checks measure the PSP's game;
 // tools/framerate_check.sh is the check with E4 on, tools/flash_check.sh the one with E6 on, tools/sprite_check.sh
 // the one with E7 on, tools/texture_check.sh the one with E5 on, tools/display_rate_check.sh the one with E8 on.
