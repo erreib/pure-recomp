@@ -123,7 +123,8 @@ race's vblank at the display's refresh. Patch 0030-vblank-period makes the kerne
 stays where it was due, and the count of vblanks stands), read by the tick, `last_vblank_us()`, the media HLE's frame
 grid, vblank duration, hcount and vblank flag, and frame interpolation's game frame and rate (passed on at each flip);
 the Metal shell asks for each picture one period after its frame's vblank. In E6's `sceGeDrawSync` wrap, before E4 and
-E6, `src/profile/enhancements.cpp` sets the period to `round(1e6 / rate)` (the rate clamped to 240 Hz) when the row is
+E6, `src/profile/enhancements.cpp` sets the period to `round(1e6 / (rate x (1 - margin)))` (the rate clamped to
+240 Hz; the margin 0.005 since task 091, below) when the row is
 Display, the display's refresh (the window shell's `display_refresh()`, or the test switch `PURE_DISPLAY_HZ=N`) is
 above 60.5 Hz and the race backend lives, and to the PSP's otherwise. "The race backend lives" is E4's gate:
 `DAT_08a8c5f4` (0x08A8C5F4, stored by the backend's constructor in the race load, zeroed by its destructor) and the
@@ -131,10 +132,12 @@ frame object (`*0x08A8E960`) both in user RAM; not the lock byte `+0x116c`, whic
 and while the save dialog runs. So Single Race and Tournament run at the display's rate, Time Trial, Free Play and Zone
 at it with the 30 fps modes row at 60 fps and at half of it at Original (two vblanks of the display's period: 60 on a
 120 Hz display), and the frontend and the save dialog keep the PSP's cadence. One line a change, not a flip: `[pure]
-display rate: off` (Original, or no display above 60.5 Hz), `[pure] display rate: 120 Hz in a race, the PSP's 59.94 Hz
-outside one` (Display, outside a race: at start) and `[pure] display rate: 120 Hz (8333 us a vblank)` (the race load:
-after flip 5700 on the Time Trial route). The game's speed is unchanged because its frame timer integrates measured dt
-("The game's clock in a race", below).
+display rate: off` (Original, or no display above 60.5 Hz), `[pure] display rate: 120 Hz display, the game at 119.40 Hz
+in a race (margin 0.005), the PSP's 59.94 Hz outside one` (Display, outside a race: at start) and `[pure] display rate:
+120 Hz display, the game at 119.40 Hz (margin 0.005, 8375 us a vblank)` (the race load: after flip 5700 on the Time
+Trial route); until task 091 they read `120 Hz in a race, ...` and `120 Hz (8333 us a vblank)`. The game's speed is
+unchanged because its frame timer integrates measured dt ("The game's clock in a race", below). The figures in the
+bullets below are task 089's, at the exact display rate (8333 us); the margin's are in "The margin (task 091)".
 - Why the frontend keeps the PSP's rate: task 089 first ran the period at the display's everywhere and compared shots
   at the same flip and at the same virtual time in both lanes of the main-menu route (out/e8probe/ on the Mac). Time
   drives the boot cards (SCEA, Studio Liverpool), the language screen's build-in, the flashing after the profile
@@ -174,6 +177,78 @@ after flip 5700 on the Time Trial route). The game's speed is unchanged because 
 - Open: `kIdleVBlankLimit` (the kernel's deadlock report after 18000 vblanks with no thread to run) still counts
   vblanks, so in a race at 120 it comes after 2.5 minutes instead of 5; `sceDisplayGetFramePerSec` still answers 59.94
   (this game does not import it). Both are left as they are (scheduler code; no caller here).
+
+### The margin (task 091)
+Erik heard the sound stutter in a race on Vulkan at Display (2026-10-14). At a game rate equal to the display's refresh,
+vsync becomes the clock that paces the game. The kernel holds the game to real time (`Kernel::pace_to_real_time`:
+behind by less than 100 ms, it runs without sleeping to catch up), but a game at exactly the display's rate cannot
+present faster than the display, so a frame that misses its refresh is 8.3 ms lost for good. The sound is made on the
+game's clock, so it falls behind the device. Once it is a quarter of the sink's prebuffer late, the sink jumps the
+stalled producer forward (patch 0024-audio-resync-counter's `resyncs=`), and each jump is a click. At the PSP's rate a
+120 Hz display takes up to 120 presents a second, so the game has room to catch up. A margin gives it that room at the
+display's rate: the race's vblank runs at the display's refresh times (1 - margin), so it catches up `margin` seconds a
+second after a miss (5 ms a second at 0.005, about 1.7 s to win back one missed refresh). The cost is one repeated
+refresh every 1 / (rate x margin) seconds (1.7 s at 0.005), the same picture shown twice. Since task 091
+`src/profile/enhancements.cpp` uses `kDisplayMargin = 0.005`, and the test switch `PURE_DISPLAY_MARGIN=F` overrides it
+(0 is the exact display rate).
+- **The diagnosis** (the planning session, out/e8audio/ on the Mac). The race route with sound, `PURE_PERF=log`,
+  `PURE_TRACE_AUDIO=1` and the stall trace, about 75 s of race in the window at 120 Hz:
+
+  | Lane | Resyncs | Seconds under 99% | Submits blocked over 8 ms |
+  |---|---|---|---|
+  | Vulkan, Display | 13 | 8 | 21 |
+  | Metal, Display (internal scale 1) | 33 | 17 | 0 |
+  | Vulkan, `PURE_DISPLAY_HZ=119.4` | 1 | 0 | 0 |
+  | Metal, `PURE_DISPLAY_HZ=119.4` | 1 | 0 | 0 |
+  | Vulkan, Original | 1 | 0 | 1 |
+
+  Vulkan's misses cost more than Metal's. Its swapchain has 2 images under FIFO, and MoltenVK blocks `vkQueueSubmit`
+  11 to 35 ms for a drawable. Task 091 then found that the last three lanes were run with the window off screen: their
+  unpaced menus presented 1300 to 2900 times a second, where vsync holds a window on screen to 120. So their clean
+  result measured nothing, and the sweep below replaces them.
+- **A window off screen measures nothing.** A window on screen presents at most the display's refresh a second when
+  unpaced. A window that is fully covered, or on another Space, presents without vsync (hundreds a second), and a race
+  in it never misses a refresh. In task 091's first runs, a browser window covered the game's 960x572 window (100%, from
+  start to end; tools/winwatch.m lists the windows in front of it). macOS 15 does not bring a window launched from a
+  terminal to the front over the active app, and an activation request from another process was ignored.
+  `tools/display_rate_check.sh --audio` therefore judges the window from its unpaced presents: the probe refuses (exit 2)
+  when the unpaced boot presents more than 1.5 times the refresh, and the run FAILs as "not on screen" when its unpaced
+  race load does. It also runs under `caffeinate -d -u`, since a display asleep holds no vsync.
+- **The measurement** (`tools/display_rate_check.sh --audio [--shell vulkan] --margin F`, task 091, 2026-10-15; this
+  Mac's 120 Hz display, internal scale Auto (4 on Metal, 1920x1088; 2 on Vulkan, 960x544), the shipped Video defaults,
+  tools/winwatch.m beside every run, the window uncovered in all of them). The bound is the review's call: at most 1
+  resync (the race load's, as at the PSP's rate) and no second under 95% speed, a freeze-sized loss. The seconds under
+  99% (one or two missed refreshes) are slips the margin's catch-up and the sink's lead absorb, and are reported.
+
+  | Margin | Shell | Runs | Resyncs | Seconds under 95% | Seconds under 99% | Result |
+  |---|---|---|---|---|---|---|
+  | 0 | Vulkan | 1 | 9 | 0 | 6 | FAIL |
+  | 0.0025 | Vulkan | 2 | 4, 5 | 0, 0 | 5, 5 | FAIL, FAIL |
+  | 0.0025 | Metal | 2 | 1, 1 | 0, 0 | 1, 0 | PASS, PASS |
+  | 0.005 | Vulkan | 2 | 1, 1 | 0, 0 | 2, 3 | PASS, PASS |
+  | 0.005 | Metal | 2 | 1, 1 | 0, 0 | 4, 2 | PASS, PASS |
+
+  So 0.005 is the smallest of the brief's margins (0.005, 0.0025, 0.001) at which every run on both shells passes.
+  0.001 was not run, since a smaller margin cannot pass where 0.0025 failed. Metal at margin 0 was also measured once,
+  with the window off screen at the race load but on screen in the race: 105 resyncs, 61 seconds under 99% and two 1 s
+  stalls from the window being covered and uncovered. The guard voids that run, but its race fails the same way as the
+  diagnosis's. Why Metal holds the sound at 0.0025 and Vulkan does not is a guess, not traced: Vulkan's misses cost
+  more (the diagnosis's submits blocked 11 to 35 ms with two swapchain images), so 2.5 ms a second may not win the time
+  back before the sink jumps. The presents a second (medians) are 119.4 to 119.9 at 0.005 on both shells.
+- **What the margin moves elsewhere.** On the Time Trial route at `PURE_DISPLAY_HZ=120` (`tools/display_rate_check.sh`),
+  the race makes 119.41 flips a race-clock second at a median of 8.38 ms (the check centres its bound on 120 x (1 -
+  margin), plus or minus 3), and the race-start fade lasts 1.89 s in 113 flips. In the swept Vineta K Time
+  Trial (`--race`, one cell a lane at 0.005):
+  - 59.95 against 119.41 flips a race-clock second.
+  - The game clock 1.0001 and 1.0011 s a virtual second.
+  - The start: 39.3/77.5/121.1 against 38.9/77.2/120.6 km/h.
+  - Contacts: 15.3 and 13.0 a lap.
+  - Reported, not bounded: the mean lap 58.60 against 58.27 s (-0.57%), the 2.0 s bin 168.2 against 176.5 km/h, and
+    the first speed pad 0.050 s and 2.53 m early (at the exact rate, 0.085 to 0.1 s and 4.2 to 4.6 m).
+- **Open.** The swapchain's image count and the presents themselves, which hold the game thread on a missed refresh,
+  are a renderer question this task leaves alone (vendor/). The rig's 100 Hz display (docs/windows.md) is unmeasured.
+  The Vulkan Frame rate row's offer at a game rate of 119.4 is unchecked: `game_rate()` reads 119.52 there, and the
+  governor interpolates only above the game's rate plus 0.5, so 120 adds nothing.
 
 ## Frame structure (from `out/frame.txt`)
 - `FUN_088ed190` is the GE init: `sceGeEdramGetAddr`, `sceKernelCreateEventFlag`, `sceGeSetCallback` (one callback

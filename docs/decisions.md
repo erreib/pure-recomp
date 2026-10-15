@@ -634,5 +634,14 @@ per-flip steering moves the lap mean more than the race does. Points 3 and 5's "
 display's rate" are withdrawn: the frontend stays at the PSP's cadence, and the 30 fps modes row keeps its meaning
 inside a race at the display's rate (Original: two vblanks of the display's period).
 
-**Status.** Accepted 2026-10-14, amended the same day. Task 089.
+**Amended 2026-10-15 (task 091's measurement).** The race's period is the display's refresh times (1 + margin) in
+time, round(1e6 / (rate x (1 - 0.005))): 119.40 Hz on a 120 Hz display, 99.50 Hz on a 100 Hz one. At exactly the
+display's rate vsync paces the game, a missed refresh is real time lost for good, and the sound, made on the game's
+clock, falls behind until the audio sink skips (Erik heard it on both renderers; 9 skips in a race on Vulkan, 105 on
+Metal at Auto). The margin is the smallest of 0.005, 0.0025 and 0.001 at which every run on both shells kept the
+sound whole (`tools/display_rate_check.sh --audio`: one skip, the race load's; no second under 95% speed); at 0.0025
+Vulkan still skipped. The cost is one refresh shown twice every 1.7 s. The sink's own tolerance of a late producer
+(task 081's fork) and the presents holding the game thread (Vulkan's two-image FIFO swapchain) stay open.
+
+**Status.** Accepted 2026-10-14, amended the same day and 2026-10-15. Tasks 089 and 091.
 

@@ -186,6 +186,9 @@ simplification task, then the enhancements. The session-by-session resume notes 
   display runs at 120.
   Repacked 2026-10-14 from 76d3131 with the Performance overlay on Metal (task 090; `--check out/090-bundle` PASS;
   out/repack-090.log): Wipeout Pure 0.1.0-76d3131 at out/release-macos/stage.
+  Repacked 2026-10-15 from bc0a86a with the display rate's margin (task 091-display-rate-margin; `--check out/release-macos/stage`
+  PASS, its files removed after; out/repack-091.log): Wipeout Pure 0.1.0-bc0a86a at out/release-macos/stage, the
+  race at Display on a 120 Hz display at 119.40 Hz with the sound whole.
   The Windows zip likewise repacked 2026-10-11 from 6393b67 on Erik's rig (`tools/bundle_windows.sh --zip`, then
   `--check out/repack-071`: all seven checks PASS, before task 071's icon check; out/repack-071.log):
   pure-recomp-0.1.0-6393b67-windows-x64.zip in out/release-windows/dist, with the same features; the route's title
@@ -347,6 +350,24 @@ simplification task, then the enhancements. The session-by-session resume notes 
   mechanism; `kIdleVBlankLimit` and `sceDisplayGetFramePerSec` (docs/timing.md); the rig's 100 Hz race
   (docs/windows.md); Erik's eye on the race at 120 and the menus. `tools/gerec/metal_check.sh` fails on fresh
   recordings with batch/m2's code too (the owed recording refresh above), not task 089's.
+  **Task 091, the margin** (2026-10-15).
+  - The problem: Erik heard the sound stutter on Vulkan at Display. At exactly the display's rate, vsync paces the game,
+    so a missed refresh is never won back and the audio sink skips. The diagnosis measured 13 resyncs on Vulkan and 33 on
+    Metal in 75 s of race.
+  - The fix: the race now runs 0.5% under the display (`kDisplayMargin` 0.005: 119.40 Hz, 8375 us a vblank on a
+    120 Hz display; the test switch `PURE_DISPLAY_MARGIN`).
+  - The check: `tools/display_rate_check.sh --audio [--shell vulkan]` counts the sink's resyncs over a race with sound
+    in the window. The bound is the review's: at most 1 resync and no second under 95%, the seconds under 99% reported.
+  - The results, on this Mac's 120 Hz display at internal scale Auto:
+    - 0.005 passes twice on each shell: 1 resync each run, 2 to 4 seconds under 99%.
+    - 0.0025 passes on Metal but fails twice on Vulkan (4 and 5 resyncs).
+    - Margin 0 fails on Vulkan (9 resyncs).
+  - The route and `--race` pass at 0.005: 119.41 flips a race-clock second, the game clock 1.0011.
+  - Found on the way: a window that is covered presents without vsync, so its run measures nothing. Most first runs had
+    a browser window over the game's, and so had the diagnosis's clean 119.4 lanes. The check now refuses or FAILs such
+    runs, and `tools/winwatch.m` says what covers the window. docs/timing.md "E8", "The margin (task 091-display-rate-margin)".
+  - Open: the rig's 100 Hz run (docs/windows.md), and the swapchain and presents that hold the game thread on a miss (a
+    renderer question).
 - **The rig's race stutter (task 077-vulkan-readback-stutter, merged 685f2a3 2026-10-12: fixed).** Erik played the Windows build 2026-10-12 and heard the audio stutter;
   the probes (out/stutter-probe*/ on the rig) found two GE block transfers a race frame, each a synchronous
   whole-queue drain in the Vulkan renderer's `read_back_framebuffer`, 9 to 16 ms twice a frame, about 15% of race
@@ -548,12 +569,12 @@ simplification task, then the enhancements. The session-by-session resume notes 
   launch), so this gate never ran at 100 Hz; the real 100 Hz figures are 091's. Erik's by hand: the Esc menu's folder buttons
   (patch 0029-windows-file-url) and a race with Display rate at Display (expect 100 fps in the race, 30 in the
   menus). Task 088 (the VR stereo spike, this rig, the Quest over Link) is OPEN and undispatched.
-- **The storms against the 10 ms budget (task 091, briefed 2026-10-14).** Erik raced at the Display rate on the
+- **The storms against the 10 ms budget (task 091-display-rate-storms, briefed 2026-10-14).** Erik raced at the Display rate on the
   rig: mostly clean, but effect-heavy moments stutter where the capped mode does not. The arithmetic predicts it
-  (082's storm swell plus render against a 10 ms frame instead of 16.7); task 091 profiles the storms at both
+  (082's storm swell plus render against a 10 ms frame instead of 16.7); task 091-display-rate-storms profiles the storms at both
   rates with the guest split and either lands a single-cause fix or writes the honest windows.md line: the
   Display rate wants headroom, Original is the smooth setting when it matters. Dispatched to a worker.
-- **The storms named: the whole race misses 10 ms (task 091 merged, 2026-10-14).** The verdict is the
+- **The storms named: the whole race misses 10 ms (task 091-display-rate-storms merged, 2026-10-14).** The verdict is the
   characterization, no patch: a race frame costs about 11.7 ms of host work at either rate (game 3.3, sceDisplay's
   host work 2.1, render 4.3, fence 1.6), so the 100 Hz race holds 85 fps at 85% speed and the storms (game +0.7 ms,
   082's swell) dip it to 76–80% — the stutters Erik saw are the dips a 10 ms budget can no longer hide. Nothing
