@@ -1,8 +1,8 @@
 diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
-index 0f0c0e7..2af20fc 100644
+index 9531e7d..2d9559b 100644
 --- a/cmake/PortableKit.cmake
 +++ b/cmake/PortableKit.cmake
-@@ -287,7 +287,9 @@ function(portablekit_add_game target)
+@@ -286,7 +286,9 @@ function(portablekit_add_game target)
                  set(generated_options "/O${PSPRECOMP_GENERATED_OPT_LEVEL};/Ob0;/bigobj")
              endif()
          else()
@@ -13,7 +13,7 @@ index 0f0c0e7..2af20fc 100644
          endif()
          set_source_files_properties(${generated} PROPERTIES COMPILE_OPTIONS "${generated_options}")
      else()
-@@ -558,7 +560,7 @@ inline constexpr const char *kBuildLabel = \"${PORTABLEKIT_BUILD_LABEL}\";
+@@ -557,7 +559,7 @@ inline constexpr const char *kBuildLabel = \"${PORTABLEKIT_BUILD_LABEL}\";
          elseif(MSVC)
              target_compile_options(${variant_target} PRIVATE /O${PSPRECOMP_GENERATED_OPT_LEVEL} /bigobj)
          else()

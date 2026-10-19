@@ -22,7 +22,7 @@ index 31110d1..348a626 100644
          } else {
              char escaped[4];
 diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
-index ffa25c6..973c3bd 100644
+index 7e7db60..ddd9c42 100644
 --- a/host/ui/menu.cpp
 +++ b/host/ui/menu.cpp
 @@ -96,9 +96,16 @@ int cycle(int value, int delta, int count) { return ((value + delta) % count + c

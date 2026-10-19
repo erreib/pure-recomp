@@ -1,27 +1,18 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 0a98bc5..435818d 100644
+index 963e83b..f6d6c4e 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -3604,9 +3604,20 @@ void VulkanRenderer::Impl::submit_and_present(VkCommandBuffer commands, VkFence
+@@ -3616,9 +3616,10 @@ void VulkanRenderer::Impl::submit_and_present(VkCommandBuffer commands, VkFence
                  vkGetBufferMemoryRequirements(device, capture_buffer, &requirements);
                  VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
                  allocate.allocationSize = requirements.size;
-+                // The CPU reads it byte by byte (write_bmp), so cached memory first: from the uncached type a
-+                // 960x544 capture took 110 to 160 ms on an RTX 3080, a long frame in every scripted `shot`.
-+                constexpr VkMemoryPropertyFlags kCoherent =
-+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-+                VkPhysicalDeviceMemoryProperties memory_properties{};
-+                vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
-+                const std::uint32_t cached =
-+                    find_memory_type(requirements.memoryTypeBits, kCoherent | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-+                const bool has_cached = (requirements.memoryTypeBits & (1u << cached)) != 0u &&
-+                                        (memory_properties.memoryTypes[cached].propertyFlags &
-+                                         (kCoherent | VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) ==
-+                                            (kCoherent | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-                 allocate.memoryTypeIndex =
+-                allocate.memoryTypeIndex =
 -                    find_memory_type(requirements.memoryTypeBits,
 -                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-+                    has_cached ? cached : find_memory_type(requirements.memoryTypeBits, kCoherent);
++                // The CPU reads it byte by byte (write_bmp), so cached memory first: from the uncached type a
++                // 960x544 capture took 110 to 160 ms on an RTX 3080, a long frame in every scripted `shot`. It is
++                // read without an invalidate, so a coherent type.
++                allocate.memoryTypeIndex = host_read_memory(requirements.memoryTypeBits, false).type;
                  vkAllocateMemory(device, &allocate, nullptr, &capture_memory);
                  vkBindBufferMemory(device, capture_buffer, capture_memory, 0u);
                  transition(commands, target, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);

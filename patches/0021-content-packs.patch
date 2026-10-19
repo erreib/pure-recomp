@@ -139,10 +139,10 @@ index 28d5069..13012a0 100644
  // <target>/2026-09-19_19-05-12/<save folder>, ... ("-2" and so on when taken).
  // Without, the save folders go straight into <target>.
 diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
-index b9bba38..ffa25c6 100644
+index 62e6b23..7e7db60 100644
 --- a/host/ui/menu.cpp
 +++ b/host/ui/menu.cpp
-@@ -1469,6 +1469,33 @@ void Menu::system() {
+@@ -1464,6 +1464,33 @@ void Menu::system() {
      dump_row("[save rows]");
      save_rows();
  

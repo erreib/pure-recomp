@@ -121,16 +121,6 @@ fragment float4 shell_fragment(Shown in [[stage_in]], texture2d<float> picture [
 }
 )";
 
-// For a check of another shape (task 086, as patch 0027-window-size-switch does for the Vulkan window):
-// PURE_WINDOW_SIZE=WxH, a size in pixels, 1 to 16384 each way; false when unset or malformed.
-bool window_size_switch(int &width, int &height) {
-    const char *size = pk::env("WINDOW_SIZE");
-    if (size == nullptr) return false;
-    char tail = 0;
-    return std::sscanf(size, "%dx%d%c", &width, &height, &tail) == 2 && width >= 1 && height >= 1 &&
-           width <= 16384 && height <= 16384;
-}
-
 class MetalShell final : public ph::Shell {
 public:
     ~MetalShell() override { shutdown(); }
@@ -158,8 +148,9 @@ public:
             const std::string title = config.title.empty() ? pk::gpu::default_window_title() : config.title;
             int window_width = static_cast<int>(kPspWidth * scale);
             int window_height = static_cast<int>(kPspHeight * scale);
+            // PURE_WINDOW_SIZE=WxH for a check of another shape (task 086), parsed as the Vulkan window parses it.
             int switch_width = 0, switch_height = 0;
-            const bool sized = window_size_switch(switch_width, switch_height);
+            const bool sized = ph::window_size_switch(switch_width, switch_height);
             if (sized) {
                 window_width = switch_width;
                 window_height = switch_height;
@@ -255,7 +246,8 @@ public:
         }
     }
 
-    void shutdown() override {
+    // The destructor's (host::Shell has no shutdown: nothing calls one through it).
+    void shutdown() {
         @autoreleasepool {
             wait_idle();
             if (ui_ready_ && ImGui::GetCurrentContext() != nullptr) shutdown_ui();
@@ -353,9 +345,6 @@ public:
         static const pk::input::touch::Controls none;
         return none;
     }
-    bool mouse_captured() const noexcept override { return mouse_captured_; }
-    bool quit_requested() const noexcept override { return quit_; }
-    void request_quit() noexcept override { quit_ = true; }
     void set_game_input(bool enabled) override {
         // Buttons held when the game gets its input back stay hidden from it until released.
         if (enabled && !input_.game_input) input_.suppress_held = true;
@@ -536,7 +525,8 @@ public:
         return true;
     }
 
-    void shutdown_ui() override {
+    // shutdown()'s, for the interface's two ImGui backends.
+    void shutdown_ui() {
         if (!ui_ready_) return;
         wait_idle();
         ImGui_ImplMetal_Shutdown();
@@ -872,7 +862,7 @@ private:
             rgba[i + 2u] = bgra[i];
             rgba[i + 3u] = 255u;
         }
-        if (pk::gpu::write_bmp_file(path, rgba.data(), width, height))
+        if (pk::gpu::write_bmp(path, rgba.data(), width, height))
             std::cout << "[render] window " << width << "x" << height << " -> " << path << std::endl;
         else
             std::cout << "[render] cannot write " << path << std::endl;

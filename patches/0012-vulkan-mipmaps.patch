@@ -1,5 +1,5 @@
 diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
-index 58518b7..6d555ec 100644
+index 58518b7..472a957 100644
 --- a/host/gpu/shaders/ge.frag
 +++ b/host/gpu/shaders/ge.frag
 @@ -24,7 +24,7 @@ layout(constant_id = 0) const bool kAlphaTest = true;
@@ -17,7 +17,7 @@ index 58518b7..6d555ec 100644
  
 +// The GE's logarithm for the mip level, in 1/16 levels: the float's exponent
 +// and the top four bits of its mantissa (a piecewise linear log2, floored to
-+// 1/16), of |x|. ge_log16 in vulkan_renderer.cpp.
++// 1/16), of |x|. ge_log16 in texture_decode.cpp.
 +float ge_log16(float x) {
 +    return float(int((floatBitsToUint(x) >> 19u) & 0xFFFu) - 127 * 16);
 +}
@@ -73,11 +73,175 @@ index 58518b7..6d555ec 100644
          int function = int(push.texture_params.y + 0.5);
          if (function == 0) {          // modulate
              color *= texel;
+diff --git a/host/gpu/texture_decode.cpp b/host/gpu/texture_decode.cpp
+index 3adac51..5f96b90 100644
+--- a/host/gpu/texture_decode.cpp
++++ b/host/gpu/texture_decode.cpp
+@@ -35,21 +35,6 @@ std::uint32_t expand_4444(std::uint16_t value) {
+     return (a << 24u) | (b << 16u) | (g << 8u) | r;
+ }
+ 
+-// Bits per texel for the format, or 0 for the block-compressed ones.
+-std::uint32_t bits_per_texel(TextureFormat format) {
+-    switch (format) {
+-    case TextureFormat::Clut4: return 4u;
+-    case TextureFormat::Clut8: return 8u;
+-    case TextureFormat::Rgba5650:
+-    case TextureFormat::Rgba5551:
+-    case TextureFormat::Rgba4444:
+-    case TextureFormat::Clut16: return 16u;
+-    case TextureFormat::Rgba8888:
+-    case TextureFormat::Clut32: return 32u;
+-    default: return 0u;
+-    }
+-}
+-
+ // <prefix>_NO_BUFFER_REUSE: allocate the decoder's working buffers for every
+ // texture, as before, instead of keeping them from one texture to the next.
+ bool reuse_buffers() {
+@@ -432,10 +417,8 @@ bool snapshot_texture(const GuestMemory &memory, const TextureState &texture, Te
+     if (total == 0u || !memory.contains(texture.address, total)) return false;
+     const std::uint8_t *texels = memory.raw_pointer(texture.address, total);
+     if (texels == nullptr) return false;
+-    const bool indexed = texture.format == TextureFormat::Clut4 || texture.format == TextureFormat::Clut8 ||
+-                         texture.format == TextureFormat::Clut16 || texture.format == TextureFormat::Clut32;
+     snapshot.clut.clear();
+-    if (indexed) {
++    if (indexed(texture.format)) {
+         const std::size_t clut_bytes = 512u * (texture.clut_format == 3u ? 4u : 2u);
+         const std::uint8_t *clut = memory.raw_pointer(texture.clut_address, clut_bytes);
+         if (clut == nullptr) return false;
+@@ -477,9 +460,8 @@ std::uint64_t texture_key(const GuestMemory &memory, const TextureState &texture
+     // block texture is drawn with whatever CLUT address the game left set, and
+     // The Boss Face's DXT1 texture is drawn with it at the framebuffer, whose
+     // first word changes every frame (issue #144).
+-    const bool indexed = texture.format == TextureFormat::Clut4 || texture.format == TextureFormat::Clut8 ||
+-                         texture.format == TextureFormat::Clut16 || texture.format == TextureFormat::Clut32;
+-    if (indexed) {
++    const bool palette = indexed(texture.format);
++    if (palette) {
+         mix(texture.clut_address);
+         mix(texture.clut_format);
+     }
+@@ -521,9 +503,69 @@ std::uint64_t texture_key(const GuestMemory &memory, const TextureState &texture
+             mix(memory.load32(texture.address + offset));
+         }
+     }
+-    if (indexed && texture.clut_address != 0u && memory.contains(texture.clut_address, 4u))
++    if (palette && texture.clut_address != 0u && memory.contains(texture.clut_address, 4u))
+         mix(memory.load32(texture.clut_address));
+     return key;
+ }
+ 
++std::uint32_t bits_per_texel(TextureFormat format) {
++    switch (format) {
++    case TextureFormat::Clut4: return 4u;
++    case TextureFormat::Clut8: return 8u;
++    case TextureFormat::Rgba5650:
++    case TextureFormat::Rgba5551:
++    case TextureFormat::Rgba4444:
++    case TextureFormat::Clut16: return 16u;
++    case TextureFormat::Rgba8888:
++    case TextureFormat::Clut32: return 32u;
++    default: return 0u;
++    }
++}
++
++bool indexed(TextureFormat format) {
++    return format == TextureFormat::Clut4 || format == TextureFormat::Clut8 || format == TextureFormat::Clut16 ||
++           format == TextureFormat::Clut32;
++}
++
++std::size_t texture_bytes(const TextureState &state) {
++    const std::uint32_t bits = bits_per_texel(state.format);
++    if (bits != 0u) {
++        const std::uint32_t stride = state.buffer_width != 0u ? state.buffer_width : state.width;
++        return static_cast<std::size_t>(stride) * bits / 8u * state.height;
++    }
++    const std::size_t blocks = static_cast<std::size_t>((state.width + 3u) / 4u) * ((state.height + 3u) / 4u);
++    return blocks * (state.format == TextureFormat::Dxt1 ? 8u : 16u);
++}
++
++TextureState texture_level(const TextureState &state, std::uint32_t n) {
++    TextureState level = state;
++    if (n == 0u || n > state.levels.size()) return level;
++    const TextureLevel &registers = state.levels[n - 1u];
++    level.address = registers.address;
++    level.buffer_width = registers.buffer_width;
++    level.width = registers.width;
++    level.height = registers.height;
++    return level;
++}
++
++std::uint32_t sampled_level_count(const TextureState &state) {
++    if (state.level_count <= 1u || (state.min_filter & 4u) == 0u) return 1u;
++    return std::min<std::uint32_t>(state.level_count, 1u + static_cast<std::uint32_t>(state.levels.size()));
++}
++
++const char *mip_level_problem(const GuestMemory &memory, const TextureState &state, std::uint32_t n) {
++    const TextureState level = texture_level(state, n);
++    if (level.width != std::max(1u, static_cast<std::uint32_t>(state.width) >> n) ||
++        level.height != std::max(1u, static_cast<std::uint32_t>(state.height) >> n))
++        return "is not half the level before it";
++    if (!memory.contains(level.address, texture_bytes(level))) return "lies outside guest memory";
++    return nullptr;
++}
++
++std::int32_t ge_log16(float value) {
++    std::uint32_t bits{};
++    std::memcpy(&bits, &value, sizeof(bits));
++    return static_cast<std::int32_t>((bits >> 19u) & 0xFFFu) - 127 * 16;
++}
++
+ } // namespace portablekit::gpu
+diff --git a/host/gpu/texture_decode.hpp b/host/gpu/texture_decode.hpp
+index bb70e0a..238282a 100644
+--- a/host/gpu/texture_decode.hpp
++++ b/host/gpu/texture_decode.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include "ge_state.hpp"
+ 
++#include <cstddef>
+ #include <cstdint>
+ #include <vector>
+ 
+@@ -31,4 +32,30 @@ bool decode_snapshot(TextureSnapshot &snapshot, std::vector<std::uint32_t> &out)
+ // Key that identifies the decoded contents of a texture for caching.
+ [[nodiscard]] std::uint64_t texture_key(const GuestMemory &memory, const TextureState &texture);
+ 
++// What every GE backend asks of a texture's layout (the Vulkan renderer and a
++// port's own backend alike):
++// Bits per texel for the format, or 0 for the block-compressed ones.
++[[nodiscard]] std::uint32_t bits_per_texel(TextureFormat format);
++// The palette formats (CLUT4 to CLUT32): the ones that read a palette.
++[[nodiscard]] bool indexed(TextureFormat format);
++// The bytes decode_texture() reads for a texture: rows of its buffer width
++// (its width when that is 0), or the blocks of a DXT texture.
++[[nodiscard]] std::size_t texture_bytes(const TextureState &state);
++// Mip level n of a texture as a texture of its own: level 0's format, swizzle
++// and palette, the level's address, row length and size (the GE's TEXADDRn,
++// TEXBUFWIDTHn and TEXSIZEn). What decode_texture() decodes the level from.
++[[nodiscard]] TextureState texture_level(const TextureState &state, std::uint32_t n);
++// The levels a draw samples by the GE's registers: its level count when the
++// minification filter takes levels (bit 2), at most the levels TextureState
++// holds; 1 otherwise.
++[[nodiscard]] std::uint32_t sampled_level_count(const TextureState &state);
++// Why level n (1 or more) cannot be sampled from guest memory: it is not half
++// the level before it, or it lies outside guest memory; null when it can. A
++// backend also keeps a level that lies in one of its render targets out.
++[[nodiscard]] const char *mip_level_problem(const GuestMemory &memory, const TextureState &state, std::uint32_t n);
++// The GE's logarithm for the mip level, in 1/16 levels: a float's exponent and
++// the top four bits of its mantissa, a piecewise linear log2 floored to 1/16
++// (PPSSPP's hardware notes, "A float-bits logarithm"). ge.frag has the same.
++[[nodiscard]] std::int32_t ge_log16(float value);
++
+ } // namespace portablekit::gpu
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 0101e80..9db16f0 100644
+index 3373a3c..cc02e3b 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -684,6 +684,8 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -646,6 +646,8 @@ struct VulkanRenderer::Impl : host::SdlPad {
          // How far down a 512-tall texture has been drawn, which decides how
          // much of it the pack's hash covers; see texture_pack.hpp.
          std::uint16_t max_seen_v{};
@@ -86,7 +250,7 @@ index 0101e80..9db16f0 100644
      };
  
      RendererConfig config;
-@@ -1297,6 +1299,11 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1264,6 +1266,11 @@ struct VulkanRenderer::Impl : host::SdlPad {
      // the game's texture is usually larger than the 480x272 the target holds.
      VkSampler clamp_sampler{};
      VkSampler clamp_sharp_sampler{};
@@ -98,7 +262,7 @@ index 0101e80..9db16f0 100644
      std::map<PipelineKey, VkPipeline> pipelines;
      // Pipelines compiled in earlier runs, kept in the data directory
      // (pipeline_cache.bin) so that a new area does not compile its shaders
-@@ -1645,7 +1652,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1612,7 +1619,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
      std::string pack_status;
      std::uint64_t replaced_draws{};  // this second, for <prefix>_TRACE_TEXTURE_PACK
      void apply_texture_pack();
@@ -110,7 +274,7 @@ index 0101e80..9db16f0 100644
      std::uint64_t texture_clock{};
      // texture_key results for the display list being walked, by the state that
      // feeds the key; cleared by begin_display_list().
-@@ -1657,6 +1667,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1624,6 +1634,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
          std::uint32_t clut_address{};
          std::uint32_t clut_format{};
          bool swizzled{};
@@ -121,7 +285,7 @@ index 0101e80..9db16f0 100644
          auto operator<=>(const TextureKeyInput &) const = default;
      };
      // The texture each input resolved to, while `textures_erased` has not
-@@ -1736,6 +1750,7 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1703,6 +1717,7 @@ struct VulkanRenderer::Impl : host::SdlPad {
          VkImage image{};
          std::uint32_t width{};
          std::uint32_t height{};
@@ -129,7 +293,7 @@ index 0101e80..9db16f0 100644
      };
      std::vector<PendingTexture> pending_textures;
      [[nodiscard]] static bool background_decode() {
-@@ -1767,12 +1782,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1772,12 +1787,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
  
      bool create_image(std::uint32_t width, std::uint32_t height, VkFormat format, VkImageUsageFlags usage,
                        VkImage &image, VkDeviceMemory &memory, VkImageView &view, VkImageAspectFlags aspect,
@@ -144,7 +308,7 @@ index 0101e80..9db16f0 100644
          info.arrayLayers = 1u;
          info.samples = VK_SAMPLE_COUNT_1_BIT;
          info.tiling = VK_IMAGE_TILING_OPTIMAL;
-@@ -1803,26 +1818,30 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1808,26 +1823,30 @@ struct VulkanRenderer::Impl : host::SdlPad {
          view_info.image = image;
          view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
          view_info.format = format;
@@ -179,7 +343,7 @@ index 0101e80..9db16f0 100644
      [[nodiscard]] VkSampler framebuffer_sampler() const {
          return sharp_textures ? clamp_sharp_sampler : clamp_sampler;
      }
-@@ -1921,7 +1940,7 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1926,7 +1945,7 @@ struct VulkanRenderer::Impl : host::SdlPad {
      void begin_pass(std::uint32_t address, std::uint32_t overwritten = 0u);
      void end_pass();
      VkPipeline pipeline_for(const PipelineKey &key);
@@ -188,7 +352,7 @@ index 0101e80..9db16f0 100644
      void trace_framebuffer_texture(const DrawCall &call);
      // A render target the texture reads, with the texture's first texel as a
      // pixel position inside it; see framebuffer_texture().
-@@ -1934,12 +1953,21 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1939,12 +1958,21 @@ struct VulkanRenderer::Impl : host::SdlPad {
                                                                const TextureState &texture);
      VkDescriptorSet framebuffer_descriptor(Target &target, bool opaque);
      void snapshot_guest_words(const GuestMemory &memory, std::uint32_t address, Target &target);
@@ -215,7 +379,7 @@ index 0101e80..9db16f0 100644
      void destroy_texture(Texture &texture);
  };
  
-@@ -2445,6 +2473,18 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2450,6 +2478,18 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      sampler_info.minFilter = VK_FILTER_LINEAR;
      if (!check(vkCreateSampler(impl.device, &sampler_info, nullptr, &impl.clamp_sampler), "vkCreateSampler", error))
          return false;
@@ -234,7 +398,7 @@ index 0101e80..9db16f0 100644
  
      // Command buffer, synchronization and the vertex staging buffer.
      VkCommandPoolCreateInfo command_pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-@@ -3612,25 +3652,27 @@ void VulkanRenderer::Impl::resolve_stencil_alpha(const char *reason) {
+@@ -3617,25 +3657,27 @@ void VulkanRenderer::Impl::resolve_stencil_alpha(const char *reason) {
  }
  
  VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture(std::uint32_t width, std::uint32_t height,
@@ -267,7 +431,7 @@ index 0101e80..9db16f0 100644
      VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
      write.dstSet = texture.descriptor;
      write.descriptorCount = 1u;
-@@ -3642,7 +3684,7 @@ VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture_image(std::ui
+@@ -3647,7 +3689,7 @@ VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture_image(std::ui
  }
  
  void VulkanRenderer::Impl::upload_texture(VkImage image, std::uint32_t width, std::uint32_t height,
@@ -276,7 +440,7 @@ index 0101e80..9db16f0 100644
      const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * 4u;
      VkBuffer ring_buffer{};
      VkDeviceSize ring_offset = 0u;
-@@ -3653,17 +3695,18 @@ void VulkanRenderer::Impl::upload_texture(VkImage image, std::uint32_t width, st
+@@ -3658,17 +3700,18 @@ void VulkanRenderer::Impl::upload_texture(VkImage image, std::uint32_t width, st
              vkBeginCommandBuffer(frame_uploads, &begin);
              frame_uploads_open = true;
          }
@@ -298,7 +462,7 @@ index 0101e80..9db16f0 100644
          ++frame_upload_count;
      } else {
      const bool reuse = reuse_buffers();
-@@ -3721,13 +3764,14 @@ void VulkanRenderer::Impl::upload_texture(VkImage image, std::uint32_t width, st
+@@ -3726,13 +3769,14 @@ void VulkanRenderer::Impl::upload_texture(VkImage image, std::uint32_t width, st
      VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
      begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
      vkBeginCommandBuffer(commands, &begin);
@@ -316,7 +480,7 @@ index 0101e80..9db16f0 100644
      vkEndCommandBuffer(commands);
      VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
      submit.commandBufferCount = 1u;
-@@ -3809,7 +3853,7 @@ void VulkanRenderer::Impl::finish_pending_textures() {
+@@ -3814,7 +3858,7 @@ void VulkanRenderer::Impl::finish_pending_textures() {
      for (PendingTexture &pending : pending_textures) {
          decode_pool->wait(*pending.job);
          if (!pending.job->ok) pending.job->pixels.assign(static_cast<std::size_t>(pending.width) * pending.height, 0u);
@@ -325,24 +489,8 @@ index 0101e80..9db16f0 100644
      }
      pending_textures.clear();
      perf::note_stall(perf::Stall::Decode, perf::Clock::now() - wait_start);
-@@ -3876,20 +3920,46 @@ std::uint16_t update_max_seen_v(std::uint16_t seen, std::uint16_t drawn, bool th
-     return drawn > seen ? 512u : seen;
- }
+@@ -3883,18 +3927,30 @@ std::uint16_t update_max_seen_v(std::uint16_t seen, std::uint16_t drawn, bool th
  
-+// Mip level n of a texture as a texture of its own: level 0's format, swizzle
-+// and palette, the level's address, row length and size (the GE's TEXADDRn,
-+// TEXBUFWIDTHn and TEXSIZEn). What decode_texture() decodes the level from.
-+TextureState texture_level(const TextureState &state, std::uint32_t n) {
-+    TextureState level = state;
-+    if (n == 0u || n > state.levels.size()) return level;
-+    const TextureLevel &registers = state.levels[n - 1u];
-+    level.address = registers.address;
-+    level.buffer_width = registers.buffer_width;
-+    level.width = registers.width;
-+    level.height = registers.height;
-+    return level;
-+}
-+
  } // namespace
  
 -// Level 0 only: the mip levels the GE names (TextureState::level_count and
@@ -377,7 +525,7 @@ index 0101e80..9db16f0 100644
      static const bool no_lookup_env = portablekit::env("NO_LOOKUP_CACHE") != nullptr;
      const bool no_lookup_cache = no_lookup_env || perf::alternate_off(perf::NewPath::Lookup);
      ListTexture *memo = nullptr;
-@@ -3897,7 +3967,15 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+@@ -3902,7 +3958,15 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
          memo = last_texture;
      } else {
          auto [entry, inserted] = list_texture_keys.try_emplace(input);
@@ -394,7 +542,7 @@ index 0101e80..9db16f0 100644
          memo = &entry->second;
          last_texture_input = input;
          last_texture = memo;
-@@ -3982,8 +4060,8 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+@@ -3987,8 +4051,8 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
          textures.erase(oldest);
          ++textures_erased;
      }
@@ -405,7 +553,7 @@ index 0101e80..9db16f0 100644
      if (texture.descriptor == VK_NULL_HANDLE) return white_texture;
      if (job) {
          if (!decode_pool) {
-@@ -3991,7 +4069,28 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+@@ -3996,7 +4060,28 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
              decode_pool = std::make_unique<DecodePool>(std::clamp(cores / 2u, 1u, 3u));
          }
          decode_pool->submit(job);
@@ -435,7 +583,7 @@ index 0101e80..9db16f0 100644
      }
      texture.max_seen_v = max_seen_v;
      // The pack's hash reads the whole texture, so it is taken here, once per
-@@ -4003,16 +4102,19 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+@@ -4008,16 +4093,19 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
      return cached;
  }
  
@@ -457,48 +605,19 @@ index 0101e80..9db16f0 100644
      return texture.descriptor;
  }
  
-@@ -4079,8 +4181,68 @@ std::uint32_t texture_bits_per_pixel(TextureFormat format) {
+@@ -4086,6 +4174,39 @@ std::uint32_t framebuffer_bytes_per_pixel(std::uint32_t format) { return format
  
- std::uint32_t framebuffer_bytes_per_pixel(std::uint32_t format) { return format == 3u ? 4u : 2u; }
- 
-+// The bytes decode_texture() reads for a texture: rows of its buffer width
-+// (its width when that is 0), or the blocks of a DXT texture.
-+std::size_t texture_byte_count(const TextureState &state) {
-+    if (state.format == TextureFormat::Dxt1 || state.format == TextureFormat::Dxt3 ||
-+        state.format == TextureFormat::Dxt5) {
-+        const std::size_t blocks = static_cast<std::size_t>((state.width + 3u) / 4u) * ((state.height + 3u) / 4u);
-+        return blocks * (state.format == TextureFormat::Dxt1 ? 8u : 16u);
-+    }
-+    const std::uint32_t stride = state.buffer_width != 0u ? state.buffer_width : state.width;
-+    return static_cast<std::size_t>(stride) * texture_bits_per_pixel(state.format) / 8u * state.height;
-+}
-+
-+// The GE's logarithm for the mip level, in 1/16 levels: a float's exponent and
-+// the top four bits of its mantissa, a piecewise linear log2 floored to 1/16
-+// (PPSSPP's hardware notes, "A float-bits logarithm"). ge.frag has the same.
-+std::int32_t ge_log16(float value) {
-+    std::uint32_t bits{};
-+    std::memcpy(&bits, &value, sizeof(bits));
-+    return static_cast<std::int32_t>((bits >> 19u) & 0xFFFu) - 127 * 16;
-+}
-+
  } // namespace
  
 +std::uint32_t VulkanRenderer::Impl::mip_levels(const GuestMemory &memory, const TextureState &state) {
 +    // <prefix>_NO_MIPMAPS samples every texture at level 0 alone, as before.
 +    static const bool no_mipmaps = portablekit::env("NO_MIPMAPS") != nullptr;
-+    if (no_mipmaps || state.level_count <= 1u || (state.min_filter & 4u) == 0u) return 1u;
-+    const std::uint32_t count =
-+        std::min<std::uint32_t>(state.level_count, 1u + static_cast<std::uint32_t>(state.levels.size()));
++    if (no_mipmaps) return 1u;
++    const std::uint32_t count = sampled_level_count(state);
 +    for (std::uint32_t n = 1u; n < count; ++n) {
 +        const TextureState level = texture_level(state, n);
-+        const std::size_t bytes = texture_byte_count(level);
-+        const char *why = nullptr;
-+        if (level.width != std::max(1u, static_cast<std::uint32_t>(state.width) >> n) ||
-+            level.height != std::max(1u, static_cast<std::uint32_t>(state.height) >> n))
-+            why = "is not half the level before it";
-+        else if (!memory.contains(level.address, bytes))
-+            why = "lies outside guest memory";
++        const std::size_t bytes = texture_bytes(level);
++        const char *why = mip_level_problem(memory, state, n);
 +        if (why == nullptr) {
 +            const std::uint64_t first = GuestMemory::canonical(level.address);
 +            for (const auto &[address, target] : targets) {
@@ -526,7 +645,7 @@ index 0101e80..9db16f0 100644
  // <prefix>_TRACE_FB_TEXTURES: every distinct texture whose memory overlaps a
  // guest framebuffer the renderer has drawn to, once, with where it is drawn.
  void VulkanRenderer::Impl::trace_framebuffer_texture(const DrawCall &call) {
-@@ -5200,7 +5362,8 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
+@@ -5188,7 +5309,8 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
      vkDeviceWaitIdle(impl.device);
      const auto rewrite = [&](Impl::Texture &texture) {
          if (texture.descriptor == VK_NULL_HANDLE) return;
@@ -536,7 +655,7 @@ index 0101e80..9db16f0 100644
          VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
          write.dstSet = texture.descriptor;
          write.descriptorCount = 1u;
-@@ -6275,6 +6438,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6263,6 +6385,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      if (trace_fb && call.texture.enabled && !call.clear_mode) impl.trace_framebuffer_texture(call);
  
      VkDescriptorSet texture_descriptor = impl.white_texture.descriptor;
@@ -544,7 +663,7 @@ index 0101e80..9db16f0 100644
      if (call.texture.enabled && !call.clear_mode) {
          const Impl::FramebufferTexture &source = framebuffer_source;
          const VkDescriptorSet copy =
-@@ -6297,13 +6461,47 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6285,13 +6408,47 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                                   (uv[2] * width + static_cast<float>(source.x)) / static_cast<float>(kPspWidth),
                                   (uv[3] * height + static_cast<float>(source.y)) / static_cast<float>(kPspHeight)};
          } else {
@@ -593,7 +712,7 @@ index 0101e80..9db16f0 100644
  
      if (!impl.pass_active || impl.current_target != call.target.color_address) {
          impl.end_pass();
-@@ -8101,6 +8299,8 @@ void VulkanRenderer::shutdown() {
+@@ -8051,6 +8208,8 @@ void VulkanRenderer::shutdown() {
      vkDestroySampler(impl.device, impl.sharp_sampler, nullptr);
      vkDestroySampler(impl.device, impl.clamp_sampler, nullptr);
      vkDestroySampler(impl.device, impl.clamp_sharp_sampler, nullptr);

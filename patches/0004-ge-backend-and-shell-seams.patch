@@ -1,15 +1,14 @@
 diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
-index caed1c4..b6b9ce3 100644
+index caed1c4..774a7cd 100644
 --- a/cmake/PortableKit.cmake
 +++ b/cmake/PortableKit.cmake
-@@ -34,10 +34,17 @@ set(PORTABLEKIT_HOST_SOURCES
+@@ -34,10 +34,16 @@ set(PORTABLEKIT_HOST_SOURCES
      host/audio/sas_core.cpp
      host/camera_probe.cpp
      host/camera/camera_input.cpp
 +    host/gpu/ge_backend.cpp
      host/gpu/ge_state.cpp
 +    host/gpu/null_backend.cpp
-+    host/gpu/record_backend.cpp
      host/gpu/texture_decode.cpp
      host/input/bindings.cpp
      host/input/touch_controls.cpp
@@ -20,7 +19,7 @@ index caed1c4..b6b9ce3 100644
      host/gpu/texture_pack.cpp
      host/gpu/texture_pack_import.cpp
      host/perf/frame_stats.cpp
-@@ -94,7 +101,10 @@ set(PORTABLEKIT_RENDERER_SOURCES
+@@ -94,7 +100,10 @@ set(PORTABLEKIT_RENDERER_SOURCES
      host/gpu/frame_interpolation.cpp
      host/gpu/frame_pacing.cpp
      host/gpu/replacement_textures.cpp
@@ -33,69 +32,34 @@ index caed1c4..b6b9ce3 100644
      host/ui/input_script.cpp
 diff --git a/host/gpu/ge_backend.cpp b/host/gpu/ge_backend.cpp
 new file mode 100644
-index 0000000..f336930
+index 0000000..50f2f75
 --- /dev/null
 +++ b/host/gpu/ge_backend.cpp
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,73 @@
 +#include "ge_backend.hpp"
 +
 +#include "../profile.hpp"
++#include "../registry.hpp"
 +
-+#include <algorithm>
 +#include <fstream>
 +#include <utility>
 +
 +namespace portablekit::gpu {
 +namespace {
 +
-+struct Entry {
-+    std::string name;
-+    std::string description;
-+    BackendFactory factory;
-+};
-+
-+// Made on first use, so it is there for registrations that run before main().
-+std::vector<Entry> &registry() {
-+    static std::vector<Entry> entries;
-+    return entries;
-+}
-+
-+const Entry *find(std::string_view name) {
-+    for (const Entry &entry : registry())
-+        if (entry.name == name) return &entry;
-+    return nullptr;
-+}
++Registry<GeBackend> &backends() { return Registry<GeBackend>::get(); }
 +
 +} // namespace
 +
 +void register_backend(std::string name, BackendFactory factory, std::string description) {
-+    for (Entry &entry : registry()) {
-+        if (entry.name == name) {
-+            entry.factory = std::move(factory);
-+            entry.description = std::move(description);
-+            return;
-+        }
-+    }
-+    registry().push_back({std::move(name), std::move(description), std::move(factory)});
++    backends().add(std::move(name), std::move(factory), std::move(description));
 +}
 +
-+std::unique_ptr<GeBackend> make_backend(std::string_view name) {
-+    const Entry *entry = find(name);
-+    if (entry == nullptr || !entry->factory) return nullptr;
-+    return entry->factory();
-+}
++std::unique_ptr<GeBackend> make_backend(std::string_view name) { return backends().make(name); }
 +
-+std::vector<std::string> backend_names() {
-+    std::vector<std::string> names;
-+    names.reserve(registry().size());
-+    for (const Entry &entry : registry()) names.push_back(entry.name);
-+    return names;
-+}
++std::vector<std::string> backend_names() { return backends().names(); }
 +
-+std::string backend_description(std::string_view name) {
-+    const Entry *entry = find(name);
-+    return entry != nullptr ? entry->description : std::string{};
-+}
++std::string backend_description(std::string_view name) { return backends().description(name); }
 +
 +std::string selected_backend() {
 +    const char *name = portablekit::env("GE_BACKEND");
@@ -106,7 +70,10 @@ index 0000000..f336930
 +    register_backend(name, std::move(factory), description != nullptr ? description : "");
 +}
 +
-+std::vector<std::uint8_t> encode_bmp(const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height) {
++// Moved here from the Vulkan renderer, so a backend without it (null) writes
++// the same file.
++bool write_bmp(const std::string &path, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
++               bool bgra) {
 +    const std::uint32_t row_bytes = (width * 3u + 3u) & ~3u;
 +    const std::uint32_t image_bytes = row_bytes * height;
 +    std::vector<std::uint8_t> file(54u + image_bytes, 0u);
@@ -130,16 +97,11 @@ index 0000000..f336930
 +        const std::uint8_t *source = pixels + static_cast<std::size_t>(y) * width * 4u;
 +        std::uint8_t *destination = file.data() + 54u + static_cast<std::size_t>(height - 1u - y) * row_bytes;
 +        for (std::uint32_t x = 0; x < width; ++x) {
-+            destination[x * 3u + 0u] = source[x * 4u + 2u];
++            destination[x * 3u + 0u] = source[x * 4u + (bgra ? 0u : 2u)];
 +            destination[x * 3u + 1u] = source[x * 4u + 1u];
-+            destination[x * 3u + 2u] = source[x * 4u + 0u];
++            destination[x * 3u + 2u] = source[x * 4u + (bgra ? 2u : 0u)];
 +        }
 +    }
-+    return file;
-+}
-+
-+bool write_bmp_file(const std::string &path, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height) {
-+    const std::vector<std::uint8_t> file = encode_bmp(pixels, width, height);
 +    std::ofstream out(path, std::ios::binary);
 +    if (!out) return false;
 +    out.write(reinterpret_cast<const char *>(file.data()), static_cast<std::streamsize>(file.size()));
@@ -149,10 +111,10 @@ index 0000000..f336930
 +} // namespace portablekit::gpu
 diff --git a/host/gpu/ge_backend.hpp b/host/gpu/ge_backend.hpp
 new file mode 100644
-index 0000000..5ddd2df
+index 0000000..12120b8
 --- /dev/null
 +++ b/host/gpu/ge_backend.hpp
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,169 @@
 +#pragma once
 +
 +// The GE backend seam: what the PSP's graphics engine did (render targets in
@@ -169,8 +131,6 @@ index 0000000..5ddd2df
 +//           so it needs the window (needs_window()).
 +//   null    draws nothing, shows a black image and counts draws
 +//           (null_backend.cpp). Needs no window and no GPU.
-+//   record  wraps another backend and writes what it is asked to a .gerec
-+//           file (record_backend.cpp, ge_record_format.hpp).
 +// <prefix>_GE_BACKEND names the one to use (vulkan when unset). A backend in
 +// the game's own sources adds itself with a BackendRegistration; the file has
 +// to be linked into the program directly, not through a static library, or
@@ -214,7 +174,7 @@ index 0000000..5ddd2df
 +enum class ImageApi : std::uint8_t {
 +    None,    // nothing to show
 +    Cpu,     // `pixels` in host memory
-+    Vulkan,  // `image` is a VkImage, `view` its VkImageView
++    Vulkan,  // the Vulkan renderer's own target, which its shell shows by display address
 +    Metal,   // `image` is an id<MTLTexture>
 +};
 +
@@ -223,14 +183,12 @@ index 0000000..5ddd2df
 +// Handles are owned by the backend and stay valid until the next call into it.
 +struct PresentedImage {
 +    ImageApi api{ImageApi::None};
-+    std::uint32_t address{};  // the display address the image shows
 +    std::uint32_t width{};    // in pixels (a multiple of 480x272 at the internal scale)
 +    std::uint32_t height{};
 +    // Cpu: rows of width RGBA pixels, red in the low byte.
 +    const std::uint8_t *pixels{};
-+    // Vulkan and Metal: the API's handles as integers.
++    // Metal: the texture's handle as an integer.
 +    std::uint64_t image{};
-+    std::uint64_t view{};
 +
 +    [[nodiscard]] bool valid() const noexcept { return api != ImageApi::None; }
 +};
@@ -242,8 +200,6 @@ index 0000000..5ddd2df
 +    GeBackend &operator=(const GeBackend &) = delete;
 +    virtual ~GeBackend() = default;
 +
-+    // The name it is registered under.
-+    [[nodiscard]] virtual const char *name() const noexcept = 0;
 +    // True when it cannot be made without the window shell (BackendConfig::
 +    // vulkan_shell). Asked before initialize(), so the HLE knows whether a run
 +    // without a window (<prefix>_NO_RENDER) can have it.
@@ -321,431 +277,19 @@ index 0000000..5ddd2df
 +inline constexpr std::uint32_t kScreenWidth = 480u;
 +inline constexpr std::uint32_t kScreenHeight = 272u;
 +
-+// `width` x `height` RGBA pixels (red in the low byte), top row first, as a
-+// 24-bit bottom-up BMP, the format the Vulkan renderer's captures have.
-+[[nodiscard]] std::vector<std::uint8_t> encode_bmp(const std::uint8_t *pixels, std::uint32_t width,
-+                                                   std::uint32_t height);
-+bool write_bmp_file(const std::string &path, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height);
++// Writes `width` x `height` 4-byte pixels, top row first (RGBA, red in the low
++// byte, or BGRA when `bgra`), as a 24-bit bottom-up BMP: no encoder needed and
++// every viewer reads it. Every capture is one; false when it cannot be written.
++bool write_bmp(const std::string &path, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
++               bool bgra = false);
 +
 +} // namespace portablekit::gpu
-diff --git a/host/gpu/ge_record_format.hpp b/host/gpu/ge_record_format.hpp
-new file mode 100644
-index 0000000..8a65930
---- /dev/null
-+++ b/host/gpu/ge_record_format.hpp
-@@ -0,0 +1,406 @@
-+#pragma once
-+
-+// The .gerec file: the calls the shell made on a GE backend (ge_backend.hpp),
-+// as the record backend (record_backend.cpp) saw them, with the guest memory
-+// each call read, so that they can be fed to any backend outside the game and
-+// the presented images compared.
-+//
-+// A file is the 8 bytes "PKGEREC\0", a u32 format version (kVersion), then
-+// records. A record is a u8 kind, a u32 payload size and the payload.
-+// Everything is little endian. Structures are written field by field in the
-+// order ge_state.hpp declares them, without padding: bool is one byte, a
-+// string is a u32 length and its bytes, a vector a u32 count and its
-+// elements. A reader skips kinds it does not know by their size; kinds and the
-+// fields of a record only ever grow at the end, so a reader for this version
-+// reads later ones.
-+//
-+//   Begin           u32 first frame, u32 frames asked for, string inner backend, string environment prefix,
-+//                   u64 frames presented and u64 draws submitted by the inner backend before the first frame
-+//   Memory          u32 address, u32 size, the bytes: guest memory as the call after it reads it. Written for
-+//                   each range a call reads (texture texels and palette, a block transfer's source rows) that
-+//                   differs from what the recording last wrote for that range; the first one is the whole of
-+//                   VRAM where the recording begins
-+//   Words           u32 address, u32 step, u32 count, then count u32: one guest word every `step` bytes of a
-+//                   render target's area, at the first draw into it in each frame (what a backend compares to
-+//                   tell whether the CPU wrote under a target it samples as a texture)
-+//   DisplayList     nothing: begin_display_list()
-+//   Draw            a DrawCall (Writer::put(DrawCall)): submit(). Three parts came after the first recordings
-+//                   and end it: the texture map state (four u32: map mode, projection source, the two shade
-+//                   lights; a Draw that ends before it reads as map mode 0), then the texture's mip levels,
-+//                   fields of TextureState written apart (Writer::put_levels: u32 level count, seven times
-+//                   u32 address, u32 buffer width, u16 width, u16 height for levels 1 to 7, u32 level mode,
-+//                   s32 level bias, f32 LOD slope; a Draw that ends before them reads as one level), then the
-+//                   colour test (u8 enabled, u32 function, u32 reference, u32 mask), dithering (u8 enabled,
-+//                   four u32 matrix rows) and u8 CLIPENABLE (kPixelBytes; a Draw that ends before them reads
-+//                   as no colour test, no dithering and CLIPENABLE off)
-+//   Transfer        a BlockTransfer: block_transfer(), followed by Memory records of the source rows as the
-+//                   copy reads them, after the backend's read-back. The shell then copies the rows itself
-+//   ReadBack        u32 address: read_back_framebuffer()
-+//   WriteBackFrame  nothing: write_back_frame()
-+//   WriteBackDepth  u32 colour address, u32 depth address, u32 depth stride, u8 whether it wrote, string why
-+//   Upload          u32 display address, u32 width, u32 height, then width x height RGBA pixels: upload_frame()
-+//   FrameEnd        u32 frame number (frames_presented() of the inner backend once it was shown), u32 display
-+//                   address asked for, u64 frames presented, u64 draws submitted (the inner backend's own
-+//                   counters, cumulative), u32 draws and u32 records in this frame, u8 ImageApi of the presented
-+//                   image, u32 width, u32 height, u32 size and the bytes of the image as capture_frame() wrote it
-+//                   (a BMP; size 0 when there was none)
-+//   End             u32 frames recorded, u64 records in the file before this one
-+//
-+// A frame is the records after the FrameEnd before it (or after Begin) up to its own.
-+#include "ge_backend.hpp"
-+#include "ge_state.hpp"
-+
-+#include <array>
-+#include <cstdint>
-+#include <cstring>
-+#include <string>
-+#include <vector>
-+
-+namespace portablekit::gpu::gerec {
-+
-+inline constexpr char kMagic[8] = {'P', 'K', 'G', 'E', 'R', 'E', 'C', '\0'};
-+inline constexpr std::uint32_t kVersion = 1u;
-+
-+enum class Kind : std::uint8_t {
-+    Begin = 1,
-+    Memory = 2,
-+    Words = 3,
-+    DisplayList = 4,
-+    Draw = 5,
-+    Transfer = 6,
-+    ReadBack = 7,
-+    WriteBackFrame = 8,
-+    WriteBackDepth = 9,
-+    Upload = 10,
-+    FrameEnd = 11,
-+    End = 12,
-+};
-+
-+inline const char *kind_name(Kind kind) {
-+    switch (kind) {
-+    case Kind::Begin: return "Begin";
-+    case Kind::Memory: return "Memory";
-+    case Kind::Words: return "Words";
-+    case Kind::DisplayList: return "DisplayList";
-+    case Kind::Draw: return "Draw";
-+    case Kind::Transfer: return "Transfer";
-+    case Kind::ReadBack: return "ReadBack";
-+    case Kind::WriteBackFrame: return "WriteBackFrame";
-+    case Kind::WriteBackDepth: return "WriteBackDepth";
-+    case Kind::Upload: return "Upload";
-+    case Kind::FrameEnd: return "FrameEnd";
-+    case Kind::End: return "End";
-+    }
-+    return "?";
-+}
-+
-+// The number of bone matrix floats a Draw carries when it has them.
-+inline constexpr std::uint32_t kBoneFloats = 96u;
-+// The bytes of a Draw's mip level fields (Writer::put_levels).
-+inline constexpr std::uint32_t kLevelBytes = 4u + 7u * 12u + 12u;
-+// The bytes of a Draw's last part: the colour test, dithering and CLIPENABLE.
-+inline constexpr std::uint32_t kPixelBytes = 13u + 17u + 1u;
-+
-+class Writer {
-+public:
-+    std::vector<std::uint8_t> bytes;
-+
-+    void u8(std::uint8_t value) { bytes.push_back(value); }
-+    void flag(bool value) { bytes.push_back(value ? 1u : 0u); }
-+    void u16(std::uint16_t value) { raw(&value, sizeof value); }
-+    void u32(std::uint32_t value) { raw(&value, sizeof value); }
-+    void u64(std::uint64_t value) { raw(&value, sizeof value); }
-+    void f32(float value) { raw(&value, sizeof value); }
-+    void raw(const void *data, std::size_t size) {
-+        const auto *first = static_cast<const std::uint8_t *>(data);
-+        bytes.insert(bytes.end(), first, first + size);
-+    }
-+    void string(const std::string &value) {
-+        u32(static_cast<std::uint32_t>(value.size()));
-+        raw(value.data(), value.size());
-+    }
-+    template <std::size_t N> void floats(const std::array<float, N> &values) {
-+        for (const float value : values) f32(value);
-+    }
-+
-+    void put(const Vertex &v) {
-+        floats(v.position), floats(v.normal), floats(v.texcoord);
-+        u32(v.color);
-+    }
-+    void put(const TextureState &v) {
-+        flag(v.enabled), u32(v.address), u32(v.buffer_width), u16(v.width), u16(v.height);
-+        u8(static_cast<std::uint8_t>(v.format)), flag(v.swizzled);
-+        u32(v.clut_address), u32(v.clut_format), u32(v.clut_shift), u32(v.clut_mask), u32(v.clut_offset);
-+        u32(v.clut_format_word), u32(v.clut_load_bytes), u32(v.clut_max_bytes);
-+        u32(v.function), flag(v.alpha_from_texture), u32(v.min_filter), u32(v.mag_filter), u32(v.wrap_s),
-+            u32(v.wrap_t);
-+        f32(v.scale_u), f32(v.scale_v), f32(v.offset_u), f32(v.offset_v);
-+    }
-+    void put(const RenderTarget &v) {
-+        u32(v.color_address), u32(v.color_stride), u32(v.color_format), u32(v.depth_address), u32(v.depth_stride);
-+    }
-+    void put(const BlendState &v) {
-+        flag(v.enabled), u32(v.source_factor), u32(v.destination_factor), u32(v.equation), u32(v.fixed_source),
-+            u32(v.fixed_destination);
-+    }
-+    void put(const DepthState &v) {
-+        flag(v.test_enabled), flag(v.write_enabled), u32(v.function), u16(v.range_near), u16(v.range_far);
-+    }
-+    void put(const AlphaTestState &v) { flag(v.enabled), u32(v.function), u32(v.reference), u32(v.mask); }
-+    void put(const StencilState &v) {
-+        flag(v.enabled), u32(v.function), u32(v.reference), u32(v.mask), u32(v.fail_op), u32(v.depth_fail_op),
-+            u32(v.pass_op);
-+    }
-+    void put(const ViewportState &v) {
-+        f32(v.x_scale), f32(v.y_scale), f32(v.z_scale), f32(v.x_offset), f32(v.y_offset), f32(v.z_offset);
-+        u32(v.scissor_x1), u32(v.scissor_y1), u32(v.scissor_x2), u32(v.scissor_y2);
-+        f32(v.offset_x), f32(v.offset_y);
-+    }
-+    void put(const LightState &v) {
-+        flag(v.enabled), u32(v.kind), u32(v.type);
-+        floats(v.position), floats(v.direction), floats(v.attenuation);
-+        f32(v.spot_exponent), f32(v.spot_cutoff), u32(v.ambient), u32(v.diffuse), u32(v.specular);
-+    }
-+    void put(const LightingState &v) {
-+        u32(v.material_update), u32(v.material_emissive), u32(v.material_diffuse), u32(v.material_specular);
-+        f32(v.specular_power), u32(v.ambient_color), u32(v.ambient_alpha), u32(v.mode), flag(v.reverse_normals);
-+        for (const LightState &light : v.lights) put(light);
-+    }
-+    void put(const FogState &v) { flag(v.enabled), f32(v.end), f32(v.scale), u32(v.color); }
-+    void put(const TextureMapState &v) {
-+        u32(v.map_mode), u32(v.proj_source), u32(v.shade_light_u), u32(v.shade_light_v);
-+    }
-+    // The mip level fields of TextureState, which put(TextureState) leaves out
-+    // so that a Draw's earlier fields keep their place: kLevelBytes bytes.
-+    void put_levels(const TextureState &v) {
-+        u32(v.level_count);
-+        for (const TextureLevel &level : v.levels)
-+            u32(level.address), u32(level.buffer_width), u16(level.width), u16(level.height);
-+        u32(v.level_mode), u32(static_cast<std::uint32_t>(v.level_bias)), f32(v.lod_slope);
-+    }
-+    void put(const ColorTestState &v) { flag(v.enabled), u32(v.function), u32(v.reference), u32(v.mask); }
-+    void put(const DitherState &v) {
-+        flag(v.enabled);
-+        for (const std::uint32_t row : v.rows) u32(row);
-+    }
-+    // Raw vertices and bone matrices are written as the bytes they point at:
-+    // u32 byte count and the bytes (raw_count x raw_stride, none when the draw
-+    // was decoded), then u8 1 and the 96 floats when the draw has bones.
-+    void put(const DrawCall &v) {
-+        u8(static_cast<std::uint8_t>(v.primitive));
-+        u32(static_cast<std::uint32_t>(v.vertices.size()));
-+        for (const Vertex &vertex : v.vertices) put(vertex);
-+        u32(static_cast<std::uint32_t>(v.indices.size()));
-+        for (const std::uint16_t index : v.indices) u16(index);
-+        flag(v.through);
-+        put(v.texture), put(v.target), put(v.blend), put(v.depth), put(v.alpha_test), put(v.viewport);
-+        flag(v.culling_enabled), flag(v.cull_clockwise), flag(v.clear_mode), u32(v.clear_flags);
-+        u32(v.vertex_type), u32(v.vertex_address), u32(v.index_address), u32(v.primitive_count);
-+        u32(v.material_color), flag(v.lighting_enabled), flag(v.has_vertex_color);
-+        put(v.lighting), put(v.fog);
-+        u64(v.environment_version), u64(v.material_version);
-+        floats(v.world), floats(v.view), floats(v.projection), floats(v.texture_matrix);
-+        const std::uint32_t raw_bytes = v.raw_vertices != nullptr ? v.raw_count * v.raw_stride : 0u;
-+        u32(v.raw_count), u32(v.raw_stride), u32(raw_bytes);
-+        if (raw_bytes != 0u) raw(v.raw_vertices, raw_bytes);
-+        flag(v.bone_matrices != nullptr);
-+        if (v.bone_matrices != nullptr)
-+            for (std::uint32_t i = 0; i < kBoneFloats; ++i) f32(v.bone_matrices[i]);
-+        put(v.stencil);
-+        u32(v.color_write_mask), u32(v.alpha_write_mask);
-+        put(v.texture_map);
-+        put_levels(v.texture);
-+        put(v.color_test), put(v.dither), flag(v.clip_enabled);
-+    }
-+    void put(const BlockTransfer &v) {
-+        u32(v.source), u32(v.source_stride), u32(v.source_x), u32(v.source_y);
-+        u32(v.destination), u32(v.destination_stride), u32(v.destination_x), u32(v.destination_y);
-+        u32(v.width), u32(v.height), u32(v.bytes_per_pixel);
-+    }
-+};
-+
-+// A Draw as read back: the call, and the bytes its raw vertex and bone
-+// pointers point into (valid as long as the RecordedDraw is not moved).
-+struct RecordedDraw {
-+    DrawCall call;
-+    std::vector<std::uint8_t> raw_vertices;
-+    std::array<float, kBoneFloats> bones{};
-+};
-+
-+class Reader {
-+public:
-+    Reader(const std::uint8_t *data, std::size_t size) : data_(data), size_(size) {}
-+
-+    [[nodiscard]] bool ok() const noexcept { return !failed_; }
-+    [[nodiscard]] std::size_t remaining() const noexcept { return size_ - at_; }
-+    [[nodiscard]] const std::uint8_t *here() const noexcept { return data_ + at_; }
-+    void skip(std::size_t size) {
-+        if (size > remaining()) failed_ = true;
-+        else at_ += size;
-+    }
-+
-+    std::uint8_t u8() { return take<std::uint8_t>(); }
-+    bool flag() { return take<std::uint8_t>() != 0u; }
-+    std::uint16_t u16() { return take<std::uint16_t>(); }
-+    std::uint32_t u32() { return take<std::uint32_t>(); }
-+    std::uint64_t u64() { return take<std::uint64_t>(); }
-+    float f32() { return take<float>(); }
-+    std::string string() {
-+        const std::uint32_t size = u32();
-+        if (size > remaining()) {
-+            failed_ = true;
-+            return {};
-+        }
-+        std::string value(reinterpret_cast<const char *>(here()), size);
-+        at_ += size;
-+        return value;
-+    }
-+    template <std::size_t N> void floats(std::array<float, N> &values) {
-+        for (float &value : values) value = f32();
-+    }
-+
-+    void get(Vertex &v) {
-+        floats(v.position), floats(v.normal), floats(v.texcoord);
-+        v.color = u32();
-+    }
-+    void get(TextureState &v) {
-+        v.enabled = flag(), v.address = u32(), v.buffer_width = u32(), v.width = u16(), v.height = u16();
-+        v.format = static_cast<TextureFormat>(u8()), v.swizzled = flag();
-+        v.clut_address = u32(), v.clut_format = u32(), v.clut_shift = u32(), v.clut_mask = u32();
-+        v.clut_offset = u32(), v.clut_format_word = u32(), v.clut_load_bytes = u32(), v.clut_max_bytes = u32();
-+        v.function = u32(), v.alpha_from_texture = flag(), v.min_filter = u32(), v.mag_filter = u32();
-+        v.wrap_s = u32(), v.wrap_t = u32();
-+        v.scale_u = f32(), v.scale_v = f32(), v.offset_u = f32(), v.offset_v = f32();
-+    }
-+    void get(RenderTarget &v) {
-+        v.color_address = u32(), v.color_stride = u32(), v.color_format = u32(), v.depth_address = u32();
-+        v.depth_stride = u32();
-+    }
-+    void get(BlendState &v) {
-+        v.enabled = flag(), v.source_factor = u32(), v.destination_factor = u32(), v.equation = u32();
-+        v.fixed_source = u32(), v.fixed_destination = u32();
-+    }
-+    void get(DepthState &v) {
-+        v.test_enabled = flag(), v.write_enabled = flag(), v.function = u32(), v.range_near = u16();
-+        v.range_far = u16();
-+    }
-+    void get(AlphaTestState &v) { v.enabled = flag(), v.function = u32(), v.reference = u32(), v.mask = u32(); }
-+    void get(StencilState &v) {
-+        v.enabled = flag(), v.function = u32(), v.reference = u32(), v.mask = u32(), v.fail_op = u32();
-+        v.depth_fail_op = u32(), v.pass_op = u32();
-+    }
-+    void get(ViewportState &v) {
-+        v.x_scale = f32(), v.y_scale = f32(), v.z_scale = f32(), v.x_offset = f32(), v.y_offset = f32();
-+        v.z_offset = f32();
-+        v.scissor_x1 = u32(), v.scissor_y1 = u32(), v.scissor_x2 = u32(), v.scissor_y2 = u32();
-+        v.offset_x = f32(), v.offset_y = f32();
-+    }
-+    void get(LightState &v) {
-+        v.enabled = flag(), v.kind = u32(), v.type = u32();
-+        floats(v.position), floats(v.direction), floats(v.attenuation);
-+        v.spot_exponent = f32(), v.spot_cutoff = f32(), v.ambient = u32(), v.diffuse = u32(), v.specular = u32();
-+    }
-+    void get(LightingState &v) {
-+        v.material_update = u32(), v.material_emissive = u32(), v.material_diffuse = u32();
-+        v.material_specular = u32(), v.specular_power = f32(), v.ambient_color = u32(), v.ambient_alpha = u32();
-+        v.mode = u32(), v.reverse_normals = flag();
-+        for (LightState &light : v.lights) get(light);
-+    }
-+    void get(FogState &v) { v.enabled = flag(), v.end = f32(), v.scale = f32(), v.color = u32(); }
-+    void get(TextureMapState &v) {
-+        v.map_mode = u32(), v.proj_source = u32(), v.shade_light_u = u32(), v.shade_light_v = u32();
-+    }
-+    void get_levels(TextureState &v) {
-+        v.level_count = u32();
-+        for (TextureLevel &level : v.levels)
-+            level.address = u32(), level.buffer_width = u32(), level.width = u16(), level.height = u16();
-+        v.level_mode = u32(), v.level_bias = static_cast<std::int32_t>(u32()), v.lod_slope = f32();
-+    }
-+    void get(ColorTestState &v) { v.enabled = flag(), v.function = u32(), v.reference = u32(), v.mask = u32(); }
-+    void get(DitherState &v) {
-+        v.enabled = flag();
-+        for (std::uint32_t &row : v.rows) row = u32();
-+    }
-+    void get(RecordedDraw &draw) {
-+        DrawCall &v = draw.call;
-+        v.primitive = static_cast<PrimitiveType>(u8());
-+        const std::uint32_t vertices = u32();
-+        if (static_cast<std::uint64_t>(vertices) * 40u > remaining()) {
-+            failed_ = true;
-+            return;
-+        }
-+        v.vertices.resize(vertices);
-+        for (Vertex &vertex : v.vertices) get(vertex);
-+        const std::uint32_t indices = u32();
-+        if (static_cast<std::uint64_t>(indices) * 2u > remaining()) {
-+            failed_ = true;
-+            return;
-+        }
-+        v.indices.resize(indices);
-+        for (std::uint16_t &index : v.indices) index = u16();
-+        v.through = flag();
-+        get(v.texture), get(v.target), get(v.blend), get(v.depth), get(v.alpha_test), get(v.viewport);
-+        v.culling_enabled = flag(), v.cull_clockwise = flag(), v.clear_mode = flag(), v.clear_flags = u32();
-+        v.vertex_type = u32(), v.vertex_address = u32(), v.index_address = u32(), v.primitive_count = u32();
-+        v.material_color = u32(), v.lighting_enabled = flag(), v.has_vertex_color = flag();
-+        get(v.lighting), get(v.fog);
-+        v.environment_version = u64(), v.material_version = u64();
-+        floats(v.world), floats(v.view), floats(v.projection), floats(v.texture_matrix);
-+        v.raw_count = u32(), v.raw_stride = u32();
-+        const std::uint32_t raw_bytes = u32();
-+        if (raw_bytes > remaining()) {
-+            failed_ = true;
-+            return;
-+        }
-+        draw.raw_vertices.assign(here(), here() + raw_bytes);
-+        at_ += raw_bytes;
-+        v.raw_vertices = raw_bytes != 0u ? draw.raw_vertices.data() : nullptr;
-+        if (flag()) {
-+            for (float &value : draw.bones) value = f32();
-+            v.bone_matrices = draw.bones.data();
-+        } else {
-+            v.bone_matrices = nullptr;
-+        }
-+        get(v.stencil);
-+        v.color_write_mask = u32(), v.alpha_write_mask = u32();
-+        // Added after the format's first recordings, which end here: they
-+        // drew every draw with its UVs.
-+        v.texture_map = {};
-+        if (remaining() >= 16u) get(v.texture_map);
-+        // Added after that (patch 0014): recordings without them drew level 0.
-+        v.texture.level_count = 1u;
-+        v.texture.levels = {};
-+        v.texture.level_mode = 0u, v.texture.level_bias = 0, v.texture.lod_slope = 0.0f;
-+        if (remaining() >= kLevelBytes) get_levels(v.texture);
-+        // Added after that (patch 0017): recordings without them kept every
-+        // fragment, dithered nothing and clipped at both depth planes.
-+        v.color_test = {};
-+        v.dither = {};
-+        v.clip_enabled = false;
-+        if (remaining() >= kPixelBytes) get(v.color_test), get(v.dither), v.clip_enabled = flag();
-+    }
-+    void get(BlockTransfer &v) {
-+        v.source = u32(), v.source_stride = u32(), v.source_x = u32(), v.source_y = u32();
-+        v.destination = u32(), v.destination_stride = u32(), v.destination_x = u32(), v.destination_y = u32();
-+        v.width = u32(), v.height = u32(), v.bytes_per_pixel = u32();
-+    }
-+
-+private:
-+    template <typename T> T take() {
-+        T value{};
-+        if (sizeof(T) > remaining()) {
-+            failed_ = true;
-+            return value;
-+        }
-+        std::memcpy(&value, data_ + at_, sizeof(T));
-+        at_ += sizeof(T);
-+        return value;
-+    }
-+
-+    const std::uint8_t *data_;
-+    std::size_t size_;
-+    std::size_t at_{};
-+    bool failed_{};
-+};
-+
-+} // namespace portablekit::gpu::gerec
 diff --git a/host/gpu/null_backend.cpp b/host/gpu/null_backend.cpp
 new file mode 100644
-index 0000000..9d75e35
+index 0000000..fad181d
 --- /dev/null
 +++ b/host/gpu/null_backend.cpp
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,107 @@
 +// A GE backend that draws nothing: it accepts every call, shows a black
 +// image and counts the draws. The smallest thing that satisfies the seam
 +// (ge_backend.hpp), and the file to copy when starting a new backend.
@@ -769,8 +313,6 @@ index 0000000..9d75e35
 +class NullBackend final : public GeBackend {
 +public:
 +    ~NullBackend() override { shutdown(); }
-+
-+    const char *name() const noexcept override { return "null"; }
 +
 +    bool initialize(const BackendConfig &, std::string &) override {
 +        // Opaque black, as a cleared target shows.
@@ -807,12 +349,11 @@ index 0000000..9d75e35
 +        ++uploads_;
 +    }
 +
-+    PresentedImage present_image(std::uint32_t display_address) override {
++    PresentedImage present_image(std::uint32_t) override {
 +        ++frames_;
 +        if (frames_ % kReportEvery == 0u) report();
 +        PresentedImage image;
 +        image.api = ImageApi::Cpu;
-+        image.address = display_address;
 +        image.width = kScreenWidth;
 +        image.height = kScreenHeight;
 +        image.pixels = black_.data();
@@ -820,7 +361,7 @@ index 0000000..9d75e35
 +    }
 +
 +    bool capture_frame(const std::string &path) override {
-+        return frames_ != 0u && write_bmp_file(path, black_.data(), kScreenWidth, kScreenHeight);
++        return frames_ != 0u && write_bmp(path, black_.data(), kScreenWidth, kScreenHeight);
 +    }
 +
 +    std::uint64_t draws_submitted() const noexcept override { return draws_; }
@@ -856,447 +397,12 @@ index 0000000..9d75e35
 +
 +} // namespace
 +} // namespace portablekit::gpu
-diff --git a/host/gpu/record_backend.cpp b/host/gpu/record_backend.cpp
-new file mode 100644
-index 0000000..b864fe7
---- /dev/null
-+++ b/host/gpu/record_backend.cpp
-@@ -0,0 +1,429 @@
-+// A GE backend that records: it wraps another backend, hands it every call
-+// unchanged, and writes the calls of some frames, the guest memory they read
-+// and the image each frame presented to a .gerec file (ge_record_format.hpp),
-+// for replaying them into any backend outside the game.
-+//
-+//   <prefix>_GE_BACKEND=record
-+//   <prefix>_GE_RECORD=<file>          the recording (nothing is recorded without it)
-+//   <prefix>_GE_RECORD_INNER=<name>    the backend that draws (default vulkan)
-+//   <prefix>_GE_RECORD_AT=<frame>      the first frame recorded (default 1)
-+//   <prefix>_GE_RECORD_FRAMES=<n>      how many frames (default 3)
-+//
-+// Frames are numbered as the inner backend counts them (frames_presented()
-+// once the frame has been shown), which is the number the HLE's
-+// "[render] frame N (D draws)" capture lines carry. A frame runs from one
-+// begin_frame() to the next; the image is taken with the inner backend's
-+// capture_frame() at the begin_frame() after the flip, once the shell has
-+// shown it. Each recorded frame prints a line of that same form, with the
-+// inner backend's own counters.
-+#include "ge_backend.hpp"
-+#include "ge_record_format.hpp"
-+
-+#include "../profile.hpp"
-+
-+#include <algorithm>
-+#include <cstdlib>
-+#include <cstring>
-+#include <filesystem>
-+#include <fstream>
-+#include <iostream>
-+#include <iterator>
-+#include <map>
-+#include <set>
-+#include <utility>
-+
-+namespace portablekit::gpu {
-+namespace {
-+
-+using gerec::Kind;
-+using gerec::Writer;
-+
-+std::uint64_t env_number(const char *name, std::uint64_t fallback) {
-+    const char *text = portablekit::env(name);
-+    if (text == nullptr || *text == '\0') return fallback;
-+    return std::strtoull(text, nullptr, 10);
-+}
-+
-+// FNV-1a over 8-byte words: whether a range changed since it was last written.
-+std::uint64_t content_hash(const std::uint8_t *data, std::size_t size) {
-+    std::uint64_t hash = 0xCBF29CE484222325ull;
-+    std::size_t at = 0u;
-+    for (; at + 8u <= size; at += 8u) {
-+        std::uint64_t word{};
-+        std::memcpy(&word, data + at, sizeof word);
-+        hash = (hash ^ word) * 0x100000001B3ull;
-+    }
-+    for (; at < size; ++at) hash = (hash ^ data[at]) * 0x100000001B3ull;
-+    return hash ^ size;
-+}
-+
-+std::uint32_t target_bytes_per_pixel(std::uint32_t format) { return format == 3u ? 4u : 2u; }
-+
-+// The bytes decoding a texture reads from its address (texture_decode.cpp):
-+// rows of the buffer width, or the blocks of a DXT texture.
-+std::size_t texture_bytes(const TextureState &texture) {
-+    const std::uint32_t width = texture.width;
-+    const std::uint32_t height = texture.height;
-+    const std::uint32_t across = texture.buffer_width != 0u ? std::max(texture.buffer_width, width) : width;
-+    switch (texture.format) {
-+    case TextureFormat::Rgba5650:
-+    case TextureFormat::Rgba5551:
-+    case TextureFormat::Rgba4444:
-+    case TextureFormat::Clut16: return static_cast<std::size_t>(across) * 2u * height;
-+    case TextureFormat::Rgba8888:
-+    case TextureFormat::Clut32: return static_cast<std::size_t>(across) * 4u * height;
-+    case TextureFormat::Clut4: return static_cast<std::size_t>(across) / 2u * height;
-+    case TextureFormat::Clut8: return static_cast<std::size_t>(across) * height;
-+    case TextureFormat::Dxt1: return static_cast<std::size_t>((across + 3u) / 4u) * ((height + 3u) / 4u) * 8u;
-+    case TextureFormat::Dxt3:
-+    case TextureFormat::Dxt5: return static_cast<std::size_t>((across + 3u) / 4u) * ((height + 3u) / 4u) * 16u;
-+    }
-+    return 0u;
-+}
-+
-+bool indexed(TextureFormat format) {
-+    return format == TextureFormat::Clut4 || format == TextureFormat::Clut8 || format == TextureFormat::Clut16 ||
-+           format == TextureFormat::Clut32;
-+}
-+
-+class RecordBackend final : public GeBackend {
-+public:
-+    RecordBackend(std::unique_ptr<GeBackend> inner, std::string inner_name)
-+        : inner_(std::move(inner)), inner_name_(std::move(inner_name)) {}
-+    ~RecordBackend() override { shutdown(); }
-+
-+    const char *name() const noexcept override { return "record"; }
-+    bool needs_window() const noexcept override { return inner_->needs_window(); }
-+
-+    bool initialize(const BackendConfig &config, std::string &error) override {
-+        if (!inner_->initialize(config, error)) return false;
-+        initialized_ = true;
-+        const char *path = portablekit::env("GE_RECORD");
-+        at_ = std::max<std::uint64_t>(env_number("GE_RECORD_AT", 1u), 1u);
-+        frames_wanted_ = std::max<std::uint64_t>(env_number("GE_RECORD_FRAMES", 3u), 1u);
-+        if (path == nullptr || *path == '\0') {
-+            std::cout << "[gerec] " << portablekit::env_name("GE_RECORD") << " names no file: " << inner_name_
-+                      << " draws, nothing is recorded\n";
-+            phase_ = Phase::Done;
-+            return true;
-+        }
-+        path_ = path;
-+        std::cout << "[gerec] recording frames " << at_ << "-" << (at_ + frames_wanted_ - 1u) << " drawn by "
-+                  << inner_name_ << " to " << path_ << "\n";
-+        return true;
-+    }
-+
-+    void shutdown() override {
-+        if (!initialized_) return;
-+        initialized_ = false;
-+        if (phase_ == Phase::Recording) {
-+            std::cout << "[gerec] the run ended while recording\n";
-+            finish();
-+        }
-+        inner_->shutdown();
-+    }
-+
-+    void begin_frame() override {
-+        boundary();
-+        inner_->begin_frame();
-+    }
-+
-+    void begin_display_list() override {
-+        record(Kind::DisplayList, {});
-+        inner_->begin_display_list();
-+    }
-+
-+    bool gpu_decode() const override { return inner_->gpu_decode(); }
-+    bool check_gpu_decode() const override { return inner_->check_gpu_decode(); }
-+
-+    void submit(const DrawCall &call, const GuestMemory &memory) override {
-+        if (phase_ == Phase::Recording) {
-+            note_vram(memory);
-+            if (call.texture.enabled) {
-+                record_memory(memory, call.texture.address, texture_bytes(call.texture));
-+                // The mip levels after the first, when the minification filter
-+                // samples them (bit 2): each from its own address, at its own
-+                // size and row length, with level 0's format.
-+                if ((call.texture.min_filter & 4u) != 0u) {
-+                    const std::uint32_t levels = std::min<std::uint32_t>(call.texture.level_count, 8u);
-+                    for (std::uint32_t n = 1u; n < levels; ++n) {
-+                        const TextureLevel &level = call.texture.levels[n - 1u];
-+                        TextureState texels = call.texture;
-+                        texels.address = level.address;
-+                        texels.buffer_width = level.buffer_width;
-+                        texels.width = level.width;
-+                        texels.height = level.height;
-+                        record_memory(memory, level.address, texture_bytes(texels));
-+                    }
-+                }
-+                if (indexed(call.texture.format))
-+                    record_memory(memory, call.texture.clut_address, 512u * (call.texture.clut_format == 3u ? 4u : 2u));
-+            }
-+            record_target_words(memory, call.target);
-+            Writer writer;
-+            writer.put(call);
-+            record(Kind::Draw, writer.bytes);
-+            ++frame_draws_;
-+        }
-+        inner_->submit(call, memory);
-+    }
-+
-+    void block_transfer(const BlockTransfer &transfer, GuestMemory &memory) override {
-+        if (phase_ == Phase::Recording) {
-+            note_vram(memory);
-+            Writer writer;
-+            writer.put(transfer);
-+            record(Kind::Transfer, writer.bytes);
-+        }
-+        inner_->block_transfer(transfer, memory);
-+        // The source rows as the shell's copy will read them, after the read-back.
-+        if (phase_ == Phase::Recording && transfer.height != 0u && transfer.width != 0u) {
-+            const std::uint32_t bpp = transfer.bytes_per_pixel;
-+            const std::uint32_t first =
-+                transfer.source + (transfer.source_y * transfer.source_stride + transfer.source_x) * bpp;
-+            const std::size_t span =
-+                (static_cast<std::size_t>(transfer.height - 1u) * transfer.source_stride + transfer.width) * bpp;
-+            record_memory(memory, first, span);
-+        }
-+    }
-+
-+    void write_back_frame(GuestMemory &memory) override {
-+        record(Kind::WriteBackFrame, {});
-+        inner_->write_back_frame(memory);
-+    }
-+
-+    void read_back_framebuffer(std::uint32_t address, GuestMemory &memory) override {
-+        if (phase_ == Phase::Recording) {
-+            Writer writer;
-+            writer.u32(address);
-+            record(Kind::ReadBack, writer.bytes);
-+        }
-+        inner_->read_back_framebuffer(address, memory);
-+    }
-+
-+    bool write_back_depth(std::uint32_t color_address, std::uint32_t depth_address, std::uint32_t depth_stride,
-+                          GuestMemory &memory, const char *why) override {
-+        const bool wrote = inner_->write_back_depth(color_address, depth_address, depth_stride, memory, why);
-+        if (phase_ == Phase::Recording) {
-+            Writer writer;
-+            writer.u32(color_address), writer.u32(depth_address), writer.u32(depth_stride), writer.flag(wrote);
-+            writer.string(why != nullptr ? why : "");
-+            record(Kind::WriteBackDepth, writer.bytes);
-+        }
-+        return wrote;
-+    }
-+
-+    void upload_frame(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width,
-+                      std::uint32_t height, std::uint32_t stride) override {
-+        if (phase_ == Phase::Recording && pixels != nullptr && stride >= width) {
-+            Writer writer;
-+            writer.u32(display_address), writer.u32(width), writer.u32(height);
-+            for (std::uint32_t row = 0; row < height; ++row)
-+                writer.raw(pixels + static_cast<std::size_t>(row) * stride * 4u, static_cast<std::size_t>(width) * 4u);
-+            record(Kind::Upload, writer.bytes);
-+        }
-+        inner_->upload_frame(display_address, pixels, width, height, stride);
-+    }
-+
-+    PresentedImage present_image(std::uint32_t display_address) override {
-+        const PresentedImage image = inner_->present_image(display_address);
-+        display_address_ = display_address;
-+        presented_ = image;
-+        return image;
-+    }
-+
-+    bool capture_frame(const std::string &path) override { return inner_->capture_frame(path); }
-+    std::uint64_t draws_submitted() const noexcept override { return inner_->draws_submitted(); }
-+    std::uint64_t frames_presented() const noexcept override { return inner_->frames_presented(); }
-+
-+private:
-+    enum class Phase : std::uint8_t { Waiting, Recording, Done };
-+
-+    // Between two frames: the one just shown ends the recording's frame, and
-+    // the next one may be the first to record.
-+    void boundary() {
-+        const std::uint64_t shown = inner_->frames_presented();
-+        if (phase_ == Phase::Recording && shown > frame_number_) {
-+            frame_end(shown);
-+            if (shown + 1u >= at_ + frames_wanted_) finish();
-+        }
-+        if (phase_ == Phase::Waiting && shown + 1u >= at_) start(shown);
-+    }
-+
-+    void start(std::uint64_t shown) {
-+        file_.open(path_, std::ios::binary | std::ios::trunc);
-+        if (!file_) {
-+            std::cerr << "[gerec] cannot write " << path_ << "; nothing is recorded\n";
-+            phase_ = Phase::Done;
-+            return;
-+        }
-+        file_.write(gerec::kMagic, sizeof gerec::kMagic);
-+        const std::uint32_t version = gerec::kVersion;
-+        file_.write(reinterpret_cast<const char *>(&version), sizeof version);
-+        phase_ = Phase::Recording;
-+        frame_number_ = shown;
-+        records_ = 0u;
-+        frames_recorded_ = 0u;
-+        recorded_.clear();
-+        vram_written_ = false;
-+        Writer writer;
-+        writer.u32(static_cast<std::uint32_t>(shown + 1u));
-+        writer.u32(static_cast<std::uint32_t>(frames_wanted_));
-+        writer.string(inner_name_);
-+        writer.string(portablekit::game().env_prefix);
-+        writer.u64(inner_->frames_presented());
-+        writer.u64(inner_->draws_submitted());
-+        record(Kind::Begin, writer.bytes);
-+        begin_recorded_frame();
-+        std::cout << "[gerec] recording from frame " << (shown + 1u) << "\n";
-+    }
-+
-+    void begin_recorded_frame() {
-+        frame_draws_ = 0u;
-+        frame_records_ = 0u;
-+        targets_seen_.clear();
-+    }
-+
-+    void frame_end(std::uint64_t shown) {
-+        // The image the shell showed, as the inner backend captures it.
-+        std::vector<std::uint8_t> image;
-+        const std::string capture = path_ + ".capture.bmp";
-+        if (inner_->capture_frame(capture)) {
-+            std::ifstream in(capture, std::ios::binary);
-+            image.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-+        }
-+        std::error_code ignored;
-+        std::filesystem::remove(capture, ignored);
-+        const std::uint32_t frame_records = frame_records_;
-+        Writer writer;
-+        writer.u32(static_cast<std::uint32_t>(shown));
-+        writer.u32(display_address_);
-+        writer.u64(inner_->frames_presented());
-+        writer.u64(inner_->draws_submitted());
-+        writer.u32(frame_draws_);
-+        writer.u32(frame_records);
-+        writer.u8(static_cast<std::uint8_t>(presented_.api));
-+        writer.u32(presented_.width);
-+        writer.u32(presented_.height);
-+        writer.u32(static_cast<std::uint32_t>(image.size()));
-+        writer.raw(image.data(), image.size());
-+        record(Kind::FrameEnd, writer.bytes);
-+        std::cout << "[render] frame " << inner_->frames_presented() << " (" << inner_->draws_submitted()
-+                  << " draws) recorded: " << frame_draws_ << " draws, " << frame_records << " records, image "
-+                  << (image.empty() ? std::string("missing") : std::to_string(image.size()) + " bytes") << "\n";
-+        ++frames_recorded_;
-+        frame_number_ = shown;
-+        begin_recorded_frame();
-+    }
-+
-+    void finish() {
-+        Writer writer;
-+        writer.u32(frames_recorded_);
-+        writer.u64(records_);
-+        record(Kind::End, writer.bytes);
-+        file_.close();
-+        phase_ = Phase::Done;
-+        std::cout << "[gerec] saved " << frames_recorded_ << " frames, " << records_ << " records to " << path_;
-+        if (missed_ranges_ != 0u)
-+            std::cout << " (" << missed_ranges_ << " inputs not in one run of guest memory were left out)";
-+        std::cout << "\n" << std::flush;
-+    }
-+
-+    void record(Kind kind, const std::vector<std::uint8_t> &payload) {
-+        if (phase_ != Phase::Recording) return;
-+        const std::uint8_t tag = static_cast<std::uint8_t>(kind);
-+        const auto size = static_cast<std::uint32_t>(payload.size());
-+        file_.write(reinterpret_cast<const char *>(&tag), 1);
-+        file_.write(reinterpret_cast<const char *>(&size), sizeof size);
-+        if (size != 0u) file_.write(reinterpret_cast<const char *>(payload.data()), size);
-+        ++records_;
-+        ++frame_records_;
-+    }
-+
-+    // Guest memory a call is about to read, unless the recording already holds
-+    // these bytes for this range.
-+    void record_memory(const GuestMemory &memory, std::uint32_t address, std::size_t size) {
-+        if (size == 0u) return;
-+        const std::uint8_t *bytes = memory.raw_pointer(address, size);
-+        if (bytes == nullptr) {
-+            ++missed_ranges_;
-+            return;
-+        }
-+        const std::uint64_t hash = content_hash(bytes, size);
-+        const auto key = std::make_pair(GuestMemory::canonical(address), static_cast<std::uint32_t>(size));
-+        const auto found = recorded_.find(key);
-+        if (found != recorded_.end() && found->second == hash) return;
-+        recorded_[key] = hash;
-+        Writer writer;
-+        writer.u32(address);
-+        writer.u32(static_cast<std::uint32_t>(size));
-+        writer.raw(bytes, size);
-+        record(Kind::Memory, writer.bytes);
-+    }
-+
-+    // The whole of VRAM, once, at the first call of the recording that reads memory.
-+    void note_vram(const GuestMemory &memory) {
-+        if (vram_written_) return;
-+        vram_written_ = true;
-+        record_memory(memory, GuestMemory::kVramPhysicalBase, GuestMemory::kVramSize);
-+    }
-+
-+    // At a target's first draw in a frame: the guest words a backend compares
-+    // when the target is later sampled as a texture.
-+    void record_target_words(const GuestMemory &memory, const RenderTarget &target) {
-+        if (!targets_seen_.insert(target.color_address).second) return;
-+        const std::uint32_t bytes = target.color_stride * kScreenHeight * target_bytes_per_pixel(target.color_format);
-+        if (!memory.contains(target.color_address, bytes)) return;
-+        constexpr std::uint32_t kStep = 256u;
-+        Writer writer;
-+        writer.u32(target.color_address);
-+        writer.u32(kStep);
-+        const std::uint32_t count = (bytes - 4u) / kStep + 1u;
-+        writer.u32(count);
-+        for (std::uint32_t i = 0; i < count; ++i) writer.u32(memory.load32(target.color_address + i * kStep));
-+        record(Kind::Words, writer.bytes);
-+    }
-+
-+    std::unique_ptr<GeBackend> inner_;
-+    std::string inner_name_;
-+    bool initialized_{};
-+    std::string path_;
-+    std::uint64_t at_{1u};
-+    std::uint64_t frames_wanted_{3u};
-+    Phase phase_{Phase::Waiting};
-+    std::ofstream file_;
-+    // frames_presented() of the inner backend at the start of the frame being recorded.
-+    std::uint64_t frame_number_{};
-+    std::uint32_t frames_recorded_{};
-+    std::uint64_t records_{};
-+    std::uint32_t frame_records_{};
-+    std::uint32_t frame_draws_{};
-+    std::uint32_t display_address_{};
-+    PresentedImage presented_{};
-+    bool vram_written_{};
-+    std::uint64_t missed_ranges_{};
-+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> recorded_;
-+    std::set<std::uint32_t> targets_seen_;
-+};
-+
-+std::unique_ptr<GeBackend> make_record_backend() {
-+    const char *named = portablekit::env("GE_RECORD_INNER");
-+    std::string inner_name = named != nullptr && *named != '\0' ? named : "vulkan";
-+    if (inner_name == "record") {
-+        std::cerr << "[gerec] the record backend cannot record itself; recording vulkan\n";
-+        inner_name = "vulkan";
-+    }
-+    std::unique_ptr<GeBackend> inner = make_backend(inner_name);
-+    if (!inner) {
-+        std::cerr << "[gerec] " << portablekit::env_name("GE_RECORD_INNER") << "=" << inner_name
-+                  << ": there is no such backend\n";
-+        return nullptr;
-+    }
-+    return std::unique_ptr<GeBackend>(new RecordBackend(std::move(inner), inner_name));
-+}
-+
-+const BackendRegistration registration("record", "records another backend's calls to a .gerec file",
-+                                       make_record_backend);
-+
-+} // namespace
-+} // namespace portablekit::gpu
 diff --git a/host/gpu/vulkan_ge_backend.cpp b/host/gpu/vulkan_ge_backend.cpp
 new file mode 100644
-index 0000000..5f52f4f
+index 0000000..0d201d0
 --- /dev/null
 +++ b/host/gpu/vulkan_ge_backend.cpp
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,72 @@
 +// The Vulkan GE backend: the VulkanRenderer's own draw path behind the seam
 +// (ge_backend.hpp). The renderer is the window shell as well and is not split;
 +// this adapter forwards each backend call to the renderer method that did the
@@ -1316,7 +422,6 @@ index 0000000..5f52f4f
 +public:
 +    ~VulkanGeBackend() override { shutdown(); }
 +
-+    const char *name() const noexcept override { return "vulkan"; }
 +    bool needs_window() const noexcept override { return true; }
 +
 +    bool initialize(const BackendConfig &config, std::string &error) override {
@@ -1371,7 +476,7 @@ index 0000000..5f52f4f
 +} // namespace
 +} // namespace portablekit::gpu
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index b8ac5f3..523a8ba 100644
+index 62c6188..5404ea8 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -1,6 +1,6 @@
@@ -1382,10 +487,48 @@ index b8ac5f3..523a8ba 100644
  #include "vulkan_renderer.hpp"
  
  #include "frame_interpolation.hpp"
-@@ -575,112 +575,8 @@ bool write_bmp(const std::string &path, const std::uint8_t *pixels, std::uint32_
-     return static_cast<bool>(out);
+@@ -537,150 +537,8 @@ const char *present_mode_name(VkPresentModeKHR mode) {
+     }
  }
  
+-// Writes 4-byte pixels, top row first, as a 24-bit bottom-up BMP: no encoder
+-// needed and every viewer reads it.
+-bool write_bmp(const std::string &path, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
+-               bool bgra) {
+-    const std::uint32_t row_bytes = (width * 3u + 3u) & ~3u;
+-    const std::uint32_t image_bytes = row_bytes * height;
+-    std::vector<std::uint8_t> file(54u + image_bytes, 0u);
+-    const auto put32 = [&](std::size_t at, std::uint32_t value) {
+-        file[at] = static_cast<std::uint8_t>(value);
+-        file[at + 1u] = static_cast<std::uint8_t>(value >> 8u);
+-        file[at + 2u] = static_cast<std::uint8_t>(value >> 16u);
+-        file[at + 3u] = static_cast<std::uint8_t>(value >> 24u);
+-    };
+-    file[0] = 'B';
+-    file[1] = 'M';
+-    put32(2u, 54u + image_bytes);
+-    put32(10u, 54u);
+-    put32(14u, 40u);
+-    put32(18u, width);
+-    put32(22u, height);
+-    file[26] = 1u;
+-    file[28] = 24u;
+-    put32(34u, image_bytes);
+-    for (std::uint32_t y = 0; y < height; ++y) {
+-        const std::uint8_t *source = pixels + static_cast<std::size_t>(y) * width * 4u;
+-        std::uint8_t *destination = file.data() + 54u + static_cast<std::size_t>(height - 1u - y) * row_bytes;
+-        for (std::uint32_t x = 0; x < width; ++x) {
+-            destination[x * 3u + 0u] = source[x * 4u + (bgra ? 0u : 2u)];
+-            destination[x * 3u + 1u] = source[x * 4u + 1u];
+-            destination[x * 3u + 2u] = source[x * 4u + (bgra ? 2u : 0u)];
+-        }
+-    }
+-    std::ofstream out(path, std::ios::binary);
+-    if (!out) return false;
+-    out.write(reinterpret_cast<const char *>(file.data()), static_cast<std::streamsize>(file.size()));
+-    return static_cast<bool>(out);
+-}
+-
 -struct PadTuning {
 -    float dead_zone{0.15f};
 -    float trigger{0.25f};
@@ -1497,7 +640,7 @@ index b8ac5f3..523a8ba 100644
  
  // Background texture decoding (<prefix>_SYNC_TEXTURE_DECODE turns it off): a
  // texture first drawn while a frame is recorded is copied out of guest
-@@ -764,7 +660,10 @@ private:
+@@ -764,7 +622,10 @@ private:
  
  } // namespace
  
@@ -1509,7 +652,7 @@ index b8ac5f3..523a8ba 100644
      struct Texture {
          VkImage image{};
          VkDeviceMemory memory{};
-@@ -1024,9 +923,6 @@ struct VulkanRenderer::Impl {
+@@ -1024,9 +885,6 @@ struct VulkanRenderer::Impl {
      bool ui_ready{};
      ImDrawData *ui_draw_data{};
      std::function<bool(const SDL_Event &)> event_hook;
@@ -1519,7 +662,7 @@ index b8ac5f3..523a8ba 100644
      // Keyboard and mouse (input/bindings.hpp). Mouse buttons are followed
      // through their events, so a scripted click counts like a real one.
      bool pointer_free{};
-@@ -1120,7 +1016,6 @@ struct VulkanRenderer::Impl {
+@@ -1120,7 +978,6 @@ struct VulkanRenderer::Impl {
          touch_motion.x += drag.x / static_cast<float>(height);
          touch_motion.y += drag.y / static_cast<float>(height);
      }
@@ -1527,7 +670,7 @@ index b8ac5f3..523a8ba 100644
  
      // Captures the pointer for the game when everything allows it and frees
      // it otherwise. Whatever the mouse did or held across a change is dropped,
-@@ -1845,93 +1740,12 @@ struct VulkanRenderer::Impl {
+@@ -1850,93 +1707,12 @@ struct VulkanRenderer::Impl {
      // those that differed.
      std::uint64_t direct_checked{};
      std::uint64_t direct_mismatched{};
@@ -1621,7 +764,7 @@ index b8ac5f3..523a8ba 100644
      [[nodiscard]] std::uint32_t find_memory_type(std::uint32_t mask, VkMemoryPropertyFlags properties) const {
          VkPhysicalDeviceMemoryProperties memory_properties{};
          vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
-@@ -5038,79 +4852,9 @@ void VulkanRenderer::sample_pad() {
+@@ -5064,79 +4840,9 @@ void VulkanRenderer::sample_pad() {
  }
  
  void VulkanRenderer::Impl::sample_pad(bool focused) {
@@ -1704,7 +847,7 @@ index b8ac5f3..523a8ba 100644
  }
  
  PadState VulkanRenderer::pad() const noexcept { return impl_ ? impl_->pad : PadState{}; }
-@@ -8207,6 +7951,29 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
+@@ -8203,6 +7909,21 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
      return write_bmp(path, pixels.data(), width, height, false);
  }
  
@@ -1716,18 +859,10 @@ index b8ac5f3..523a8ba 100644
 +    auto displayed = impl.targets.find(display_address);
 +    if (displayed == impl.targets.end()) displayed = impl.targets.find(impl.last_drawn_target);
 +    if (displayed == impl.targets.end()) return image;
-+    const auto handle = [](auto value) {
-+        std::uint64_t bits = 0u;
-+        static_assert(sizeof(value) <= sizeof(bits));
-+        std::memcpy(&bits, &value, sizeof(value));
-+        return bits;
-+    };
++    // The Vulkan shell shows the target by its display address; no handle leaves the renderer.
 +    image.api = ImageApi::Vulkan;
-+    image.address = displayed->first;
 +    image.width = impl.target_extent.width;
 +    image.height = impl.target_extent.height;
-+    image.image = handle(displayed->second.color);
-+    image.view = handle(displayed->second.color_view);
 +    return image;
 +}
 +
@@ -2328,6 +1463,86 @@ index 3d88aaf..835217a 100644
  }
  #endif
  
+diff --git a/host/registry.hpp b/host/registry.hpp
+new file mode 100644
+index 0000000..72f209d
+--- /dev/null
++++ b/host/registry.hpp
+@@ -0,0 +1,74 @@
++#pragma once
++
++// Named factories for one interface: the GE backends (gpu/ge_backend.hpp) and
++// the shells (shell/shell.hpp). Each implementation's source file adds itself
++// before main() with a registration object, and the HLE makes the one an
++// environment variable names.
++#include <functional>
++#include <memory>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++namespace portablekit {
++
++template <typename T> class Registry {
++public:
++    using Factory = std::function<std::unique_ptr<T>()>;
++
++    // Made on first use, so it is there for registrations that run before main().
++    static Registry &get() {
++        static Registry registry;
++        return registry;
++    }
++
++    // A later registration of the same name replaces the earlier one.
++    void add(std::string name, Factory factory, std::string description) {
++        for (Entry &entry : entries_) {
++            if (entry.name == name) {
++                entry.factory = std::move(factory);
++                entry.description = std::move(description);
++                return;
++            }
++        }
++        entries_.push_back({std::move(name), std::move(description), std::move(factory)});
++    }
++
++    // A new, uninitialised instance, or null when nothing has that name.
++    [[nodiscard]] std::unique_ptr<T> make(std::string_view name) const {
++        const Entry *entry = find(name);
++        if (entry == nullptr || !entry->factory) return nullptr;
++        return entry->factory();
++    }
++
++    // The registered names, in the order they were registered.
++    [[nodiscard]] std::vector<std::string> names() const {
++        std::vector<std::string> names;
++        names.reserve(entries_.size());
++        for (const Entry &entry : entries_) names.push_back(entry.name);
++        return names;
++    }
++
++    [[nodiscard]] std::string description(std::string_view name) const {
++        const Entry *entry = find(name);
++        return entry != nullptr ? entry->description : std::string{};
++    }
++
++private:
++    struct Entry {
++        std::string name;
++        std::string description;
++        Factory factory;
++    };
++
++    [[nodiscard]] const Entry *find(std::string_view name) const {
++        for (const Entry &entry : entries_)
++            if (entry.name == name) return &entry;
++        return nullptr;
++    }
++
++    std::vector<Entry> entries_;
++};
++
++} // namespace portablekit
 diff --git a/host/shell/gamepad.cpp b/host/shell/gamepad.cpp
 new file mode 100644
 index 0000000..54fd8bb
@@ -2533,10 +1748,10 @@ index 0000000..f9ceb35
 +} // namespace portablekit::host
 diff --git a/host/shell/headless_shell.cpp b/host/shell/headless_shell.cpp
 new file mode 100644
-index 0000000..8869597
+index 0000000..8874c97
 --- /dev/null
 +++ b/host/shell/headless_shell.cpp
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,250 @@
 +// The headless shell: no window, no GPU, no SDL. The pad the game reads comes
 +// from the input script (<prefix>_INPUT_SCRIPT, and the live file
 +// <prefix>_INPUT_LIVE) read at pad level: the same file format and step names
@@ -2583,7 +1798,6 @@ index 0000000..8869597
 +        ready_ = true;
 +        return true;
 +    }
-+    void shutdown() override { ready_ = false; }
 +    bool available() const noexcept override { return ready_; }
 +    bool has_window() const noexcept override { return false; }
 +
@@ -2596,9 +1810,6 @@ index 0000000..8869597
 +    bool take_touch_menu() noexcept override { return false; }
 +    bool touch_controls_visible() const noexcept override { return false; }
 +    const input::touch::Controls &touch_controls() const override { return touch_; }
-+    bool mouse_captured() const noexcept override { return false; }
-+    bool quit_requested() const noexcept override { return quit_; }
-+    void request_quit() noexcept override { quit_ = true; }
 +    void set_game_input(bool enabled) override { game_input_ = enabled; }
 +    void set_pointer_free(bool) override {}
 +    void set_scripted_key(int, bool) override {}
@@ -2646,7 +1857,6 @@ index 0000000..8869597
 +        error = "the headless shell has no window to draw the interface in";
 +        return false;
 +    }
-+    void shutdown_ui() override {}
 +    void begin_ui_frame() override {}
 +    void set_ui_draw_data(ImDrawData *) override {}
 +    void present_ui(bool) override {}
@@ -3228,67 +2438,33 @@ index 0000000..f47077d
 +} // namespace portablekit::host
 diff --git a/host/shell/shell.cpp b/host/shell/shell.cpp
 new file mode 100644
-index 0000000..18ed47a
+index 0000000..291bcfb
 --- /dev/null
 +++ b/host/shell/shell.cpp
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,34 @@
 +#include "shell/shell.hpp"
 +
 +#include "../profile.hpp"
++#include "../registry.hpp"
 +
 +#include <utility>
 +
 +namespace portablekit::host {
 +namespace {
 +
-+struct Entry {
-+    std::string name;
-+    std::string description;
-+    ShellFactory factory;
-+};
-+
-+// Made on first use, so it is there for registrations that run before main().
-+std::vector<Entry> &registry() {
-+    static std::vector<Entry> entries;
-+    return entries;
-+}
-+
-+const Entry *find(std::string_view name) {
-+    for (const Entry &entry : registry())
-+        if (entry.name == name) return &entry;
-+    return nullptr;
-+}
++Registry<Shell> &shells() { return Registry<Shell>::get(); }
 +
 +} // namespace
 +
 +void register_shell(std::string name, ShellFactory factory, std::string description) {
-+    for (Entry &entry : registry()) {
-+        if (entry.name == name) {
-+            entry.factory = std::move(factory);
-+            entry.description = std::move(description);
-+            return;
-+        }
-+    }
-+    registry().push_back({std::move(name), std::move(description), std::move(factory)});
++    shells().add(std::move(name), std::move(factory), std::move(description));
 +}
 +
-+std::unique_ptr<Shell> make_shell(std::string_view name) {
-+    const Entry *entry = find(name);
-+    if (entry == nullptr || !entry->factory) return nullptr;
-+    return entry->factory();
-+}
++std::unique_ptr<Shell> make_shell(std::string_view name) { return shells().make(name); }
 +
-+std::vector<std::string> shell_names() {
-+    std::vector<std::string> names;
-+    names.reserve(registry().size());
-+    for (const Entry &entry : registry()) names.push_back(entry.name);
-+    return names;
-+}
++std::vector<std::string> shell_names() { return shells().names(); }
 +
-+std::string shell_description(std::string_view name) {
-+    const Entry *entry = find(name);
-+    return entry != nullptr ? entry->description : std::string{};
-+}
++std::string shell_description(std::string_view name) { return shells().description(name); }
 +
 +std::string selected_shell() {
 +    const char *name = portablekit::env("SHELL");
@@ -3302,10 +2478,10 @@ index 0000000..18ed47a
 +} // namespace portablekit::host
 diff --git a/host/shell/shell.hpp b/host/shell/shell.hpp
 new file mode 100644
-index 0000000..66f9a3e
+index 0000000..5136ecd
 --- /dev/null
 +++ b/host/shell/shell.hpp
-@@ -0,0 +1,225 @@
+@@ -0,0 +1,218 @@
 +#pragma once
 +
 +// The shell seam: what is around the GE backend (gpu/ge_backend.hpp). A shell
@@ -3406,9 +2582,8 @@ index 0000000..66f9a3e
 +    // The name it is registered under.
 +    [[nodiscard]] virtual const char *name() const noexcept = 0;
 +    // Returns false and fills `error` when the shell cannot run (no window, no
-+    // device).
++    // device). The shell's destructor frees what it made.
 +    virtual bool initialize(const ShellConfig &config, std::string &error) = 0;
-+    virtual void shutdown() = 0;
 +    [[nodiscard]] virtual bool available() const noexcept = 0;
 +    // Whether there is a window: events, the interface and the frame
 +    // interpolation's presents between flips exist only then.
@@ -3435,11 +2610,6 @@ index 0000000..66f9a3e
 +    // game runs, hidden again by a gamepad, the keyboard or a real mouse.
 +    [[nodiscard]] virtual bool touch_controls_visible() const noexcept = 0;
 +    [[nodiscard]] virtual const input::touch::Controls &touch_controls() const = 0;
-+    // The pointer is captured for the game: hidden, and its motion and buttons
-+    // go to the game.
-+    [[nodiscard]] virtual bool mouse_captured() const noexcept = 0;
-+    [[nodiscard]] virtual bool quit_requested() const noexcept = 0;
-+    virtual void request_quit() noexcept = 0;
 +    // While off, the game reads a neutral pad. Turning it back on ignores the
 +    // buttons still held until they are released.
 +    virtual void set_game_input(bool enabled) = 0;
@@ -3499,9 +2669,8 @@ index 0000000..66f9a3e
 +    // ImGui context and loaded its fonts; initialize_ui starts ImGui's SDL3
 +    // platform backend for the window (the ImGui_ImplSDL3_InitFor... of the API
 +    // the shell draws with) and the renderer backend, and on failure leaves
-+    // neither running. shutdown_ui stops both.
++    // neither running.
 +    virtual bool initialize_ui(std::string &error) = 0;
-+    virtual void shutdown_ui() = 0;
 +    // The renderer backend's NewFrame, before ImGui::NewFrame.
 +    virtual void begin_ui_frame() = 0;
 +    // Draw data from ImGui::Render, drawn over the next presented image.
@@ -3533,10 +2702,10 @@ index 0000000..66f9a3e
 +} // namespace portablekit::host
 diff --git a/host/shell/vulkan_shell.cpp b/host/shell/vulkan_shell.cpp
 new file mode 100644
-index 0000000..ca3824a
+index 0000000..70f2469
 --- /dev/null
 +++ b/host/shell/vulkan_shell.cpp
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,125 @@
 +// The Vulkan shell: the VulkanRenderer behind host::Shell (shell.hpp). The
 +// renderer is the window shell and the Vulkan GE backend's draw path at once
 +// and is not split; this adapter owns it and forwards each shell call to the
@@ -3577,7 +2746,6 @@ index 0000000..ca3824a
 +        if (!config.title.empty()) renderer_config.title = config.title;
 +        return renderer_->initialize(renderer_config, error);
 +    }
-+    void shutdown() override { renderer_->shutdown(); }
 +    bool available() const noexcept override { return renderer_->available(); }
 +    bool has_window() const noexcept override { return renderer_->window() != nullptr; }
 +
@@ -3589,9 +2757,6 @@ index 0000000..ca3824a
 +    bool take_touch_menu() noexcept override { return renderer_->take_touch_menu(); }
 +    bool touch_controls_visible() const noexcept override { return renderer_->touch_controls_visible(); }
 +    const input::touch::Controls &touch_controls() const override { return renderer_->touch_controls(); }
-+    bool mouse_captured() const noexcept override { return renderer_->mouse_captured(); }
-+    bool quit_requested() const noexcept override { return renderer_->quit_requested(); }
-+    void request_quit() noexcept override { renderer_->request_quit(); }
 +    void set_game_input(bool enabled) override { renderer_->set_game_input(enabled); }
 +    void set_pointer_free(bool free) override { renderer_->set_pointer_free(free); }
 +    void set_scripted_key(int position, bool down) override { renderer_->set_scripted_key(position, down); }
@@ -3642,12 +2807,6 @@ index 0000000..ca3824a
 +        ImGui_ImplSDL3_Shutdown();
 +        ui_platform_ = false;
 +        return false;
-+    }
-+    void shutdown_ui() override {
-+        renderer_->shutdown_ui();
-+        if (!ui_platform_) return;
-+        ImGui_ImplSDL3_Shutdown();
-+        ui_platform_ = false;
 +    }
 +    void begin_ui_frame() override { renderer_->begin_ui_frame(); }
 +    void set_ui_draw_data(ImDrawData *draw_data) override { renderer_->set_ui_draw_data(draw_data); }

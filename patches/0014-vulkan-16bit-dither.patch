@@ -1,5 +1,5 @@
 diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
-index 2bb509c..4de7478 100644
+index 224d0e7..ab498a4 100644
 --- a/host/gpu/shaders/ge.frag
 +++ b/host/gpu/shaders/ge.frag
 @@ -30,6 +30,31 @@ layout(constant_id = 2) const uint kColorFunction = 1u;
@@ -117,7 +117,7 @@ index 2bb509c..4de7478 100644
 +
  // The GE's logarithm for the mip level, in 1/16 levels: the float's exponent
  // and the top four bits of its mantissa (a piecewise linear log2, floored to
- // 1/16), of |x|. ge_log16 in vulkan_renderer.cpp.
+ // 1/16), of |x|. ge_log16 in texture_decode.cpp.
 @@ -143,7 +245,7 @@ void main() {
      // its world.
      if (!kAlphaTest) {
@@ -135,7 +135,7 @@ index 2bb509c..4de7478 100644
 +    out_color = written(color);
  }
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 6ba6c7c..fe33c67 100644
+index 1698dd5..019eac4 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -115,6 +115,9 @@ constexpr std::size_t kMaxCachedTextures = 1024u;
@@ -169,7 +169,7 @@ index 6ba6c7c..fe33c67 100644
  
      auto operator<=>(const PipelineKey &) const = default;
  };
-@@ -1113,6 +1130,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1075,6 +1092,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
          VkDeviceMemory depth_memory{};
          VkImageView depth_view{};
          VkFramebuffer framebuffer{};
@@ -180,7 +180,7 @@ index 6ba6c7c..fe33c67 100644
          bool initialized{};
          // The guest's view of the buffer when it was last drawn to: row length
          // in pixels and pixel format (0:5650 1:5551 2:4444 3:8888).
-@@ -1307,6 +1328,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1274,6 +1295,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
      VkDescriptorPool descriptor_pool{};
      VkDescriptorSetLayout lighting_layout{};
      VkDescriptorSet lighting_descriptor{};  // binding 0: environment, binding 1: object
@@ -191,7 +191,7 @@ index 6ba6c7c..fe33c67 100644
      VkDeviceSize uniform_alignment{256u};
      VkSampler sampler{};        // linear
      VkSampler sharp_sampler{};  // nearest, for the sharp texture setting
-@@ -1954,6 +1979,17 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1959,6 +1984,17 @@ struct VulkanRenderer::Impl : host::SdlPad {
      // `overwritten`: bit 0, the pass's first draw writes every pixel's colour
      // and alpha; bit 1, every pixel's depth.
      void begin_pass(std::uint32_t address, std::uint32_t overwritten = 0u);
@@ -209,7 +209,7 @@ index 6ba6c7c..fe33c67 100644
      void end_pass();
      VkPipeline pipeline_for(const PipelineKey &key);
      Texture &texture_for(const GuestMemory &memory, const DrawCall &call, std::uint32_t levels);
-@@ -2362,18 +2398,57 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2367,18 +2403,57 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      }
      attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
      attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -268,7 +268,7 @@ index 6ba6c7c..fe33c67 100644
      if (!check(vkCreateRenderPass(impl.device, &render_pass_info, nullptr, &impl.render_pass), "vkCreateRenderPass",
                 error))
          return false;
-@@ -2465,10 +2540,34 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2470,10 +2545,34 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
                 "vkCreateDescriptorPool", error))
          return false;
  
@@ -304,7 +304,7 @@ index 6ba6c7c..fe33c67 100644
      pipeline_layout_info.setLayoutCount = static_cast<std::uint32_t>(set_layouts.size());
      pipeline_layout_info.pSetLayouts = set_layouts.data();
      pipeline_layout_info.pushConstantRangeCount = 1u;
-@@ -3446,6 +3545,8 @@ void VulkanRenderer::Impl::write_capture(VkFence fence) {
+@@ -3451,6 +3550,8 @@ void VulkanRenderer::Impl::write_capture(VkFence fence) {
  void VulkanRenderer::Impl::destroy_target(Target &target) {
      for (VkDescriptorSet &descriptor : target.copy_descriptors)
          if (descriptor != VK_NULL_HANDLE) vkFreeDescriptorSets(device, descriptor_pool, 1u, &descriptor);
@@ -313,7 +313,7 @@ index 6ba6c7c..fe33c67 100644
      vkDestroyImageView(device, target.copy_opaque_view, nullptr);
      vkDestroyImageView(device, target.copy_view, nullptr);
      vkDestroyImage(device, target.copy, nullptr);
-@@ -3496,9 +3597,10 @@ VulkanRenderer::Impl::Target *VulkanRenderer::Impl::target_for(std::uint32_t add
+@@ -3501,9 +3602,10 @@ VulkanRenderer::Impl::Target *VulkanRenderer::Impl::target_for(std::uint32_t add
  }
  
  bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
@@ -325,7 +325,7 @@ index 6ba6c7c..fe33c67 100644
                        target.color,
                        target.color_memory, target.color_view, VK_IMAGE_ASPECT_COLOR_BIT, error))
          return false;
-@@ -3515,7 +3617,26 @@ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
+@@ -3520,7 +3622,26 @@ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
      info.width = target_extent.width;
      info.height = target_extent.height;
      info.layers = 1u;
@@ -353,7 +353,7 @@ index 6ba6c7c..fe33c67 100644
  }
  
  // Attachments are loaded, not cleared, so a new target starts undefined:
-@@ -3603,6 +3724,11 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
+@@ -3608,6 +3729,11 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
      perf::count_render_pass();
      if ((overwritten & 3u) != 0u) perf::count_cleared_pass();
      forget_bindings();
@@ -365,7 +365,7 @@ index 6ba6c7c..fe33c67 100644
      current_target = address;
      last_drawn_target = address;
      pass_active = true;
-@@ -4682,8 +4808,8 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+@@ -4629,8 +4755,8 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
  namespace {
  
  constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
@@ -376,7 +376,7 @@ index 6ba6c7c..fe33c67 100644
  constexpr std::uint32_t kMaxPipelineKeys = 4096u;
  
  std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
-@@ -4691,7 +4817,9 @@ std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
+@@ -4638,7 +4764,9 @@ std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
              key.depth_test ? 1u : 0u, key.depth_write ? 1u : 0u, key.depth_function, key.cull ? 1u : 0u,
              key.cull_clockwise ? 1u : 0u, key.color_mask, key.alpha_test ? 1u : 0u, key.raw ? 1u : 0u,
              key.alpha_blend, key.stencil, key.stencil_values,
@@ -387,7 +387,7 @@ index 6ba6c7c..fe33c67 100644
  }
  
  PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
-@@ -4715,6 +4843,12 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+@@ -4662,6 +4790,12 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
      key.depth_clamp = (words[15] & 8u) != 0u;
      key.color_reference = words[16] & 0xFFFFFFu;
      key.color_test_mask = words[17] & 0xFFFFFFu;
@@ -400,7 +400,7 @@ index 6ba6c7c..fe33c67 100644
      return key;
  }
  
-@@ -4949,7 +5083,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4896,7 +5030,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
          return vk;
      };
      VkPipelineColorBlendAttachmentState blend_attachment{};
@@ -411,7 +411,7 @@ index 6ba6c7c..fe33c67 100644
      blend_attachment.srcColorBlendFactor = colour_factor(key.source_factor, true);
      blend_attachment.dstColorBlendFactor = colour_factor(key.destination_factor, false);
      blend_attachment.colorBlendOp = to_blend_op(key.equation);
-@@ -4966,11 +5102,16 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4913,11 +5049,16 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      blend.pAttachments = &blend_attachment;
  
      // kAlphaTest, kColorTest and the colour test's function, reference and
@@ -432,7 +432,7 @@ index 6ba6c7c..fe33c67 100644
      for (std::uint32_t i = 0; i < fragment_entries.size(); ++i)
          fragment_entries[i] = {i, i * 4u, sizeof(std::uint32_t)};
      VkSpecializationInfo specialization{};
-@@ -6414,6 +6555,34 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6361,6 +6502,34 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // the alpha is copied from the stencil before it is read
      // (resolve_stencil_alpha, below and in end_pass).
      static const bool no_stencil_alpha = portablekit::env("NO_STENCIL_ALPHA") != nullptr;
@@ -467,7 +467,7 @@ index 6ba6c7c..fe33c67 100644
      int stored_alpha = -1;
      float blend_alpha = 1.0f;
      bool follows = true;
-@@ -6444,7 +6613,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6391,7 +6560,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              key.stencil_values = stored_reference(call) | (call.stencil.mask & 0xFFu) << 8u |
                                   (~call.alpha_write_mask & 0xFFu) << 16u;
          }
@@ -478,7 +478,7 @@ index 6ba6c7c..fe33c67 100644
              key.alpha_blend = kAlphaDual;
              stored_alpha = stencil;
          } else if (stencil >= 0 && blend_reads_source_alpha(key)) {
-@@ -6498,9 +6669,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6445,9 +6616,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      const float wrap_flags = no_texture_clamp ? 0.0f
                                                : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
                                                      (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
@@ -490,7 +490,7 @@ index 6ba6c7c..fe33c67 100644
      push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
                             static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
                             static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
-@@ -6695,6 +6865,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6642,6 +6812,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      vk_scissor.offset = {left, top};
      vk_scissor.extent = {static_cast<std::uint32_t>(right - left), static_cast<std::uint32_t>(bottom - top)};
      const std::array<std::uint32_t, 3> lighting_offsets{impl.environment_offset, impl.object_offset, impl.raw_offset};
@@ -506,7 +506,7 @@ index 6ba6c7c..fe33c67 100644
      if (merge) {
          const Impl::DrawState state{pipeline, texture_descriptor, lighting_offsets, vk_viewport, vk_scissor,
                                      blend_constants, push};
-@@ -7560,6 +7739,11 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+@@ -7477,6 +7656,11 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
      pass.renderArea = {{0, 0}, target_extent};
      vkCmdBeginRenderPass(commands, &pass, VK_SUBPASS_CONTENTS_INLINE);
      perf::count_render_pass();
@@ -518,7 +518,7 @@ index 6ba6c7c..fe33c67 100644
      // The game clears its framebuffer itself; start from a known state for
      // any part it does not.
      std::array<VkClearAttachment, 2> clears{};
-@@ -8041,6 +8225,15 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+@@ -7958,6 +8142,15 @@ bool VulkanRenderer::present(std::uint32_t display_address,
      // Show the target the guest flipped to; fall back to whatever was drawn last.
      auto displayed = impl.targets.find(display_address);
      if (displayed == impl.targets.end()) displayed = impl.targets.find(impl.last_drawn_target);
@@ -534,7 +534,7 @@ index 6ba6c7c..fe33c67 100644
      VkImage source = displayed != impl.targets.end() ? displayed->second.color : VK_NULL_HANDLE;
      impl.presented_target = displayed != impl.targets.end() ? displayed->first : 0u;
      if (impl.holding) source = impl.held.color;
-@@ -8398,8 +8591,10 @@ void VulkanRenderer::shutdown() {
+@@ -8307,8 +8500,10 @@ void VulkanRenderer::shutdown() {
      impl.holding = false;
      impl.destroy_interpolation_targets();
      vkDestroyDescriptorPool(impl.device, impl.descriptor_pool, nullptr);

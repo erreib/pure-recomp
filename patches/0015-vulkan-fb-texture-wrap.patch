@@ -1,5 +1,5 @@
 diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
-index 4de7478..73f2e2a 100644
+index ab498a4..89eb11b 100644
 --- a/host/gpu/shaders/ge.frag
 +++ b/host/gpu/shaders/ge.frag
 @@ -58,11 +58,15 @@ layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput ta
@@ -142,7 +142,7 @@ index fdbb5b8..f94e8b1 100644
          vec2 ndc = vec2(in_position.x / push.viewport.x, in_position.y / push.viewport.y) * 2.0 - 1.0;
          gl_Position = vec4(ndc, clamp(in_position.z / 65535.0, 0.0, 1.0), 1.0);
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index fe33c67..51e8bac 100644
+index 019eac4..1f7d40f 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -129,7 +129,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
@@ -178,7 +178,7 @@ index fe33c67..51e8bac 100644
      std::array<float, 4> texture_map{};
      std::array<float, 16> texture_matrix{};
      std::array<float, 4> viewer{};
-@@ -6242,10 +6248,16 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6189,10 +6195,16 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              ? call.texture_map.map_mode
              : 0u;
      const bool mapped = map_mode != 0u;
@@ -197,7 +197,7 @@ index fe33c67..51e8bac 100644
      const bool fogged = call.fog.enabled && !no_fog && !call.through && !call.clear_mode;
      const auto view_world = multiply(call.view, call.world);
      // CLIPENABLE's depth clamp (patch 0013; PPSSPP's hardware notes, "Z
-@@ -6290,7 +6302,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6237,7 +6249,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
          impl.environment_version = call.environment_version;
          impl.environment_depth = clamp_values;
      }
@@ -206,7 +206,7 @@ index fe33c67..51e8bac 100644
          const LightingState &state = call.lighting;
          ObjectBlock object{};
          object.world = call.world;
-@@ -6322,15 +6334,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6269,15 +6281,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              if (length > 0.0f)
                  for (float &value : viewer) value /= length;
              object.viewer = {viewer[0], viewer[1], viewer[2], state.reverse_normals ? 1.0f : 0.0f};
@@ -231,7 +231,7 @@ index fe33c67..51e8bac 100644
          }
          if (!impl.object_valid || std::memcmp(&object, &impl.last_object, sizeof(object)) != 0) {
              if (!impl.write_uniform(&object, sizeof(object), impl.object_offset)) return;
-@@ -6698,20 +6710,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6645,20 +6657,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                  ? impl.framebuffer_descriptor(*source.target, call.texture.format == TextureFormat::Rgba5650)
                  : VK_NULL_HANDLE;
          if (copy != VK_NULL_HANDLE) {

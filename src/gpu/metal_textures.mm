@@ -22,12 +22,15 @@
 #include <system_error>
 
 namespace pure::gpu::metal_backend {
-namespace {
 
-bool indexed(TextureFormat format) {
-    return format == TextureFormat::Clut4 || format == TextureFormat::Clut8 || format == TextureFormat::Clut16 ||
-           format == TextureFormat::Clut32;
-}
+// The texture layout the framework's decoder and the Vulkan renderer read too (gpu/texture_decode.hpp).
+using pk::bits_per_texel;
+using pk::ge_log16;
+using pk::indexed;
+using pk::texture_bytes;
+using pk::texture_level;
+
+namespace {
 
 // A 64-bit hash of bytes, eight at a time.
 std::uint64_t hash_bytes(std::uint64_t hash, const std::uint8_t *data, std::size_t size) {
@@ -74,72 +77,19 @@ std::uint64_t hash_guest(std::uint64_t hash, const GuestMemory &memory, std::uin
     return hash;
 }
 
-// The bytes decode_texture() reads for a texture: rows of its buffer width (its width when that is 0), or the
-// blocks of a DXT texture.
-std::size_t texture_bytes(const TextureState &state) {
-    const std::uint32_t bits = texture_bits(state.format);
-    if (bits != 0u) {
-        const std::uint32_t stride = state.buffer_width != 0u ? state.buffer_width : state.width;
-        return static_cast<std::size_t>(stride) * bits / 8u * state.height;
-    }
-    const std::size_t blocks = static_cast<std::size_t>((state.width + 3u) / 4u) * ((state.height + 3u) / 4u);
-    return blocks * (state.format == TextureFormat::Dxt1 ? 8u : 16u);
-}
-
-// Mip level n of a texture as a texture of its own: level 0's format, swizzle and palette, the level's address,
-// row length and size. What decode_texture() decodes the level from.
-TextureState texture_level(const TextureState &state, std::uint32_t n) {
-    TextureState level = state;
-    if (n == 0u || n > state.levels.size()) return level;
-    const pk::TextureLevel &registers = state.levels[n - 1u];
-    level.address = registers.address;
-    level.buffer_width = registers.buffer_width;
-    level.width = registers.width;
-    level.height = registers.height;
-    return level;
-}
-
-// The GE's logarithm for the mip level, in 1/16 levels: a float's exponent and the top four bits of its mantissa,
-// a piecewise linear log2 floored to 1/16 (PPSSPP's hardware notes, "GE arithmetic"). shaders/ge.metal has the same.
-std::int32_t ge_log16(float value) {
-    std::uint32_t bits{};
-    std::memcpy(&bits, &value, sizeof(bits));
-    return static_cast<std::int32_t>((bits >> 19u) & 0xFFFu) - 127 * 16;
-}
-
 } // namespace
-
-std::uint32_t texture_bits(TextureFormat format) {
-    switch (format) {
-    case TextureFormat::Clut4: return 4u;
-    case TextureFormat::Clut8: return 8u;
-    case TextureFormat::Rgba5650:
-    case TextureFormat::Rgba5551:
-    case TextureFormat::Rgba4444:
-    case TextureFormat::Clut16: return 16u;
-    case TextureFormat::Rgba8888:
-    case TextureFormat::Clut32: return 32u;
-    default: return 0u;
-    }
-}
 
 // The mip levels a draw samples its texture with (task 037): the GE's level count when the minification
 // filter takes levels (min_filter bit 2) and every level after the first halves the one before, lies in
-// guest memory and outside every render target; 1 otherwise. A texture with a level that fails is drawn at
-// level 0 alone, said once per texture.
+// guest memory (pk::mip_level_problem) and outside every render target; 1 otherwise. A texture with a level
+// that fails is drawn at level 0 alone, said once per texture.
 std::uint32_t MetalGeBackend::mip_levels(const GuestMemory &memory, const TextureState &state) {
-    if (switches_.no_mipmaps || state.level_count <= 1u || (state.min_filter & 4u) == 0u) return 1u;
-    const std::uint32_t count =
-        std::min<std::uint32_t>(state.level_count, 1u + static_cast<std::uint32_t>(state.levels.size()));
+    if (switches_.no_mipmaps) return 1u;
+    const std::uint32_t count = pk::sampled_level_count(state);
     for (std::uint32_t n = 1u; n < count; ++n) {
         const TextureState level = texture_level(state, n);
-        const char *why = nullptr;
-        if (level.width != std::max(1u, static_cast<std::uint32_t>(state.width) >> n) ||
-            level.height != std::max(1u, static_cast<std::uint32_t>(state.height) >> n))
-            why = "is not half the level before it";
-        else if (!memory.contains(level.address, texture_bytes(level)))
-            why = "lies outside guest memory";
-        else if (target_holding(level.address, texture_bytes(level)) != nullptr)
+        const char *why = pk::mip_level_problem(memory, state, n);
+        if (why == nullptr && target_holding(level.address, texture_bytes(level)) != nullptr)
             why = "lies in a render target";
         if (why == nullptr) continue;
         if (bad_levels_.insert(state.address).second)
@@ -178,7 +128,7 @@ std::uint64_t MetalGeBackend::content_key(const GuestMemory &memory, const Textu
         key = hash_guest(key, memory, level.address, texture_bytes(level));
     }
     if (indexed(state.format)) {
-        const std::uint32_t bits = texture_bits(state.format);
+        const std::uint32_t bits = bits_per_texel(state.format);
         key = hash_value(key, state.clut_address);
         key = hash_value(key, static_cast<std::uint64_t>(state.clut_format) << 48u |
                                   static_cast<std::uint64_t>(state.clut_shift) << 32u |

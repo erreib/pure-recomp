@@ -30,13 +30,11 @@ MTLCompareFunction to_compare(std::uint32_t function);                        //
 std::uint32_t stored_reference(const DrawCall &call);                         // metal_effects.mm
 int stencil_alpha(const DrawCall &call);                                      // metal_effects.mm
 bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail);        // metal_effects.mm
-std::uint32_t texture_bits(TextureFormat format);                             // metal_textures.mm
 
 class MetalGeBackend final : public pk::GeBackend {
 public:
     ~MetalGeBackend() override { shutdown(); }
 
-    const char *name() const noexcept override { return "metal"; }
     bool needs_window() const noexcept override { return false; }
 
     bool initialize(const pk::BackendConfig &config, std::string &error) override;

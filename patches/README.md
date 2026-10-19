@@ -3,13 +3,17 @@
 Applied in numeric order by `tools/vendor_setup.sh` (`git apply` inside `vendor/portablekit`, at the commit in
 `vendor/PIN`). `tools/patches.sh check` applies the series to a clean checkout of the pinned commit and compares it
 with the vendor tree; `tools/patches.sh export NNNN-slug` writes a new patch from the vendor tree's uncommitted
-changes, numbered above the last one. The series has one patch per framework topic (task 052); which patches could
+changes, numbered above the last one. To change a patch inside the series, `tools/patches.sh open` makes it a branch
+of one commit a patch in out/patch-series and `tools/patches.sh close` writes the commits back and brings the vendor
+tree to them (task 095; the script's header has the steps). The series has one patch per framework topic (task 052); which patches could
 go upstream, what a pull request would carry and what it needs first: `docs/upstream.md`.
 
 ## Old numbers
 Task 052 (2026-10-07) regrouped the twenty patches of tasks 001 to 048 into nine, one per topic (the series has grown since; the table above is current), without
 changing a byte of the vendor tree. The task files (the record), a few strings the tools print, two config comments
-and three comments inside the vendor tree itself ("patch 0014", "patch 0017", "patch 0021") cite the old numbers;
+and comments inside the vendor tree itself cite the old numbers: since task 095 only the two "patch 0021" of
+`include/psprecomp/allegrex_context.hpp` (now 0009-vfpu-rounding), left because a change there recompiles the corpus
+(the record format's "patch 0014" and "patch 0017" moved to `src/tools/` with it and name their fields instead);
 since task 053 the docs name the new patch with the task that made the change, and the history files under
 `docs/history/` mark an old number "old". This is where each went. A patch split by file
 went to more than one new patch. 0016 was never used.
@@ -46,7 +50,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0001-cmake-embed-nids-verbatim | 0001 | Bug | candidate | `VERBATIM` on the NID table's embedding command, so a profile's `config/nids.csv` survives the shell |
 | 0002-ge-state-commands | 0004, 0013, 0014, 0017 (ge_state) | Missing feature | candidate | GeState parses the stencil, the write masks, the texture map modes, the mip levels, the colour test, dithering and CLIPENABLE into `DrawCall` |
 | 0003-vulkan-renderer-fixes | 0003, 0004 (renderer), 0005 to 0008, 0013/0014/0017 (comments) | Bug, missing feature | candidate | The Vulkan renderer: framebuffer textures, stencil as alpha, the alpha test's numbering, shadow volumes and dual source, the descriptor pool at shutdown, depth written back at SIGNAL |
-| 0004-ge-backend-and-shell-seams | 0009, 0010, 0012, 0013/0014/0017 (record format) | Missing feature | candidate | `gpu::GeBackend` and `host::Shell` behind the HLE (D-003, D-007): the vulkan, null and record backends, the vulkan and headless shells, the .gerec record format |
+| 0004-ge-backend-and-shell-seams | 0009, 0010, 0012, 0013/0014/0017 (record format) | Missing feature | candidate | `gpu::GeBackend` and `host::Shell` behind the HLE (D-003, D-007): the vulkan and null backends, the vulkan and headless shells (the record backend and its .gerec format live in `src/tools/` since task 095) |
 | 0005-kernel-host-waits-and-pacing | 0011 | Behaviour (headless pace) | candidate | Only network waits hold the unpaced clock to real time; the shell decides whether the clock is paced |
 | 0006-mpeg-ring-not-empty-while-aus-pending | 0002 | Bug | candidate | `sceMpegRingbufferAvailableSize` reports the ring one packet short of empty while access units are queued |
 | 0007-savedata-list-and-no-key-mode | 0015, 0019 | Missing feature | candidate | List requests answered with a choice (script, PSP-style list, or a safe default); saves without a game key written and checked in mode 1 |
@@ -67,12 +71,12 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0022-vulkan-async-readback | (task 077-vulkan-readback-stutter) | Performance | candidate (any discrete GPU) | The depth write-back at a GE SIGNAL (`write_back_depth`, the lens flare's CPU depth test) records its copy into the frame and stores the copy the frame before recorded, instead of submitting the half-recorded frame and fence-waiting the queue every race frame; the guest reads depth one frame old. `<prefix>_SYNC_READBACK=1` restores the synchronous drain |
 | 0023-vulkan-cached-window-capture | (task 078-vulkan-effect-slowdowns) | Performance, tooling | candidate (any discrete GPU) | A window capture (the input script's `shot`) reads its buffer from a HOST_CACHED memory type when the device has one, instead of the first HOST_COHERENT type (uncached on NVIDIA): `write_bmp` reads it byte by byte, which took 110 to 160 ms a capture on an RTX 3080 and now about 4 ms, wait included; the picture is the same |
 | 0024-audio-resync-counter | (task 079) | Tooling | candidate | The sink's stalled-producer jump (a producer's cursor under the device's read position plus 512 frames, snapped to plus 2048: an audible skip with the ring never dry) is counted: `resyncs=` and `resynced=` (frames skipped) on the `[audio]` trace line and its shutdown total, with `lead=` (frames written ahead of the device). The counter only; the rate-matching the slug names is not in it (task 079 stopped at the characterization) |
-| 0025-guest-time-split | (task 082) | Tooling | candidate (every port wants it) | `<prefix>_TRACE_GUEST=1`: a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second, the [perf] line's guest time (frame less render and pacing) split at the HLE boundary: `HleRegistrar::bind` wraps each import in a timer only when the trace is on (off: nothing per call, one flag test per registration and per render/pacing add), each call's wall time less the render and pacing inside it charged to its module family, `game` the remainder (recompiled code and the dispatch between imports); `store` is the stall tally's depth and frame stores, inside render, shown apart |
+| 0025-guest-time-split | (task 082; removed by task 095) | Removed | none | Removed (task 095): `<prefix>_TRACE_GUEST`, the [perf] line's guest time split at the HLE boundary, served task 082's one measurement and nothing in `tools/` or `src/` set it afterwards; the number stays unused |
 | 0026-corpus-inlining | (task 083) | Performance | **candidate of the first order (every Windows port pays this today)** | The MSVC-style branch of `portablekit_add_game` compiled every generated unit, and the overlay targets, `/O2 /Ob0`: optimization on, inlining off, where the clang path inlines. Both sites now pass `/Ob2`. The recompiled code is almost all small functions, so the cost was the whole Windows guest anomaly: the rig's `game` bucket fell from about 10 to about 3.6 ms a game frame. `/bigobj` and the opt level are unchanged; no FP contraction flag (see the section) |
 | 0027-window-size-switch | (task 084) | Tooling | candidate | `<prefix>_WINDOW_SIZE=WxH` opens the Vulkan renderer's window at W x H instead of 480x272 times `video.window_scale`, so a check can run a window of another shape (21:9 for `tools/aspect_check.sh`, the Fill aspect of D-020); unset or malformed, the window is as before |
 | 0028-vulkan-orthographic-fit | (task 085) | Behaviour | candidate | Under the Fill aspect the Vulkan renderer's interface fit (2D draws into the shown framebuffer pulled in about the screen's centre to square pixels) takes transformed draws under an orthographic projection with lighting off too, not only through mode: their clip x and y scaled after `viewport_into_clip`, in the draw's transform and in its frame-interpolation summary alike; a draw at least 470 of the 480 PSP pixels wide through its transform stays spread unless it is textured and lies within the screen (2 PSP pixels of margin each side: a layer of interface art); `<prefix>_NO_ORTHOGRAPHIC_FIT` fits through-mode draws alone, as before; Original and Stretch draw as before |
 | 0029-windows-file-url | (the planning session, 2026-10-13, after Erik's Windows play) | Bug fix | **candidate of the first order (every Windows port's folder buttons)** | The menu's folder buttons (Open the data folder, the saves, backups, textures and fonts folders) build a `file://` URL for `SDL_OpenURL` by percent-encoding the whole path, so a Windows path came out `file://C%3A%5CUsers%5C...`, which Explorer refuses: nothing opened. The three copies of `file_url` (menu.cpp, font_menu.cpp, save_screen.cpp) now put three slashes before an absolute path, keep the drive's colon and turn backslashes into slashes: `file:///C:/Users/...`; macOS and Linux paths come out as before (`file:///Users/...`) |
-| 0030-vblank-period | (task 089) | Behaviour | candidate | The kernel's vblank period a runtime value: `Kernel::vblank_period_us()` and `set_vblank_period_us()` (default `kVBlankPeriodUs`, the PSP's 16683 us; a new period applies from the next vblank, which stays where it was due, and the count of vblanks stands), read by the tick (`process_timers`), `last_vblank_us()` (now the vblank's own time, kept at the tick), the media HLE's frame grid (`frame_start_us`'s step), vblank duration, hcount and vblank flag, and frame interpolation's game frame (`pacing::set_vblank_period_us`, passed on at each flip; `game_frame_us()` and `game_rate()` follow it, 60 at the PSP's period as before, 120 for a game at 60 whose vblank runs at 120 Hz, and a present clock follows a change at its next flip). Nothing moves at the default period |
+| 0030-vblank-period | (task 089) | Behaviour | candidate | The kernel's vblank period a runtime value: `Kernel::vblank_period_us()` and `set_vblank_period_us()` (default `kVBlankPeriodUs`, the PSP's 16683 us; a new period applies from the next vblank, which stays where it was due, and the count of vblanks stands), read by the tick (`process_timers`), `last_vblank_us()` (now the vblank's own time, kept at the tick), the media HLE's frame grid (`frame_start_us`'s step), vblank duration, hcount and vblank flag, and frame interpolation's game frame (read from the kernel through `pacing::set_vblank_period_source`; `game_frame_us()` and `game_rate()` follow it, 60 at the PSP's period as before, 120 for a game at 60 whose vblank runs at 120 Hz, and a present clock follows a change at its next flip). Nothing moves at the default period |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -83,7 +87,7 @@ Old 0001. `portablekit_add_game` passes `-DINPUT=a.csv|b.csv` to the shell unquo
 
 ### 0002-ge-state-commands
 The ge_state.{hpp,cpp} sections of old 0004, 0013, 0014 and 0017, in that order. No backend draws with any of it
-here; 0003 and the Metal backend in `src/` read it, and 0004's record format writes it.
+here; 0003 and the Metal backend in `src/` read it, and our record format (`src/tools/ge_record_format.hpp`) writes it.
 - Stencil and write masks (old 0004): the GE state ignored the stencil (0x24, 0xDC, 0xDD) and the write masks (0xE8,
   0xE9). Parses them into `DrawCall::stencil` (`StencilState`), `color_write_mask` and `alpha_write_mask`.
 - Texture mapping modes (old 0013): the GE state ignored TEXMAPMODE (0xC0: the map mode in bits 0..1, the texture
@@ -107,6 +111,9 @@ here; 0003 and the Metal backend in `src/` read it, and 0004's record format wri
   CLIPENABLE on (every 3D draw). Parses them into `DrawCall::color_test` (`ColorTestState`), `dither`
   (`DitherState`, with `offset(x, y)`) and `clip_enabled`, so 10 commands leave the ignored-command list (30 distinct
   remain, from 40).
+- Task 095 took out `ge_state.hpp`'s notes that the Vulkan renderer samples level 0, draws every draw with its UVs
+  and draws none of the colour test, dithering and CLIPENABLE: 0011 to 0014 draw them, and the GE state says what the
+  GE does, not what a backend draws.
 
 ### 0003-vulkan-renderer-fixes
 Old 0003, the renderer and shader sections of old 0004, old 0005 to 0008, then the renderer sections of old 0013,
@@ -153,22 +160,28 @@ colour test, nor dithering, nor CLIPENABLE's depth clamp). Needs 0002's stencil 
   does), and stores z = depth x 65535 as 16-bit pixels in rows of the depth stride at the depth address (480x272;
   screen-wide buffers, stride 480 or more, only). Depth images get TRANSFER_SRC usage. About 1 ms a race frame on the
   M4 Pro, 0.9 of it the GPU wait. `PURE_NO_DEPTH_READBACK=1` turns it off; `PURE_TRACE_DEPTH_READBACK=1` logs each
-  write-back. The HLE side (`hle_media.cpp`) goes through the GE backend once 0004 applies.
+  write-back. The HLE side (`hle_media.cpp`) goes through the GE backend once 0004 applies. Since task 095 the
+  read-back pieces are written once, here: `drain_recording` (submit, wait, go on recording; the framework's
+  `read_back_framebuffer` and the depth write-back both call it, the waits as before), `host_read_memory` (the
+  memory type of a buffer the CPU reads: cached and coherent, then cached, then coherent; the frame write-back, the
+  depth write-back and 0023's capture pick with it, each as before) and `invalidate_writeback(memory, coherent)`.
 
 ### 0004-ge-backend-and-shell-seams
-Old 0009, 0010 and 0012, then the record-format sections of old 0013, 0014 and 0017 and 0017's record_backend.cpp
-section. Needs 0002 (the record format writes every `DrawCall` field) and 0003 (it builds on the renderer's depth
-write-back and its HLE call).
+Old 0009, 0010 and 0012. It carried the record backend and the .gerec format too (with the record-format sections of
+old 0013, 0014 and 0017) until task 095 moved both to `src/tools/` (`record_backend.cpp`, `ge_record_format.hpp`):
+their users are ours (`--replay`, `tools/gerec/`), and the backend registers with `BackendRegistration` as the Metal
+backend does. Needs 0003 (it builds on the renderer's depth write-back and its HLE call).
 - The GE backend seam (old 0009; D-003, docs/ge-backend.md): `gpu::GeBackend` (`host/gpu/ge_backend.hpp`) with a
   registry (`register_backend`, `make_backend`, `BackendRegistration`) and `<prefix>_GE_BACKEND` (vulkan when unset).
   The HLE (`hle_media.cpp`) hands draws, block transfers, read-backs, the frame and depth write-backs, CPU pictures,
   captures and the draw/frame counters to the backend. `vulkan` forwards each call to the renderer method that did
   the work before (`vulkan_ge_backend.cpp`, no change in output; the renderer gains `display_image()`, which names the
   target `present()` shows). `null` draws nothing, presents black and counts draws, and needs no window: with
-  `<prefix>_NO_RENDER` set it is the only backend that runs, without a window or GPU. `record` wraps another backend
-  (`<prefix>_GE_RECORD_INNER`) and writes frames `<prefix>_GE_RECORD_AT` to `+<prefix>_GE_RECORD_FRAMES-1` to
-  `<prefix>_GE_RECORD`: every call with the guest memory it read and each frame's presented image
-  (`ge_record_format.hpp`, read by `tools/gerec/gerec_dump.py`). Adds the four sources to `cmake/PortableKit.cmake`.
+  `<prefix>_NO_RENDER` set it is the only backend that runs, without a window or GPU. Adds the three sources to
+  `cmake/PortableKit.cmake`. Task 095 trimmed the interface to what is called through it: no `GeBackend::name()`;
+  `PresentedImage` keeps `api`, the size, `pixels` (Cpu) and `image` (Metal's texture), the Vulkan backend naming
+  its target by display address alone; one BMP writer, `gpu::write_bmp` (moved out of the renderer, so the null
+  backend writes the same file without it); and both registries one template, `Registry<T>` (`host/registry.hpp`).
 - The shell seam (old 0010; D-007, docs/ge-backend.md section 8): `host::Shell` (`host/shell/shell.hpp`: lifecycle,
   events and input, presenting, interface) with a registry (`register_shell`, `make_shell`, `ShellRegistration`) and
   `<prefix>_SHELL` (vulkan when unset; `<prefix>_NO_RENDER` means headless). The HLE (`hle_media.cpp`) owns a shell
@@ -184,20 +197,15 @@ write-back and its HLE call).
   axis names (`gamepad.cpp`), the input script's grammar (`script_steps.cpp`). The interface layer attaches to a
   `Shell` with a window (`Layer::attach(host::Shell &)`); the menu's resolution, texture filter and texture pack rows
   use the Vulkan renderer through `active_renderer()`. Adds the six sources to `cmake/PortableKit.cmake`. No change in
-  what the Vulkan path shows (the frame regression captures are pixel-identical).
+  what the Vulkan path shows (the frame regression captures are pixel-identical). Since task 095 `Shell` has no
+  `shutdown`, `shutdown_ui`, `mouse_captured`, `quit_requested` or `request_quit`: nothing called them through it, and
+  a shell's destructor frees what it made.
 - The UI platform init in the shell (old 0012): `Layer::attach` started ImGui's SDL3 platform backend with
   `ImGui_ImplSDL3_InitForVulkan` for every shell, which is wrong for a shell that draws with another API (the Metal
   shell, task 027, needs `ImGui_ImplSDL3_InitForMetal`). The platform init moves into `Shell::initialize_ui`: the
   Vulkan shell calls `ImGui_ImplSDL3_InitForVulkan` for its renderer's window before the renderer's ImGui Vulkan
-  backend (and shuts both down, or leaves neither running on failure), and `Layer::attach` loads the fonts, calls
+  backend (and leaves neither running on failure), and `Layer::attach` loads the fonts, calls
   only `shell.initialize_ui`, then sets the gamepad mode. The Vulkan path is unchanged.
-- The record format's later fields (old 0013, 0014, 0017): a Draw ends with the texture map state (four u32), then
-  the mip level fields (`Writer::put_levels`, `kLevelBytes`), then the colour test, dithering and CLIPENABLE
-  (`kPixelBytes`). Each came after recordings had been made, so the reader takes a Draw that ends before a part as
-  map mode 0, one level, and no colour test, no dithering, CLIPENABLE off respectively; `kVersion` stays 1.
-  `RecordBackend::submit` also records the texels of every mip level a draw samples (levels 1 to `level_count` - 1
-  when the minification filter's bit 2 is on), so a recording replays mipmapped draws from their own texels instead
-  of zeroed memory.
 
 ### 0005-kernel-host-waits-and-pacing
 Old 0011. Needs 0004 (the HLE sets the pacing where it makes the shell). `Kernel::advance_clock` slept up to 1 ms of
@@ -206,7 +214,8 @@ real time per clock step while any thread was in a `WaitType::Host` wait, so a n
 about 19 frames a second. `wait_host` takes `real_time` (only the adhoc network waits pass it) and the sleep applies
 to those alone; `Kernel::set_paced(bool)` lets the HLE pace the clock by the shell (a shell with a window is paced,
 the headless one is not), with `<prefix>_NO_RENDER` deciding until the shell exists. Headless frontend route: 2200
-frames in 1.1 s instead of 115 s, same draws, same events. Windowed runs unchanged.
+frames in 1.1 s instead of 115 s, same draws, same events. Windowed runs unchanged. `<prefix>_NO_RENDER` is read
+once (a static, as before the patch), not at every pacing call.
 
 ### 0006-mpeg-ring-not-empty-while-aus-pending
 Old 0002. `sceMpegRingbufferAvailableSize` reported the ring empty while the demuxer still held access units (the
@@ -321,7 +330,10 @@ sampled through a sampler of its own (`mip_sampler`, linear between levels). `te
 8, the part of D that is the same across the draw; `mip_lod` in `ge.frag` adds the rest with the GE's float-bits
 logarithm and samples with `textureLod`, as `sample_texture` in `src/gpu/shaders/ge.metal` (task 037). At an internal
 scale above 1 the auto rule's gradient is taken per PSP pixel. A texture of one level is drawn as before;
-`<prefix>_NO_MIPMAPS` (the name the Metal backend reads) restores the old path.
+`<prefix>_NO_MIPMAPS` (the name the Metal backend reads) restores the old path. Since task 095 the layout helpers
+both backends need are `texture_decode.hpp`'s, written once: `bits_per_texel` (the decoder's, no longer file-local),
+`indexed`, `texture_bytes`, `texture_level`, `sampled_level_count`, `mip_level_problem` (the halving and guest memory
+checks; each backend adds its own render targets) and `ge_log16`; the decoder's two palette tests call `indexed`.
 
 ### 0013-vulkan-colortest-depthclamp
 Task 059. The renderer kept every fragment and clipped every transformed draw at both ends of the depth range; the
@@ -395,7 +407,8 @@ Metal backend, task 066) had no row. Now they ask the backend the HLE draws with
 in `host/gpu/ge_backend.hpp`, defined in `hle_media.cpp` over its `active_backend()`): the row is drawn when
 `GeBackend::supports_internal_scale()` answers true, its value is `target_size()`, and a change calls
 `set_internal_scale(setting)`, the setting as `BackendConfig::internal_scale` takes it (0 Auto). The defaults are no,
-nothing and 480x272, so the null and record backends have no row; the Vulkan backend (`vulkan_ge_backend.cpp`) answers
+nothing and 480x272, so the null backend has no row (our record backend in `src/tools/` answers as the backend it
+wraps, since task 095); the Vulkan backend (`vulkan_ge_backend.cpp`) answers
 true and forwards both to its renderer, which is what the menu called before, so the Vulkan shell's menu is unchanged
 (the texture filter and texture pack rows keep their renderer gate). `GameProfile::default_internal_scale`
 (`std::optional`, unset by default) is the scale a new player starts with: `settings::defaults_for` applies it, so it
@@ -447,7 +460,8 @@ for every frame; 0 for a key no option has). `host/ui/menu.cpp`: `game_rows(tab)
 row is locked with "Set by <variable>" when the environment decides it), saving on change; the `<prefix>_MENU_DUMP`
 lines list the rows as the others; each tab's Restore button puts that tab's options back to their defaults (not one
 the environment decides). A game that lists no option gets no section and no key: every tab and settings.ini are as
-before. Our profile lists one, Flashes (`game.smooth_flashes`, `src/profile/enhancements.cpp`).
+before. Our profile lists one, Flashes (`game.smooth_flashes`, `src/profile/enhancements.cpp`). The menu's own tab
+type (0016's `Menu::Tab`) is `MenuTab` itself, an alias since task 095.
 
 ### 0020-vulkan-texture-detail
 Task 076 (D-019, E5; the Metal backend's half was task 075). The renderer picked a mipmapped draw's level as the GE does
@@ -474,7 +488,9 @@ enhanced draw and by a 2D one, so `Texture` gains `detail_descriptor`, made at t
 rewritten with the other on a Texture filter change and freed with it; the descriptor pool is sized for twice as many
 texture sets when the game names the option. `[render] texture detail: on` at the first enhanced draw. Without the
 option, or with it at 0, the draws, the samplers and the pictures are as before (the Vulkan window suite's seven scenes
-to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`).
+to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`). The
+bits of `texture_params.x` are described once, above `PushConstants` in `vulkan_renderer.cpp`; `ge.vert` and `ge.frag`
+point there (task 095: the three descriptions disagreed).
 
 ### 0021-content-packs
 Task 078 (078-download-packs-menu, the Mac line's 078; D-005; docs/dlc.md, "In the menu (task 078)"). A game's download packs are save folders the game loads as
@@ -508,7 +524,7 @@ recorded (`begun_frames` tells this frame's from those), waiting for that frame'
 in practice); older ones are dropped. The first SIGNAL stores nothing (guest memory keeps its bytes). A second SIGNAL in
 one frame that needs a bigger buffer than the first's drains as before. The conversion to the GE's 16 bits is
 `store_depth`, the copy `record_depth_copy`, both shared with the synchronous path, which `<prefix>_SYNC_READBACK=1`
-restores exactly. The start-up line says which (`a frame late` or `synchronous`). Upstream: a candidate; the one-frame
+restores exactly (its drain and both invalidates are 0003's `drain_recording` and `invalidate_writeback`). The start-up line says which (`a frame late` or `synchronous`). Upstream: a candidate; the one-frame
 lag is what a game's CPU depth test sees, so a framework would want it per game or documented.
 
 ### 0023-vulkan-cached-window-capture
@@ -516,7 +532,8 @@ Task 078 (078-vulkan-effect-slowdowns). The input script's `shot` (a window capt
 `find_memory_type(HOST_VISIBLE | HOST_COHERENT)`, the first such type, which on NVIDIA is uncached, and `write_bmp`
 then read it a byte at a time: 110 to 160 ms a capture on the rig, a long frame at every scripted shot (the "first-use
 present hitches" task 078 was opened for). The buffer now comes from a HOST_VISIBLE | HOST_COHERENT | HOST_CACHED type
-when the device has one (type 4 on the RTX 3080), else as before; no invalidate is needed since the type is coherent.
+when the device has one (type 4 on the RTX 3080), else as before; no invalidate is needed since the type is coherent
+(0003's `host_read_memory` with `invalidates` false picks it).
 Measured: fence wait 1.5 to 3.3 ms, read, convert and write 1.6 to 2.5 ms. The BMP is the same bytes. Upstream: a
 candidate; any discrete GPU's captures.
 
@@ -532,15 +549,11 @@ skips track the producer's lost time, not a fast device clock, so the slug's rat
 Result). Upstream: a candidate, since any port with a slow or bursty producer skips here without knowing it.
 
 ### 0025-guest-time-split
-Task 082. The guest thread's twin of the render split: where the [perf] line's guest milliseconds go. The timer sits
-in `HleRegistrar::bind` (host/hle/hle_common.cpp), the one place every implemented import is registered, so the
-recompiled code, the runtime's dispatch (src/) and the kernel are untouched and an untraced run registers the very
-functions it did before. Module families: kernel (ThreadMan, Kernel_Library, SysMem, Utils, InterruptManager,
-ModuleMgr, LoadExec, sceSuspend, sceDmac), io (IoFileMgr, sceUmd, Stdio), sas (sceSasCore), audio (sceAudio,
-sceAtrac, sceMp3, sceVaudio), ge (sceGe_), display (sceDisplay), other (the rest). Render time (display lists,
-presents) and pacing sleeps inside a call are subtracted, as the [perf] guest figure subtracts them; the depth store
-(patch 0022-vulkan-async-readback) runs inside a list's render time, so it is not guest time and shows as `store`. Unimplemented imports
-(`[hle-stub]`) are registered elsewhere and count as game. Measurements: docs/tasks/082-guest-frame-profile.md.
+Removed by task 095 (the audit of 2026-10-19). Task 082 added `<prefix>_TRACE_GUEST=1`, a `[guest-split]` line a
+second that split the [perf] line's guest time by module family with a timer around each import in
+`HleRegistrar::bind`, to measure where the rig's guest milliseconds went (docs/tasks/082-guest-frame-profile.md keeps
+the figures). Nothing in `tools/` or `src/` set the switch after that measurement, so the patch and its timer went;
+the number is left unused rather than renumbering the patches after it.
 
 ### 0026-corpus-inlining
 Task 083. `cmake/PortableKit.cmake` passed `/Ob0` (no inlining) beside `/O${PSPRECOMP_GENERATED_OPT_LEVEL}` in its
@@ -563,8 +576,9 @@ so every window it opens has the PSP's shape until the player resizes it. A chec
 draws its 3D view at the window's shape) needs a window of another shape from the first frame, the same in every run.
 `<prefix>_WINDOW_SIZE=WxH`, read once beside `SDL_CreateWindow`, opens the window at W x H (1 to 16384 each) and
 prints `[render] window WxH (WINDOW_SIZE)`; unset, or anything but two positive numbers joined by an `x`, and the
-window is as before. Nothing else reads it: the menu's Window size row and a later resize work as they did. Applies to
-the pin alone. Upstream: a candidate, tooling any port's window checks can use.
+window is as before. Nothing else reads it: the menu's Window size row and a later resize work as they did. The parse
+is `host::window_size_switch()` (`shell/shell.hpp`, task 095), which our Metal shell calls too. Applies to the pin
+alone. Upstream: a candidate, tooling any port's window checks can use.
 
 ### 0028-vulkan-orthographic-fit
 Task 085 (D-020, point 3). Under Fill the target has the window's shape, so each of the game's 480x272 pixels is wider
@@ -607,8 +621,10 @@ hcount and the vblank flag, whose two `16683` literals were the same constant) a
 interpolation's game frame. The period is now the kernel's `vblank_period_us()`, set by `set_vblank_period_us()`
 (0 restores the PSP's); `last_vblank_us()` is kept at the tick, so a change of period leaves it the vblank's own
 time; a change applies from the next vblank, which stays where it was due (never moved into the past), and the count
-of vblanks so far stands. The media HLE passes the period to `gpu::pacing::set_vblank_period_us()` at each flip
-(frame_pacing.cpp is in the renderer's sources, which the kernel does not link): `game_frame_us()` is the period
+of vblanks so far stands. The period is kept by the kernel alone: frame_pacing.cpp, which is built without the
+kernel (the renderer's sources, the framework's interpolation tests), reads it through the function the media HLE
+hands `gpu::pacing::set_vblank_period_source()` when it makes the shell (task 095; until then a copy passed on at
+each flip, and an uncalled `pacing::vblank_period_us()`): `game_frame_us()` is the period
 times the game's frame in vblanks and `game_rate()` 60 x 16683 / period / that count, exactly 30 or 60 at the PSP's
 period as before, so the menu's Frame rate row, which offers only rates above `game_rate()`, offers the game's own
 rate and Match display when a game at 60 runs its vblank at 120 Hz. A present clock whose frame no longer matches

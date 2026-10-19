@@ -185,9 +185,18 @@ index dc2d92b..2335631 100644
 +
  } // namespace portablekit::settings
 diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
-index bd31979..b9bba38 100644
+index bd31979..62e6b23 100644
 --- a/host/ui/menu.cpp
 +++ b/host/ui/menu.cpp
+@@ -187,7 +187,7 @@ public:
+ 
+ private:
+     enum class Confirm { None, Quit, Setup };
+-    enum class Tab { Video, Audio, Controls, Network, System };
++    using Tab = MenuTab;  // the tabs a game's own rows name (GameOption::tab)
+ 
+     // The tabs the game has: Network only with ad hoc play.
+     static std::vector<Tab> tabs();
 @@ -196,6 +196,11 @@ private:
      void controls();
      void network();
@@ -200,22 +209,17 @@ index bd31979..b9bba38 100644
      bool confirm_dialog();
  
      host::Shell &shell() { return Layer::get().shell(); }
-@@ -223,6 +228,42 @@ private:
+@@ -223,6 +228,37 @@ private:
      std::optional<input::Action> binding_;  // waiting for a key for this control
  };
  
-+// GameOption::tab names the tabs in Tab's order.
-+static_assert(static_cast<int>(MenuTab::Video) == 0 && static_cast<int>(MenuTab::Audio) == 1 &&
-+              static_cast<int>(MenuTab::Controls) == 2 && static_cast<int>(MenuTab::Network) == 3 &&
-+              static_cast<int>(MenuTab::System) == 4);
-+
 +void Menu::game_rows(Tab tab) {
 +    const std::span<const GameOption> options = portablekit::game().options;
 +    settings::Settings &s = settings::current();
 +    bool shown = false;
 +    for (std::size_t i = 0; i < options.size(); ++i) {
 +        const GameOption &option = options[i];
-+        if (static_cast<int>(option.tab) != static_cast<int>(tab) || option.choices.empty()) continue;
++        if (option.tab != tab || option.choices.empty()) continue;
 +        if (!shown) section("Game");
 +        shown = true;
 +        const int count = static_cast<int>(option.choices.size());
@@ -235,7 +239,7 @@ index bd31979..b9bba38 100644
 +    settings::Settings &s = settings::current();
 +    for (std::size_t i = 0; i < options.size() && i < s.game_options.size(); ++i) {
 +        const std::string key = std::string("game.") + options[i].key;
-+        if (static_cast<int>(options[i].tab) == static_cast<int>(tab) && settings::overridden_by(key.c_str()).empty())
++        if (options[i].tab == tab && settings::overridden_by(key.c_str()).empty())
 +            s.game_options[i] = options[i].default_choice;
 +    }
 +}
@@ -243,7 +247,7 @@ index bd31979..b9bba38 100644
  std::vector<Menu::Tab> Menu::tabs() {
      std::vector<Tab> shown{Tab::Video, Tab::Audio, Tab::Controls};
      if (portablekit::game().features.adhoc) shown.push_back(Tab::Network);
-@@ -589,8 +630,10 @@ void Menu::video() {
+@@ -589,8 +625,10 @@ void Menu::video() {
          shell().set_frame_rate(s.frame_rate);
          shell().set_frame_rate_auto(s.frame_rate_auto);
          shell().set_perf_overlay(perf::options().overlay);
@@ -254,7 +258,7 @@ index bd31979..b9bba38 100644
  }
  
  void Menu::audio() {
-@@ -625,8 +668,10 @@ void Menu::audio() {
+@@ -625,8 +663,10 @@ void Menu::audio() {
          s.volume = settings::defaults().volume;
          s.mute = settings::defaults().mute;
          sink.set_volume(gain(s));
@@ -265,7 +269,7 @@ index bd31979..b9bba38 100644
  }
  
  // A text field row. Returns true when an edit was committed; the new text is
-@@ -994,6 +1039,7 @@ void Menu::controls() {
+@@ -994,6 +1034,7 @@ void Menu::controls() {
          restore("input.touch_size", s.touch_size, d.touch_size);
          restore("input.touch_camera_speed", s.touch_camera_speed, d.touch_camera_speed);
          s.bindings = d.bindings;
@@ -273,7 +277,7 @@ index bd31979..b9bba38 100644
          settings::save();
      }
  
-@@ -1048,6 +1094,7 @@ void Menu::controls() {
+@@ -1048,6 +1089,7 @@ void Menu::controls() {
          s.bindings = input::classic_bindings();
          settings::save();
      }
@@ -281,7 +285,7 @@ index bd31979..b9bba38 100644
  }
  
  std::string format_duration(std::uint64_t ms) {
-@@ -1336,9 +1383,11 @@ void Menu::network() {
+@@ -1336,9 +1378,11 @@ void Menu::network() {
          restore("network.adhoc", s.adhoc, defaults.adhoc);
          restore("network.server", s.adhoc_server, defaults.adhoc_server);
          restore("network.nickname", s.adhoc_nickname, defaults.adhoc_nickname);
@@ -293,7 +297,7 @@ index bd31979..b9bba38 100644
  }
  
  void Menu::system() {
-@@ -1431,6 +1480,7 @@ void Menu::system() {
+@@ -1431,6 +1475,7 @@ void Menu::system() {
      info_row("Graphics", graphics);
      dump_detail(graphics);
      info_row("Interface", std::string("Dear ImGui ") + IMGUI_VERSION);

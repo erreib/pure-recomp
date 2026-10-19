@@ -74,7 +74,7 @@ index f180930..2de9e7a 100644
 +    out_color = stored(color);
  }
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 43aa31e..b8ac5f3 100644
+index 43aa31e..62c6188 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -96,6 +96,12 @@ constexpr std::uint32_t kFrameRegions = 3u;
@@ -314,7 +314,21 @@ index 43aa31e..b8ac5f3 100644
          const VkFormat candidates[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT,
                                         VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D16_UNORM,
                                         VK_FORMAT_D32_SFLOAT_S8_UINT};
-@@ -1052,6 +1247,13 @@ struct VulkanRenderer::Impl {
+@@ -1036,8 +1231,11 @@ struct VulkanRenderer::Impl {
+     // first host-visible coherent type, as before.
+     bool writeback_cached{};
+     bool writeback_coherent{true};
+-    void invalidate_writeback(VkDeviceMemory memory) {
+-        if (writeback_coherent || memory == VK_NULL_HANDLE) return;
++    void invalidate_writeback(VkDeviceMemory memory) { invalidate_writeback(memory, writeback_coherent); }
++    // Any mapped buffer the GPU wrote and the CPU is about to read (the depth
++    // write-back's too): a type that is not coherent needs the invalidate.
++    void invalidate_writeback(VkDeviceMemory memory, bool coherent) {
++        if (coherent || memory == VK_NULL_HANDLE) return;
+         VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
+         range.memory = memory;
+         range.offset = 0u;
+@@ -1052,6 +1250,15 @@ struct VulkanRenderer::Impl {
      WritebackFrame writeback_ready{};     // pixels waiting in writeback_pixels
      bool writeback_has_pixels{};
      std::vector<std::uint32_t> writeback_pixels;
@@ -325,10 +339,12 @@ index 43aa31e..b8ac5f3 100644
 +    bool depth_readback_coherent{true};
 +    bool create_depth_readback(VkDeviceSize bytes, std::string &error);
 +    void destroy_depth_readback();
++    // The frame so far run and waited for, for a read-back the CPU needs now.
++    perf::Clock::duration drain_recording(const char *waiting, const char *resumed, bool collect_writebacks);
  
      // Frames in flight. With two (the default) the CPU records a frame while
      // the GPU still draws the one before, so their times overlap instead of
-@@ -1242,7 +1444,7 @@ struct VulkanRenderer::Impl {
+@@ -1242,7 +1449,7 @@ struct VulkanRenderer::Impl {
      // turn with it (see kFrameRegions).
      std::uint32_t frame_region{};
      std::uint32_t next_region{};
@@ -337,7 +353,7 @@ index 43aa31e..b8ac5f3 100644
      VkDeviceSize index_limit{kIndexBufferBytes};
      void enter_region(std::uint32_t index) {
          // How much of its region the frame being left used, for the perf line.
-@@ -1250,7 +1452,7 @@ struct VulkanRenderer::Impl {
+@@ -1250,7 +1457,7 @@ struct VulkanRenderer::Impl {
                                 index_offset - static_cast<VkDeviceSize>(frame_region) * kIndexBufferBytes);
          frame_region = index;
          vertex_offset = static_cast<VkDeviceSize>(index) * kVertexBufferBytes;
@@ -346,7 +362,52 @@ index 43aa31e..b8ac5f3 100644
          index_offset = static_cast<VkDeviceSize>(index) * kIndexBufferBytes;
          index_limit = index_offset + kIndexBufferBytes;
      }
-@@ -2193,6 +2395,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -1741,6 +1948,44 @@ struct VulkanRenderer::Impl {
+         return 0u;
+     }
+ 
++    // The memory type of a buffer the CPU reads back, among `mask`'s: host
++    // cached first, since the CPU reads uncached memory slowly (the frame
++    // write-back took ~3 ms on a Steam Deck), coherent before not, and a
++    // cached type that is not coherent only for a reader that invalidates
++    // (`invalidates`); else the first host-visible coherent type. Without
++    // one of those, `found` is false and `type` 0, as find_memory_type gives.
++    struct HostReadMemory {
++        std::uint32_t type{};
++        bool found{};
++        bool cached{};
++        bool coherent{true};
++    };
++    [[nodiscard]] HostReadMemory host_read_memory(std::uint32_t mask, bool invalidates) const {
++        VkPhysicalDeviceMemoryProperties memory_properties{};
++        vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
++        const auto first = [&](VkMemoryPropertyFlags wanted) -> std::int32_t {
++            for (std::uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i)
++                if ((mask & (1u << i)) != 0u && (memory_properties.memoryTypes[i].propertyFlags & wanted) == wanted)
++                    return static_cast<std::int32_t>(i);
++            return -1;
++        };
++        constexpr VkMemoryPropertyFlags kCached =
++            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
++        constexpr VkMemoryPropertyFlags kCoherent =
++            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
++        HostReadMemory memory;
++        std::int32_t chosen = first(kCached | kCoherent);
++        if (chosen < 0 && invalidates) chosen = first(kCached);
++        memory.cached = chosen >= 0;
++        if (chosen < 0) chosen = first(kCoherent);
++        if (chosen < 0) return memory;
++        memory.type = static_cast<std::uint32_t>(chosen);
++        memory.found = true;
++        memory.coherent =
++            (memory_properties.memoryTypes[chosen].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0u;
++        return memory;
++    }
++
+     bool create_image(std::uint32_t width, std::uint32_t height, VkFormat format, VkImageUsageFlags usage,
+                       VkImage &image, VkDeviceMemory &memory, VkImageView &view, VkImageAspectFlags aspect,
+                       std::string &error) {
+@@ -2193,6 +2438,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      // fault or hang. <prefix>_NO_ROBUST_BUFFERS leaves it off, as before.
      if (supported_features.robustBufferAccess == VK_TRUE && portablekit::env("NO_ROBUST_BUFFERS") == nullptr)
          enabled_features.robustBufferAccess = VK_TRUE;
@@ -359,7 +420,7 @@ index 43aa31e..b8ac5f3 100644
      std::cout << "[render] robust buffer access " << (enabled_features.robustBufferAccess ? "on" : "off") << "\n";
      VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
      device_info.pEnabledFeatures = &enabled_features;
-@@ -2271,6 +2479,10 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2271,6 +2522,10 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      attachments[1] = attachments[0];
      impl.choose_depth_format();
      attachments[1].format = impl.depth_format;
@@ -370,7 +431,7 @@ index 43aa31e..b8ac5f3 100644
      attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
      attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
      VkAttachmentReference color_reference{0u, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-@@ -2291,7 +2503,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2291,7 +2546,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      if (portablekit::env("NO_CLEAR_LOAD") == nullptr) {
          for (std::uint32_t variant = 1u; variant < 4u; ++variant) {
              std::array<VkAttachmentDescription, 2> skipped = attachments;
@@ -380,7 +441,7 @@ index 43aa31e..b8ac5f3 100644
              if ((variant & 2u) != 0u) skipped[1].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
              VkRenderPassCreateInfo variant_info = render_pass_info;
              variant_info.pAttachments = skipped.data();
-@@ -2313,7 +2526,11 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2313,7 +2569,11 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      } else if (!create_shader(kGeRawVertexShader, sizeof(kGeRawVertexShader), impl.raw_vertex_shader)) {
          return false;
      }
@@ -393,7 +454,7 @@ index 43aa31e..b8ac5f3 100644
  
      VkDescriptorSetLayoutBinding binding{};
      binding.binding = 0u;
-@@ -2615,7 +2832,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2615,7 +2875,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
                    << (kVertexBufferTotal >> 20u) << " MiB in memory type " << vertex_type << " ("
                    << ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0u ? "device local, " : "")
                    << ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0u ? "cached" : "uncached")
@@ -404,7 +465,7 @@ index 43aa31e..b8ac5f3 100644
      }
      std::cout << "Renderer: Vulkan on " << properties.deviceName << ", target " << impl.target_extent.width << "x"
                << impl.target_extent.height << "\n";
-@@ -3394,9 +3613,10 @@ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
+@@ -3394,9 +3656,10 @@ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
                        target.color,
                        target.color_memory, target.color_view, VK_IMAGE_ASPECT_COLOR_BIT, error))
          return false;
@@ -417,7 +478,7 @@ index 43aa31e..b8ac5f3 100644
          return false;
      const std::array<VkImageView, 2> views{target.color_view, target.depth_view};
      VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-@@ -3497,15 +3717,78 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
+@@ -3497,15 +3760,78 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address, std::uint32_t overw
      current_target = address;
      last_drawn_target = address;
      pass_active = true;
@@ -496,7 +557,7 @@ index 43aa31e..b8ac5f3 100644
  VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture(std::uint32_t width, std::uint32_t height,
                                                                     const std::uint32_t *pixels) {
      Texture texture = create_texture_image(width, height);
-@@ -3773,6 +4056,9 @@ std::uint16_t update_max_seen_v(std::uint16_t seen, std::uint16_t drawn, bool th
+@@ -3773,6 +4099,9 @@ std::uint16_t update_max_seen_v(std::uint16_t seen, std::uint16_t drawn, bool th
  
  } // namespace
  
@@ -506,7 +567,48 @@ index 43aa31e..b8ac5f3 100644
  VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemory &memory, const DrawCall &call) {
      const TextureState &state = call.texture;
      const TextureKeyInput input{state.address,
-@@ -4202,8 +4488,14 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+@@ -4052,32 +4381,15 @@ bool VulkanRenderer::Impl::create_writeback(std::string &error) {
+     vkGetBufferMemoryRequirements(device, writeback.buffer, &requirements);
+     VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+     allocate.allocationSize = requirements.size;
+-    allocate.memoryTypeIndex = find_memory_type(
+-        requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+-    writeback_cached = false;
+-    writeback_coherent = true;
++    // Cached and coherent first, then cached alone (take_writeback invalidates it).
+     static const bool no_cached = portablekit::env("NO_CACHED_READBACK") != nullptr;
+-    if (!no_cached) {
+-        // Cached and coherent first, then cached alone.
+-        VkPhysicalDeviceMemoryProperties memory_properties{};
+-        vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+-        const VkMemoryPropertyFlags cached = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+-        std::int32_t chosen = -1;
+-        for (const VkMemoryPropertyFlags wanted : {cached | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, cached}) {
+-            for (std::uint32_t i = 0; i < memory_properties.memoryTypeCount && chosen < 0; ++i) {
+-                if ((requirements.memoryTypeBits & (1u << i)) != 0u &&
+-                    (memory_properties.memoryTypes[i].propertyFlags & wanted) == wanted)
+-                    chosen = static_cast<std::int32_t>(i);
+-            }
+-            if (chosen >= 0) break;
+-        }
+-        if (chosen >= 0) {
+-            allocate.memoryTypeIndex = static_cast<std::uint32_t>(chosen);
+-            writeback_cached = true;
+-            writeback_coherent =
+-                (memory_properties.memoryTypes[chosen].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0u;
+-        }
+-    }
++    const HostReadMemory memory = host_read_memory(requirements.memoryTypeBits, true);
++    writeback_cached = !no_cached && memory.cached;
++    writeback_coherent = !writeback_cached || memory.coherent;
++    allocate.memoryTypeIndex =
++        writeback_cached ? memory.type
++                         : find_memory_type(requirements.memoryTypeBits,
++                                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+     if (&frame == &slots[0])
+         std::cout << "[render] frame write-back in memory type " << allocate.memoryTypeIndex
+                   << (writeback_cached ? " (host cached" : " (host uncached")
+@@ -4202,8 +4514,14 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
          texture.height == 0u)
          return {};
      const std::uint32_t texture_address = GuestMemory::canonical(texture.address);
@@ -521,7 +623,7 @@ index 43aa31e..b8ac5f3 100644
      for (auto &[address, target] : targets) {
          if (!target.initialized || target.guest_words.empty()) continue;
          const std::uint32_t bytes_per_pixel = framebuffer_bytes_per_pixel(target.format);
-@@ -4212,9 +4504,12 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+@@ -4212,9 +4530,12 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
          const std::uint32_t bytes = target.stride * kPspHeight * bytes_per_pixel;
          if (texture_address < base || texture_address - base >= bytes) continue;
          if (texture.buffer_width != target.stride || (texture_address - base) % bytes_per_pixel != 0u) continue;
@@ -535,7 +637,7 @@ index 43aa31e..b8ac5f3 100644
          }
      }
      if (best == nullptr) return {};
-@@ -4376,14 +4671,15 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+@@ -4376,14 +4697,15 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
  namespace {
  
  constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
@@ -554,7 +656,7 @@ index 43aa31e..b8ac5f3 100644
  }
  
  PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
-@@ -4400,6 +4696,9 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+@@ -4400,6 +4722,9 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
      key.color_mask = words[9] & 0xFu;
      key.alpha_test = words[10] != 0u;
      key.raw = words[11] != 0u;
@@ -564,7 +666,7 @@ index 43aa31e..b8ac5f3 100644
      return key;
  }
  
-@@ -4445,7 +4744,9 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
+@@ -4445,7 +4770,9 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
          if (!in) return;
          in.seekg(0, std::ios::end);
          const std::streamoff size = in.tellg();
@@ -575,7 +677,7 @@ index 43aa31e..b8ac5f3 100644
          in.seekg(0);
          data.resize(static_cast<std::size_t>(size / 4));
          in.read(reinterpret_cast<char *>(data.data()), size);
-@@ -4554,7 +4855,10 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4554,7 +4881,10 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      stages[0].pName = "main";
      stages[1] = stages[0];
      stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -587,7 +689,7 @@ index 43aa31e..b8ac5f3 100644
  
      VkVertexInputBindingDescription binding{0u, sizeof(GpuVertex), VK_VERTEX_INPUT_RATE_VERTEX};
      std::array<VkVertexInputAttributeDescription, 4> attributes{
-@@ -4598,14 +4902,41 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4598,14 +4928,41 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      depth.depthTestEnable = key.depth_test ? VK_TRUE : VK_FALSE;
      depth.depthWriteEnable = key.depth_write ? VK_TRUE : VK_FALSE;
      depth.depthCompareOp = to_compare_op(key.depth_function);
@@ -634,7 +736,7 @@ index 43aa31e..b8ac5f3 100644
      blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
      blend_attachment.colorWriteMask = key.color_mask;
      VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-@@ -6040,12 +6371,71 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6040,12 +6397,71 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
          key.cull = call.culling_enabled && !call.through && call.primitive != PrimitiveType::Sprites;
          key.cull_clockwise = call.cull_clockwise;
      }
@@ -709,7 +811,7 @@ index 43aa31e..b8ac5f3 100644
      key.raw = raw;
      // Escape hatch for bisecting "nothing is visible" reports.
      static const bool no_cull = portablekit::env("NO_CULL") != nullptr;
-@@ -6059,6 +6449,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6059,6 +6475,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      push.transform = multiply(call.projection, view_world);
      push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
                       (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f)};
@@ -717,7 +819,7 @@ index 43aa31e..b8ac5f3 100644
      push.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
      // The GE's texture wrap register: clamp in u, in v, or repeat. The
      // sampler repeats; the fragment shader clamps the axes flagged here
-@@ -6068,17 +6459,24 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6068,17 +6485,24 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      const float wrap_flags = no_texture_clamp ? 0.0f
                                                : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
                                                      (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
@@ -744,7 +846,7 @@ index 43aa31e..b8ac5f3 100644
  
      static const bool trace_fb = portablekit::env("TRACE_FB_TEXTURES") != nullptr;
      if (trace_fb && call.texture.enabled && !call.clear_mode) impl.trace_framebuffer_texture(call);
-@@ -6134,6 +6532,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6134,6 +6558,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
          impl.begin_pass(call.target.color_address, overwritten);
          if (!impl.pass_active) return;
      }
@@ -754,7 +856,7 @@ index 43aa31e..b8ac5f3 100644
      {
          Impl::Target &drawn = impl.targets.at(call.target.color_address);
          const bool layout_changed =
-@@ -6183,7 +6584,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6183,7 +6610,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
          key.source_factor == kFactorFixed ? call.blend.fixed_source : call.blend.fixed_destination;
      const std::array<float, 4> blend_constants{static_cast<float>(constant_color & 0xFFu) / 255.0f,
                                                 static_cast<float>((constant_color >> 8u) & 0xFFu) / 255.0f,
@@ -764,7 +866,96 @@ index 43aa31e..b8ac5f3 100644
  
      const auto clamp_axis = [](std::uint32_t value, std::uint32_t limit) { return std::min(value, limit); };
      const std::uint32_t sx1 = clamp_axis(call.viewport.scissor_x1, kPspWidth - 1u);
-@@ -6406,6 +6808,215 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+@@ -6332,6 +6760,49 @@ void VulkanRenderer::write_back_frame(GuestMemory &memory) {
+     perf::note_stall(perf::Stall::Store, perf::Clock::now() - store_start);
+ }
+ 
++// Submits the frame recorded so far, waits for it (a Stall::Readback, as
++// wait_fence reports `waiting`) and goes on recording the same frame, for a
++// read-back the CPU needs at once. With `collect_writebacks`, the other
++// slots' frame write-backs, older than this one, are taken while it runs.
++// Returns the time from the submit to the end of the wait.
++perf::Clock::duration VulkanRenderer::Impl::drain_recording(const char *waiting, const char *resumed,
++                                                            bool collect_writebacks) {
++    end_gpu_segment(command_buffer);
++    vkEndCommandBuffer(command_buffer);
++    std::array<VkCommandBuffer, 2> batch{};
++    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
++    submit.commandBufferCount = frame_batch(command_buffer, batch);
++    submit.pCommandBuffers = batch.data();
++    const perf::Clock::time_point wait_start = perf::Clock::now();
++    vkQueueSubmit(queue, 1u, &submit, frame_fence);
++    // The frame before, submitted earlier, has finished too; its write-back
++    // is taken first, as it is older than this one.
++    if (collect_writebacks)
++        for (std::uint32_t other = 0; other < slot_count; ++other)
++            if (other != slot) collect_writeback(other, true);
++    wait_fence(frame_fence, waiting);
++    const perf::Clock::duration waited = perf::Clock::now() - wait_start;
++    perf::add_wait_time(waited, perf::Stall::Readback);
++    vkResetFences(device, 1u, &frame_fence);
++    // Uploads and evictions recorded so far have finished with the frame.
++    release_frame_uploads(slot);
++    vkResetCommandBuffer(command_buffer, 0u);
++    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++    vkBeginCommandBuffer(command_buffer, &begin);
++    breadcrumb(command_buffer, resumed);
++    // The queries written so far stay valid: they were reset at the start of
++    // the frame, and the next pair follows them.
++    begin_gpu_segment(command_buffer);
++    // A frame recorded for drawing again keeps what it wrote so far.
++    if (!interpolating) enter_region(frame_region);
++    environment_version = 0u;
++    object_valid = false;
++    raw_valid = false;
++    forget_bindings();
++    return waited;
++}
++
+ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &memory) {
+     Impl &impl = *impl_;
+     static const bool disabled = portablekit::env("NO_FB_TEXTURES") != nullptr;
+@@ -6356,37 +6827,7 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+     Impl::FrameSlot &frame = impl.slots[impl.slot];
+     if (!frame.writeback_in_flight) return;
+     // Run everything recorded so far and carry on recording afterwards.
+-    impl.end_gpu_segment(impl.command_buffer);
+-    vkEndCommandBuffer(impl.command_buffer);
+-    std::array<VkCommandBuffer, 2> batch{};
+-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+-    submit.commandBufferCount = impl.frame_batch(impl.command_buffer, batch);
+-    submit.pCommandBuffers = batch.data();
+-    const perf::Clock::time_point wait_start = perf::Clock::now();
+-    vkQueueSubmit(impl.queue, 1u, &submit, impl.frame_fence);
+-    // The frame before, submitted earlier, has finished too; its write-back
+-    // is taken first, as it is older than this one.
+-    for (std::uint32_t other = 0; other < impl.slot_count; ++other)
+-        if (other != impl.slot) impl.collect_writeback(other, true);
+-    impl.wait_fence(impl.frame_fence, "a framebuffer read back");
+-    perf::add_wait_time(perf::Clock::now() - wait_start, perf::Stall::Readback);
+-    vkResetFences(impl.device, 1u, &impl.frame_fence);
+-    // Uploads and evictions recorded so far have finished with the frame.
+-    impl.release_frame_uploads(impl.slot);
+-    vkResetCommandBuffer(impl.command_buffer, 0u);
+-    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+-    vkBeginCommandBuffer(impl.command_buffer, &begin);
+-    impl.breadcrumb(impl.command_buffer, "frame goes on after a read-back");
+-    // The queries written so far stay valid: they were reset at the start of
+-    // the frame, and the next pair follows them.
+-    impl.begin_gpu_segment(impl.command_buffer);
+-    // A frame recorded for drawing again keeps what it wrote so far.
+-    if (!impl.interpolating) impl.enter_region(impl.frame_region);
+-    impl.environment_version = 0u;
+-    impl.object_valid = false;
+-    impl.raw_valid = false;
+-    impl.forget_bindings();
++    impl.drain_recording("a framebuffer read back", "frame goes on after a read-back", true);
+     frame.writeback_in_flight = false;
+     const perf::Clock::time_point copy_start = perf::Clock::now();
+     std::vector<std::uint32_t> fresh_pixels;
+@@ -6406,6 +6847,172 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
                    << " back for a block transfer\n";
  }
  
@@ -778,28 +969,15 @@ index 43aa31e..b8ac5f3 100644
 +    VkMemoryRequirements requirements{};
 +    vkGetBufferMemoryRequirements(device, depth_readback.buffer, &requirements);
 +    // The CPU reads it, so cached memory first, as for the frame write-back.
-+    VkPhysicalDeviceMemoryProperties memory_properties{};
-+    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
-+    constexpr VkMemoryPropertyFlags kVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-+    std::int32_t chosen = -1;
-+    for (const VkMemoryPropertyFlags wanted :
-+         {kVisible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-+          kVisible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, kVisible | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT}) {
-+        for (std::uint32_t i = 0; i < memory_properties.memoryTypeCount && chosen < 0; ++i)
-+            if ((requirements.memoryTypeBits & (1u << i)) != 0u &&
-+                (memory_properties.memoryTypes[i].propertyFlags & wanted) == wanted)
-+                chosen = static_cast<std::int32_t>(i);
-+        if (chosen >= 0) break;
-+    }
-+    if (chosen < 0) {
++    const HostReadMemory host = host_read_memory(requirements.memoryTypeBits, true);
++    if (!host.found) {
 +        error = "no host-visible memory type";
 +        return false;
 +    }
-+    depth_readback_coherent =
-+        (memory_properties.memoryTypes[chosen].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0u;
++    depth_readback_coherent = host.coherent;
 +    VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
 +    allocate.allocationSize = requirements.size;
-+    allocate.memoryTypeIndex = static_cast<std::uint32_t>(chosen);
++    allocate.memoryTypeIndex = host.type;
 +    if (!check(vkAllocateMemory(device, &allocate, nullptr, &depth_readback.memory), "vkAllocateMemory", error))
 +        return false;
 +    vkBindBufferMemory(device, depth_readback.buffer, depth_readback.memory, 0u);
@@ -883,43 +1061,13 @@ index 43aa31e..b8ac5f3 100644
 +
 +    // Run everything recorded so far and carry on recording afterwards, as
 +    // read_back_framebuffer() does.
-+    impl.end_gpu_segment(impl.command_buffer);
-+    vkEndCommandBuffer(impl.command_buffer);
-+    std::array<VkCommandBuffer, 2> batch{};
-+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-+    submit.commandBufferCount = impl.frame_batch(impl.command_buffer, batch);
-+    submit.pCommandBuffers = batch.data();
-+    const perf::Clock::time_point wait_start = perf::Clock::now();
-+    vkQueueSubmit(impl.queue, 1u, &submit, impl.frame_fence);
-+    impl.wait_fence(impl.frame_fence, "a depth write-back");
-+    const perf::Clock::duration waited = perf::Clock::now() - wait_start;
-+    perf::add_wait_time(waited, perf::Stall::Readback);
-+    vkResetFences(impl.device, 1u, &impl.frame_fence);
-+    // Uploads and evictions recorded so far have finished with the frame.
-+    impl.release_frame_uploads(impl.slot);
-+    vkResetCommandBuffer(impl.command_buffer, 0u);
-+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-+    vkBeginCommandBuffer(impl.command_buffer, &begin);
-+    impl.breadcrumb(impl.command_buffer, "frame goes on after a depth write-back");
-+    impl.begin_gpu_segment(impl.command_buffer);
-+    // A frame recorded for drawing again keeps what it wrote so far.
-+    if (!impl.interpolating) impl.enter_region(impl.frame_region);
-+    impl.environment_version = 0u;
-+    impl.object_valid = false;
-+    impl.raw_valid = false;
-+    impl.forget_bindings();
++    const perf::Clock::duration waited =
++        impl.drain_recording("a depth write-back", "frame goes on after a depth write-back", false);
 +
 +    // The GE's 16-bit z of each PSP pixel, from the texel at its centre. The
 +    // GE's z reaches the depth image as z / 65535 (the vertex shader and the
 +    // Vulkan viewport's depth range), so it is the texel times 65535.
-+    if (!impl.depth_readback_coherent) {
-+        VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
-+        range.memory = impl.depth_readback.memory;
-+        range.offset = 0u;
-+        range.size = VK_WHOLE_SIZE;
-+        vkInvalidateMappedMemoryRanges(impl.device, 1u, &range);
-+    }
++    impl.invalidate_writeback(impl.depth_readback.memory, impl.depth_readback_coherent);
 +    const auto *texels = static_cast<const std::uint8_t *>(impl.depth_readback.mapped);
 +    const auto centre = [](std::uint32_t pixel, std::uint32_t pixels, std::uint32_t texels_across) {
 +        const float at = (static_cast<float>(pixel) + 0.5f) * static_cast<float>(texels_across) /
@@ -980,7 +1128,7 @@ index 43aa31e..b8ac5f3 100644
  namespace {
  
  // 480x272 RGBA pixels (red in the low byte) into guest framebuffer rows of
-@@ -6876,7 +7487,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+@@ -6876,7 +7483,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
      clears[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
      clears[0].colorAttachment = 0u;
      clears[0].clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
@@ -989,7 +1137,7 @@ index 43aa31e..b8ac5f3 100644
      clears[1].clearValue.depthStencil = {0.0f, 0u};
      const VkClearRect whole{{{0, 0}, target_extent}, 0u, 1u};
      vkCmdClearAttachments(commands, static_cast<std::uint32_t>(clears.size()), clears.data(), 1u, &whole);
-@@ -7646,6 +8257,7 @@ void VulkanRenderer::shutdown() {
+@@ -7646,6 +8253,7 @@ void VulkanRenderer::shutdown() {
      vkFreeMemory(impl.device, impl.overlay_memory, nullptr);
      impl.destroy_upload();
      impl.destroy_writeback();
@@ -997,7 +1145,7 @@ index 43aa31e..b8ac5f3 100644
      if (impl.breadcrumbs.mapped != nullptr) vkUnmapMemory(impl.device, impl.breadcrumbs.memory);
      vkDestroyBuffer(impl.device, impl.breadcrumbs.buffer, nullptr);
      vkFreeMemory(impl.device, impl.breadcrumbs.memory, nullptr);
-@@ -7672,6 +8284,15 @@ void VulkanRenderer::shutdown() {
+@@ -7672,6 +8280,15 @@ void VulkanRenderer::shutdown() {
      vkDestroySampler(impl.device, impl.sharp_sampler, nullptr);
      vkDestroySampler(impl.device, impl.clamp_sampler, nullptr);
      vkDestroySampler(impl.device, impl.clamp_sharp_sampler, nullptr);
@@ -1013,7 +1161,7 @@ index 43aa31e..b8ac5f3 100644
      vkDestroyDescriptorPool(impl.device, impl.descriptor_pool, nullptr);
      vkDestroyDescriptorSetLayout(impl.device, impl.descriptor_layout, nullptr);
      vkDestroyDescriptorSetLayout(impl.device, impl.lighting_layout, nullptr);
-@@ -7682,12 +8303,8 @@ void VulkanRenderer::shutdown() {
+@@ -7682,12 +8299,8 @@ void VulkanRenderer::shutdown() {
      vkDestroyBuffer(impl.device, impl.check_buffer, nullptr);
      vkFreeMemory(impl.device, impl.check_memory, nullptr);
      vkDestroyShaderModule(impl.device, impl.fragment_shader, nullptr);
