@@ -211,7 +211,7 @@ docs/history/fidelity.md, whose captures came during the load.
 channels mixed and clamped, 44.1 kHz stereo on emulated time from boot) of task 041's Free Play pause route: the ship
 left on Vineta K's grid past the race music's first track change, START at vblank 28800 (480.479 s), then END
 SESSION. 495.5 s, 87,399,468 bytes. `tools/sas_reverb_check.sh` compares the port's sound after the pause with it
-(docs/verification.md, "The SAS reverb check"). Same PPSSPP and memory stick as above; the hardware renderer, which
+(docs/fidelity.md, "The SAS reverb check"). Same PPSSPP and memory stick as above; the hardware renderer, which
 does not change an emulated-time dump. About 8 minutes:
 
 ```
@@ -264,7 +264,7 @@ Copy them into another worktree with `cp -Rp ~/dev/pure-recomp/ref/saves ref/` (
 ## Task 044 additions (2026-10-07): the scorecard's references
 
 `tools/scorecard.py --refresh-references [CATEGORY]` takes the PPSSPP side of the accuracy scorecard (docs/scorecard.md,
-docs/verification.md "The accuracy scorecard") and keeps it under `ref/scorecard/`, git-ignored like every capture
+docs/fidelity.md "The accuracy scorecard") and keeps it under `ref/scorecard/`, git-ignored like every capture
 here. It lists each file it made, with its size, SHA-256 and the command that made it, in
 `ref/scorecard/manifest.json` and in the table below, which it rewrites between the two markers. Same PPSSPP, settings
 and memory stick as above (`PPCD00001DLS001` only; the tool waits while PPSSPP runs for someone else or while its
@@ -323,7 +323,7 @@ read from VRAM.
 
 ## Task 047 (2026-10-07): PPSSPP's VFPU samples
 
-`ref/vfpu/` (docs/verification.md, "The VFPU dot-product check"; docs/fidelity.md, difference 13): PPSSPP 1.20.4's
+`ref/vfpu/` (docs/fidelity.md, "The VFPU dot-product check"; docs/fidelity.md, difference 13): PPSSPP 1.20.4's
 operands and results at the game's VFPU dot-product and transcendental instructions over the scorecard's Vineta K race
 (`frontend.txt` + `vineta_k_start.txt`, Cross from vblank 7213), from READY to 12 s of race clock. Each set directory
 holds `sites.json` (the sites, their lanes, prefixes and rows, the run's CPU core and every ship's end offset from
@@ -359,7 +359,7 @@ PPSSPP's memory stick held `PPCD00001DLS001` only, before and after every run; e
 
 ## Task 048 (2026-10-07): PPSSPP's samples of the other kinds
 
-Three more sets under `ref/vfpu/jit/` (docs/verification.md, "The other kinds"; docs/fidelity.md, difference 13), each
+Three more sets under `ref/vfpu/jit/` (docs/fidelity.md, "The other kinds"; docs/fidelity.md, difference 13), each
 with its own coverage files: PPSSPP 1.20.4's JIT on the scorecard's reference routes. `048_vineta_k` and
 `048_karbonis`: every execution from READY to 13 s of race clock of every `vcrsp`, `vfad` and `vmscl` site with 50 or
 more hits (no `vcrs`, `vqmul`, `vavg` or `vrot` ran). `048_karbonis_dot`: every execution of every dot-product and

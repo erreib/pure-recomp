@@ -241,6 +241,6 @@ list's captures are `run4/list-save.png`, `run4/save-completed.png`, `run4/list-
 `folder_check` reads the pilot's name from `PROFILE.BIN` as `tools/save_interchange.sh --check` deciphers it, since
 the file is enciphered as on a PSP (the change task 045 proposed, applied in its review).
 
-`tools/save_interchange.sh` (about 3 minutes; docs/verification.md, "The save interchange check") moves saves between
+`tools/save_interchange.sh` (about 3 minutes; docs/fidelity.md, "The save interchange check") moves saves between
 the port and PPSSPP both ways on sticks of its own under `out/045/`, and leaves PPSSPP's stick as it found it.
 `tools/save_interchange.sh --check FOLDER PROFILE.BIN OUT` writes the decrypted profile of any save folder.

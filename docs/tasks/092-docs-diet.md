@@ -1,6 +1,6 @@
 # 092: The docs diet (current state in the reference docs, history out)
 
-Milestone: cleanup (audit 2026-10-19) | Branch: task/092-docs-diet | Status: OPEN
+Milestone: cleanup (audit 2026-10-19) | Branch: task/092-docs-diet | Status: MERGED
 
 ## Goal
 A fresh session reads little and finds the current state fast. The audit (docs/history/audit-2026-10-19.md, "Docs")
@@ -161,4 +161,10 @@ Open questions:
 - The routes row names its 23 files in one brace-form row; if one row a file is wanted literally, it is 23 rows.
 
 ## Review
-(Fills at review) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged aa93f3b into batch/m2 as 937cf39 (2026-10-19). Verify rerun on the merge: docs_check PASS (39 files), the
+size bounds met (status.md 15,816 bytes, vendor-map.md 3,442; CLAUDE.md + approach.md + status.md 26,439: about
+6.6K tokens against 47K before). Spot-read: status.md whole (the milestone table, Works, the follow-ups, the gate),
+the moved blocks' headings in sessions.md and fidelity.md, the docs_check `tools` rule. Applied after the merge (the
+worker's open question 2): the moved sections' pointers in ref/README.md and docs/savedata.md now name
+docs/fidelity.md; tools/scorecard.py's header waits for task 094 (tools/ is in its hands). Open for Erik: whether the
+Windows folder buttons (patch 0029-windows-file-url) were checked on the rig by hand; status.md carries them as open.
