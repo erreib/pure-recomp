@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-19 (task 092). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-19 (the docs pass after task 095). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack | on the roadmap, not scheduled (Next) |
-| Cleanup | the audit of 2026-10-19 | tasks 092 to 096 (docs/history/audit-2026-10-19.md) |
+| Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) and the scorecard rerun (096) wait for Erik's screen and an idle machine |
 
 ## Works
 
@@ -183,13 +183,11 @@ after a change that moves or renames a file, a tool or a patch.
 ## Next
 
 - The audit's cleanup (docs/history/audit-2026-10-19.md): 092 docs, 093 src, 094 tools and 095 patches (29 now)
-  merged 2026-10-19. Next: a docs pass for the lines 094 and 095 list as owed (their Results; small, the planning
-  session's), then one screen session for the window checks every task
-  lists (Erik books it; the gerec recordings record afresh, about 15 minutes), then the scorecard rerun on an idle
-  machine (`tools/scorecard.py --only timing`, and `SCORECARD_RACE_CLOCK=ref/race_clock tools/scorecard.py --only
-  trajectories` to compare with 2026-10-07): the baseline of 2026-10-19 showed 4 two-vblank stretches on Vineta K,
-  taken while two builds ran (out/scorecard-audit/). A `--full` run rewrites docs/scorecard.md and drops its
-  hand-written Windows paragraph: restore it. Then E8's audio sink (task 081's fork b+), the rig's 100 Hz skips.
+  merged 2026-10-19, and the doc lines 094 and 095 owed applied the same day. Next: the screen batch, task 097 (Erik
+  books the screen; about 80 minutes, the gerec recordings last; `tools/verify_task.sh 097`), then the scorecard
+  rerun on an idle machine (task 097's "After the batch": `--only timing`, the trajectories against 2026-10-07; a
+  `--full` run drops docs/scorecard.md's Windows paragraph, restore it). Then E8's audio sink, task 081's fork b+
+  (task 098), and the rig's 100 Hz skips.
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
