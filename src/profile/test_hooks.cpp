@@ -3,6 +3,7 @@
 // switches' names, their log lines and their effects are what they were in pure_profile.cpp: moved, not rewritten.
 #include "test_hooks.hpp"
 
+#include "../helpers.hpp"
 #include "kernel/kernel.hpp"
 #include "profile.hpp"
 
@@ -22,18 +23,11 @@
 namespace portablekit::test_hooks {
 namespace {
 
-std::string item_hex(std::uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return b; }
+using pure::env_on;
+using pure::hex;
+using pure::load_float;
 
 std::string item_f(float v) { char b[24]; std::snprintf(b, sizeof b, "%.3f", static_cast<double>(v)); return b; }
-
-bool env_on(const char *name) { const char *v = env(name); return v != nullptr && *v != '\0' && *v != '0'; }
-
-float load_float(Runtime &rt, std::uint32_t a) {
-    const std::uint32_t u = rt.memory().load32(a);
-    float x;
-    std::memcpy(&x, &u, 4);
-    return x;
-}
 
 // --- The player's ship and the race records, for the probes and the switch that read them ------------------------
 
@@ -83,7 +77,7 @@ std::uint32_t player_ship(Runtime &rt, std::uint64_t frame) {
         last_scan = frame;
         ship = find_player_ship(rt);
         if (ship == 0u) return 0u;
-        std::cout << "[pure] ship frame " << frame << " player object " << item_hex(ship) << " index "
+        std::cout << "[pure] ship frame " << frame << " player object " << hex(ship) << " index "
                   << m.load32(ship + 0x480u) << "\n";
     }
     return ship;
@@ -96,7 +90,7 @@ float ship_shield_max(Runtime &rt, std::uint32_t ship) {
     if (sim < 0x08800000u || sim >= 0x0A000000u) return 0.0f;
     const std::uint32_t type = m.load32(sim + 0x74u);
     if (type < 0x08800000u || type >= 0x0A000000u) return 0.0f;
-    const float full = load_float(rt, type + 0x84u);
+    const float full = load_float(m, type + 0x84u);
     return std::isfinite(full) && full > 0.0f ? full : 0.0f;
 }
 
@@ -112,7 +106,7 @@ void watch_ship(Runtime &rt, std::uint64_t frame, std::uint32_t ship) {
     if (ship == 0u) return;
     const auto &m = rt.memory();
     const std::uint32_t rec = kRaceRecordPos + m.load32(ship + 0x480u) * kRaceRecordStride;
-    const auto f = [&rt](std::uint32_t a) { return load_float(rt, a); };
+    const auto f = [&m](std::uint32_t a) { return load_float(m, a); };
     const float vx = f(rec - 0x20u), vy = f(rec - 0x1cu), vz = f(rec - 0x18u);
     std::ostringstream o;
     o << "clock=" << item_f(f(rec + 0x1cu)) << " pos=" << item_f(f(rec)) << "," << item_f(f(rec + 4u)) << ","
@@ -139,7 +133,7 @@ void watch_grid(Runtime &rt, std::uint64_t frame, std::uint32_t ship) {
         return;
     }
     const auto &m = rt.memory();
-    const auto f = [&rt](std::uint32_t a) { return load_float(rt, a); };
+    const auto f = [&m](std::uint32_t a) { return load_float(m, a); };
     for (std::uint32_t k = 0u; k < 8u; ++k) {
         const std::uint32_t rec = kRaceRecordPos + k * kRaceRecordStride;
         std::ostringstream o;
@@ -168,8 +162,7 @@ constexpr std::uint32_t kFrontendRoot = 0x08B17C18u;
 constexpr std::uint32_t kGameClock = 0x44u;
 
 void watch_rand(Runtime &rt, std::uint64_t frame) {
-    static const char *v = env("WATCH_RAND");
-    static const bool on = v != nullptr && *v != '\0' && *v != '0', every = on && std::strcmp(v, "2") == 0;
+    static const bool on = env_on("WATCH_RAND"), every = on && std::strcmp(env("WATCH_RAND"), "2") == 0;
     if (!on) return;
     static std::uint32_t last = 0u;
     static bool any = false;
@@ -184,8 +177,8 @@ void watch_rand(Runtime &rt, std::uint64_t frame) {
     const std::uint32_t bits = (root >= 0x08800000u && root < 0x0A000000u) ? m.load32(root + kGameClock) : 0u;
     float clock;
     std::memcpy(&clock, &bits, 4);
-    std::cout << "[pure] rand frame " << frame << " t=" << kernel().now_us() << " state=" << item_hex(s)
-              << " clock=" << item_f(clock) << " (" << item_hex(bits) << ")\n";
+    std::cout << "[pure] rand frame " << frame << " t=" << kernel().now_us() << " state=" << hex(s)
+              << " clock=" << item_f(clock) << " (" << hex(bits) << ")\n";
 }
 
 // --- PURE_WATCH_WORDS=ADDR[,ADDR...] -------------------------------------------------------------------------------
@@ -203,7 +196,7 @@ void watch_words(Runtime &rt, std::uint64_t frame) {
     }();
     if (addrs.empty()) return;
     std::cout << "[pure] words frame " << frame << " t=" << kernel().now_us() << ":";
-    for (const std::uint32_t a : addrs) std::cout << " " << item_hex(rt.memory().load32(a));
+    for (const std::uint32_t a : addrs) std::cout << " " << hex(rt.memory().load32(a));
     std::cout << "\n";
 }
 
@@ -246,7 +239,7 @@ void trace_rand(Runtime &rt, std::uint64_t frame) {
     auto &calls = rand_calls();
     if (calls.empty()) return;
     std::cout << "[pure] rand calls frame " << frame << ":";
-    for (const auto &[ra, n] : calls) std::cout << " " << item_hex(ra) << "*" << n;
+    for (const auto &[ra, n] : calls) std::cout << " " << hex(ra) << "*" << n;
     std::cout << "\n";
     calls.clear();
 }
@@ -419,8 +412,8 @@ void pinned_srand(psprecomp::CorpusRuntime &crt, AllegrexContext &ctx) {
     const std::optional<std::uint32_t> &want = ra == kSrandFromTeamPick ? clock.team
                                                : ra == kSrandFromBillboards ? clock.race : std::optional<std::uint32_t>{};
     if (want) {
-        std::cout << "[pure] srand from " << item_hex(ra) << " t=" << kernel().now_us() << " seed " << item_hex(seed)
-                  << " pinned to " << item_hex(*want) << "\n";
+        std::cout << "[pure] srand from " << hex(ra) << " t=" << kernel().now_us() << " seed " << hex(seed)
+                  << " pinned to " << hex(*want) << "\n";
         seed = *want;
     }
     if (ra == kSrandFromBillboards && clock.frames.size() > 1u) {
@@ -478,7 +471,7 @@ void wrap_frame_timer(HleRegistrar &hle) {
 // At start-up: reads the file (the first race_clock() call), announces the switch, and wraps the frame timer.
 void race_clock_start(HleRegistrar &hle) {
     if (race_clock().on) {
-        const auto show = [](const std::optional<std::uint32_t> &w) { return w ? item_hex(*w) : std::string("-"); };
+        const auto show = [](const std::optional<std::uint32_t> &w) { return w ? hex(*w) : std::string("-"); };
         const std::size_t n = race_clock().frames.empty() ? 0u : race_clock().frames.size() - 1u;
         std::cout << "[pure] TEST SWITCH: race clock (PURE_TEST_RACE_CLOCK=" << race_clock().path << ": the AI team "
                   << "pick's seed " << show(race_clock().team) << ", the race's seed " << show(race_clock().race) << ", "

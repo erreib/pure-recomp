@@ -14,6 +14,7 @@
 // until another shape has been seen (PURE_TRACE_ASPECT puts the override in from the first flip).
 #include "aspect.hpp"
 
+#include "../helpers.hpp"
 #include "psprecomp/corpus_abi.hpp"
 #include "psprecomp/runtime.hpp"
 
@@ -90,10 +91,7 @@ private:
 
 // PURE_TRACE_ASPECT=1 (test-only): the override's counts once a second, and the override in from the first flip.
 bool trace_on() {
-    static const bool on = [] {
-        const char *v = env("TRACE_ASPECT");
-        return v != nullptr && *v != '\0' && *v != '0';
-    }();
+    static const bool on = pure::env_on("TRACE_ASPECT");
     return on;
 }
 
@@ -114,10 +112,6 @@ bool install(psprecomp::Runtime &rt) {
     rt.register_function(kPerspective, &perspective, "pure::perspective");
     std::cout << "[aspect] FUN_08a31148 overridden: the 3D view takes the picture's shape\n";
     return true;
-}
-
-float load_float(psprecomp::Runtime &rt, std::uint32_t address) {
-    return std::bit_cast<float>(rt.memory().load32(address));
 }
 
 // PURE_TRACE_ASPECT=1: the counts over the run and the view aspect, once a second at a flip.
@@ -144,14 +138,14 @@ void view_aspect_frame(psprecomp::Runtime &rt, float aspect) {
     if (state != State::In) return;
     view_aspect = is_psp(aspect) ? kPspAspect : aspect;
     if (!is_psp(aspect)) {
-        const float tan_y = load_float(rt, kTanHalfY);
+        const float tan_y = pure::load_float(rt.memory(), kTanHalfY);
         if (std::isfinite(tan_y) && tan_y > 0.0f) {
             rt.memory().store32(kTanHalfX, std::bit_cast<std::uint32_t>(tan_y * aspect));
             tangent_changed = true;
         }
     } else if (tangent_changed) {
         // Back at the PSP's shape: the PSP's value, once.
-        rt.memory().store32(kTanHalfX, std::bit_cast<std::uint32_t>(load_float(rt, kTanHalfY) * kPspAspect));
+        rt.memory().store32(kTanHalfX, std::bit_cast<std::uint32_t>(pure::load_float(rt.memory(), kTanHalfY) * kPspAspect));
         tangent_changed = false;
     }
     trace();

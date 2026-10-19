@@ -12,6 +12,7 @@
 #include "ge_replay.hpp"
 
 #include "../gpu/ge_names.hpp"
+#include "../helpers.hpp"
 
 #include "gpu/ge_backend.hpp"
 #include "gpu/ge_record_format.hpp"
@@ -66,12 +67,6 @@ std::uint32_t guest_bytes() {
 struct BadFile : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
-
-std::string hex(std::uint32_t value, int digits = 8) {
-    char text[16];
-    std::snprintf(text, sizeof text, "0x%0*X", digits, value);
-    return text;
-}
 
 double ms_since(Clock::time_point start) {
     return std::chrono::duration<double, std::milli>(Clock::now() - start).count();

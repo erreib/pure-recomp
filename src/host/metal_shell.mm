@@ -43,6 +43,7 @@
 // resources, so the shell's sampling comes after every draw of the frame, and the next frame's draws after the
 // sampling. (On a queue of the shell's own nothing ordered them, and the window dropped the race HUD: task 031.)
 #include "../gpu/metal_device.hpp"
+#include "../helpers.hpp"
 #include "shell/sdl_pad.hpp"
 #include "shell/shell.hpp"
 
@@ -920,10 +921,7 @@ private:
     bool sharp_{};
     float display_hz_{};
     // PURE_METAL_PACE=0 shows every picture as soon as it can be, as before task 033.
-    bool pace_pictures_{[] {
-        const char *value = pk::env("METAL_PACE");
-        return value == nullptr || std::strcmp(value, "0") != 0;
-    }()};
+    bool pace_pictures_{env_on("METAL_PACE", true)};
 
     std::string capture_path_;
     id<MTLBuffer> capture_buffer_{};
