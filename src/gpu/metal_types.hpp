@@ -315,7 +315,7 @@ struct FrameTimes {
     double wait_depth{};    // GPU waits: the SIGNAL's depth write-back
     double wait_frame{};    // the frame write-back
     double wait_guest{};    // block transfers and read-backs from a target
-    double wait_capture{};  // captures and the Vulkan shell's hand-over
+    double wait_capture{};  // captures (capture_frame's read-back)
     double wait_ring{};     // more than kFramesInFlight frames in flight
 };
 
