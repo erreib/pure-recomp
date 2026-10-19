@@ -219,6 +219,8 @@ refresh every 1 / (rate x margin) seconds (1.7 s at 0.005), the same picture sho
   tools/winwatch.m beside every run, the window uncovered in all of them). The bound is the review's call: at most 1
   resync (the race load's, as at the PSP's rate) and no second under 95% speed, a freeze-sized loss. The seconds under
   99% (one or two missed refreshes) are slips the margin's catch-up and the sink's lead absorb, and are reported.
+  Since task 500 (2026-10-19) a channel restart (a jump over a second of audio, `resynced=` far past the late limit:
+  the rig's race has one at its 8th second in every run) is printed apart as a restart and not bounded.
 
   | Margin | Shell | Runs | Resyncs | Seconds under 95% | Seconds under 99% | Result |
   |---|---|---|---|---|---|---|
