@@ -12,7 +12,7 @@ listed as owed, then the gerec recordings afresh. Nothing is merged on it: the f
 - The game window in front and uncovered for the whole batch; nothing else full-screen; the display at 120 Hz.
 - No other PureNative, no PPSSPP, no build running (the stutter and display-rate checks measure wall time; the gerec
   recordings are paced races). `tools/lib.sh`'s guard waits for a stray game but not for a build.
-- About 80 minutes. The order below puts the cheap gates first and the 25 minutes of recording last, so the batch
+- About 85 minutes. The order below puts the cheap gates first and the 25 minutes of recording last, so the batch
   can stop early if the screen is needed back: whatever is left stays owed.
 
 ## Read first
@@ -29,7 +29,7 @@ listed as owed, then the gerec recordings afresh. Nothing is merged on it: the f
 | 4 | `tools/menu_check.sh` and `tools/menu_check.sh --shell vulkan` | 093, 094, 095 | 1 min | the rows by capability; `Menu::Tab` as `MenuTab` |
 | 5 | `tools/aspect_check.sh` and `tools/aspect_check.sh --shell metal` | 094, 095 | 5 min | Fill on both shells; the shared `PURE_WINDOW_SIZE` parse |
 | 6 | `tools/overlay_check.sh` | 094 | 30 s | the overlay after `frame_regress --wait` replaced its refusal loop |
-| 7 | `tools/display_rate_check.sh --audio` and `--audio --shell vulkan` | 094, 095 | 5 min | E8's sound at the margin; the vblank period now read from the kernel |
+| 7 | `PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio` and `--audio --shell vulkan`, then `PURE_TRACE_AUDIO=1 PURE_AUDIO_SNAP=1 tools/display_rate_check.sh --audio` | 094, 095, 098 | 8 min | E8's sound at the margin; the vblank period read from the kernel; the sink's late-write rule (098) against the old snap: compare the `[audio]` lines' `resyncs=`, `lates=`, `late=` and `ratio=` over the race, and the check's verdict under both |
 | 8 | `tools/stutter_check.sh` and `tools/stutter_check.sh --shell vulkan` | 094, 095 | 12 min | wall time; 094's window guard on a live run (it must not fire) |
 | 9 | `tools/texture_check.sh --shell vulkan` | 094 | 2 to 5 min | the Vulkan lane after imgdiff's `reduce_centres` |
 | 10 | `tools/sprite_pack.sh --check` | 094 | 1 to 4 min | the pack check's `guarded` loop on `--wait` |
@@ -43,7 +43,7 @@ Each command's output goes under `out/097/` (`tee out/097/NN-name.log`). Verify 
 the next row, and the Result records both.
 
 ## Verify
-`mkdir -p out/097 && tools/frame_regress.sh --shell metal 2>&1 | tee out/097/01-metal.log && tools/frame_regress.sh --shell vulkan --backend vulkan 2>&1 | tee out/097/02-vulkan.log && tools/hud_check.sh 2>&1 | tee out/097/03-hud-metal.log && tools/hud_check.sh --shell vulkan 2>&1 | tee out/097/03-hud-vulkan.log && tools/menu_check.sh 2>&1 | tee out/097/04-menu-metal.log && tools/menu_check.sh --shell vulkan 2>&1 | tee out/097/04-menu-vulkan.log && tools/aspect_check.sh 2>&1 | tee out/097/05-aspect-vulkan.log && tools/aspect_check.sh --shell metal 2>&1 | tee out/097/05-aspect-metal.log && tools/overlay_check.sh 2>&1 | tee out/097/06-overlay.log && tools/display_rate_check.sh --audio 2>&1 | tee out/097/07-audio-metal.log && tools/display_rate_check.sh --audio --shell vulkan 2>&1 | tee out/097/07-audio-vulkan.log && tools/stutter_check.sh 2>&1 | tee out/097/08-stutter-metal.log && tools/stutter_check.sh --shell vulkan 2>&1 | tee out/097/08-stutter-vulkan.log && tools/texture_check.sh --shell vulkan 2>&1 | tee out/097/09-texture-vulkan.log && tools/sprite_pack.sh --check 2>&1 | tee out/097/10-sprite-pack.log && tools/save_roundtrip.sh 2>&1 | tee out/097/11-save-roundtrip.log && tools/run_boot.py --seconds 20 --window --shell vulkan out/097/12-vulkan-alone.log && tools/gerec/replay_check.sh 2>&1 | tee out/097/13-replay.log && tools/gerec/metal_check.sh 2>&1 | tee out/097/14-metal-check.log`
+`mkdir -p out/097 && tools/frame_regress.sh --shell metal 2>&1 | tee out/097/01-metal.log && tools/frame_regress.sh --shell vulkan --backend vulkan 2>&1 | tee out/097/02-vulkan.log && tools/hud_check.sh 2>&1 | tee out/097/03-hud-metal.log && tools/hud_check.sh --shell vulkan 2>&1 | tee out/097/03-hud-vulkan.log && tools/menu_check.sh 2>&1 | tee out/097/04-menu-metal.log && tools/menu_check.sh --shell vulkan 2>&1 | tee out/097/04-menu-vulkan.log && tools/aspect_check.sh 2>&1 | tee out/097/05-aspect-vulkan.log && tools/aspect_check.sh --shell metal 2>&1 | tee out/097/05-aspect-metal.log && tools/overlay_check.sh 2>&1 | tee out/097/06-overlay.log && PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio 2>&1 | tee out/097/07-audio-metal.log && PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio --shell vulkan 2>&1 | tee out/097/07-audio-vulkan.log && PURE_TRACE_AUDIO=1 PURE_AUDIO_SNAP=1 tools/display_rate_check.sh --audio 2>&1 | tee out/097/07-audio-metal-snap.log && tools/stutter_check.sh 2>&1 | tee out/097/08-stutter-metal.log && tools/stutter_check.sh --shell vulkan 2>&1 | tee out/097/08-stutter-vulkan.log && tools/texture_check.sh --shell vulkan 2>&1 | tee out/097/09-texture-vulkan.log && tools/sprite_pack.sh --check 2>&1 | tee out/097/10-sprite-pack.log && tools/save_roundtrip.sh 2>&1 | tee out/097/11-save-roundtrip.log && tools/run_boot.py --seconds 20 --window --shell vulkan out/097/12-vulkan-alone.log && tools/gerec/replay_check.sh 2>&1 | tee out/097/13-replay.log && tools/gerec/metal_check.sh 2>&1 | tee out/097/14-metal-check.log`
 
 (`set -o pipefail` is not in verify_task.sh's shell, so read each tool's own PASS or FAIL line in its log rather than
 the chain's exit alone.)
@@ -61,6 +61,9 @@ drops its hand-written Windows paragraph: restore it from git before committing.
 2. The window suite (`tools/frame_regress.sh --shell vulkan --backend vulkan`), `tools/stutter_check.sh`,
    `tools/menu_check.sh --shell vulkan`.
 3. One race with `--env PURE_SYNC_READBACK=1`: the start-up line must say `synchronous` (095's `drain_recording`).
+4. Task 098's sink: `PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio --shell vulkan` at the Display rate
+   (100 Hz), then the same with `PURE_AUDIO_SNAP=1`; the early-race resyncs of 2026-10-15 (3 to 4) should read as
+   `lates=` with `ratio=0.990` seconds and no resync, and the race by ear.
 
 ## Escalation
 A FAIL in rows 1 to 3 stops the batch: it is a regression in batch/m2 against a merged gate and takes a task of

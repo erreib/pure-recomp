@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-19 (the docs pass after task 095). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-19 (task 098). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -43,7 +43,7 @@ a 100 Hz display).
 |---|---|
 | Toolchain | Mac: `tools/check_env.sh` (arm64 cmake and ninja, SDL3, MoltenVK, Ghidra 12.1.4, PPSSPP); the rig: clang-cl on the `win-x64` preset, Git Bash (docs/setup.md) |
 | Disc and game | `tools/iso_extract.py` verifies CRC 4502C588 and extracts `disc/`; `tools/setup_game.sh` lays out `game/` |
-| Vendor | PortableKit at 8b0c3fe with 29 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
+| Vendor | PortableKit at 8b0c3fe with 30 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
 | Corpus | `tools/regen.sh` (85 s): 144 units on the Mac, 145 on the rig, inlined on both since patch 0026-corpus-inlining; `PSPRECOMP_NO_INTERPRETER=1` runs clean |
 | The game | the whole single-player game: every mode, class, league and circuit; the movies, the music and the sound with the SAS reverb; saves in the PSP's format with the save list, import, export and backups; the twelve US download packs |
 | Mac, Metal (the default) | the Metal shell and backend (D-008): the drawable at the display's pixels, internal scale Auto, Fill, texture detail, the flashes smoothed, the 30-fps modes at 60, the race at 119.40 Hz on the 120 Hz display (E8), the performance overlay (F3) |
@@ -109,8 +109,9 @@ The enhancements:
   speed; the storms route held 85% where this one holds 100%, unexplained; the E8 gate must pin `PURE_DISPLAY_HZ=100`;
   drop vblanks or slow down under about 95% is a pacer call; worktree builds there lose the renderer (`SDL3_ROOT`)
   (docs/timing.md, "On the rig's 100 Hz display"; [091](tasks/091-display-rate-storms.md)).
-- The audio sink's tolerance of a late producer, task 081's fork, demoted to polish
-  ([081](tasks/081-audio-sink-grace.md)).
+- The audio sink keeps a late producer's content and rebuilds its lead by slowing the device 1% (task 098, patch
+  0031-audio-sink-late-writes, D-023); unproven in a window: its probe is task 097's row 7, the rig's 100 Hz run is Erik's
+  ([098](tasks/098-audio-sink-late-writes.md), [081](tasks/081-audio-sink-grace.md)).
 
 Fidelity, the game and the saves:
 - The follower stalls on Sinucit, Manor Top and Karbonis and is marginal on Citta Nuova; Zone has no racing line
@@ -186,8 +187,9 @@ after a change that moves or renames a file, a tool or a patch.
   merged 2026-10-19, and the doc lines 094 and 095 owed applied the same day. Next: the screen batch, task 097 (Erik
   books the screen; about 80 minutes, the gerec recordings last; `tools/verify_task.sh 097`), then the scorecard
   rerun on an idle machine (task 097's "After the batch": `--only timing`, the trajectories against 2026-10-07; a
-  `--full` run drops docs/scorecard.md's Windows paragraph, restore it). Then E8's audio sink, task 081's fork b+
-  (task 098), and the rig's 100 Hz skips.
+  `--full` run drops docs/scorecard.md's Windows paragraph, restore it). E8's audio sink (task 098, patch 0031-audio-sink-late-writes,
+  task 081's fork b+) is in batch/m2 unproven in a window: row 7 of the screen batch is its probe (both rules, by
+  `PURE_AUDIO_SNAP=1`), then Erik's race on the rig at 100 Hz says whether the early-race skips are gone.
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
