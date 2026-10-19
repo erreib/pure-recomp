@@ -304,8 +304,12 @@ READBACK_RE = re.compile(r" readback ([\d.]+) max")
 SLOW_FRAME_RE = re.compile(r"^\[slow-frame\] (\d+) ([\d.]+) ms")
 PACING_RE = re.compile(r" pacing ([\d.]+) x\d")
 # PURE_TRACE_AUDIO=1: the audio sink's line a second; `resyncs=` counts the stalled producer's jumps (patch
-# 0024-audio-resync-counter), each a skip in the sound.
-AUDIO_RE = re.compile(r"^\[audio\] (\d+)s .* resyncs=(\d+) ")
+# 0024-audio-resync-counter) and `resynced=` the frames they jumped. A jump in a playing channel is a few buffers (the
+# race load's about 4500 frames, a dip's about 2100), each a skip in the sound; one over RESTART_FRAMES is a channel
+# that sat idle and restarted at the write target (seconds of frames: task 500 saw 388 k at the rig's race second 8 in
+# every run, task 097 twenty such on the Mac), no skip in anything playing.
+AUDIO_RE = re.compile(r"^\[audio\] (\d+)s .* resyncs=(\d+) (?:resynced=(\d+) )?")
+RESTART_FRAMES = 44100     # a mean jump over this (one second of audio) is a restart, not a skip
 PACED = "[pure] paced from frame"                  # PURE_PACED_FROM=N: the first paced flip
 PACED_RE = re.compile(r"^\[pure\] paced from frame (\d+)")
 
@@ -343,6 +347,13 @@ def audio_resyncs(line):
     """An `[audio]` line's (second, resyncs), or None."""
     m = AUDIO_RE.match(line)
     return (int(m[1]), int(m[2])) if m else None
+
+
+def audio_restart(line, limit=RESTART_FRAMES):
+    """Whether an `[audio]` line's resyncs are channel restarts: their mean jump (`resynced=` over `resyncs=`) is over
+    limit frames. False for a line without `resynced=` or without a resync."""
+    m = AUDIO_RE.match(line)
+    return bool(m and m[3] and int(m[2]) and int(m[3]) // int(m[2]) > limit)
 
 
 # ----------------------------------------------------------------------------------- the window guard (task 094)
@@ -663,6 +674,12 @@ def selftest():
         check("slow_frame less its pacing", slow_frame("[slow-frame] 6421 31.5 ms: render 4.0 pacing 10.0 x1"),
               (6421, 21.5))
         check("audio_resyncs", audio_resyncs("[audio] 193s queued 4800 frames resyncs=1 underruns=0"), (193, 1))
+        skip = "[audio] 192s frames=44100 peak=1 rms=1.0 silent=16 dropped=0 resyncs=1 resynced=2064 lead=2255 x=0"
+        restart = skip.replace("resynced=2064", "resynced=388473")
+        check("audio_restart", (audio_restart(skip), audio_restart(restart), audio_resyncs(restart),
+                                audio_restart(skip.replace("resyncs=1", "resyncs=0")),
+                                audio_restart("[audio] 193s queued 4800 frames resyncs=1 underruns=0")),
+              (False, True, (192, 1), False, False))
         check("other lines", (perf("[perf] GPU timestamps: 64 bits"), stalls("[stalls] x"), slow_frame("x"),
                               audio_resyncs("[audio] 3s resyncs=x")), (None, None, None, None))
 

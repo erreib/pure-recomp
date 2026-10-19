@@ -159,3 +159,36 @@ Open questions:
   pair for the rig, where the early-race drain outpaces the recovery (task 098's open question 2).
 - The probe's resync rule against the 196s channel restart (reading 2): allow it or classify by size, else
   `--audio --shell vulkan` never PASSes on the rig.
+
+## Follow-up: the probe tells a channel restart from a skip (the rig, 2026-10-19, branch task/500-probe-restarts)
+Reading 2 above, made directly (docs/approach.md rule 1: two tools files, two doc lines). `purelib.logs` reads
+`resynced=` beside `resyncs=` (`AUDIO_RE`) and `audio_restart(line)` says whether a line's jumps average over
+`RESTART_FRAMES` (44100, one second of audio): a cursor that sat idle and restarted at the write target, not a skip
+in a playing channel (the race load's jump is about 4500 frames, a dip's about 2100, a restart's 388 k to 394 k).
+`tools/display_rate_check.sh --audio` counts those apart as `channel restarts N (audio seconds: ...)` and leaves them
+out of `MAX_RESYNCS`; the header, docs/verification.md's row and docs/timing.md's measurement paragraph say so.
+`python3 tools/purelib/logs.py --selftest` PASS (a skip, a restart, no resync, a line without `resynced=`);
+`python3 tools/docs_check.py` PASS.
+
+Replayed over the three logs above with the new reader: new rule run 1 and run 2 read 1 resync (the load's) and 1
+restart, so both would PASS on the count; the old rule reads 2 (the load's and the 192s jump) and 1 restart, FAIL.
+
+Two live runs after the change, out/500/10-audio-new-restarts*.log and 11-audio-new-restarts2*.log, both with the
+window on screen and both under other load (Chrome and VS Code at about 39% of the CPU between them, measured
+between the runs; the three runs above were not checked for this):
+- Run 4: FAIL on 3 seconds under 95% speed (race seconds 5, 10 and 19 at 89, 70 and 93%) and 5 resyncs
+  (189s; 198s x2 after a `lead=0`; 207s x2 at a 247 ms frame), 1 restart (197s, 394459, printed apart). The new
+  rule's late branch under that load: `lates=` 40, 59, 58, 57 at 193 to 196s with `late=` 87343 frames in all,
+  the lead at 0 to 212 through them (run 1's shape, four seconds long). Not a figure for the rule: a disturbed run.
+- Run 5 (the second run): FAIL on 3 resyncs: the load's (188s, 4667), then 2 at 206s (`resynced=` 13851 for the
+  pair, `silent=` 3874) under a 247 ms host frame at race second 19 (`[perf]` max 247.3 ms, speed 98%); 1 restart
+  (196s, 389266) apart; no second under 95%. The early race was run 2's shape: `lates=2 late=1536` at the load
+  armed the ratio to 192s, the lead 2595 to 4167, no silence after the load's 4155.
+
+So the classification holds in every run (the restart at race second 8 to 9 is one line each time, the rest are
+jumps a playing channel made), and the probe on the rig now FAILs only on what the ear would hear: a dip the lead
+did not cover. A stall of a quarter second is beyond any sink rule's reach (the deficit passes `kLateLimit` and
+snaps under both); its cause today is the machine's other load, to be ruled out before the next measurement by
+closing Chrome and the editor, which the brief's preconditions did not name.
+
+Changed: tools/purelib/logs.py, tools/display_rate_check.sh, docs/verification.md, docs/timing.md, this file.

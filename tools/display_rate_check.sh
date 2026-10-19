@@ -62,7 +62,8 @@
 # (<out>/data), on the shell's own GE backend with the shipped defaults of the Video rows (PURE_INTERNAL_SCALE=0, Auto,
 # PURE_SIXTY_FPS=1, PURE_SMOOTH_FLASHES=1, PURE_TEXTURE_DETAIL=1, PURE_SPRITE_UPSCALE=0: a player's), sound on
 # (--sound), PURE_TRACE_AUDIO=1 (the audio sink's `[audio]` line a second; its `resyncs=` counts the stalled producer's
-# jumps of patch 0024-audio-resync-counter, each a skip in the sound) and PURE_PERF=log (a `[perf]` line a second:
+# jumps of patch 0024-audio-resync-counter, each a skip in the sound unless `resynced=` says the jump was over
+# RESTART_FRAMES of tools/purelib/logs.py, a channel that sat idle and restarted) and PURE_PERF=log (a `[perf]` line a second:
 # `fps` the presents, `game` the game's flips, `speed` its virtual time against real time), unpaced to flip AUDIO_FROM
 # and paced from it (PURE_PACED_FROM), to flip AUDIO_FROM + AUDIO_SECONDS x the game's rate, under `caffeinate -d -u`
 # on macOS (a display asleep holds no vsync). A probe first, the boot's first PROBE_FLIPS flips unpaced with
@@ -74,11 +75,12 @@
 # itself is judged the same way at its race load and FAILs as `the window was not on screen` when it was not: the
 # window guard of tools/purelib/logs.py (SCREEN_HELD, window_guard), which tools/stutter_check.sh shares. From the
 # race load's `[pure] display rate` line to the run's end: PASS when the `[audio]` lines count at most MAX_RESYNCS
-# resync (the race load's, as at the PSP's rate), no `[perf]` second after the first AUDIO_SKIP (the load, and the
+# resync (the race load's, as at the PSP's rate; the channel restarts are counted and printed apart, not bounded: the
+# rig's race has one at its 8th second in every run, task 500), no `[perf]` second after the first AUDIO_SKIP (the load, and the
 # unpaced flips to AUDIO_FROM) is under MIN_SPEED% speed (a freeze-sized loss), and the run reached its last flip. The
 # goal is the sound: a second under SLIP_SPEED% (a frame or two that missed the display's refresh) is a slip the audio's
 # lead and the margin's catch-up absorb, counted and printed, not bounded (the review's call, 2026-10-15). Printed: the
-# resyncs and the audio seconds they fell in, the seconds under SLIP_SPEED% and their speeds, the medians of the
+# resyncs and the restarts and the audio seconds they fell in, the seconds under SLIP_SPEED% and their speeds, the medians of the
 # presents and the game's flips a second, the unpaced presents that judged the window, the display, the margin, the
 # game's rate and the period in force, the wall time. About 2.5 minutes.
 # Waits up to 600 s while another PureNative runs (one game at a time). Prints `display_rate_check: PASS ...` or
@@ -242,12 +244,12 @@ EOF
     $SLIP_SPEED <<'EOF' | tee "$OUT/summary.txt"
 import statistics, sys
 sys.path.insert(0, "tools")
-from purelib.logs import DISPLAY_RACE_RE, audio_resyncs, perf as perf_of, window_guard  # the readers, the guard
+from purelib.logs import DISPLAY_RACE_RE, audio_restart, audio_resyncs, perf as perf_of, window_guard  # the readers
 
 log, shell, end, margin_arg = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 skip, max_resyncs, min_speed, seconds = int(sys.argv[5]), int(sys.argv[6]), float(sys.argv[7]), sys.argv[8]
 slip_speed = float(sys.argv[9])
-race, resyncs, perf, reached = None, [], [], False
+race, resyncs, restarts, perf, reached = None, [], [], [], False
 with open(log, errors="replace") as f:
     for line in f:
         line = line.rstrip("\n")
@@ -260,7 +262,7 @@ with open(log, errors="replace") as f:
             continue
         a = audio_resyncs(line)
         if a and a[1]:
-            resyncs.append(a)
+            (restarts if audio_restart(line) else resyncs).append(a)
             continue
         p = perf_of(line)
         if p:
@@ -294,11 +296,14 @@ if total > max_resyncs:
 if freezes:
     fails.append(f"{len(freezes)} second{'' if len(freezes) == 1 else 's'} under {min_speed:g}% speed")
 where = ", ".join(f"{s}s" + (f" x{k}" if k > 1 else "") for s, k in resyncs) or "none"
+restarted = sum(k for _, k in restarts)
+where_restarts = ", ".join(f"{s}s" + (f" x{k}" if k > 1 else "") for s, k in restarts) or "none"
 slip_text = ", ".join(f"race second {n} {s}%" for n, s in slips[:12]) + (", ..." if len(slips) > 12 else "")
 print(f"{shell}: {hz} Hz display, margin {margin}, the game at {rate:.2f} Hz ({period} us a vblank); the window on "
       f"screen: {'yes' if shown else 'no'} (unpaced presents a second: the menus' median "
       f"{menus_fps if menus_fps is not None else '-'}, the race load's {load or '-'}); race seconds "
-      f"{len(perf)} ({len(counted)} after the first {skip}); resyncs {total} (audio seconds: {where}); seconds under "
+      f"{len(perf)} ({len(counted)} after the first {skip}); resyncs {total} (audio seconds: {where}); channel restarts "
+      f"{restarted} (audio seconds: {where_restarts}); seconds under "
       f"{slip_speed:g}% speed {len(slips)}{' (' + slip_text + ')' if slips else ''}, under {min_speed:g}% "
       f"{len(freezes)}; medians {fps if fps is not None else '-'} presents and {game if game is not None else '-'} game "
       f"flips a second; flip {end} reached: {'yes' if reached else 'no'}; {seconds} s")
