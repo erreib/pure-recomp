@@ -1,5 +1,5 @@
 diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
-index 6d555ec..2bb509c 100644
+index 472a957..224d0e7 100644
 --- a/host/gpu/shaders/ge.frag
 +++ b/host/gpu/shaders/ge.frag
 @@ -21,6 +21,15 @@ layout(set = 0, binding = 0) uniform sampler2D guest_texture;

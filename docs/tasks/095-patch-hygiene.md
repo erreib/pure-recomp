@@ -99,7 +99,9 @@ another game started, wait and rerun it.
   5 (read-back once: `drain_recording`, `host_read_memory`, `invalidate_writeback(memory, coherent)` in 0003).
   6, texture helpers (texture_decode.hpp exports, used by vulkan_renderer.cpp and metal_textures.mm).
   6's rest (MenuTab alias, vblank period kept by the kernel alone, WINDOW_SIZE parse once, NO_RENDER static).
-- Left: 7 (stale notes), Verify, Result. README rows go with each item.
+  7 (ge_state.hpp notes, 0022's "patch 0021", texture_params.x described once, ge.frag's ge_log16 pointer,
+  test_hooks.cpp and pure_profile.cpp numbers).
+- Left: Verify, Result.
 - Workflow: `tools/patches.sh open`, edit in out/patch-series, fixup + `GIT_SEQUENCE_EDITOR=true git rebase -i
   --autosquash <pin>` (or an `edit` stop for a patch the later ones rework), `tools/patches.sh close`, build, commit.
 

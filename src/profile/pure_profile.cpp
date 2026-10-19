@@ -60,7 +60,8 @@ void return_one(Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 1u); }
 constexpr std::uint32_t kNidSceDisplaySetFrameBuf = 0x289D82FEu;
 
 // PURE_PACED_FROM=N (task 034), for the tools: the kernel's clock runs unpaced (Kernel::set_paced(false), patch
-// 0011) from start-up until flip N, and is held to real time (set_paced(true)) from flip N on, whatever the shell.
+// 0005-kernel-host-waits-and-pacing) from start-up until flip N, and is held to real time (set_paced(true)) from flip N
+// on, whatever the shell.
 // Without a window the menus before a race then take seconds, while the race, where tools/campaign_sweep.py steers
 // closed loop from the probe's lines, keeps real time. A window still presents at the display's rate (the Metal
 // shell waits for a drawable at vsync), so a windowed run gains little. 0 is paced from the start; unset (or empty)

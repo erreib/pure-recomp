@@ -276,10 +276,10 @@ void wrap_call_traces(HleRegistrar &hle) {
 }
 
 // --- PURE_VFPU_DOT=ppsspp|psp --------------------------------------------------------------------------------------
-// README.md: (patch 0020, D-013; test only) the rounding of the VFPU's dot products: `psp`, the default, rounds as a
-// real PSP does (pspautotests' rule); `ppsspp` rounds as PPSSPP's JIT does (a fused chain), so a run can be compared
-// with PPSSPP's references bit for bit. `PURE_TEST_RACE_CLOCK` selects `ppsspp` by itself: the reference race is
-// PPSSPP's.
+// README.md: (patch 0009-vfpu-rounding, D-013; test only) the rounding of the VFPU's dot products: `psp`, the
+// default, rounds as a real PSP does (pspautotests' rule); `ppsspp` rounds as PPSSPP's JIT does (a fused chain), so a
+// run can be compared with PPSSPP's references bit for bit. `PURE_TEST_RACE_CLOCK` selects `ppsspp` by itself: the
+// reference race is PPSSPP's.
 // Set once, at the first flip; the race clock's own choice is made earlier (at start-up, when its file is read), so
 // this switch, when set, wins over it.
 void vfpu_dot() {

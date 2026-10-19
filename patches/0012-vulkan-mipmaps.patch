@@ -1,5 +1,5 @@
 diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
-index 58518b7..6d555ec 100644
+index 58518b7..472a957 100644
 --- a/host/gpu/shaders/ge.frag
 +++ b/host/gpu/shaders/ge.frag
 @@ -24,7 +24,7 @@ layout(constant_id = 0) const bool kAlphaTest = true;
@@ -17,7 +17,7 @@ index 58518b7..6d555ec 100644
  
 +// The GE's logarithm for the mip level, in 1/16 levels: the float's exponent
 +// and the top four bits of its mantissa (a piecewise linear log2, floored to
-+// 1/16), of |x|. ge_log16 in vulkan_renderer.cpp.
++// 1/16), of |x|. ge_log16 in texture_decode.cpp.
 +float ge_log16(float x) {
 +    return float(int((floatBitsToUint(x) >> 19u) & 0xFFFu) - 127 * 16);
 +}

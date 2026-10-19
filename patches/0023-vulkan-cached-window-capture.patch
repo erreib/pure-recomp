@@ -1,8 +1,8 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index cdbf92f..894e223 100644
+index 963e83b..f6d6c4e 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -3609,9 +3609,10 @@ void VulkanRenderer::Impl::submit_and_present(VkCommandBuffer commands, VkFence
+@@ -3616,9 +3616,10 @@ void VulkanRenderer::Impl::submit_and_present(VkCommandBuffer commands, VkFence
                  vkGetBufferMemoryRequirements(device, capture_buffer, &requirements);
                  VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
                  allocate.allocationSize = requirements.size;

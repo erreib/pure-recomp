@@ -204,7 +204,7 @@ index 48af218..723c8c4 100644
  
  void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
 diff --git a/host/gpu/ge_state.hpp b/host/gpu/ge_state.hpp
-index a187ab4..fe4460e 100644
+index a187ab4..e2889d0 100644
 --- a/host/gpu/ge_state.hpp
 +++ b/host/gpu/ge_state.hpp
 @@ -45,6 +45,17 @@ struct Vertex {
@@ -225,7 +225,7 @@ index a187ab4..fe4460e 100644
  struct TextureState {
      bool enabled{};
      std::uint32_t address{};
-@@ -75,6 +86,21 @@ struct TextureState {
+@@ -75,6 +86,20 @@ struct TextureState {
      float scale_v{1.0f};
      float offset_u{};
      float offset_v{};
@@ -237,8 +237,7 @@ index a187ab4..fe4460e 100644
 +    // levels), at the level TEXLEVEL (0xC8) chooses: bits 0..1 the mode (0
 +    // auto, from the texture coordinates' change across the screen; 1
 +    // constant, the bias alone; 2 slope, from TEXLODSLOPE and the depth),
-+    // bits 16..23 the bias, signed, in 1/16 of a level. The Vulkan renderer
-+    // samples level 0 whatever these say.
++    // bits 16..23 the bias, signed, in 1/16 of a level.
 +    std::uint32_t level_count{1u};
 +    std::array<TextureLevel, 7> levels{};
 +    std::uint32_t level_mode{};
@@ -247,7 +246,7 @@ index a187ab4..fe4460e 100644
  };
  
  struct RenderTarget {
-@@ -109,6 +135,18 @@ struct AlphaTestState {
+@@ -109,6 +134,18 @@ struct AlphaTestState {
      std::uint32_t mask{0xFFu};
  };
  
@@ -266,7 +265,7 @@ index a187ab4..fe4460e 100644
  struct ViewportState {
      float x_scale{}, y_scale{}, z_scale{};
      float x_offset{}, y_offset{}, z_offset{};
-@@ -155,6 +193,44 @@ struct FogState {
+@@ -155,6 +192,44 @@ struct FogState {
      std::uint32_t color{};
  };
  
@@ -311,7 +310,7 @@ index a187ab4..fe4460e 100644
  // A draw call: decoded vertices plus the state they are drawn with.
  struct DrawCall {
      PrimitiveType primitive{};
-@@ -201,6 +277,23 @@ struct DrawCall {
+@@ -201,6 +276,20 @@ struct DrawCall {
      std::uint32_t raw_count{};
      std::uint32_t raw_stride{};
      const float *bone_matrices{};
@@ -320,22 +319,19 @@ index a187ab4..fe4460e 100644
 +    // the colour (0xE8) and the alpha, i.e. the stencil, apart (0xE9).
 +    std::uint32_t color_write_mask{};
 +    std::uint32_t alpha_write_mask{};
-+    // The texture mapping mode. The Vulkan renderer draws every draw with its
-+    // UVs (mode 0) whatever this says.
++    // The texture mapping mode.
 +    TextureMapState texture_map;
 +    // The colour test, dithering and CLIPENABLE (0x1C). With CLIPENABLE on the
 +    // GE clips a transformed primitive at the near plane only and clamps each
 +    // vertex's screen z to 0..65535; MINZ and MAXZ (depth.range_near and
-+    // range_far) then reject pixels outside them. The Vulkan renderer draws
-+    // none of the three: it keeps every fragment, writes 16-bit targets
-+    // without dithering, and clips at the near and far planes.
++    // range_far) then reject pixels outside them.
 +    ColorTestState color_test;
 +    DitherState dither;
 +    bool clip_enabled{};
  };
  
  // Where each field of a vertex of `vertex_type` lies in its bytes, as
-@@ -291,6 +384,13 @@ private:
+@@ -291,6 +380,13 @@ private:
      BlendState blend_{};
      DepthState depth_{};
      AlphaTestState alpha_test_{};

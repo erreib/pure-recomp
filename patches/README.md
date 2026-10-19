@@ -3,13 +3,17 @@
 Applied in numeric order by `tools/vendor_setup.sh` (`git apply` inside `vendor/portablekit`, at the commit in
 `vendor/PIN`). `tools/patches.sh check` applies the series to a clean checkout of the pinned commit and compares it
 with the vendor tree; `tools/patches.sh export NNNN-slug` writes a new patch from the vendor tree's uncommitted
-changes, numbered above the last one. The series has one patch per framework topic (task 052); which patches could
+changes, numbered above the last one. To change a patch inside the series, `tools/patches.sh open` makes it a branch
+of one commit a patch in out/patch-series and `tools/patches.sh close` writes the commits back and brings the vendor
+tree to them (task 095; the script's header has the steps). The series has one patch per framework topic (task 052); which patches could
 go upstream, what a pull request would carry and what it needs first: `docs/upstream.md`.
 
 ## Old numbers
 Task 052 (2026-10-07) regrouped the twenty patches of tasks 001 to 048 into nine, one per topic (the series has grown since; the table above is current), without
 changing a byte of the vendor tree. The task files (the record), a few strings the tools print, two config comments
-and three comments inside the vendor tree itself ("patch 0014", "patch 0017", "patch 0021") cite the old numbers;
+and comments inside the vendor tree itself cite the old numbers: since task 095 only the two "patch 0021" of
+`include/psprecomp/allegrex_context.hpp` (now 0009-vfpu-rounding), left because a change there recompiles the corpus
+(the record format's "patch 0014" and "patch 0017" moved to `src/tools/` with it and name their fields instead);
 since task 053 the docs name the new patch with the task that made the change, and the history files under
 `docs/history/` mark an old number "old". This is where each went. A patch split by file
 went to more than one new patch. 0016 was never used.
@@ -107,6 +111,9 @@ here; 0003 and the Metal backend in `src/` read it, and our record format (`src/
   CLIPENABLE on (every 3D draw). Parses them into `DrawCall::color_test` (`ColorTestState`), `dither`
   (`DitherState`, with `offset(x, y)`) and `clip_enabled`, so 10 commands leave the ignored-command list (30 distinct
   remain, from 40).
+- Task 095 took out `ge_state.hpp`'s notes that the Vulkan renderer samples level 0, draws every draw with its UVs
+  and draws none of the colour test, dithering and CLIPENABLE: 0011 to 0014 draw them, and the GE state says what the
+  GE does, not what a backend draws.
 
 ### 0003-vulkan-renderer-fixes
 Old 0003, the renderer and shader sections of old 0004, old 0005 to 0008, then the renderer sections of old 0013,
@@ -481,7 +488,9 @@ enhanced draw and by a 2D one, so `Texture` gains `detail_descriptor`, made at t
 rewritten with the other on a Texture filter change and freed with it; the descriptor pool is sized for twice as many
 texture sets when the game names the option. `[render] texture detail: on` at the first enhanced draw. Without the
 option, or with it at 0, the draws, the samplers and the pictures are as before (the Vulkan window suite's seven scenes
-to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`).
+to the pixel). Our profile names `texture_detail` (the Texture detail row, `src/profile/enhancements.cpp`). The
+bits of `texture_params.x` are described once, above `PushConstants` in `vulkan_renderer.cpp`; `ge.vert` and `ge.frag`
+point there (task 095: the three descriptions disagreed).
 
 ### 0021-content-packs
 Task 078 (078-download-packs-menu, the Mac line's 078; D-005; docs/dlc.md, "In the menu (task 078)"). A game's download packs are save folders the game loads as

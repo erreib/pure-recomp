@@ -1,8 +1,8 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index e2f4e88..cdbf92f 100644
+index 6a084d4..963e83b 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -1198,10 +1198,28 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1205,10 +1205,28 @@ struct VulkanRenderer::Impl : host::SdlPad {
      Staging depth_readback{};
      VkDeviceSize depth_readback_size{};
      bool depth_readback_coherent{true};
@@ -33,12 +33,12 @@ index e2f4e88..cdbf92f 100644
  
      // Frames in flight. With two (the default) the CPU records a frame while
      // the GPU still draws the one before, so their times overlap instead of
-@@ -1229,6 +1247,15 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1236,6 +1254,15 @@ struct VulkanRenderer::Impl : host::SdlPad {
          std::uint32_t writeback_width{};
          bool writeback_in_flight{};
          WritebackFrame writeback_recorded{};
 +        // The depth write-back recorded in this slot's frame at a SIGNAL
-+        // (write_back_depth(), patch 0021): stored in guest memory at the
++        // (write_back_depth()): stored in guest memory at the
 +        // next frame's, after this frame's fence, instead of draining the
 +        // queue mid-frame. `depth_frame` is begun_frames when recorded.
 +        Staging depth{};
@@ -49,7 +49,7 @@ index e2f4e88..cdbf92f 100644
          // A frame the game wrote itself (upload_frame()).
          Staging movie{};
          std::uint32_t gpu_timer_pending{};  // queries the frame wrote, read after its fence
-@@ -5817,6 +5844,7 @@ void VulkanRenderer::begin_frame() {
+@@ -5824,6 +5851,7 @@ void VulkanRenderer::begin_frame() {
      if (!impl.ready || impl.recording) return;
      // The next slot: its fence is the frame slot_count frames back.
      impl.slot = (impl.slot + 1u) % impl.slot_count;
@@ -57,7 +57,7 @@ index e2f4e88..cdbf92f 100644
      Impl::FrameSlot &frame = impl.slots[impl.slot];
      impl.command_buffer = frame.commands;
      impl.frame_fence = frame.fence;
-@@ -7238,15 +7266,16 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+@@ -7245,15 +7273,16 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
                    << " back for a block transfer\n";
  }
  
@@ -77,7 +77,7 @@ index e2f4e88..cdbf92f 100644
      // The CPU reads it, so cached memory first, as for the frame write-back.
      const HostReadMemory host = host_read_memory(requirements.memoryTypeBits, true);
      if (!host.found) {
-@@ -7257,22 +7286,77 @@ bool VulkanRenderer::Impl::create_depth_readback(VkDeviceSize bytes, std::string
+@@ -7264,22 +7293,77 @@ bool VulkanRenderer::Impl::create_depth_readback(VkDeviceSize bytes, std::string
      VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
      allocate.allocationSize = requirements.size;
      allocate.memoryTypeIndex = host.type;
@@ -165,7 +165,7 @@ index e2f4e88..cdbf92f 100644
  }
  
  bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t depth_address,
-@@ -7288,8 +7372,7 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+@@ -7295,8 +7379,7 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
      depth_address = 0x04000000u | (depth_address & 0x001FFFF0u);
      if (depth_stride < kPspWidth) return false;
      const std::size_t guest_bytes = static_cast<std::size_t>(depth_stride) * kPspHeight * 2u;
@@ -175,7 +175,7 @@ index e2f4e88..cdbf92f 100644
      // Bytes per texel of the depth aspect copied into a buffer.
      std::uint32_t texel_bytes = 4u;
      switch (impl.depth_format) {
-@@ -7306,98 +7389,138 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+@@ -7313,98 +7396,138 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
      Impl::Target &target = found->second;
      const VkExtent2D extent = target.extent;  // the target's own (patch 0018)
      const VkDeviceSize bytes = static_cast<VkDeviceSize>(extent.width) * extent.height * texel_bytes;

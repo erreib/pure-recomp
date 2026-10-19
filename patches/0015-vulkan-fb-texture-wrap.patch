@@ -1,5 +1,5 @@
 diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
-index 4de7478..73f2e2a 100644
+index ab498a4..89eb11b 100644
 --- a/host/gpu/shaders/ge.frag
 +++ b/host/gpu/shaders/ge.frag
 @@ -58,11 +58,15 @@ layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput ta
