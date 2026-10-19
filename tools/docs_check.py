@@ -12,9 +12,9 @@ blocks too except for links:
            member present, or a stem (`src/tools/ge_replay` for `ge_replay.cpp`); a placeholder in capitals (TRACK,
            MODE, NAME, FILE, DIR and the like, `PLACEHOLDERS`) stands for any name
            (`config/pad_scripts/drive/TRACK.txt`). A path counts when it starts a word (not
-           `vendor/portablekit/tools/...` or `~/dev/x/src/...`). docs/vendor-map.md, docs/codegen-baseline.md and
-           docs/research.md are spike reports about other repositories (PortableKit, Yakumo, PSPRecomp), whose
-           `src/` and `tools/` are theirs, and the history files under docs/history/ are dated records that keep the
+           `vendor/portablekit/tools/...` or `~/dev/x/src/...`). docs/codegen-baseline.md and docs/research.md are
+           spike reports about other repositories (PortableKit, Yakumo, PSPRecomp), whose `src/` and `tools/` are
+           theirs, and the history files under docs/history/ are dated records that keep the
            names of their day: this check skips both kinds.
   links    every relative Markdown link `[text](target)` resolves: the file exists, and a `#anchor` names a heading of
            it (GitHub's rule: lower case, punctuation dropped, spaces to hyphens, -1, -2 for repeats).
@@ -35,7 +35,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Spike reports whose tools/ and src/ paths are other repositories' (they say so in their opening lines).
-EXTERNAL = {"docs/vendor-map.md", "docs/codegen-baseline.md", "docs/research.md"}
+EXTERNAL = {"docs/codegen-baseline.md", "docs/research.md"}
 # The words the docs use for "any name" inside a path.
 PLACEHOLDERS = ("TRACK", "MODE", "NNNN", "NNN", "NAME", "FILE", "DIR", "CELL", "SCENE", "ADDR", "TAG", "PACK")
 PATH_PREFIXES = ("tools/", "src/", "config/", "docs/", "packaging/", "third_party/")

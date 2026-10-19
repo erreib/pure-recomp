@@ -796,8 +796,8 @@ that the docs name only what exists:
 - **Paths.** Every `tools/...`, `src/...`, `config/...`, `docs/...`, `packaging/...` and `third_party/...` path a doc
   names exists: a file, a directory, a glob that matches, `a.{hpp,cpp}` braces with every member, or a stem
   (`src/tools/ge_replay`); a placeholder in capitals (TRACK, MODE, NAME, FILE, DIR and the like) stands for any
-  name. Paths inside code blocks count too. The spike reports about other repositories (docs/vendor-map.md,
-  docs/codegen-baseline.md, docs/research.md) and the dated history files under `docs/history/` are not path-checked.
+  name. Paths inside code blocks count too. The spike reports about other repositories (docs/codegen-baseline.md,
+  docs/research.md) and the dated history files under `docs/history/` are not path-checked.
 - **Links.** Every relative Markdown link resolves, and a `#anchor` names a heading of its file (GitHub's rule).
 - **Patches.** Every `NNNN-slug` patch name is a file in `patches/`, and a patch cited by the word and a number alone is
   reported: task 052 regrouped the series, so the numbers tasks 001 to 048 used name other patches now.
