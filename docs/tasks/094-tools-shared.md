@@ -1,6 +1,6 @@
 # 094: The checks' shared code, and three harness defects
 
-Milestone: cleanup (audit 2026-10-19) | Branch: task/094-tools-shared | Status: OPEN
+Milestone: cleanup (audit 2026-10-19) | Branch: task/094-tools-shared | Status: MERGED
 
 ## Goal
 Each log format is parsed in one place, each piece of setup is written once, and three defects in the harness are
@@ -251,4 +251,14 @@ Open questions:
   - The refactor_check counts passage in verification.md: the GPU waits are dropped wherever they stand.
 
 ## Review
-(Fills at review) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged into batch/m2 as 61665ee (2026-10-19). Gate (docs/approach.md rule 3): the merge put task 093's src beside
+these tools for the first time, so the headless checks that read the Metal backend's lines ran on the merge
+(out/094_gate.log): logs and imgdiff selftests, the suite 18/18 (`--wait`), framerate_check and display_rate_check PASS.
+refactor_check there compared against the main checkout's before-captures of 2026-10-10 (a2fb6fb): 18/18 pixels equal,
+the counts differing only by the lines' later fields (upscaled, enhanced), a stale baseline, not this task. docs_check
+needed tools/lib.sh's row (task 092's new rule), added with purelib/logs.py's. Spot-read: purelib/logs.py's window
+guard (`window_shown`, the 1.5x rule shared with display_rate_check), lib.sh, replay_check's `record()` staleness
+test, save_roundtrip's split. The worker's question: Verify lines use `save_roundtrip.sh --headless` for headless
+changes; runs 4 and 5 (the save list, a host window) join the window batch. The doc lines the Result lists are owed
+to the docs pass after task 095. Window checks owed: the Result's list (the gerec recordings record afresh on their
+first window run, about 15 minutes).

@@ -37,6 +37,7 @@ merge waits on them. The table as it stood before task 092, with each tool's det
 |---|---|---|
 | `tools/check_env.sh` | the toolchain present and arm64 (cmake, ninja, SDL3, MoltenVK, Vulkan, glslang, Ghidra, Java, PPSSPP, the vendor pin) | seconds |
 | `tools/env.sh` | sourced by the other tools: the compiler, the PATH, the shared `CCACHE_DIR`; `PURE_MALLOC_DEBUG=1` | sourced |
+| `tools/lib.sh` | sourced by the checks (task 094): `need_game`, `wait_game`, `window_shell`, `pick_backend`, `fresh_stick` | sourced |
 | `tools/iso_extract.py` | the UMD image without mounting it: list, extract, cat, verify (CRC 4502C588) | seconds |
 | `tools/setup_game.sh` | lays out `game/` (EBOOT.ELF, disc.iso, ms0/) | seconds |
 | `tools/vendor_setup.sh` | clones the framework at `vendor/PIN` and applies `patches/` | a clone |
@@ -49,7 +50,7 @@ merge waits on them. The table as it stood before task 092, with each tool's det
 | `tools/purelib/__init__.py` | the Python tools' shared package (docs/verification.md, "The shared runner") | a library |
 | `tools/purelib/port.py` | running the port: paths, a test run's environment, scratch data and sticks, the one-game guard, the pty runner | a library |
 | `tools/purelib/conpty.py` | PureNative under a Windows pseudoconsole, for `port.py` on Windows | a library |
-| `tools/purelib/logs.py` | the readers of a run's log lines | a library |
+| `tools/purelib/logs.py` | the readers of a run's log lines, each defined once (task 094): the sweep cell, flip times, `[pure] display rate`, `[perf]`, `[stalls]`, `[slow-frame]`, `[audio]`, the window guard, `scan_log`; `--selftest` | a library |
 | `tools/purelib/ppsspp.py` | PPSSPP shared between tasks: one at a time, its stick left as found | a library |
 | `tools/purelib/dlc.py` | the twelve US download packs: names, the checks on a pack folder, the app's data directory | a library |
 | `tools/campaign_sweep.py` | a (mode, track) cell from a cold boot to its end screen, steered by the follower; `--record-line` | about 4 minutes a race |
