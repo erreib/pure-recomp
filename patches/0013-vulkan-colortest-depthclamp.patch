@@ -100,7 +100,7 @@ index c47877b..fdbb5b8 100644
          // [0, w], so without this remap the near half of every frustum is lost.
          // The PSP viewport's z scale and offset are folded into the Vulkan
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index f58280b..452aa44 100644
+index 8a76cdf..5a837a4 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -222,9 +222,13 @@ struct EnvironmentBlock {
@@ -143,7 +143,7 @@ index f58280b..452aa44 100644
      void choose_depth_format() {
          if (portablekit::env("NO_STENCIL_BUFFER") == nullptr && portablekit::env("NO_STENCIL_ALPHA") == nullptr) {
              for (const VkFormat format : {VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT}) {
-@@ -1332,6 +1347,7 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1337,6 +1352,7 @@ struct VulkanRenderer::Impl : host::SdlPad {
      // state stays the same; begin_frame() drops them with the vertex buffer.
      std::uint64_t environment_version{};    // 0: none written this frame
      std::uint32_t environment_offset{};
@@ -151,7 +151,7 @@ index f58280b..452aa44 100644
      ObjectBlock last_object{};
      std::uint32_t object_offset{};
      bool object_valid{};
-@@ -2213,6 +2229,17 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2256,6 +2272,17 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
          enabled_features.dualSrcBlend = VK_TRUE;
          impl.dual_source = true;
      }
@@ -169,7 +169,7 @@ index f58280b..452aa44 100644
      std::cout << "[render] robust buffer access " << (enabled_features.robustBufferAccess ? "on" : "off") << "\n";
      VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
      device_info.pEnabledFeatures = &enabled_features;
-@@ -4617,15 +4644,16 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
+@@ -4643,15 +4670,16 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
  namespace {
  
  constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u;  // "YKPK"
@@ -189,7 +189,7 @@ index f58280b..452aa44 100644
  }
  
  PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
-@@ -4645,6 +4673,10 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
+@@ -4671,6 +4699,10 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words)
      key.alpha_blend = words[12] <= kAlphaAdd ? words[12] : kAlphaFragment;
      key.stencil = words[13] & 0x1FFFu;
      key.stencil_values = words[14] & 0xFFFFFFu;
@@ -200,7 +200,7 @@ index f58280b..452aa44 100644
      return key;
  }
  
-@@ -4804,7 +4836,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4830,7 +4862,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      stages[1].module = key.alpha_blend == kAlphaDual ? dual_fragment_shader : fragment_shader;
      // A key saved by a run with dual-source blending or the stencil
      // attachment, prewarmed in a run without it (prewarm_pipelines).
@@ -211,7 +211,7 @@ index f58280b..452aa44 100644
  
      VkVertexInputBindingDescription binding{0u, sizeof(GpuVertex), VK_VERTEX_INPUT_RATE_VERTEX};
      std::array<VkVertexInputAttributeDescription, 4> attributes{
-@@ -4840,6 +4874,10 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4866,6 +4900,10 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      raster.cullMode = key.cull ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
      raster.frontFace = key.cull_clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
      raster.lineWidth = 1.0f;
@@ -222,7 +222,7 @@ index f58280b..452aa44 100644
  
      VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
      multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-@@ -4889,15 +4927,29 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+@@ -4915,15 +4953,29 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
      blend.attachmentCount = 1u;
      blend.pAttachments = &blend_attachment;
  
@@ -259,7 +259,7 @@ index f58280b..452aa44 100644
  
      VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
      info.stageCount = static_cast<std::uint32_t>(stages.size());
-@@ -6017,7 +6069,25 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6043,7 +6095,25 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // only when it changed, and the vertices follow whatever was written.
      const bool fogged = call.fog.enabled && !no_fog && !call.through && !call.clear_mode;
      const auto view_world = multiply(call.view, call.world);
@@ -286,7 +286,7 @@ index f58280b..452aa44 100644
          const LightingState &state = call.lighting;
          EnvironmentBlock environment{};
          environment.ambient = unpack_color(state.ambient_color, static_cast<float>(state.ambient_alpha) / 255.0f);
-@@ -6036,8 +6106,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6062,8 +6132,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              environment.light_diffuse[i] = unpack_color(light.diffuse);
              environment.light_specular[i] = unpack_color(light.specular);
          }
@@ -297,7 +297,7 @@ index f58280b..452aa44 100644
      }
      if (lit || mapped) {
          const LightingState &state = call.lighting;
-@@ -6353,6 +6425,17 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6379,6 +6451,17 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      key.alpha_test = no_alpha_variants || perf::alternate_off(perf::NewPath::Alpha) ||
                       (!call.clear_mode && call.alpha_test.enabled && call.alpha_test.function != 1u);
      key.raw = raw;
@@ -315,7 +315,7 @@ index f58280b..452aa44 100644
      // Escape hatch for bisecting "nothing is visible" reports.
      static const bool no_cull = portablekit::env("NO_CULL") != nullptr;
      static const bool no_depth = portablekit::env("NO_DEPTH") != nullptr;
-@@ -6377,10 +6460,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6403,10 +6486,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      const float wrap_flags = no_texture_clamp ? 0.0f
                                                : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
                                                      (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
@@ -329,7 +329,7 @@ index f58280b..452aa44 100644
      push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
                             static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
                             static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
-@@ -6531,6 +6613,11 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6557,6 +6639,11 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              vk_viewport.maxDepth = std::clamp((vp.z_offset + vp.z_scale) / 65535.0f, 0.0f, 1.0f);
          }
      }

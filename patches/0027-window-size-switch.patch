@@ -1,8 +1,8 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index c020c0e..cce5542 100644
+index 3a507fb..1b0e5a5 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -2253,8 +2253,21 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2296,8 +2296,21 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      // under them). The safe area keeps the picture clear of a camera cutout.
      window_flags |= SDL_WINDOW_FULLSCREEN;
  #endif

@@ -139,7 +139,7 @@ index 476ebf6..c47877b 100644
          // PSP clip space follows OpenGL with z in [-w, w]; Vulkan clips against
          // [0, w], so without this remap the near half of every frustum is lost.
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index f76682c..85b89e9 100644
+index bd4cbbf..3373a3c 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -126,7 +126,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
@@ -170,7 +170,7 @@ index f76682c..85b89e9 100644
  
  // GPU vertex decode (<prefix>_GPU_DECODE): what the raw vertex shader needs to
  // decode and skin a draw's own bytes; the layout matches the Raw block in
-@@ -5818,12 +5826,35 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -5844,12 +5852,35 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
          }
      }
  
@@ -210,7 +210,7 @@ index f76682c..85b89e9 100644
          const LightingState &state = call.lighting;
          EnvironmentBlock environment{};
          environment.ambient = unpack_color(state.ambient_color, static_cast<float>(state.ambient_alpha) / 255.0f);
-@@ -5845,23 +5876,48 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -5871,23 +5902,48 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
          if (!impl.write_uniform(&environment, sizeof(environment), impl.environment_offset)) return;
          impl.environment_version = call.environment_version;
      }
@@ -273,7 +273,7 @@ index f76682c..85b89e9 100644
          if (!impl.object_valid || std::memcmp(&object, &impl.last_object, sizeof(object)) != 0) {
              if (!impl.write_uniform(&object, sizeof(object), impl.object_offset)) return;
              impl.last_object = object;
-@@ -5924,15 +5980,6 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -5950,15 +6006,6 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                  if (first + index < frame.check_drawn.size()) frame.check_drawn[first + index] = 1u;
          }
      }
@@ -289,7 +289,7 @@ index f76682c..85b89e9 100644
      // Under Fill the game's 480x272 screen is spread over a target of the
      // window's shape, which suits the 3D view the game now draws at that
      // shape, but would stretch the 2D interface. Its draws into the shown
-@@ -6175,9 +6222,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6201,9 +6248,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                             static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
                             static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 1u)};
      // Through-mode texture coordinates are in texels, transformed ones in [0,1].
@@ -302,7 +302,7 @@ index f76682c..85b89e9 100644
      push.uv_transform = call.through && call.texture.width != 0u
                              ? std::array<float, 4>{1.0f / static_cast<float>(call.texture.width),
                                                     1.0f / static_cast<float>(call.texture.height), 0.0f, 0.0f}
-@@ -6215,6 +6262,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6241,6 +6288,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              texture_descriptor = impl.texture_descriptor(memory, call);
          }
      }
@@ -313,7 +313,7 @@ index f76682c..85b89e9 100644
  
      if (!impl.pass_active || impl.current_target != call.target.color_address) {
          impl.end_pass();
-@@ -6333,7 +6384,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6359,7 +6410,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                  vkCmdDraw(impl.command_buffer, draw_count, 1u, 0u, 0u);
              }
              perf::count_recorded_draws(1u);
@@ -322,7 +322,7 @@ index f76682c..85b89e9 100644
                                          draw_count, drawn_vertices, false);
          } else {
              Impl::DrawGroup &group = impl.group;
-@@ -6360,7 +6411,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6386,7 +6437,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                  rebase = 0u;
                  impl.group_skinned = skinned;
              }
@@ -331,7 +331,7 @@ index f76682c..85b89e9 100644
                                          group.index_base, draw_count, vertex_count, join, raw);
              auto *indices = reinterpret_cast<std::uint8_t *>(impl.index_mapped) + impl.index_offset;
              if (rebase == 0u) {
-@@ -6411,7 +6462,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6437,7 +6488,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      if (impl.interpolating) {
          const Impl::DrawState state{pipeline, texture_descriptor, lighting_offsets, vk_viewport, vk_scissor,
                                      blend_constants, push};

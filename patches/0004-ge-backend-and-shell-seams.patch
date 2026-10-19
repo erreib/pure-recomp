@@ -476,7 +476,7 @@ index 0000000..0d201d0
 +} // namespace
 +} // namespace portablekit::gpu
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index b8ac5f3..e203c08 100644
+index 62c6188..5404ea8 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -1,6 +1,6 @@
@@ -670,7 +670,7 @@ index b8ac5f3..e203c08 100644
  
      // Captures the pointer for the game when everything allows it and frees
      // it otherwise. Whatever the mouse did or held across a change is dropped,
-@@ -1845,93 +1702,12 @@ struct VulkanRenderer::Impl {
+@@ -1850,93 +1707,12 @@ struct VulkanRenderer::Impl {
      // those that differed.
      std::uint64_t direct_checked{};
      std::uint64_t direct_mismatched{};
@@ -764,7 +764,7 @@ index b8ac5f3..e203c08 100644
      [[nodiscard]] std::uint32_t find_memory_type(std::uint32_t mask, VkMemoryPropertyFlags properties) const {
          VkPhysicalDeviceMemoryProperties memory_properties{};
          vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
-@@ -5038,79 +4814,9 @@ void VulkanRenderer::sample_pad() {
+@@ -5064,79 +4840,9 @@ void VulkanRenderer::sample_pad() {
  }
  
  void VulkanRenderer::Impl::sample_pad(bool focused) {
@@ -847,7 +847,7 @@ index b8ac5f3..e203c08 100644
  }
  
  PadState VulkanRenderer::pad() const noexcept { return impl_ ? impl_->pad : PadState{}; }
-@@ -8207,6 +7913,21 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
+@@ -8203,6 +7909,21 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
      return write_bmp(path, pixels.data(), width, height, false);
  }
  

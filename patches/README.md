@@ -153,7 +153,11 @@ colour test, nor dithering, nor CLIPENABLE's depth clamp). Needs 0002's stencil 
   does), and stores z = depth x 65535 as 16-bit pixels in rows of the depth stride at the depth address (480x272;
   screen-wide buffers, stride 480 or more, only). Depth images get TRANSFER_SRC usage. About 1 ms a race frame on the
   M4 Pro, 0.9 of it the GPU wait. `PURE_NO_DEPTH_READBACK=1` turns it off; `PURE_TRACE_DEPTH_READBACK=1` logs each
-  write-back. The HLE side (`hle_media.cpp`) goes through the GE backend once 0004 applies.
+  write-back. The HLE side (`hle_media.cpp`) goes through the GE backend once 0004 applies. Since task 095 the
+  read-back pieces are written once, here: `drain_recording` (submit, wait, go on recording; the framework's
+  `read_back_framebuffer` and the depth write-back both call it, the waits as before), `host_read_memory` (the
+  memory type of a buffer the CPU reads: cached and coherent, then cached, then coherent; the frame write-back, the
+  depth write-back and 0023's capture pick with it, each as before) and `invalidate_writeback(memory, coherent)`.
 
 ### 0004-ge-backend-and-shell-seams
 Old 0009, 0010 and 0012. It carried the record backend and the .gerec format too (with the record-format sections of
@@ -506,7 +510,7 @@ recorded (`begun_frames` tells this frame's from those), waiting for that frame'
 in practice); older ones are dropped. The first SIGNAL stores nothing (guest memory keeps its bytes). A second SIGNAL in
 one frame that needs a bigger buffer than the first's drains as before. The conversion to the GE's 16 bits is
 `store_depth`, the copy `record_depth_copy`, both shared with the synchronous path, which `<prefix>_SYNC_READBACK=1`
-restores exactly. The start-up line says which (`a frame late` or `synchronous`). Upstream: a candidate; the one-frame
+restores exactly (its drain and both invalidates are 0003's `drain_recording` and `invalidate_writeback`). The start-up line says which (`a frame late` or `synchronous`). Upstream: a candidate; the one-frame
 lag is what a game's CPU depth test sees, so a framework would want it per game or documented.
 
 ### 0023-vulkan-cached-window-capture
@@ -514,7 +518,8 @@ Task 078 (078-vulkan-effect-slowdowns). The input script's `shot` (a window capt
 `find_memory_type(HOST_VISIBLE | HOST_COHERENT)`, the first such type, which on NVIDIA is uncached, and `write_bmp`
 then read it a byte at a time: 110 to 160 ms a capture on the rig, a long frame at every scripted shot (the "first-use
 present hitches" task 078 was opened for). The buffer now comes from a HOST_VISIBLE | HOST_COHERENT | HOST_CACHED type
-when the device has one (type 4 on the RTX 3080), else as before; no invalidate is needed since the type is coherent.
+when the device has one (type 4 on the RTX 3080), else as before; no invalidate is needed since the type is coherent
+(0003's `host_read_memory` with `invalidates` false picks it).
 Measured: fence wait 1.5 to 3.3 ms, read, convert and write 1.6 to 2.5 ms. The BMP is the same bytes. Upstream: a
 candidate; any discrete GPU's captures.
 
