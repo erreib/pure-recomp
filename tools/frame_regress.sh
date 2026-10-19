@@ -3,10 +3,11 @@
 # with its PPSSPP reference in ref/ (tools/imgdiff.py) and prints a PASS/FAIL table, also written to <out>/summary.txt.
 # Exit 0 only when every scene passes. Every renderer change runs this before merging, on both paths (D-008). Three
 # bounded runs, one per route, each on an empty memory stick of its own (<out>/game, tools/lib.sh's fresh_stick:
-# EBOOT.ELF and disc.iso linked to game/'s), because main_menu.txt creates and saves a profile. By default (task 034) they run headless on the Metal
-# backend: no window, unpaced, the scenes the backend's own 480x272 pictures, under a minute in all. In a window
-# (--shell metal or vulkan; task 069) the suite captures the window scenes (WINDOW_SCENES below) and each run is
-# unpaced until PACE_MARGIN flips before its route's first scene and paced from there: about 5 minutes at 120 Hz.
+# EBOOT.ELF and disc.iso linked to game/'s), because main_menu.txt creates and saves a profile. By default (task 034)
+# they run headless on the Metal backend: no window, unpaced, the scenes the backend's own 480x272 pictures, under a
+# minute in all. In a window (--shell metal or vulkan; task 069) the suite captures the window scenes (WINDOW_SCENES
+# below) and each run is unpaced until PACE_MARGIN flips before its route's first scene and paced from there: about 5
+# minutes at 120 Hz.
 #   tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR]
 #                          [--only SCENE[,SCENE...]] [--window-scenes | --all-scenes] [--paced-from N | --paced]
 #                          [--env KEY=VAL ...] [--wait [SECONDS] | --allow-parallel]
