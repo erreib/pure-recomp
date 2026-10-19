@@ -78,7 +78,7 @@ then docs/status.md; this file says what Windows needs and in what order. Each s
 ## Bringing the rig up to date
 
 After a pull, in Git Bash in the checkout, one game at a time:
-1. `tools/patches.sh check || tools/vendor_setup.sh`, then `tools/patches.sh check` (30 patches); the corpus is
+1. `tools/patches.sh check || tools/vendor_setup.sh`, then `tools/patches.sh check` (29 patches); the corpus is
    regenerated only when the brief says so.
 2. `tools/build.sh profile`.
 3. The checks the pulled changes need (docs/verification.md, "Which path for which change"). Only the Vulkan window

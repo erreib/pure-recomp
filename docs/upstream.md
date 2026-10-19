@@ -17,7 +17,7 @@ it uses.
 | 0001-cmake-embed-nids-verbatim | yes | nothing | nothing |
 | 0002-ge-state-commands | yes | nothing | nothing |
 | 0003-vulkan-renderer-fixes | yes | nothing | 0002 (`DrawCall::stencil` and the write masks) |
-| 0004-ge-backend-and-shell-seams | no | 0003 (`hle_media.cpp`, the renderer header) | 0002 (the record format writes every `DrawCall` field), 0003 (the depth write-back it routes) |
+| 0004-ge-backend-and-shell-seams | no | 0003 (`hle_media.cpp`, the renderer header) | 0003 (the depth write-back it routes); its dependency on 0002 was the record format's, in `src/tools/` since task 095 |
 | 0005-kernel-host-waits-and-pacing | no | 0004 (one line, where the HLE makes the shell) | 0004 |
 | 0006-mpeg-ring-not-empty-while-aus-pending | yes | nothing | nothing |
 | 0007-savedata-list-and-no-key-mode | no | 0004 (the shells' script readers) | 0004 |
@@ -71,16 +71,15 @@ the matching 0002 fields, or nowhere.
 
 ### 0004-ge-backend-and-shell-seams: candidate, the largest; talk to upstream first
 The HLE's interface to whatever draws and shows the GE's work (D-003, D-007): `gpu::GeBackend` with its registry and
-the vulkan, null and record backends; `host::Shell` with its registry and the vulkan and headless shells; the SDL pad,
+the vulkan and null backends; `host::Shell` with its registry and the vulkan and headless shells; the SDL pad,
 the gamepad mapping and the input script's grammar moved out of the renderer; ImGui's platform init moved into the
 shell (old 0012, which a non-Vulkan shell needs). 32 files, about 215 KB. This is what lets a game add a backend or a
 shell in its own sources (our Metal backend and shell in `src/`, D-008), and what a headless run needs; it touches
 `hle_media.cpp`, the renderer and `host/ui/` broadly, so it is the request most likely to need rework on upstream's
-head. Offer it as an issue describing the two seams before any code, then as at least three requests: the GE backend
-seam with the null backend; the shell seam with the headless shell and the UI platform init; the record backend and
-its format, which serve our A/B tooling (`tools/gerec/`, `src/tools/ge_replay`) and may well stay ours. The format's
-readers for Draws that end early exist only for recordings our own builds made before old 0013, 0014 and 0017; an
-upstream request would write the full Draw and drop them, with the comments that cite those patch numbers.
+head. Offer it as an issue describing the two seams before any code, then as two requests: the GE backend seam with the
+null backend; the shell seam with the headless shell and the UI platform init. The record backend and its format,
+which serve our A/B tooling (`tools/gerec/`, `src/tools/ge_replay`), are this repository's since task 095
+(`src/tools/record_backend.cpp`, `ge_record_format.hpp`) and are not offered.
 
 ### 0005-kernel-host-waits-and-pacing: candidate
 Two parts. The kernel part (`kernel.{hpp,cpp}`, `hle_adhoc.cpp`: only waits for the network let real time pass in an
@@ -197,7 +196,8 @@ after 0010 and 0020.
 ### 0030-vblank-period: candidate
 The kernel's vblank period a runtime value (task 089): `Kernel::vblank_period_us()` and `set_vblank_period_us()`,
 the PSP's 16683 us by default, read by the tick, `last_vblank_us()`, the media HLE's frame grid, vblank duration,
-hcount and vblank flag, and frame interpolation's game frame and rate (passed on at each flip). Nothing changes at the
+hcount and vblank flag, and frame interpolation's game frame and rate (read from the kernel through `pacing::set_vblank_period_source()`, so
+a change shows at once rather than at the next flip; task 095). Nothing changes at the
 default. A port that wants its game's frame rate at the display's refresh sets the period from its own option, as our
 profile's Display rate row does; the game must measure time rather than count frames for its speed to stay the same,
 which is the port's question to answer, not the framework's. VR's 72 and 90 Hz want the same control. It touches
@@ -205,8 +205,7 @@ files earlier patches change (kernel.cpp, hle_media.cpp, frame_pacing.cpp); offe
 shares.
 
 ## Ours only
-No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); the record format's
-readers for early recordings (0004); comments that cite this repo's tasks, fidelity differences and old patch
+No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); comments that cite this repo's tasks, fidelity differences and old patch
 numbers. If a future patch is ours only (a test hook, a seam only our profile uses), it stays a patch of its own so
 that this list stays true.
 

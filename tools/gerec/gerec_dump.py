@@ -10,7 +10,7 @@ them out), and a table of the frames: draws counted in the stream, the draws the
 and the inner backend's own cumulative counter with its change since the frame before (the Begin record holds the
 counter before the first frame). The three must agree; the table says so per frame and the exit code is 1 when one
 disagrees or the file is cut short. --draws parses every Draw record in full (the layout of
-vendor/portablekit/host/gpu/ge_record_format.hpp) and checks that it fills its payload exactly; it is implied unless
+src/tools/ge_record_format.hpp) and checks that it fills its payload exactly; it is implied unless
 --summary is given. --images DIR writes each frame's presented image (a BMP, as capture_frame() wrote it) to
 DIR/frame_<n>.bmp.
 
@@ -22,7 +22,7 @@ recording made before one of them reads its draws as without it, so its replays 
 recording is not current and exits 1.
 
 The format: the 8 bytes "PKGEREC\\0", a u32 version, then records of a u8 kind, a u32 payload size and the payload,
-little endian. ge_record_format.hpp is the reference; this reader follows version 1.
+little endian. src/tools/ge_record_format.hpp is the reference; this reader follows version 1.
 """
 import argparse, os, struct, sys
 

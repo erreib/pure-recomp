@@ -11,7 +11,7 @@ fidelity layer's checks". What each check measured when it was made, the runs an
 |---|---|---|---|---|
 | frame regression | `tools/frame_regress.sh` | the pictures: 18 scenes against PPSSPP's captures | each scene's fraction of pixels over its tolerance at or below its limit ("Frame regression suite") | headless after every change; the two window paths before merging a renderer or shell change |
 | race HUD | `tools/hud_check.sh` | the race's HUD in a window, after the suite's last race scene | 61 of 61 shots show the CURRENT and LAP labels | with the window paths |
-| no change | `tools/refactor_check.sh` | a change that only moves code | 0 differing pixels and the same backend counts | a refactor; Metal's Fill and texture detail at scale 1 and one more |
+| no change | `tools/refactor_check.sh` | a change that only moves code | 0 differing pixels and the same backend counts (the GPU waits and the upscale's time dropped wherever they sit in the line) | a refactor; Metal's Fill and texture detail at scale 1 and one more |
 | internal scale | `tools/scale_check.sh [S]` | the Metal backend at scale S against 1 (E3) | each scene reduced within 5% at tol 24 of the 1x capture; the bloom within 10% | the Metal backend's targets, the texture detail, the sprite upscale |
 | billboards | `tools/billboard_check.sh` | the advert screen shows the advert, not bars (difference 15) | the screen's vertical luminance step at least the script's threshold | a change to how a target is sampled as a texture |
 | Metal against Vulkan | `tools/gerec/metal_check.sh` | the two backends on one recording | the TEAM SELECTION frames and race frame 6016 within 0.02 at tol 24 | the Metal backend's draws and effects |
@@ -19,7 +19,7 @@ fidelity layer's checks". What each check measured when it was made, the runs an
 | flashes (E6) | `tools/flash_check.sh [--race]` | E6, run with it on | 57 two-vblank flips at the fade with 0, none with 1; `--race` no stretch with 1, laps within 5% | E6 and the enhancement hooks |
 | frame rate (E4) | `tools/framerate_check.sh [--race]` | E4, run with it on | 29 to 31 against 58 to 61 flips a race-clock second; `--race` both game clocks within 1%, the start within 5% | E4 and the enhancement hooks |
 | display rate (E8) | `tools/display_rate_check.sh [--race \| --audio]` | E8, run with it on; `--audio` the sound at the display's rate | the race at 120 x (1 - margin) plus or minus 3, the menus at the PSP's rate; `--audio` at most 1 resync and no second under 95% | E8, the presents, the pacer; `--audio` on both shells on a display above 60 Hz, the window uncovered |
-| stutter | `tools/stutter_check.sh` | wall time in a window with sound | at most 1 second in 10 with a frame over 25 ms; the readback at most 2 ms a frame | a GPU wait, write-back or submit (on the rig); E8 with `PURE_DISPLAY_RATE=1` |
+| stutter | `tools/stutter_check.sh` | wall time in a window with sound | at most 1 second in 10 with a frame over 25 ms; the readback at most 2 ms a frame; FAIL as "the window was not on screen" when the unpaced menus present over 1.5 x the display's refresh | a GPU wait, write-back or submit (on the rig); E8 with `PURE_DISPLAY_RATE=1` |
 | sprite upscale (E7) | `tools/sprite_check.sh`, `tools/sprite_proto_check.py` | E7, run with it on; the scaler against its prototype | each scene within its limit, changed by 1%, the HUD found; the prototype within 2 levels | the sprite upscale |
 | texture pack | `tools/sprite_pack.sh --check` | the Vulkan renderer's pack loader with the upscaled art | 40 keys, 10 drawn, both scenes changed and within their limits | the pack's keys or loader |
 | texture detail (E5) | `tools/texture_check.sh [--shell vulkan]` | E5, run with it on | each scene within its limit; the three Vineta K scenes changed by 1% with more high-frequency energy | texture sampling or the level rule, on both renderers |
@@ -27,7 +27,7 @@ fidelity layer's checks". What each check measured when it was made, the runs an
 | the Esc menu | `tools/menu_check.sh [--shell vulkan]` | the rows against what the game and the shell have | every tab's rows as the script lists them | the menu, a shell, an enhancement; on both shells |
 | the performance overlay | `tools/overlay_check.sh` | the Metal shell's overlay | the rectangle changed by 20%, the rest within 0.10 at tol 32, `FPS` read back | the Metal shell's overlay |
 | download packs | `tools/dlc_check.sh --packs DIR` | the twelve US packs loaded, raced and imported | twelve opened and imported, three pack races with the HUD | the pack folders, the save transfer, the Download packs section |
-| saves | `tools/save_roundtrip.sh` | profiles saved, loaded and listed | all five runs | savedata; the download packs |
+| saves | `tools/save_roundtrip.sh` | profiles saved, loaded and listed | all five runs: 1 to 3 headless, 4 and 5 in the window (`--headless`: 1 to 3 only) | savedata; the download packs |
 | controls | `tools/controls_check.py` | docs/controls.md's tables against the framework's sources | no difference | the bindings or the pad tuning |
 | the app | `tools/bundle.sh --check DIR` | the app bundle: signature, libraries, no game data, setup and a run | every check | packing, a release |
 | the Windows zip | `tools/bundle_windows.sh --check DIR` | the release folder: files, DLLs, icon, no game data, setup and a run | every check | packing on the rig, a release |
@@ -94,7 +94,7 @@ the modules).
 # Frame regression suite
 
 ```
-tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]]
+tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]] [--wait [SECONDS]]
                        [--window-scenes | --all-scenes] [--paced-from N | --paced] [--env KEY=VAL ...]
                        [--allow-parallel]
 ```
@@ -201,8 +201,9 @@ How the runs are made:
   (settings.ini, the Vulkan pipeline caches), kept between runs, unless the environment sets `PURE_NO_AUDIO` or
   `PURE_DATA_DIR`; the player's `~/Library/Application Support/pure-recomp/PureNative/` is never read or written, so
   a setting changed while playing cannot move a scene. The summary names the data directory.
-- One game at a time: the suite refuses to start while another PureNative runs (`tools/run_boot.py`'s
-  `other_games()`, from `tools/purelib`), names it and exits 2, unless `--allow-parallel` is given.
+- One game at a time: the suite refuses to start while another PureNative runs (`purelib.port`'s `other_games()`),
+  names it and exits 2, unless `--allow-parallel` is given or `--wait [SECONDS]` (task 094) has it wait for the other
+  game instead; the scale, refactor, aspect and overlay checks and `sprite_pack.sh` pass `--wait`.
 - `--env KEY=VAL` passes extra environment to every run, through `tools/run_boot.py --env`. The summary records it.
 - The summary's first lines give the date, the commit (`+changes` when tracked files differ from it), the shell, the
   backend and so the measured column, the extra environment, and each run's exit code, whether it reached its last
@@ -311,7 +312,9 @@ data directory:
   `--allow-parallel` is given. No tool passes it on its own; the headless suite's own results do not depend on timing
   (unpaced, flip-indexed), so it is the run that can take `--allow-parallel` safely, while a sweep cell (its race
   paced and steered closed loop) and the window paths should not. `run_boot.py`, `hud_check.sh` and
-  `save_roundtrip.sh` do not check; the scorecard waits for the other game instead ("The shared runner").
+  `save_roundtrip.sh` do not check; the scorecard waits for the other game instead ("The shared runner"). Since task
+  094 the bash checks take the guard from `tools/lib.sh` (`need_game`, `wait_game`), and `frame_regress.sh --wait`
+  waits, bounded, rather than refuses.
 
 Since task 050 the Python tools share one runner, `tools/purelib` ("The shared runner"), and every headless run it
 starts sets `PURE_NO_BUSY_CLOCK=1`, so a run does not depend on the machine's load. The wall times before and after
@@ -394,7 +397,7 @@ line, output or file layout of a tool changed with the move.
 | Module | Holds | Used by |
 |---|---|---|
 | `purelib.port` | `ROOT`, `EXE` (`build/arm64/bin/PureNative`) and `GAME` of the checkout the tool is in (a worktree runs its own build and game), `main_checkout()` for what a worktree never makes (the matrix of task 035); `clean_env` (a run's environment); `scratch_data_dir` and `silence` (task 034); `fresh_stick` (a game directory on an empty memory stick); `other_games`, `refuse` (the guard that will not start), `wait_game`, `wait_until` and `waited` (the guard that waits, and for how long); `PtyRun` (PureNative under a pty, the log folded as it comes); `headless_run` (one run through `tools/run_boot.py`: script, frames, shell, backend, paced-from, extra environment, shots, game and data directories; returns the exit code, the exit frame and the log); `run_tool` (another tool, its output to a file) | `run_boot.py` (`PtyRun`), `campaign_sweep.py` (`PtyRun`, the stick, the refusal), `scorecard.py` (`headless_run`, the wait), `fidelity_audit.py` (its cells' environment, `run_tool`); the bash checks for the guard, the sticks and the data directories: `frame_regress.sh`, `hud_check.sh`, `save_roundtrip.sh`, `save_interchange.sh`, `billboard_check.sh`, `menu_check.sh`, `overlay_check.sh`, `aspect_check.sh`, `flash_check.sh`, `framerate_check.sh`, `display_rate_check.sh`, `stutter_check.sh`, `sprite_pack.sh`, `dlc_check.sh`, `gerec/replay_check.sh` |
-| `purelib.logs` | the line formats and their readers: `[pure] ship` (`SHIP_RE`, `SHIP_T_RE`), `player object` (`PLAYER_RE`), `[pure] grid` (`GRID_RE`, `grid_samples`), `[pure] exit at frame` (`exit_frame`), `[hle-stub]` and the start-up list (`STUB_RE`, `UNIMPL_RE`, `unimplemented`, `HALT_RE`), the `[metal]` exit lines (`metal_exit`, `metal_pipelines`, `METAL_FPS_RE`), the GE exit list (`ge_ignored`), the audio capture's underruns and files (`UNDERRUN_RE`, `wav_files`, `wav_channel`) | `run_boot.py`, `campaign_sweep.py`, `scorecard.py`, `fidelity_audit.py`, `pp_lines.py`, `flash_check.sh`, `framerate_check.sh`, `display_rate_check.sh` |
+| `purelib.logs` | the line formats and their readers: `[pure] ship` (`SHIP_RE`, `SHIP_T_RE`), `player object` (`PLAYER_RE`), `[pure] grid` (`GRID_RE`, `grid_samples`), `[pure] exit at frame` (`exit_frame`), `[hle-stub]` and the start-up list (`STUB_RE`, `UNIMPL_RE`, `unimplemented`, `HALT_RE`), the `[metal]` exit lines (`metal_exit`, `metal_pipelines`, `METAL_FPS_RE`), the GE exit list (`ge_ignored`), the audio capture's underruns and files (`UNDERRUN_RE`, `wav_files`, `wav_channel`); since task 094 the checks' readers, each defined once: the sweep cell (`SWEEP_LINE_RE`, `LAPS_RE`, `CONTACTS_RE`, `WORDS_RE`, `sweep_result`, `race_cell`), the flips (`flip_log`, `flip_median_ms`, `flips_per_second`), the display rate (`DISPLAY_*`, `display_margin`), `perf`, `stalls`, `slow_frame`, `audio_resyncs`, the window guard (`window_guard`, `window_shown`, `SCREEN_HELD`: the 1.5 x refresh rule display_rate_check and stutter_check share) and `scan_log` with `STRETCH_MIN` and `TWO_VBLANK_US` (moved from fidelity_audit, which imports them back); `--selftest` | `run_boot.py`, `campaign_sweep.py`, `scorecard.py`, `fidelity_audit.py`, `pp_lines.py`, `flash_check.sh`, `framerate_check.sh`, `display_rate_check.sh`, `stutter_check.sh` |
 | `purelib.ppsspp` | PPSSPP's shared use: `wait_free` (no PPSSPPSDL running and no profile save on its memory stick, as the scorecard waited), `stick_snapshot` and `stick_restore` (what a run added to the stick moved out, changes reported) | `scorecard.py`, `vfpu_probe.py`, `ai_seed_check.sh` |
 | `purelib.dlc` | (task 077) the twelve US download packs: `PACKS` (folder name to title), `read_param_sfo`, `check_pack_folder` (the name, PI.WAD in either case, PARAM.SFO naming the folder), `find_pack_folders` (a pack, a folder of packs, its SAVEDATA or PSP/SAVEDATA), `app_data_dir` | `dlc_install.sh`, `dlc_check.sh` |
 | `purelib.conpty` | (task 055) PureNative under a Windows pseudoconsole (ConPTY), so its C runtime sees a console and does not buffer: `ConPty`, `strip_vt` (a console line back to its text), `undo_oem` | `purelib.port` on Windows |

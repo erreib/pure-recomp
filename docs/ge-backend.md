@@ -21,7 +21,7 @@ for everything the GE does:
 
 | Method | What it must do (from this game's needs) |
 |---|---|
-| `name()`, `needs_window()` | the registered name; whether it draws with the window shell's device (asked before `initialize`: the Vulkan backend does, null, record and metal do not) |
+| `needs_window()` | whether it draws with the window shell's device (asked before `initialize`: the Vulkan backend does, null, record and metal do not) |
 | `initialize(const BackendConfig&, std::string& error)`, `shutdown()` | device, internal scale, sharp or filtered textures (`BackendConfig`: `vulkan_shell`, the window's `VulkanRenderer` or null; `internal_scale`; `sharp_textures`). `shutdown` **frees every per-target resource before the pools they came from** (task 015) |
 | `begin_frame()`, `begin_display_list()` | per-frame and per-list bookkeeping (a target's guest-word snapshot is taken at its first draw of the frame: the framebuffer-texture lookup of section 2 depends on it). `begin_frame()` is called once after `initialize` and after each flip |
 | `gpu_decode()`, `check_gpu_decode()` | whether `GeState` hands transformed draws over undecoded (false unless a backend draws raw vertices, as Vulkan can with `<prefix>_GPU_DECODE=1`) |
@@ -31,7 +31,7 @@ for everything the GE does:
 | `read_back_framebuffer(address, GuestMemory&)` | one target into guest VRAM (block transfers, movie frames) |
 | `write_back_depth(color, depth, stride, GuestMemory&, why)` | the depth target as Z16 into guest VRAM at a SIGNAL (the lens flare reads a 4x4 block around the sun: docs/ge-effects.md); returns whether it wrote |
 | `upload_frame(display, pixels, w, h, stride)` | a CPU-drawn picture (movies, `show_cpu_picture_in_vram`) into the display target |
-| `present_image(display_address) -> PresentedImage` | the display target at the display address (or the target drawn last when none is there), as an image the shell composites with the UI and presents; the backend never touches the swapchain. `PresentedImage`: `api` (None, Cpu, Vulkan, Metal), `address`, `width`, `height`, `pixels` (Cpu), `image` and `view` (the API's handles as integers), valid until the next call |
+| `present_image(display_address) -> PresentedImage` | the display target at the display address (or the target drawn last when none is there), as an image the shell composites with the UI and presents; the backend never touches the swapchain. `PresentedImage`: `api` (None, Cpu, Vulkan, Metal), `width`, `height`, `pixels` (Cpu) and `image` (the API's handle as an integer; Metal fills it, the Vulkan backend no longer does), valid until the next call |
 | `capture_frame(path)` | the presented image as a BMP for the regression suite and the script's `shot` without a window |
 | `draws_submitted()`, `frames_presented()` | the counters the HLE prints |
 
@@ -64,11 +64,12 @@ interpolation (it works on presented images and stays in the shell), fast-forwar
 |---|---|---|
 | `vulkan` | `host/gpu/vulkan_ge_backend.cpp` (built with the renderer) | `VulkanGeBackend`, a thin adapter over `VulkanRenderer`'s draw path; it needs the Vulkan shell, whose renderer is `BackendConfig::vulkan_shell`. The renderer still begins its frame lazily at the first draw, upload or present and ends it in the shell's present, which also does the frame write-back's copy, frame interpolation and the swapchain, so `begin_frame()` does nothing and `present_image()` only names the target (`VulkanRenderer::display_image`). Every other method forwards to the renderer method the HLE called before the seam |
 | `null` | `host/gpu/null_backend.cpp` (system layer: built without Vulkan) | counts draws, block transfers and uploads, presents a black 480x272 Cpu image and writes it for `capture_frame`; prints `[render] null backend: frame N, D draws submitted (K in the last 600 frames, F fps)` every 600 frames and a total at exit. It needs no window or GPU, so with `<prefix>_NO_RENDER` set it runs headless |
-| `record` | `host/gpu/record_backend.cpp`, `host/gpu/ge_record_format.hpp` | wraps another backend (`<prefix>_GE_RECORD_INNER`, default vulkan) and writes the calls it sees with the guest memory each read, and each frame's presented image, to a `.gerec` file (section 6) |
+| `record` | `src/tools/record_backend.cpp`, `src/tools/ge_record_format.hpp` (this repository's since task 095, namespace `pure::gerec`; built on every platform and registered through `BackendRegistration` as the Metal backend is; forwards the internal scale calls) | wraps another backend (`<prefix>_GE_RECORD_INNER`, default vulkan) and writes the calls it sees with the guest memory each read, and each frame's presented image, to a `.gerec` file (section 6) |
 | `metal` | ours: `src/gpu/` | the native backend, the default on macOS (D-008): docs/metal-backend.md. MSL compiled at run time (no Xcode), `Depth32Float_Stencil8` targets with the same stencil copy rule, `present_image` returns the target's `MTLTexture` for the Metal shell to draw (or hands a read-back to the Vulkan shell's window). Registered from our sources with a `BackendRegistration` |
 
 The registry (`register_backend`, `make_backend`, `backend_names`, `backend_description`, `BackendRegistration`)
-lets any source file add a backend before `main()`.
+lets any source file add a backend before `main()`. Since task 095 the backends' and the shells' registries are one
+template, `Registry<T>` in `host/registry.hpp`.
 
 ## 4. Validation
 
@@ -109,10 +110,10 @@ The GE backend seam's files, all under `vendor/portablekit/` (the shell seam's a
 
 | File | What |
 |---|---|
-| `host/gpu/ge_backend.hpp`, `.cpp` | `GeBackend`, `BackendConfig`, `PresentedImage`, the registry, `selected_backend()` (`<prefix>_GE_BACKEND`, vulkan when unset or empty), a BMP encoder (`encode_bmp`, `write_bmp_file`) |
+| `host/gpu/ge_backend.hpp`, `.cpp` | `GeBackend`, `BackendConfig`, `PresentedImage`, the registry (`Registry<GeBackend>`, `host/registry.hpp`), `selected_backend()` (`<prefix>_GE_BACKEND`, vulkan when unset or empty), the one BMP writer `gpu::write_bmp` (the null backend has no renderer) |
 | `host/gpu/vulkan_ge_backend.cpp` | `vulkan`: the adapter over `VulkanRenderer` (renderer sources) |
 | `host/gpu/null_backend.cpp` | `null` (system-layer sources: built without Vulkan) |
-| `host/gpu/record_backend.cpp`, `ge_record_format.hpp` | `record` and the `.gerec` format (Writer and Reader, for ge_replay) |
+| `src/tools/record_backend.cpp`, `ge_record_format.hpp` (this repository, not the vendor; task 095) | `record` and the `.gerec` format (Writer and Reader, for ge_replay) |
 | `host/gpu/vulkan_renderer.hpp`, `.cpp` | `display_image(address)`: the target `present()` would show, as a `PresentedImage` |
 | `host/hle/hle_media.cpp` | every GE call goes to the backend, every window and pad call to the shell |
 | `cmake/PortableKit.cmake` | the new sources |
@@ -126,7 +127,7 @@ default; `metal` records the Metal backend's draws, headless too). Frames are nu
 starts at the `begin_frame()` after frame N-1 and each frame ends at the `begin_frame()` after its flip, where the
 inner backend's `capture_frame()` gives its image; a `[render] frame N (D draws) recorded: ...` line marks each.
 
-The format, documented at the top of `host/gpu/ge_record_format.hpp`: the 8 bytes `PKGEREC\0`, a u32 version
+The format, documented at the top of `src/tools/ge_record_format.hpp`: the 8 bytes `PKGEREC\0`, a u32 version
 (`kVersion`, 1), then records of a u8 kind, a u32 payload size and the payload, little endian, structures written
 field by field in the order `ge_state.hpp` declares them, without padding (bool one byte, a string a u32 length and
 its bytes, a vector a u32 count and its elements). A reader skips kinds it does not know by their size; kinds and a
@@ -288,9 +289,13 @@ warm-up, as both start equally empty. The frontend and title recordings, 2D scre
 ### The check
 
 `tools/gerec/replay_check.sh` records `out/gerec/race.gerec` (frames 6014-6016), `out/gerec/race_warm.gerec`
-(6008-6016), `out/gerec/frontend.gerec` (690-691) and `out/gerec/title.gerec` (1750-1751) when they are missing, each
+(6008-6016), `out/gerec/frontend.gerec` (690-691) and `out/gerec/title.gerec` (1750-1751) when they are missing or stale
+(`gerec_dump.py --current`, task 094: the format version, and Draws that carry the texture map, the mip levels, the
+colour test, dithering and CLIPENABLE), each
 by one windowed run of its route on an empty stick in the Vulkan shell over the Vulkan backend (named explicitly, as
-the default is Metal), and checks each with `gerec_dump.py --summary`. Then it replays `race.gerec` into vulkan with
+the default is Metal), and checks each with `gerec_dump.py --summary`. Each replay runs on an empty data directory of its own
+(`out/gerec/data/<log name>`, unless `PURE_DATA_DIR` names one) with the sprite upscale, texture detail and display
+rate off; `metal_check.sh` sources this script for its setup, `record()`, `replay()` and `verdict()`. Then it replays `race.gerec` into vulkan with
 `--compare` from a cold start (reported, not a pass condition: the table above), `race_warm.gerec` frames 6014-6016
 into vulkan at `--tol 4 --max-frac 0.001`, `race.gerec` into null, `race.gerec` into vulkan and null with
 `--first-diff --frames 6014` (null draws nothing, so the bisection names draw 1, the clear), and `frontend.gerec` and
@@ -311,13 +316,13 @@ internal-scale settings, which are the Vulkan backend's own:
 
 | Group | Methods |
 |---|---|
-| Lifecycle | `initialize(const ShellConfig &, std::string &error)`, `shutdown()`, `available()`, `name()`, `has_window()` |
-| Events and input | `pump_events() -> bool` (false when the window closed), `sample_pad()`, `pad() -> PadState`, `take_mouse_motion()`, `take_touch_motion()`, `take_touch_menu()`, `touch_controls_visible()`, `touch_controls()`, `mouse_captured()`, `quit_requested()`, `request_quit()`, `set_game_input(bool)`, `set_pointer_free(bool)`, `set_scripted_key(int, bool)`, `set_scripted_input(bool)`, `set_event_hook(fn)`, `gamepad() -> SDL_Gamepad *`, `window() -> SDL_Window *` (null without one) |
+| Lifecycle | `initialize(const ShellConfig &, std::string &error)`, `available()`, `name()`, `has_window()` (no `shutdown` through `Shell*` since task 095: the Metal shell's destructor calls its own) |
+| Events and input | `pump_events() -> bool` (false when the window closed), `sample_pad()`, `pad() -> PadState`, `take_mouse_motion()`, `take_touch_motion()`, `take_touch_menu()`, `touch_controls_visible()`, `touch_controls()`, `quit_requested()`, `request_quit()`, `set_game_input(bool)`, `set_pointer_free(bool)`, `set_scripted_key(int, bool)`, `set_scripted_input(bool)`, `set_event_hook(fn)`, `gamepad() -> SDL_Gamepad *`, `window() -> SDL_Window *` (null without one) |
 | Presenting | `present(const PresentedImage &, std::uint32_t display_address, real_time) -> bool`, `present_due()`, `present_until(wake)`, `pause_interpolation()`, `set_fast_forward(bool)`, `hold_frame(bool)`, `capture_window(path)`, `game_aspect()`, `display_refresh()`, `frame_rate_now()`, `set_frame_rate(...)`, `set_frame_rate_auto(bool)`, `set_window_scale`, `set_fullscreen`, `set_present_mode`, `supports_present_mode`, `set_aspect`, `set_sharp_screen`, `set_perf_overlay`, `device_name()` |
-| Interface (ImGui) | `initialize_ui(error)`, `shutdown_ui()`, `begin_ui_frame()`, `set_ui_draw_data(ImDrawData *)`, `present_ui(bool show_game)` |
+| Interface (ImGui) | `initialize_ui(error)`, `begin_ui_frame()`, `set_ui_draw_data(ImDrawData *)`, `present_ui(bool show_game)` |
 
 `PadState`, `MouseMotion`, `CameraReading` and the scripted-mouse constant move to `host/shell/shell.hpp` (the
-renderer header keeps using them). The registry is the backend's in form: `register_shell`, `make_shell`,
+renderer header keeps using them). The registry is the backend's (`Registry<Shell>`, `host/registry.hpp`): `register_shell`, `make_shell`,
 `shell_names`, `shell_description`, `ShellRegistration`, and `selected_shell()` (`<prefix>_SHELL`, vulkan when unset
 or empty). Beside the table:
 
@@ -349,7 +354,7 @@ The shell seam's files, all under `vendor/portablekit/`, and ours:
 
 | File | Built with | What |
 |---|---|---|
-| `host/shell/shell.hpp`, `shell.cpp` | system layer | `host::Shell`, `ShellConfig`, `PadState`, `MouseMotion`, `CameraReading`, `kScriptedMouse`, the registry (`register_shell`, `make_shell`, `shell_names`, `shell_description`, `ShellRegistration`), `selected_shell()` (`<prefix>_SHELL`, vulkan when unset or empty) |
+| `host/shell/shell.hpp`, `shell.cpp` | system layer | `host::Shell`, `ShellConfig`, `PadState`, `MouseMotion`, `CameraReading`, `kScriptedMouse`, the registry (`Registry<Shell>`: `register_shell`, `make_shell`, `shell_names`, `shell_description`, `ShellRegistration`), `selected_shell()` (`<prefix>_SHELL`, vulkan when unset or empty) |
 | `host/shell/vulkan_shell.hpp`, `vulkan_shell.cpp` | renderer | `vulkan`: owns the `VulkanRenderer` and forwards every call to it; `host::vulkan_renderer(Shell *)` gives the renderer when the shell is this one, else null |
 | `host/shell/headless_shell.cpp` | system layer | `headless`: no window, no SDL, no GPU; the pad from the input script |
 | `host/shell/sdl_pad.hpp`, `sdl_pad.cpp` | renderer | `host::SdlPad`: the pad sampling, the gamepad attach (open, scan, close, the script's virtual pad taking over) and the scripted keys, moved out of `VulkanRenderer::Impl`, which now derives from it |

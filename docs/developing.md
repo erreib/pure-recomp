@@ -41,7 +41,7 @@ merge waits on them. The table as it stood before task 092, with each tool's det
 | `tools/iso_extract.py` | the UMD image without mounting it: list, extract, cat, verify (CRC 4502C588) | seconds |
 | `tools/setup_game.sh` | lays out `game/` (EBOOT.ELF, disc.iso, ms0/) | seconds |
 | `tools/vendor_setup.sh` | clones the framework at `vendor/PIN` and applies `patches/` | a clone |
-| `tools/patches.sh` | `check` the vendor tree against the pin and the patches; `export NNNN-slug` a vendor change | seconds |
+| `tools/patches.sh` | `check` the vendor tree against the pin and the patches; `export NNNN-slug` a vendor change; `open` and `close` (task 095) edit the series as one commit a patch on a worktree of vendor/PIN and write it back | seconds |
 | `tools/worktree_init.sh` | a fresh git worktree made buildable: vendor, links, `game/`, a build from the shared ccache | about a minute |
 | `tools/build.sh` | the CMake builds: `profile` (PureNative, incremental), `release`, `tools`, `configure`, `clean` | seconds incremental; 8 to 20 minutes for the corpus |
 | `tools/regen.sh` | regenerates the corpus into `generated/` and rebuilds; never run by workers (CLAUDE.md) | 85 s, then 15 to 20 minutes |
@@ -57,23 +57,23 @@ merge waits on them. The table as it stood before task 092, with each tool's det
 | `tools/pad_record.py` | a run log with `PURE_TRACE_PAD=1` turned into a replayable input script | seconds |
 | `tools/record_lap.sh` | a race played by hand with every ship logged; `--line` makes the follower's racing line | a race |
 | `tools/pp_lines.py` | reference, not a gate: the AI's racing lines from a PPSSPP race or a port log (docs/tracks.md) | a PPSSPP race |
-| `tools/frame_regress.sh` | the frame regression suite: 18 scenes against PPSSPP's captures | about 25 s headless; about 5 minutes a window path |
+| `tools/frame_regress.sh` | the frame regression suite: 18 scenes against PPSSPP's captures; `--wait [SECONDS]` (task 094) waits for another game to end instead of refusing | about 25 s headless; about 5 minutes a window path |
 | `tools/hud_check.sh` | the race's HUD in 61 shots of a window | about 80 s; 15 s headless |
 | `tools/hud_check.py` | counts the shots that show the race HUD | seconds |
-| `tools/refactor_check.sh` | a change that moved code changed no pixel and no count | about a minute a side |
-| `tools/scale_check.sh` | the Metal backend at internal scale S against 1 (E3) | about a minute |
+| `tools/refactor_check.sh` | a change that moved code changed no pixel and no count (the GPU waits and the upscale's time dropped wherever they sit in the line); waits for another game (`frame_regress.sh --wait`) | about a minute a side |
+| `tools/scale_check.sh` | the Metal backend at internal scale S against 1 (E3); waits for another game (`frame_regress.sh --wait`) | about a minute |
 | `tools/billboard_check.sh` | the advert screen shows the advert, not bars (difference 15) | about 10 s; 4 minutes in a window |
 | `tools/flash_check.sh` | E6 with it on: the race-start fade, `--race` the stretches | about 15 s; `--race` 8 minutes |
 | `tools/framerate_check.sh` | E4 with it on: the 30-fps modes at 60 | about 15 s; `--race` 7 minutes |
 | `tools/display_rate_check.sh` | E8 with it on: the race at the display's rate, `--audio` the sound in the window | about 20 s; `--race` 8, `--audio` 2.5 minutes |
-| `tools/stutter_check.sh` | wall time: one swept race in the window, frames over 25 ms and the readback stall | about 6 minutes |
+| `tools/stutter_check.sh` | wall time: one swept race in the window, frames over 25 ms and the readback stall; FAILs as "the window was not on screen" when the unpaced menus present over 1.5 x the display's refresh (task 094) | about 6 minutes |
 | `tools/winwatch.m` | macOS diagnostic, built by hand: what covers the game's window during a window check | beside a check |
 | `tools/sprite_check.sh` | E7 with it on: seven scenes at internal scale 4 | about 40 s |
 | `tools/sprite_proto_check.py` | the sprite upscale against its prototype on `PURE_SPRITE_DUMP`'s textures | seconds |
 | `tools/sprite_pack.sh` | the upscaled art as a texture pack for the Vulkan renderer; `--check` it in the window | about 8 minutes; `--check` 1 to 4 |
 | `tools/texture_check.sh` | E5 with it on: four race scenes at internal scale 4 | about 40 s; `--shell vulkan` 2 to 5 minutes |
-| `tools/aspect_check.sh` | E2: the view and the 2D fit under Fill in a 21:9 window | about 4 minutes; `--shell metal` 30 s |
-| `tools/overlay_check.sh` | the performance overlay on the Metal shell | about 25 s |
+| `tools/aspect_check.sh` | E2: the view and the 2D fit under Fill in a 21:9 window; waits for another game (`frame_regress.sh --wait`) | about 4 minutes; `--shell metal` 30 s |
+| `tools/overlay_check.sh` | the performance overlay on the Metal shell; waits for another game (`frame_regress.sh --wait`) | about 25 s |
 | `tools/menu_check.sh` | the Esc menu's rows against what the game and the shell have | about 25 s |
 | `tools/imgdiff.py` | frame comparison at a tolerance, mask and region; the variance check (docs/verification.md) | under a second |
 | `tools/png.py` | dependency-free PNG and BMP reading and writing | a library |
@@ -83,8 +83,8 @@ merge waits on them. The table as it stood before task 092, with each tool's det
 | `tools/frame_times.py` | the summary of a `PURE_METAL_TRACE` file: frame times and their causes | seconds |
 | `tools/wavstats.py` | loudness, silences and clipping of a captured WAV | seconds |
 | `tools/audio_compare.py` | reference, not a gate: two WAVs side by side, `--locate` one in the other | seconds |
-| `tools/sas_reverb_check.sh` | reference, not a gate: the reverb's tail at a pause against PPSSPP's | about 20 s |
-| `tools/save_roundtrip.sh` | the profile saves: new, load, beside a DLC folder, two profiles through the save list | about 13 minutes |
+| `tools/sas_reverb_check.sh` | reference, not a gate: the reverb's tail at a pause against PPSSPP's; waits up to 600 s for another game instead of refusing | about 20 s |
+| `tools/save_roundtrip.sh` | the profile saves: runs 1 to 3 (new, load, beside a DLC folder) headless, runs 4 and 5 (two profiles through the save list) in the window; `--headless` runs 1 to 3 only | about 3 minutes; `--headless` 8 s |
 | `tools/save_interchange.sh` | reference, not a gate: saves both ways between the port and PPSSPP | about 3 minutes |
 | `tools/dlc_install.sh` | installs a player's download packs after checking them (docs/dlc.md) | seconds |
 | `tools/dlc_check.sh` | the download packs: opened, the screens changed, three pack races, the menu's import | about 75 s |
@@ -162,7 +162,6 @@ hooks").
 | `PURE_INPUT_SCRIPT="700:pad a;1350:pad start;1500:shot name"` | run-control. scripted input, frame-indexed; actions `pad a/b/x/y/start/back/dpup/...` (SDL's names: a = Cross, back = Select), `axis NAME VALUE`, `key NAME` (SDL's key names: `Escape`, `Return`, `Down`), `shot NAME`, `save ANSWER` (task 039: the answer to the game's next save-list request, LISTLOAD, LISTSAVE or a list delete, given without the list screen: a save name of the game's list such as `P0001`, a 0-based position in it, `newest`, `free` for the first free slot, or `cancel`; with none queued a window shows the list when there is a choice, and otherwise the newest save is loaded and the first free slot saved to, docs/savedata.md), `quit`; every name and the PSP button it presses are in [docs/controls.md](controls.md) (keyboard layouts, gamepad mapping, dead zone, rebinding in the menu and in settings.ini). In a window it drives a virtual gamepad; in the headless shell (`PURE_SHELL` below) the same file drives the pad directly: `pad`, `axis`, `shot` (the GE backend's picture), `save` and `quit` work, `key`/`mouse`/`click`/`text`/`drop` are reported once and ignored. `PURE_INPUT_LIVE=<file>` (appended lines, read as they come) works in both |
 | `PURE_LIST_STUBS=1`, `PURE_STRICT_HLE=1` | run-control. list unimplemented imports at start; stop at the first one called |
 | `PURE_TRACE_{KERNEL,IO,GE,MPEG,ATRAC,SAS,AUDIO,SAVEDATA,PAD,PACING,SYNC}=1` | test-only. framework traces, one subsystem each; `PAD` prints `[pad] buttons 0x... analog X,Y right X,Y` on each change of the pad (the bits and values: [docs/controls.md](controls.md)); `AUDIO` prints `[audio] Ns frames= peak= rms= silent= dropped= resyncs= resynced= lead=` a device second and a `total` line at exit (patch 0024-audio-resync-counter, task 079: `resyncs` and `resynced` count a producer's cursor snapped forward past the device, an audible skip that never shows in `silent`) |
-| `PURE_TRACE_GUEST=1` | test-only. (task 082) a `[guest-split] ms per game frame: game G | kernel K io I sas S audio A ge E display D other O | store T (in render) | guest U hle H calls N` line a second: the `[perf]` guest time split at the HLE boundary by module family, `game` the recompiled code left over; `store` is inside render, outside the guest total |
 | `PURE_TRACE_ASPECT=1` | test-only. (task 084) the E2 override (`src/profile/aspect.cpp`) is put in at the first flip whatever the picture's shape (without it, at the first flip of a shape other than 480:272), and a `[aspect] calls: race camera R (W widened), other O (V widened); view aspect A` line a second counts its calls over the run, those whose 480/272 aspect it replaced, and the view aspect in force. The registration routes the projection builder's calls through the function table, which moves the run's timing a little (the headless suite's race scenes move with it), so both lanes of `tools/aspect_check.sh` set it |
 | `PURE_MENU_DUMP=1` | test-only. (task 064) when the Esc menu opens, its first frames draw each tab once and print `[menu] tabs: Video, Audio, Controls, System` and one `[menu] <Tab>: <rows>` line a tab: the row labels in draw order, the offered choices of Aspect ratio and Right stick, the Graphics line's text and (task 078) the Download packs row's count in parentheses (`Right stick (D-pad / Off)`, `Graphics (Metal on Apple M4 Pro)`, `Download packs (12 of 12 installed)`), the rows the font, texture-pack and save screens draw and the content packs' rows as one entry each (`[font rows]`, `[content pack rows]`); then the menu shows the Video tab as usual. For `tools/menu_check.sh` (docs/controls.md, "Rows the menu leaves out") |
 | `PURE_MALLOC_DEBUG=1` (in `tools/env.sh`) | test-only. macOS malloc checks for a single run (task 015): `( export PURE_MALLOC_DEBUG=1; . tools/env.sh; python3 tools/run_boot.py ... )` |

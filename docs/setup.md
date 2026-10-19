@@ -118,7 +118,7 @@ reaches the tools through a pipe, not a pty, so log lines arrive in bursts (tool
 | `tools/bundle_windows.sh --check` | runs (task 061): the Windows release folder, docs/release.md "Windows" |
 | `tools/verify_task.sh 054` | demonstrated (task 055: 18/18 PASS, 20m 14s) |
 | `tools/campaign_sweep.py` | demonstrated, windowed Vulkan (task 055: single_race Vineta K PASS, 3 laps, 45 contacts). The game runs under a pseudoconsole (`tools/purelib/conpty.py`): through a pipe its stdout was block-buffered, the follower steered about 1 s late and the cell stalled |
-| `tools/save_roundtrip.sh` | demonstrated (task 055: all five runs PASS, windowed) |
+| `tools/save_roundtrip.sh` | demonstrated (task 055: all five runs PASS, windowed; since task 094 runs 1 to 3 are headless) |
 | `tools/wavstats.py` on a `PURE_AUDIO_WAV` capture | demonstrated (task 055: a windowed main_menu.txt run to frame 2200, 74 s of mix) |
 | `tools/scorecard.py --refresh-references` | demonstrated (task 055: 38 references from PPSSPP's x64 JIT, 71 min) |
 | `tools/vfpu_probe.py` cover, sample, port; `tools/vfpu_model.py --check` | demonstrated (task 055). `--check` exits 1 because PPSSPP's x64 JIT rounds dot products otherwise than the Apple JIT's rule (difference 13); the port's test mode still equals the model row for row |

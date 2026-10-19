@@ -10,7 +10,8 @@ run, its working rules) and `docs/status.md` (the current state) first; `docs/de
 - Never commit: `disc/`, `disc.iso`, `game/`, `generated/`, `vendor/`, `ref/*` captures, `build/`, `out/`, any bytes
   of the game, any DLC key. `config/` holds addresses, names, NIDs and hashes only.
 - Never edit `vendor/` directly in a task unless the brief says so. If it does, export the change with
-  `tools/patches.sh export NNNN-slug` and commit `patches/`, never `vendor/`.
+  `tools/patches.sh export NNNN-slug` (or edit the series itself with `tools/patches.sh open` and `close`) and commit
+  `patches/`, never `vendor/`.
 - Never edit `vendor/portablekit/include/psprecomp/` (any change there recompiles the whole corpus, 8 to 20
   minutes). Never run `tools/regen.sh`. `tools/build.sh profile` is incremental (seconds when only `src/` changed).
   If your task needs the corpus regenerated or a full rebuild, stop and report BLOCKED.

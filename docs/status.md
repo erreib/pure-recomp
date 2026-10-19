@@ -43,7 +43,7 @@ a 100 Hz display).
 |---|---|
 | Toolchain | Mac: `tools/check_env.sh` (arm64 cmake and ninja, SDL3, MoltenVK, Ghidra 12.1.4, PPSSPP); the rig: clang-cl on the `win-x64` preset, Git Bash (docs/setup.md) |
 | Disc and game | `tools/iso_extract.py` verifies CRC 4502C588 and extracts `disc/`; `tools/setup_game.sh` lays out `game/` |
-| Vendor | PortableKit at 8b0c3fe with 30 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
+| Vendor | PortableKit at 8b0c3fe with 29 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
 | Corpus | `tools/regen.sh` (85 s): 144 units on the Mac, 145 on the rig, inlined on both since patch 0026-corpus-inlining; `PSPRECOMP_NO_INTERPRETER=1` runs clean |
 | The game | the whole single-player game: every mode, class, league and circuit; the movies, the music and the sound with the SAS reverb; saves in the PSP's format with the save list, import, export and backups; the twelve US download packs |
 | Mac, Metal (the default) | the Metal shell and backend (D-008): the drawable at the display's pixels, internal scale Auto, Fill, texture detail, the flashes smoothed, the 30-fps modes at 60, the race at 119.40 Hz on the 120 Hz display (E8), the performance overlay (F3) |

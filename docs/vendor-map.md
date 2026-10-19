@@ -14,13 +14,17 @@ recompile), the interpreter, the kernel, the HLE, the GE parser and texture deco
 - 0001-cmake-embed-nids-verbatim: `config/nids.csv` survives the shell
 - 0002-ge-state-commands: stencil, masks, texture maps, mips, colour test, dither, CLIPENABLE parsed
 - 0003-vulkan-renderer-fixes: framebuffer textures, stencil as alpha, alpha test, shadow volumes, depth write-back
-- 0004-ge-backend-and-shell-seams: `gpu::GeBackend`, `host::Shell` (D-003, D-007); null and record backends
-- 0005-kernel-host-waits-and-pacing: the shell sets the pace (`Kernel::set_paced`)
+- 0004-ge-backend-and-shell-seams: `gpu::GeBackend`, `host::Shell` (D-003, D-007), one `Registry<T>` (`host/registry.hpp`), `gpu::write_bmp`;
+  the null backend (the record backend is ours: `src/tools/record_backend.cpp`)
+- 0005-kernel-host-waits-and-pacing: the shell sets the pace (`Kernel::set_paced`); frame pacing reads the vblank period
+  through `pacing::set_vblank_period_source()`
 - 0006-mpeg-ring-not-empty-while-aus-pending: movies end
 - 0007-savedata-list-and-no-key-mode: the save list; saves in mode 1
 - 0008-sas-reverb: the SPU reverberator
 - 0009-vfpu-rounding: the PSP's VFPU rounding (D-013), `-ffp-contract=off`
-- 0010-vulkan-viewport-into-clip-space to 0015-vulkan-fb-texture-wrap: the Vulkan renderer draws what Metal does
+- 0010-vulkan-viewport-into-clip-space to 0015-vulkan-fb-texture-wrap: the Vulkan renderer draws what Metal does;
+  0012's `texture_decode.hpp` exports `bits_per_texel`, `indexed`, `texture_bytes`, `texture_level`,
+  `sampled_level_count`, `mip_level_problem` and `ge_log16`, which the Metal backend uses too
 - 0016-menu-rows-by-capability: `GameProfile::features` (D-014)
 - 0017-internal-scale-by-backend: the Resolution row asks the backend
 - 0018-vulkan-effects-at-1x: the effect buffers at 1x (D-015)
@@ -30,9 +34,10 @@ recompile), the interpreter, the kernel, the HLE, the GE parser and texture deco
 - 0022-vulkan-async-readback: the depth write-back a frame late
 - 0023-vulkan-cached-window-capture: captures from host-cached memory
 - 0024-audio-resync-counter: `resyncs=` on the `[audio]` line
-- 0025-guest-time-split: `PURE_TRACE_GUEST`
+- 0025: removed by task 095 (the guest-time split; its number stays unused)
 - 0026-corpus-inlining: MSVC's `/Ob2`
-- 0027-window-size-switch: `PURE_WINDOW_SIZE`
+- 0027-window-size-switch: `PURE_WINDOW_SIZE` (`host::window_size_switch()`, parsed once for the Vulkan renderer and
+  the Metal shell)
 - 0028-vulkan-orthographic-fit: the 2D fit under Fill
 - 0029-windows-file-url: the folder buttons on Windows
 - 0030-vblank-period: `Kernel::set_vblank_period_us` (E8)

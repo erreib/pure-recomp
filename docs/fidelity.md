@@ -239,8 +239,8 @@ held effects' end, not the music's). START's time: PPSSPP's from its vblank timi
 of the first sceSas call the run logs after the script's START (it traces `__sceSasRevEVOL`, which the race calls
 every frame). It prints both starts and the RMS of ten 100 ms steps from there, and checks the first five: PASS (exit
 0) when each of the port's is non-zero and within a factor of 2 of PPSSPP's, else FAIL (exit 1); exit 2 when the
-reference or the build is missing or another PureNative runs (one game at a time; `--allow-parallel` starts
-anyway). `<out>` (default `out/sas_reverb`) keeps the route, the log, the WAVs and `summary.txt`. `--env` passes the
+reference or the build is missing, or when another PureNative still runs after a wait of up to 600 s (one game at a
+time, `tools/lib.sh`'s `wait_game`, since task 094; `--allow-parallel` starts anyway). `<out>` (default `out/sas_reverb`) keeps the route, the log, the WAVs and `summary.txt`. `--env` passes the
 A/B switches: `--env PURE_NO_REVERB=1` (the port before task 043) and `--env PURE_SAS_REVERB_SPU_RATE=1` (the SPU's own
 22050 Hz) both FAIL.
 

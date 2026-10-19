@@ -91,7 +91,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `src/gpu/sprite_upscale.hpp`, `.cpp` | (task 073) `upscale_sprite`, the 4x resample of a W x H RGBA8 texture ("Sprite upscale"), and `write_png` for `PURE_SPRITE_DUMP` (the framework's vendored stb_image_write); plain C++, no Metal |
 | `src/gpu/ge_names.hpp` | the GE's primitive and texture-format names, shared with `ge_replay` (plain C++) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
-| `tools/scale_check.sh` | (task 066) the backend at internal scale S against 1: the suite's 18 scenes headless at both, compared after reducing the S captures to 480x272 by their blocks' centre pixels, plus the race scenes' bloom region ("Internal scale") |
+| `tools/scale_check.sh` | (task 066) the backend at internal scale S against 1: the suite's 18 scenes headless at both, compared after reducing the S captures to 480x272 by their blocks' centre pixels (`tools/imgdiff.py`'s `reduce_centres`), plus the race scenes' bloom region ("Internal scale") |
 | `tools/refactor_check.sh` | (task 049) the proof that a change moved code and changed no picture: the frame regression suite's 18 scenes captured before the change (`--before`, on the starting commit) and after, compared at `--tol 0`, plus the backend's exit counts per route; PASS only at 0 differing pixels everywhere |
 | `src/host/metal_shell.mm` | the Metal shell (task 027): `MetalShell : portablekit::host::Shell` and its `ShellRegistration("metal", ...)`. Objective-C++ with ARC |
 | `src/gpu/metal_device.hpp`, `.mm` | the program's one Metal device and command queue, `pure::metal::device()` and `pure::metal::queue()`, which the backend and the shell both use (task 031, "One command queue" below), the frame trace's hook through which the shell reports its presents (task 033, "Frame times"), and the Metal shell's drawable size, which the backend's Auto internal scale reads (task 066, "Internal scale"), and since task 086 the two values of the Fill aspect: the shell's switch (`set_fill`) and the size of the backend's next screen-wide targets (`set_view_size`), whose shape the shell hands the game ("Fill"). Objective-C++ with ARC |
@@ -298,7 +298,7 @@ prints them.
   When the frame write-back will store the shown target at the next flip, the picture is kept for it: the read-back
   the Vulkan shell gets anyway, or else a blit into a shared buffer recorded with the frame's commands.
 - `capture_frame` reads that texture back synchronously (a blit into a shared buffer, `waitUntilCompleted`) and
-  writes the BMP of `gpu::write_bmp_file` at the texture's size: 480x272, or 480S x 272S at an internal scale S
+  writes the BMP (`gpu::write_bmp`) at the texture's size: 480x272, or 480S x 272S at an internal scale S
   ("Internal scale"; `PURE_SCREENSHOT_EVERY` captures go through it).
 - `upload_frame` (a CPU-drawn picture: a movie frame shown from main memory, or one decoded into VRAM) copies the
   pixels into the target at that address (made with the given stride and 8888 when there is none) through a staging
@@ -396,7 +396,7 @@ compared at tol 24, limit 5% (scale_check's rule):
 ### The checks
 
 `tools/scale_check.sh [S]` (default 4) captures the suite's 18 scenes headless at `PURE_INTERNAL_SCALE=1` and at S,
-checks that each S capture is 480S x 272S, reduces it to 480x272 by its blocks' centre pixels (the guest's rule above)
+checks that each S capture is 480S x 272S, reduces it to 480x272 by its blocks' centre pixels (the guest's rule above; imgdiff's `reduce_centres`, shared with the texture, sprite, pack and aspect checks since task 094)
 and compares it with the 1x capture at tol 24: each must differ in at most 5% of its pixels (D-015's bar). On the three
 race scenes of Vineta K's grid (race_hud, tt_hud, fp_hud) the bloom's region, x 296-479, y 0-55 (the light strips
 under the stand's roof at the top right and their glows), must keep its mean luminance within 10%. The region is where
@@ -724,7 +724,7 @@ PSP's texels; `tools/gerec/metal_check.sh` sets it for its replays too, which ru
 its TEAM frames would differ from Vulkan's in 5.9% of pixels, over its 2% bar). `tools/sprite_check.sh` is the check
 with it on: title, main_menu, class_select, team_select, race_hud, tt_hud and fp_hud headless at internal scale 4 with
 the option off and on (`tools/frame_regress.sh --only`). Each capture with it on must be 1920x1088; reduced to 480x272
-by its blocks' centre pixels (scale_check's rule), within the scene's own limit of its reference at the scene's tol
+by its blocks' centre pixels (scale_check's rule, imgdiff's `reduce_centres`), within the scene's own limit of its reference at the scene's tol
 (the picture is the same picture); different from the capture with it off in at least 1% of its pixels at tol 24 (the
 detail is there); for the three race scenes, with the HUD found by `tools/hud_check.py` (not zone_hud, whose HUD has no
 CURRENT or LAP label); and the main menu run's exit line must count at least 2 upscaled textures in under 2000 ms.
@@ -808,7 +808,7 @@ to the pixel: `tools/refactor_check.sh` from the commit before the task, at inte
 
 `tools/texture_check.sh` is the check with it on: race_hud, tt_hud, fp_hud and zone_hud headless at internal scale 4
 with the option off and on (`tools/frame_regress.sh --only`). Each capture with it on must be 1920x1088 and, reduced
-to 480x272 by its blocks' centre pixels, within the scene's own limit of its reference at the scene's tol (the picture
+to 480x272 by its blocks' centre pixels (imgdiff's `reduce_centres`), within the scene's own limit of its reference at the scene's tol (the picture
 is the same picture). For race_hud, tt_hud and fp_hud it must also differ from the capture with it off in at least 1%
 of its pixels at tol 24 (the detail is there), hold more high-frequency energy (the mean absolute difference, per
 channel, between each pixel and its right and its lower neighbour over the whole picture: the ratio above 1.0), and
@@ -873,7 +873,7 @@ same rule, reached by other means:
 
 `tools/texture_check.sh --shell vulkan` is its check: race_hud, tt_hud, fp_hud and zone_hud captured in the Vulkan
 window (`tools/frame_regress.sh --shell vulkan --backend vulkan`, paced from 300 flips before the scene) with the
-option off and on, each capture reduced by the centre pixel of its S x S blocks (S its width over 480), the same bars
+option off and on, each capture reduced by the centre pixel of its S x S blocks (S its width over 480; imgdiff's `reduce_centres`), the same bars
 as the Metal lane, and the `on` and `off` lines in place of the count. On 2026-10-12 (the task's build, the default
 960x544 window, S = 2), about 2 minutes (up to 5 when the off runs are made again, below):
 
@@ -1472,10 +1472,12 @@ as before and named once; the game never draws one.
 ## The 3D check
 
 `tools/gerec/metal_check.sh [TEAM_FRAME]` compares Metal with Vulkan through ge_replay (`docs/ge-backend.md`,
-section 7). It records, when missing, `out/gerec/team.gerec` (TEAM_FRAME and the frame after, default 5650) and
+section 7). It sources `tools/gerec/replay_check.sh` for its setup and steps (task 094) and records, when missing or
+stale (`gerec_dump.py --current`), `out/gerec/team.gerec` (TEAM_FRAME and the frame after, default 5650) and
 `out/gerec/race_1x.gerec` (6008-6016), both at internal scale 1, and `out/gerec/race_warm.gerec` (6008-6016 at the
 settings' 2x, replay_check.sh's), each by one windowed run of `main_menu.txt` + `single_race.txt` on an empty memory
-stick (about 3, 3.5 and 3.5 minutes). Then:
+stick (about 3, 3.5 and 3.5 minutes). Each replay runs on an empty data directory of its own with the enhancements
+off (replay_check's rule). Then:
 
 1. the team frames' draws must hold no stencil and no bloom-target draw (lit and fogged ones are counted);
 2. `--replay out/gerec/team.gerec --a vulkan --b metal --tol 24 --max-frac 0.02` must pass;

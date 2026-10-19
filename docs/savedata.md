@@ -229,7 +229,8 @@ profile alone (`tools/dlc_check.sh`'s import step).
 
 ## Running the check
 
-`tools/save_roundtrip.sh` (about 13 minutes, five windowed runs) uses its own stick, `out/014/game/ms0`, emptied
+`tools/save_roundtrip.sh` (about 3 minutes: runs 1 to 3 headless, runs 4 and 5 in the window; `--headless` runs 1 to 3
+in 8 s; task 094) uses its own stick, `out/014/game/ms0`, emptied
 at the start; the checkout's `game/ms0` is not touched. Logs and captures are in `out/014/run{1,2,3,4,5}{.log,/}`.
 Runs 4 and 5 (task 039) make the second profile on the stick runs 1 to 3 left (`two_profiles.txt`: LOAD, PROFILE >
 NEW, NAME1111, the save list on P0001, Cross; then PROFILE > LOAD, the list of both, Up and Cross on P0000, and SET
