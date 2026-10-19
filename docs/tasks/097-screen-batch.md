@@ -70,3 +70,28 @@ A FAIL in rows 1 to 3 stops the batch: it is a regression in batch/m2 against a 
 its own before the rest is worth running. A FAIL in rows 7 or 8 is first checked against the guard ("the window
 was not on screen"): a covered window measures nothing (rule 4), so rerun the row once with the window in front
 before calling it a finding.
+
+## The scorecard rerun (2026-10-19, before the batch; no screen needed)
+Run by the planning session on batch/m2 at 3810eac with no game, build or PPSSPP running (load average about 3 from
+other programs), into out/scorecard-rerun/ (docs/scorecard.md untouched):
+`tools/scorecard.py --only timing` (12m 12s) and `SCORECARD_RACE_CLOCK=ref/race_clock tools/scorecard.py --only
+trajectories` (1m 51s).
+
+Timing: **close** (5 faithful, 1 close, 1 accepted). Flips per race-clock second 59.46 (Single Race), 59.36
+(Tournament, the matrix's), 29.98, 29.98, 29.97 (the 30-fps modes), all faithful. The two-vblank stretches over the
+follower-driven Vineta K race: 3 (45, 25, 24 flips) against PPSSPP's 0, close; the 2026-10-19 baseline taken beside
+two builds had 4 (differs) and the 2026-10-07 run 1 (faithful). So the builds were not the whole of it: the count
+swings 1 to 4 from run to run, and the row's own note says where they fall follows the weapons and the follower's
+put-backs. No new finding; the Follow-ups line (the stretch row rests on one race a side) now says so. The race load
+0.30 s against PPSSPP's 1.50 s, accepted (D-011), as before.
+
+Trajectories: **differs** (12 faithful, 2 close, 11 differ), the known state. Every player row is faithful but
+Karbonis (first over 1 m at 12.08 s, 23.84 m at 19.95 s, the nearest AI ship 369 m away), which is the divergence
+docs/fidelity.md records since patch 0009-vfpu-rounding (task 048's premise: "Karbonis' player, faithful before the
+patch, now parts at 12.08 s"), reproduced to the sample. docs/scorecard.md's trajectory rows predate that patch
+(2026-10-07 13:43), which is why they show Karbonis faithful. The AI rows differ as task 046 left them (the codegen's
+dot products), with the worst distances moved by the AI's own run-to-run differences (Sinucit 280.70 to 12.07 m,
+Citta Nuova 83.86 to 7.48 m, Mandrashee 0.46 to 1.60 m); PPSSPP's two Vineta K runs agree to 0.000 m as before.
+
+Not run: pictures, saves, coverage and audio (`--quick` or `--full`); a `--full` run rewrites docs/scorecard.md and
+needs its Windows paragraph restored after.

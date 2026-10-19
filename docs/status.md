@@ -54,7 +54,7 @@ a 100 Hz display).
 | Controls | keyboard (two layouts), mouse, gamepads, rebinding in the menu (docs/controls.md; `tools/controls_check.py`) |
 | The app and the zip | `tools/bundle.sh` makes `Wipeout Pure.app`, `tools/bundle_windows.sh` the Windows zip, eight checks each (docs/release.md); 0.1.0 published on GitHub with both archives; last staged 0.1.0-bc0a86a on the Mac and e4f1fb7 on the rig (2026-10-15) |
 | The harness | the headless suite (18 scenes, about 25 s), the window suites (7 scenes, about 5 minutes a path), the HUD check, the enhancements' checks, the sweep, the scorecard and the fidelity tools; on the rig under Git Bash (the ConPTY runner, PPSSPP 1.20.4), all but `tools/refactor_check.sh`; docs/verification.md |
-| Fidelity | the M8 audit's fourteen differences fixed, explained or accepted (docs/fidelity.md); the scorecard last ran on 2026-10-08 (task 096) |
+| Fidelity | the M8 audit's fourteen differences fixed, explained or accepted (docs/fidelity.md); the scorecard's timing and trajectories lanes rerun 2026-10-19 (task 097, "The scorecard rerun"): timing close, the players faithful on 11 of 12 circuits as docs/fidelity.md says |
 
 ## Follow-ups
 
@@ -131,7 +131,8 @@ Fidelity, the game and the saves:
   reference with packs; the EU and JP packs later ([077](tasks/077-download-packs.md),
   [078](tasks/078-download-packs-menu.md)).
 - The scorecard: coverage reads the 2026-10-06 matrix, functions entered are not measured, the stretch row rests on
-  one race a side; not run since 2026-10-08 (task 096; [044](tasks/044-accuracy-scorecard.md)).
+  one race a side and swings 1 to 4 stretches (faithful to differs) run to run, idle machine or not (2026-10-19,
+  [097](tasks/097-screen-batch.md); [044](tasks/044-accuracy-scorecard.md)).
 
 The tools:
 - `tools/ppsspp/ppdmp.py tex` decodes direct-colour VRAM textures only; the CLUT decoder of 2026-10-10 waits to be
@@ -185,9 +186,8 @@ after a change that moves or renames a file, a tool or a patch.
 
 - The audit's cleanup (docs/history/audit-2026-10-19.md): 092 docs, 093 src, 094 tools and 095 patches (29 now)
   merged 2026-10-19, and the doc lines 094 and 095 owed applied the same day. Next: the screen batch, task 097 (Erik
-  books the screen; about 80 minutes, the gerec recordings last; `tools/verify_task.sh 097`), then the scorecard
-  rerun on an idle machine (task 097's "After the batch": `--only timing`, the trajectories against 2026-10-07; a
-  `--full` run drops docs/scorecard.md's Windows paragraph, restore it). E8's audio sink (task 098, patch 0031-audio-sink-late-writes,
+  books the screen; about 80 minutes, the gerec recordings last; `tools/verify_task.sh 097`). The scorecard's timing and
+  trajectories lanes reran 2026-10-19 (task 097, "The scorecard rerun"): no new finding. E8's audio sink (task 098, patch 0031-audio-sink-late-writes,
   task 081's fork b+) is in batch/m2 unproven in a window: row 7 of the screen batch is its probe (both rules, by
   `PURE_AUDIO_SNAP=1`), then Erik's race on the rig at 100 Hz says whether the early-race skips are gone.
 - Menu refinements: Erik's to name.
