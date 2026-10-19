@@ -209,7 +209,7 @@ void MetalGeBackend::block_transfer(const pk::BlockTransfer &transfer, GuestMemo
 
 // The frame shown at the last flip into guest VRAM, in its format (the Vulkan backend's write-back, which
 // stores at each flip the target the flip before showed). present_image() copied its pixels into a shared
-// buffer, or read them back for the Vulkan shell; this waits for that copy and stores them.
+// buffer; this waits for that copy and stores them.
 void MetalGeBackend::write_back_frame(GuestMemory &memory) {
     ++stats_.frames.calls;
     const TraceClock clock(trace_.file != nullptr, trace_.times.memory);
@@ -217,22 +217,17 @@ void MetalGeBackend::write_back_frame(GuestMemory &memory) {
     PendingFrame pending = pending_frame_;
     pending_frame_ = PendingFrame{};
     @autoreleasepool {
-        const std::uint8_t *pixels = picture_.data();
-        if (!pending.from_picture) {
-            if (pending.commands != nil && pending.commands.status < MTLCommandBufferStatusCompleted) {
-                const auto start = std::chrono::steady_clock::now();
-                [pending.commands waitUntilCompleted];
-                const double ms =
-                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-                stats_.wait_ms += ms;
-                stats_.frames.wait_ms += ms;
-                trace_.times.wait_frame += ms;
-                ++stats_.waits;
-            }
-            pixels = static_cast<const std::uint8_t *>(pending.buffer.contents);
-        } else if (picture_.size() != pending.target->picture_bytes()) {
-            return;
+        if (pending.commands != nil && pending.commands.status < MTLCommandBufferStatusCompleted) {
+            const auto start = std::chrono::steady_clock::now();
+            [pending.commands waitUntilCompleted];
+            const double ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            stats_.wait_ms += ms;
+            stats_.frames.wait_ms += ms;
+            trace_.times.wait_frame += ms;
+            ++stats_.waits;
         }
+        const auto *pixels = static_cast<const std::uint8_t *>(pending.buffer.contents);
         if (store_pixels(memory, *pending.target, guest_pixels(*pending.target, pixels), 0u, kHeight))
             ++stats_.frames.written;
     }

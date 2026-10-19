@@ -367,7 +367,6 @@ struct Prewarm {
 // The switches initialize() reads once from the environment and the backend's config (metal_backend.mm); the file
 // that draws each concern reads its own. The class's switches_.
 struct Switches {
-    bool to_shell{};   // hand each picture to the Vulkan shell's window (PURE_METAL_SHELL=0 leaves it black)
     bool sharp{};      // the config's sharp textures: nearest filtering
     bool log_draws{};  // PURE_METAL_LOG
     bool no_framebuffer_textures{};

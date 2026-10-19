@@ -38,11 +38,10 @@
 //              GE's 16-bit z at a SIGNAL (the lens flare reads it). Each waits for the GPU; counted, with
 //              the time waited.
 //
-// Under the Vulkan shell (BackendConfig::vulkan_shell), whose present shows its own targets and whose
-// window the input script's `shot` steps read, every presented picture is also read back and handed to it
-// (metal_shell.hpp); PURE_METAL_SHELL=0 leaves that window black. Under any other shell nothing is handed
-// over and nothing is read back: the Metal shell (src/host/metal_shell.mm) samples the presented texture
-// itself, and the headless one captures through capture_frame(). PURE_METAL_LOG=1 prints a line per draw.
+// Nothing is read back for a window: the Metal shell (src/host/metal_shell.mm) samples the presented texture
+// itself, and the headless one captures through capture_frame(). The Vulkan shell shows only its own targets, so
+// under it this backend's pictures reach no window (PURE_SHELL=vulkan draws with the Vulkan backend unless
+// PURE_GE_BACKEND names another, src/host/pure_main.cpp). PURE_METAL_LOG=1 prints a line per draw.
 //
 // Frame times (task 033, docs/metal-backend.md "Frame times"): PURE_METAL_TRACE=FILE writes a CSV row per flip with
 // where the time between two flips went (submit, pipeline creation, texture decodes, each kind of GPU wait, the
@@ -211,12 +210,7 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         guest_readback_ = [device_ newBufferWithLength:largest options:MTLResourceStorageModeShared];
         pool_ = std::make_shared<ChunkPool>();
 
-        // The hand-over (a read-back a frame) only for the Vulkan shell; any other shell has
-        // vulkan_shell null and shows the texture present_image() names, or no window at all.
-        shell_ = config.vulkan_shell;
         switches_.sharp = config.sharp_textures;
-        const char *shell_switch = portablekit::env("METAL_SHELL");
-        switches_.to_shell = shell_ != nullptr && !(shell_switch != nullptr && std::strcmp(shell_switch, "0") == 0);
         const char *log = portablekit::env("METAL_LOG");
         switches_.log_draws = log != nullptr && *log != '\0' && std::strcmp(log, "0") != 0;
         switches_.no_framebuffer_textures = portablekit::env("NO_FB_TEXTURES") != nullptr;
@@ -257,11 +251,8 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         ready_ = true;
         const double ms = std::chrono::duration<double, std::milli>(trace_.started - start).count();
         std::cout << "[metal] drawing with " << device_.name.UTF8String << ", " << scale_report()
-                  << "; shaders compiled in " << ms << " ms; "
-                  << (switches_.to_shell ? "pictures shown in the window"
-                                : (shell_ != nullptr ? "window left black (PURE_METAL_SHELL=0)"
-                                                     : "pictures shown by the shell, not read back"))
-                  << "\n";
+                  << "; shaders compiled in " << ms << " ms"
+                  << (config.vulkan_shell != nullptr ? "; the Vulkan shell shows none of its pictures" : "") << "\n";
         // Task 033: the frame trace, the list of keys a run used, and the pre-warm.
         if (pure::metal::trace_on()) open_trace(portablekit::env("METAL_TRACE"));
         if (const char *out = portablekit::env("METAL_PIPELINES_OUT"); out != nullptr && *out != '\0')
@@ -379,19 +370,12 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         if (shown == nullptr) shown = last_drawn_;
         presented_ = shown;
         // The next write_back_frame() stores this picture (as the Vulkan backend stores at each flip the
-        // target the flip before showed): read back for the Vulkan shell anyway, else copied into a shared
-        // buffer by this frame's commands.
+        // target the flip before showed), copied into a shared buffer by this frame's commands.
         const bool written_back = shown != nullptr && frame_written_back(*shown);
         pending_frame_ = PendingFrame{};
-        if (shown != nullptr && switches_.to_shell) {
-            read_back(*shown);
-            show_in_shell(shell_, display_address, picture_.data(), picture_width_, picture_height_, shell_scratch_);
-            if (written_back) pending_frame_ = PendingFrame{shown, nil, true};
-        } else {
-            if (written_back) copy_to_buffer(shown->color, frame_writeback_, MTLBlitOptionNone);
-            id<MTLCommandBuffer> committed = commit(false);
-            if (written_back) pending_frame_ = PendingFrame{shown, committed, false, frame_writeback_};
-        }
+        if (written_back) copy_to_buffer(shown->color, frame_writeback_, MTLBlitOptionNone);
+        id<MTLCommandBuffer> committed = commit(false);
+        if (written_back) pending_frame_ = PendingFrame{shown, committed, frame_writeback_};
         frame_drawn_ = false;
         // The targets of the scale before a change go once nothing reads them: the write-back pending now is this
         // picture's, and it is the new scale's (or nothing at all).
