@@ -230,9 +230,10 @@ bool MetalGeBackend::initialize(const pk::BackendConfig &config, std::string &er
         switches_.no_color_test = portablekit::env_set("NO_COLOR_TEST");
         switches_.no_dither = portablekit::env_set("NO_DITHER");
         switches_.no_depth_clamp = portablekit::env_set("NO_DEPTH_CLAMP");
-        // Ours (task 040), for looking at a target the game draws but does not show (the 565 billboard target):
-        // each flip presents the target drawn last at this address instead of the display.
-        if (const char *show = portablekit::env("METAL_SHOW_TARGET"); show != nullptr && *show != '\0')
+        // For looking at a target the game draws but does not show (the 565 billboard target; task 040): each flip
+        // presents the target drawn last at this address instead of the display. The framework's name, which the
+        // Vulkan backend reads for the same (patch 0014).
+        if (const char *show = portablekit::env("SHOW_TARGET"); show != nullptr)
             switches_.show_target = static_cast<std::uint32_t>(std::strtoul(show, nullptr, 0));
         // The framework's traces, as the Vulkan backend reads them: a line per copy of the stencil into the
         // alpha, and per depth write-back.

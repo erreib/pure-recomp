@@ -378,7 +378,7 @@ struct Switches {
     bool no_color_test{};
     bool no_dither{};
     bool no_depth_clamp{};
-    std::uint32_t show_target{};  // PURE_METAL_SHOW_TARGET: the target each flip presents instead of the display
+    std::uint32_t show_target{};  // PURE_SHOW_TARGET: the target each flip presents instead of the display
     std::string sprite_dump;      // PURE_SPRITE_DUMP (task 073): the folder each upscaled texture is written to once
 };
 
