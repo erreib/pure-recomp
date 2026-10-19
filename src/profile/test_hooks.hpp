@@ -1,9 +1,9 @@
 // The test instruments (task 051): every test switch and probe of the port, apart from the game's profile
 // (pure_profile.cpp), so the profile reads as the port and these as what they are. They are PURE_TEST_NO_DAMAGE,
-// PURE_TEST_UNLOCK_ALL, PURE_TEST_RACE_CLOCK, PURE_VFPU_DOT, PURE_WATCH_MOVIE, PURE_WATCH_SHIP, PURE_WATCH_GRID,
-// PURE_WATCH_RAND, PURE_WATCH_WORDS, PURE_TRACE_RAND and PURE_TRACE_CALLS (README.md, the switches tables: each one
-// test-only). None is for play, and each is off unless set. The run-control switches (PURE_EXIT_AT_FRAME,
-// PURE_FRAME_LOG, PURE_PACED_FROM) stay in the profile: they shape a run, they do not change or watch the game.
+// PURE_TEST_UNLOCK_ALL, PURE_TEST_RACE_CLOCK, PURE_VFPU_DOT, PURE_WATCH_SHIP, PURE_WATCH_GRID, PURE_WATCH_RAND,
+// PURE_WATCH_WORDS, PURE_TRACE_RAND and PURE_TRACE_CALLS (README.md, the switches tables: each one test-only). None
+// is for play, and each is off unless set. The run-control switches (PURE_EXIT_AT_FRAME, PURE_FRAME_LOG,
+// PURE_PACED_FROM) stay in the profile: they shape a run, they do not change or watch the game.
 #pragma once
 
 #include "hle/hle_common.hpp"

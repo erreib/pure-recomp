@@ -3,7 +3,6 @@
 // file), with the helpers more than one of those files uses. Objective-C++ only.
 #pragma once
 
-#include "metal_shell.hpp"
 #include "metal_types.hpp"
 
 #import <Foundation/Foundation.h>
@@ -31,7 +30,6 @@ MTLCompareFunction to_compare(std::uint32_t function);                        //
 std::uint32_t stored_reference(const DrawCall &call);                         // metal_effects.mm
 int stencil_alpha(const DrawCall &call);                                      // metal_effects.mm
 bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail);        // metal_effects.mm
-const char *format_name(TextureFormat format);                                // metal_textures.mm
 std::uint32_t texture_bits(TextureFormat format);                             // metal_textures.mm
 
 class MetalGeBackend final : public pk::GeBackend {
@@ -284,17 +282,14 @@ private:
     // A scaled target's 480x272 picture for guest memory, the centre pixel of each block (guest_pixels()).
     std::vector<std::uint8_t> guest_picture_;
     // The picture the next write_back_frame() stores: the target shown at the last flip, with its pixels in
-    // picture_ (read back for the Vulkan shell) or in frame_writeback_ once `commands` has run.
+    // frame_writeback_ once `commands` has run.
     struct PendingFrame {
         Target *target{};
         id<MTLCommandBuffer> commands;
-        bool from_picture{};
         id<MTLBuffer> buffer;  // the frame_writeback_ the commands copy into (a scale change replaces that member)
     };
     PendingFrame pending_frame_;
     double last_wait_ms_{};  // of the last commit(true)
-    portablekit::gpu::VulkanRenderer *shell_{};
-    std::vector<std::uint8_t> shell_scratch_;
     std::set<std::uint32_t> bad_levels_;  // textures drawn at level 0 alone for a level mip_levels() refused
     Switches switches_;     // read once by initialize() (metal_backend.mm)
     TraceState trace_;      // PURE_METAL_TRACE, the framework's traces and the counts' lines (metal_trace.mm)

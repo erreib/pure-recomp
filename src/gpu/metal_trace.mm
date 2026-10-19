@@ -76,7 +76,6 @@ void MetalGeBackend::end_trace_interval() {
     const pure::metal::ShellPresents shell = pure::metal::take_shell_presents();
     row.shell_ms = shell.cpu_ms;
     row.drawable_ms = shell.drawable_ms;
-    row.shell_presents = shell.count;
     row.occluded = shell.occluded;
     if (shell.count != 0u) trace_.shell_seen = true;
     trace_.pending_rows.push_back(row);

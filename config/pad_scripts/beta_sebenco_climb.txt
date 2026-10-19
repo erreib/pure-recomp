@@ -1,9 +1,0 @@
-# Single Race on SEBENCO CLIMB (Beta league, third track) at Vector, for the first full-HUD frame against PPSSPP's
-# (task 038). Chain after main_menu.txt + single_race.txt, with PURE_TEST_UNLOCK_ALL=1 (a new profile has the Alpha
-# league only): the picks tools/campaign_sweep.py makes for `single_race sebenco_climb`, one DOWN on LEAGUE SELECTION
-# (ALPHA -> BETA) and two on TRACK SELECTION (SINUCIT -> CITTA NUOVA -> SEBENCO CLIMB). Flip 6018 is the first frame
-# with the HUD fully faded in, PPSSPP's vblank of burst K's file f07670 (ref/README.md, docs/fidelity.md).
-5180:pad dpdown
-5380:pad dpdown
-5410:pad dpdown
-6018:shot sebenco_climb_hud
