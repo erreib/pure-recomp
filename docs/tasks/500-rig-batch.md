@@ -192,3 +192,11 @@ snaps under both); its cause today is the machine's other load, to be ruled out 
 closing Chrome and the editor, which the brief's preconditions did not name.
 
 Changed: tools/purelib/logs.py, tools/display_rate_check.sh, docs/verification.md, docs/timing.md, this file.
+
+## The clean run (2026-10-19, after Chrome was closed)
+`PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio --shell vulkan`, out/500/12-audio-new-clean*.log, VS Code
+still open (about 23% of the CPU in a 3 s sample before the run): **PASS**, 1 resync (188s, the load's, 5100 frames),
+1 channel restart apart (196s, 389266), race second 5 at 95%, none under 95%, medians 99.5 presents and 99.5 game
+flips a second. The early race took run 2's shape: `lates=2 late=1525` at the load armed the ratio to 192s, the
+lead 1754 to 4046, no silence after the load's 4577. The first PASS of the audio probe on the rig; docs/status.md
+and docs/timing.md say so.

@@ -61,3 +61,10 @@ Open questions:
   seconds say how long recoveries last in practice.
 - The counter's readers (`purelib.logs.audio_resyncs`) read `resyncs=` only; `lates=` has no reader yet. Add one
   when the probe's verdict wants it.
+
+## The rig's run (2026-10-19, task 500)
+Measured in docs/tasks/500-rig-batch.md (its Result's step 8 table and reading 1, the Follow-up, and the clean run):
+the probe PASSes at 100 Hz under the new rule once channel restarts are counted apart and the machine is quiet
+(1 resync, the load's; 1 restart; no second under 95%). The dip at race second 4 took two shapes across the runs:
+clean when the load's late writes armed the ratio early (the 512-frame threshold, open question 1 here), or 19961
+frames of silence in 84 pieces when the lead drained to zero first. Open questions 1 and 2 are the next sink task.
