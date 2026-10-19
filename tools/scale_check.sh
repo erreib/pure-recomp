@@ -10,11 +10,11 @@
 #              default 600, 0 gives up at once).
 # For each scene: the S capture must be 480S x 272S (the backend's display target at the scale, capture_frame); it is
 # reduced to 480x272 by the centre pixel of each S x S block, (x S + S/2, y S + S/2), the rule by which the backend
-# feeds guest memory (D-015), and compared with the 1x capture by tools/imgdiff.py at tol 24: PASS when at most 5% of
-# the pixels differ. The table also gives, for the record, the fraction with tools/imgdiff.py's own nearest neighbour
-# on the full capture ("top-left"), which takes the block's top-left pixel (S x, S y): that pixel's centre lies
-# (S - 1) / 2S of a pixel up and left of the 1x pixel's (3/8 at S = 4), which moves every filtered edge, so it is not
-# the pass condition (docs/metal-backend.md, "Internal scale").
+# feeds guest memory (D-015; tools/imgdiff.py's reduce_centres), and compared with the 1x capture by tools/imgdiff.py at
+# tol 24: PASS when at most 5% of the pixels differ. The table also gives, for the record, the fraction with
+# tools/imgdiff.py's own nearest neighbour on the full capture ("top-left"), which takes the block's top-left pixel (S
+# x, S y): that pixel's centre lies (S - 1) / 2S of a pixel up and left of the 1x pixel's (3/8 at S = 4), which moves
+# every filtered edge, so it is not the pass condition (docs/metal-backend.md, "Internal scale").
 # For the race scenes on Vineta K's grid (race_hud, tt_hud, fp_hud) the bloom's region, BLOOM below, is measured too:
 # its mean luminance (0.299 R + 0.587 G + 0.114 B) in the S capture at its own size against the 1x capture's, PASS
 # within 10% of the 1x mean. The region is where the bloom adds the most on that grid: the light strips under the
@@ -82,7 +82,6 @@ python3 - "$DIR" "$SCALE" "$BLOOM" "$BLOOM_SCENES" "$((SECONDS - START))" <<'EOF
 import os, sys
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
-import png  # noqa: E402  (tools/png.py)
 
 out, scale, bloom, bloom_scenes, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4].split(), sys.argv[5]
 region = tuple(int(v) for v in bloom.split(","))
@@ -93,26 +92,6 @@ lines = []
 def note(text=""):
     print(text)
     lines.append(text)
-
-
-def centres(path, reduced):
-    """The S capture at `path` reduced to 480x272 by each block's centre pixel, written to `reduced`."""
-    w, h, rgb = imgdiff.load_rgb(path)
-    half = scale // 2
-    rows = []
-    for y in range(272):
-        start = ((y * scale + half) * w + half) * 3
-        line = rgb[start:start + (w - half) * 3]
-        row = bytearray(480 * 3)
-        for k in range(3):
-            row[k::3] = line[k::scale * 3][:480]
-        rows.append(bytes(row))
-    png.write_png(reduced, 480, 272, 3, b"".join(rows))
-
-
-def compare(a, b, diff=None):
-    opts = type("Opts", (), dict(a=a, b=b, tol=TOL, max_frac=MAX_FRAC, mask=None, region=None, out=diff))
-    return imgdiff.compare(opts)
 
 
 def luminance(path):
@@ -150,10 +129,10 @@ for scene in scenes:
              f"FAIL (not {480 * scale}x{272 * scale})")
         continue
     reduced = os.path.join(reduced_dir, scene + ".png")
-    centres(a, reduced)
+    imgdiff.reduce_centres(a, reduced, scale)
     diff = os.path.join(out, scene + ".diff.png")
-    r = compare(reduced, b, diff)
-    top_left = compare(a, b)["fraction"]
+    r = imgdiff.compare_files(reduced, b, TOL, MAX_FRAC, diff)
+    top_left = imgdiff.compare_files(a, b, TOL, MAX_FRAC)["fraction"]
     ok = r["result"] == "PASS"
     if ok:
         os.remove(diff)

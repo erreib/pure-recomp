@@ -210,8 +210,7 @@ def fraction(a, b, region=None, diff=None, mask=None, tol=TOL):
         pa = os.path.join(out, ".a.png"); write(pa, a)
     if pb is None:
         pb = os.path.join(out, ".b.png"); write(pb, b)
-    opts = type("Opts", (), dict(a=pa, b=pb, tol=tol, max_frac=1.0, mask=mask, region=region, out=diff))
-    r = imgdiff.compare(opts)["fraction"]
+    r = imgdiff.compare_files(pa, pb, tol, 1.0, diff, mask, region)["fraction"]
     for p in (os.path.join(out, ".a.png"), os.path.join(out, ".b.png")):
         if os.path.exists(p):
             os.remove(p)

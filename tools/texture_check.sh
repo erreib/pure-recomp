@@ -25,10 +25,10 @@
 # PASS when, for every scene:
 #   - the 1 capture is 1920x1088 (the display target at internal scale 4); with --shell vulkan, a multiple S of
 #     480x272 the size of the 0 capture (the window's pixels);
-#   - reduced to 480x272 by the centre pixel of each 4 x 4 block (S x S with --shell vulkan; tools/scale_check.sh's
-#     rule and code, copied: the rule by which the backend feeds guest memory, D-015), it is within the scene's own
-#     limit of its PPSSPP reference at the scene's tol, both read from tools/frame_regress.sh's scene table (the
-#     picture is the same picture);
+#   - reduced to 480x272 by the centre pixel of each 4 x 4 block (S x S with --shell vulkan; tools/imgdiff.py's
+#     reduce_centres, tools/scale_check.sh's rule: the rule by which the backend feeds guest memory, D-015), it is
+#     within the scene's own limit of its PPSSPP reference at the scene's tol, both read from tools/frame_regress.sh's
+#     scene table (the picture is the same picture);
 #   - for race_hud, tt_hud and fp_hud (DETAIL_SCENES), the full 1 capture differs from the full 0 capture in at least
 #     1% of its pixels at tol 24 (the detail is there), and holds more high-frequency energy than the full 0 one: the
 #     mean absolute difference, per channel, between each pixel and its right and its lower neighbour over the whole
@@ -141,7 +141,6 @@ import os, re, subprocess, sys
 from operator import sub
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
-import png  # noqa: E402  (tools/png.py)
 
 out, scale, scenes, hud_scenes, detail_scenes, seconds, lane = sys.argv[1], int(sys.argv[2]), sys.argv[3].split(), \
     sys.argv[4].split(), sys.argv[5].split(), sys.argv[6], sys.argv[7]
@@ -170,22 +169,6 @@ def scene_table():
     return table
 
 
-def centres(path, reduced, scale):
-    """The S capture at `path` reduced to 480x272 by each block's centre pixel, written to `reduced`. Copied from
-    tools/scale_check.sh (task 066): (x S + S/2, y S + S/2), the backend's rule for guest memory."""
-    w, h, rgb = imgdiff.load_rgb(path)
-    half = scale // 2
-    rows = []
-    for y in range(272):
-        start = ((y * scale + half) * w + half) * 3
-        line = rgb[start:start + (w - half) * 3]
-        row = bytearray(480 * 3)
-        for k in range(3):
-            row[k::3] = line[k::scale * 3][:480]
-        rows.append(bytes(row))
-    png.write_png(reduced, 480, 272, 3, b"".join(rows))
-
-
 def energy(path):
     """The picture's high-frequency energy: the mean absolute difference, per channel, between each pixel and its
     right neighbour and between each pixel and its lower neighbour, over the whole picture (0 to 255)."""
@@ -196,11 +179,6 @@ def energy(path):
         row = rgb[y * stride:(y + 1) * stride]
         total += sum(map(abs, map(sub, row[:-3], row[3:])))
     return total / ((h - 1) * stride + h * (stride - 3))
-
-
-def compare(a, b, tol, max_frac, diff=None):
-    opts = type("Opts", (), dict(a=a, b=b, tol=tol, max_frac=max_frac, mask=None, region=None, out=diff))
-    return imgdiff.compare(opts)
 
 
 def hud(scene, capture, frame):
@@ -250,15 +228,15 @@ for scene in scenes:
         why.append(f"not {size[0]}x{size[1]}")
     if not why:
         reduced = os.path.join(reduced_dir, scene + ".png")
-        centres(a, reduced, s)
+        imgdiff.reduce_centres(a, reduced, s)
         diff = os.path.join(out, scene + ".diff.png")
-        r = compare(reduced, ref, tol, limit, diff)
+        r = imgdiff.compare_files(reduced, ref, tol, limit, diff)
         reduced_text = f"{r['fraction']:.4f}"
         if r["result"] == "PASS":
             os.remove(diff)
         else:
             why.append(f"reduced over the limit, diff {diff}")
-        full = compare(a, b, DIFF_TOL, 1.0)
+        full = imgdiff.compare_files(a, b, DIFF_TOL, 1.0)
         e0, e1 = energy(b), energy(a)
         ratio = e1 / e0 if e0 > 0 else float("inf")
         if scene in detail_scenes:
@@ -336,7 +314,7 @@ else:
         note(f"race_hud at scale 1 with 1: {w}x{h}, not 480x272: FAIL")
     else:
         diff = os.path.join(out, "race_hud.s1.diff.png")
-        r = compare(s1, ref, tol, limit, diff)
+        r = imgdiff.compare_files(s1, ref, tol, limit, diff)
         s1_ok = r["result"] == "PASS"
         if s1_ok:
             os.remove(diff)

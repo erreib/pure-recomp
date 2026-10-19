@@ -195,7 +195,6 @@ python3 - "$(native "$PACK")" "$(native "$CHECKDIR")" "$CHECK_SCENES" "$HUD_SCEN
 import os, re, subprocess, sys
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
-import png  # noqa: E402  (tools/png.py)
 
 pack, check, scenes, hud_scenes, game, seconds, summary = sys.argv[1], sys.argv[2], sys.argv[3].split(), \
     sys.argv[4].split(), sys.argv[5], int(sys.argv[6]), sys.argv[7]
@@ -246,28 +245,13 @@ def read_pack(folder):
 
 
 def reduce(path, reduced):
-    """The capture at `path` reduced to 480x272 by the centre pixel of each S x S block, (x S + S/2, y S + S/2) as
-    tools/scale_check.sh and tools/sprite_check.sh reduce, written to `reduced`; (S, None) or (None, why)."""
-    w, h, rgb = imgdiff.load_rgb(path)
-    s = w // 480
-    if s < 1 or w != 480 * s or h != 272 * s:
-        return None, f"{w}x{h} is not a multiple of 480x272"
-    half = s // 2
-    rows = []
-    for y in range(272):
-        start = ((y * s + half) * w + half) * 3
-        line = rgb[start:start + (w - half) * 3]
-        row = bytearray(480 * 3)
-        for k in range(3):
-            row[k::3] = line[k::s * 3][:480]
-        rows.append(bytes(row))
-    png.write_png(reduced, 480, 272, 3, b"".join(rows))
-    return s, None
-
-
-def compare(a, b, tol, max_frac, diff=None):
-    opts = type("Opts", (), dict(a=a, b=b, tol=tol, max_frac=max_frac, mask=None, region=None, out=diff))
-    return imgdiff.compare(opts)
+    """The capture at `path` reduced to 480x272 by the centre pixel of each S x S block (tools/imgdiff.py's
+    reduce_centres, as tools/scale_check.sh and tools/sprite_check.sh reduce), written to `reduced`; (S, None) or
+    (None, why)."""
+    try:
+        return imgdiff.reduce_centres(path, reduced), None
+    except imgdiff.NotScaled as e:
+        return None, str(e)
 
 
 def hud(scene, capture, frame):
@@ -350,7 +334,7 @@ for scene in scenes:
         continue
     w, h, _ = imgdiff.load_rgb(on)
     why = []
-    vs = compare(on, off, DIFF_TOL, 1.0)
+    vs = imgdiff.compare_files(on, off, DIFF_TOL, 1.0)
     if vs["fraction"] < MIN_DIFF:
         why.append(f"differs from the capture without the pack in under {MIN_DIFF:.0%}")
     texts = {}
@@ -363,7 +347,7 @@ for scene in scenes:
                 why.append(bad)
             continue
         diff = os.path.join(check, f"{scene}.{state}.diff.png")
-        r = compare(reduced, ref, tol, limit, diff)
+        r = imgdiff.compare_files(reduced, ref, tol, limit, diff)
         texts[state] = f"{r['fraction']:.4f}"
         if r["result"] == "PASS":
             os.remove(diff)
