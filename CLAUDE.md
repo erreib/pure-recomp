@@ -2,8 +2,9 @@
 
 Static recompilation of Wipeout Pure (PSP, US Greatest Hits v2.00, UCUS-98612, ISO CRC32 4502C588) to a native
 macOS arm64 build, on TeamGDB/PortableKit (MIT: the PSPRecomp framework plus its host layer), vendored at the
-commit in `vendor/PIN` with the patches in `patches/`. Read `docs/vendor-map.md` and
-`docs/status.md` first, then `docs/decisions.md`. The research behind every choice is in `docs/research.md`.
+commit in `vendor/PIN` with the patches in `patches/`. A planning session reads `docs/approach.md` (how the work is
+run, its working rules) and `docs/status.md` (the current state) first; `docs/decisions.md`, `docs/vendor-map.md` and
+`docs/research.md` are looked up by entry, not read whole. A worker reads its brief and the sections it names.
 
 ## Hard rules
 - Never commit: `disc/`, `disc.iso`, `game/`, `generated/`, `vendor/`, `ref/*` captures, `build/`, `out/`, any bytes
@@ -41,7 +42,9 @@ Switches this repo adds are listed in docs/developing.md.
 1. Read `docs/tasks/NNN-slug.md` fully, then every file under "Read first".
 2. Stay inside "May touch". If the fix needs a file under "Must not touch", stop: write the Result section with
    status BLOCKED and the reason, commit, and end.
-3. Run the Verify command yourself before finishing; paste its last 20 lines into Result.
+3. Run the Verify command yourself before finishing; paste its last 20 lines into Result. Run no window check (a
+   game window: `--shell metal|vulkan`, a window suite) unless the brief says Erik's screen is booked: list the
+   window checks your change needs in Result instead.
 4. Append `## Result` to the task file: Status (DONE | PARTIAL | BLOCKED), Changed (files), Verify output (last
    20 lines), Open questions. Commit everything on your branch. Your final message is the Result section verbatim.
 5. Escalate (BLOCKED) when: the escalation condition in the brief occurs; the vendor API differs from
@@ -57,5 +60,4 @@ commit. For vendor changes: `tools/patches.sh export NNNN-slug`, then add the ro
 C++20. Log lines carry a tag: `[guest]` game stdout, `[pure]` our profile, `[hle-stub]` unimplemented import,
 `[io]` `[kernel]` `[mpeg]` `[render]` `[pacing]` framework traces. There is no tests/ directory: the checks are the tools under tools/ (docs/verification.md lists them).
 
-Read docs/approach.md first in a new session: what the asset is, how the work is split, and what substitutes for
-the memory a solo author would have.
+Task numbers: the Mac takes 092 to 499, the rig 500 and up (docs/approach.md, "Working rules").
