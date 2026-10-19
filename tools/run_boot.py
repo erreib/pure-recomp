@@ -61,9 +61,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import png  # noqa: E402  (tools/png.py)
 from purelib import port  # noqa: E402  (tools/purelib: the environment, the guard, the pty runner)
 from purelib.logs import RA_RE, STUB_RE, UNIMPL_RE as LIST_RE  # noqa: E402
-# Kept under their names here for the scripts that import them from run_boot (frame_regress.sh and
-# sas_reverb_check.sh call run_boot.other_games()).
-from purelib.port import FRAME_EXIT_GRACE, other_games, scratch_data_dir, silence  # noqa: E402,F401
+from purelib.port import FRAME_EXIT_GRACE, scratch_data_dir, silence  # noqa: E402
 
 
 def parse(argv):
