@@ -182,8 +182,14 @@ after a change that moves or renames a file, a tool or a patch.
 
 ## Next
 
-- The audit's cleanup: this task (092), then 093 to 096 (docs/history/audit-2026-10-19.md, "Findings and where they
-  go").
+- The audit's cleanup (docs/history/audit-2026-10-19.md): 092 docs, 093 src and 094 tools merged 2026-10-19; 095
+  (patch hygiene) running on task/095-patch-hygiene (its task file's Progress says what is left). After it: a docs pass
+  for the lines 094 and 095 list as owed (their Results), then one screen session for the window checks every task
+  lists (Erik books it; the gerec recordings record afresh, about 15 minutes), then the scorecard rerun on an idle
+  machine (`tools/scorecard.py --only timing`, and `SCORECARD_RACE_CLOCK=ref/race_clock tools/scorecard.py --only
+  trajectories` to compare with 2026-10-07): the baseline of 2026-10-19 showed 4 two-vblank stretches on Vineta K,
+  taken while two builds ran (out/scorecard-audit/). A `--full` run rewrites docs/scorecard.md and drops its
+  hand-written Windows paragraph: restore it. Then E8's audio sink (task 081's fork b+), the rig's 100 Hz skips.
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
