@@ -275,11 +275,18 @@ The rig (RTX 3080, an i5-8600K, a 100 Hz display) runs the race at Display at 10
   Task 501 (the same day) arms the recovery from a 2048-frame lead instead of 512, so the race load's landing starts
   it while a lead is left: on the rig the lead's minimum over the race's first ten seconds reads 1091 to 1707 frames
   across the runs, no silence after the load's second, and the dip at race second 4 passes under an already-armed
-  ratio (docs/tasks/501-audio-sink-early-arming.md, Result). Also notable: this route held full speed at 100 Hz where task
-  091-display-rate-storms' stutter_check route measured 85%; the difference (stutter_check's tracing and live-file
-  harness, the route, internal scale Auto here) is unexplained and wants a look before the storms' verdict is
-  quoted to players. Erik's ear on the staged build (2026-10-15): "betterish", but more audio hiccups than the
-  Mac build. Parked for now. The probe needed a fix to run on Windows at all: its Python prints `yes\r\n`, `read` kept the
+  ratio (docs/tasks/501-audio-sink-early-arming.md, Result). The race load itself snaps the producers it stopped
+  once or twice when they resume (one or two `resyncs=` in the load's second, by how the load's stalls fall), so
+  since task 501 the probe counts the load's snaps (the `[audio]` lines before `[pure] paced from frame`) apart and
+  bounds the paced race at none. Also notable: this route held full speed at 100 Hz where task
+  091-display-rate-storms' stutter_check route measured 85%, and 90% again on 2026-10-19 (task 501: median 90%,
+  148 of 215 seconds under 95%, frame avg 11.2 ms); the leading candidate is the sweep's live-file steering, which
+  costs the rig 15 to 25 ms of render on every tenth flip (tools/stutter_check.sh's header, task 077: 150 of that
+  run's 165 frames over 25 ms were live-file flips), a cost a player's gamepad does not have; the second difference
+  is the weapons the follower picks up. What settles it is a played race at Display with `PURE_PERF=log`
+  (`PURE_TRACE_AUDIO=1` with it, read by `tools/audio_hiccups.py`): speed near 100 says the harness, under 95 says
+  the game. Erik's ear on the staged build (2026-10-15, before tasks 098 and 501): "betterish", but more audio hiccups than the
+  Mac build. The probe needed a fix to run on Windows at all: its Python prints `yes\r\n`, `read` kept the
   `\r`, and every run refused as "not on screen" (tools/display_rate_check.sh, one line).
 
 ## Frame structure (from `out/frame.txt`)
