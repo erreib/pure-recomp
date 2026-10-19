@@ -3,6 +3,7 @@
 0004-ge-backend-and-shell-seams).
 
   tools/gerec/gerec_dump.py [--summary] [--draws] [--images DIR] FILE.gerec
+  tools/gerec/gerec_dump.py --current FILE.gerec
 
 Prints the Begin record, one line per record of the stream (kind, payload size and what it holds; --summary leaves
 them out), and a table of the frames: draws counted in the stream, the draws the FrameEnd record says the frame had,
@@ -12,6 +13,13 @@ disagrees or the file is cut short. --draws parses every Draw record in full (th
 vendor/portablekit/host/gpu/ge_record_format.hpp) and checks that it fills its payload exactly; it is implied unless
 --summary is given. --images DIR writes each frame's presented image (a BMP, as capture_frame() wrote it) to
 DIR/frame_<n>.bmp.
+
+--current (task 094) says whether a recording is in the current format, the one tools/gerec/replay_check.sh and
+metal_check.sh reuse rather than record again: format version VERSION and Draw records that carry every part the
+format has grown (DRAW_PARTS: the texture map state, the mip levels, and the colour test, dithering and CLIPENABLE; a
+recording made before one of them reads its draws as without it, so its replays never exercise that). It prints
+`FIRST SCALE` (the first frame the recording holds and its image's scale, the width over 480) and exits 0, or why the
+recording is not current and exits 1.
 
 The format: the 8 bytes "PKGEREC\\0", a u32 version, then records of a u8 kind, a u32 payload size and the payload,
 little endian. ge_record_format.hpp is the reference; this reader follows version 1.
@@ -29,6 +37,10 @@ IMAGE_APIS = ["none", "cpu", "vulkan", "metal"]
 LEVEL_BYTES = 4 + 7 * 12 + 12   # a Draw's mip level fields (Writer::put_levels)
 LEVEL_MODES = ["auto", "const", "slope", "mode3"]
 PIXEL_BYTES = 13 + 17 + 1       # a Draw's colour test, dithering and CLIPENABLE (task 040)
+# The parts a Draw record has grown after the first recordings, in order (ge_record_format.hpp); a current recording's
+# Draws carry all of them.
+DRAW_PARTS = ("the texture map state (task 036)", "the mip levels (task 037)",
+              "the colour test, dithering and CLIPENABLE (task 040)")
 COLOR_TEST_FUNCTIONS = ["never", "always", "equal", "notequal"]
 
 
@@ -112,12 +124,17 @@ def draw_call(c):
     d["color_write_mask"], d["alpha_write_mask"] = c.u32(), c.u32()
     # The texture map state (task 036): map mode, projection source, the two shade lights. Recordings made before
     # it end here, and their draws are map mode 0.
-    d["texture_map"] = c.take("<4I") if c.left() >= 16 else (0, 0, 0, 0)
+    d["parts"] = 0                                               # how many of DRAW_PARTS the record carries
+    d["texture_map"] = (0, 0, 0, 0)
+    if c.left() >= 16:
+        d["texture_map"] = c.take("<4I")
+        d["parts"] = 1
     # The texture's mip levels (task 037): the level count, levels 1 to 7 (address, buffer width, width, height),
     # the level mode, the bias in 1/16 levels and the LOD slope. Recordings made before end here: one level.
     t = d["texture"]
     t["level_count"], t["levels"], t["level_mode"], t["level_bias"], t["lod_slope"] = 1, [], 0, 0, 0.0
     if c.left() >= LEVEL_BYTES:
+        d["parts"] = 2
         t["level_count"] = c.u32()
         t["levels"] = [c.take("<IIHH") for _ in range(7)]
         t["level_mode"], t["level_bias"], t["lod_slope"] = c.u32(), c.take("<i")[0], c.f32()
@@ -125,6 +142,7 @@ def draw_call(c):
     # CLIPENABLE (task 040). Recordings made before end here: no colour test, no dithering, CLIPENABLE off.
     d["color_test"], d["dither"], d["clip"] = (False, 0, 0, 0xFFFFFF), (False, (0, 0, 0, 0)), False
     if c.left() >= PIXEL_BYTES:
+        d["parts"] = 3
         d["color_test"] = (c.flag(),) + c.take("<3I")
         d["dither"] = (c.flag(), c.take("<4I"))
         d["clip"] = c.flag()
@@ -174,13 +192,53 @@ def describe_draw(d):
     return text
 
 
+def current(path):
+    """(first frame, scale, None) when the recording at path is in the current format (version VERSION, its first Draw
+    carrying every one of DRAW_PARTS), else (first, scale, why); first and scale None when not found."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:8] != MAGIC:
+        return None, None, f"not a .gerec file (magic {data[:8]!r})"
+    version = struct.unpack_from("<I", data, 8)[0]
+    at, first, scale, parts = 12, None, None, None
+    while at + 5 <= len(data) and (first is None or scale is None or parts is None):
+        kind, size = struct.unpack_from("<BI", data, at)
+        at += 5
+        if at + size > len(data):
+            break
+        c = Cursor(data, at, at + size)
+        try:
+            if kind == 1 and first is None:                     # Begin: u32 first frame
+                first = c.u32()
+            elif kind == 5 and parts is None:                   # Draw
+                parts = draw_call(c)["parts"]
+            elif kind == 11 and scale is None:                  # FrameEnd: ..., u32 width at byte 33
+                scale = struct.unpack_from("<I", data, at + 33)[0] // 480
+        except Cut as e:
+            return first, scale, f"a record cut short ({e})"
+        at += size
+    if version != VERSION:
+        return first, scale, f"format version {version}, not {VERSION}"
+    if parts is None:
+        return first, scale, "no Draw record"
+    if parts < len(DRAW_PARTS):
+        return first, scale, ("its Draw records end before " + DRAW_PARTS[parts]
+                              + (", and the parts after it" if parts < len(DRAW_PARTS) - 1 else ""))
+    return first, scale, None
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="gerec_dump.py", usage=__doc__.split("\n\n")[1].strip())
     p.add_argument("file")
     p.add_argument("--summary", action="store_true")
     p.add_argument("--draws", action="store_true")
     p.add_argument("--images")
+    p.add_argument("--current", action="store_true")
     opts = p.parse_args(argv)
+    if opts.current:
+        first, scale, why = current(opts.file)
+        print(why or f"{first} {scale}")
+        return 1 if why else 0
     parse_draws = opts.draws or not opts.summary
     with open(opts.file, "rb") as f:
         data = f.read()

@@ -43,7 +43,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
-ROOT=$PWD
+. tools/lib.sh
 
 FRONT_FROM=4000   # the frontend's counted flips: MAIN MENU and SINGLE PLAYER's screens
 FRONT_TO=5000
@@ -79,27 +79,11 @@ while [ $# -gt 0 ]; do
     *) echo "framerate_check: unknown argument $1"; usage ;;
   esac
 done
-case $SHELL_NAME in
-  headless|metal) BACKEND=${BACKEND:-metal} ;;
-  vulkan) BACKEND=${BACKEND:-vulkan} ;;
-  *) echo "framerate_check: --shell is headless, metal or vulkan, not $SHELL_NAME"; exit 2 ;;
-esac
-case $BACKEND in metal|vulkan) ;; *) echo "framerate_check: --backend is metal or vulkan, not $BACKEND"; exit 2 ;; esac
+pick_backend framerate_check "headless metal vulkan"
 MODE=route
 [ "$RACE" = yes ] && MODE=race
 OUT=${OUT:-out/framerate_check/$MODE-$BACKEND-$SHELL_NAME}
-
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
-
-# One game at a time (task 034).
-wait_game() {
-  python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
-sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("framerate_check: " + m, flush=True),
-                              limit=600) else 2)'
-}
+need_game
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -110,7 +94,7 @@ if [ "$MODE" = race ]; then
   for v in 0 1; do
     FRAMES=()
     [ "$v" = 1 ] && FRAMES=(--frames $RACE_FRAMES)
-    wait_game || exit 2
+    wait_game framerate_check || exit 2
     t0=$SECONDS
     PURE_SIXTY_FPS=$v PURE_WATCH_WORDS=08a8c3dc python3 tools/campaign_sweep.py time_trial vineta_k --out "$OUT/$v" \
       --shell "$SHELL_NAME" --backend "$BACKEND" ${FRAMES[@]+"${FRAMES[@]}"} > "$OUT/$v.stdout" 2>&1
@@ -119,57 +103,19 @@ if [ "$MODE" = race ]; then
     echo "framerate_check: PURE_SIXTY_FPS=$v: campaign_sweep exit $rc, $((SECONDS - t0)) s, log $OUT/$v/time_trial-vineta_k.log"
   done
   python3 - "$OUT" "$SLOW_FPS" "$FAST_FPS" "$CLOCK_RATE" "$START_PCT" "$START_KMH" <<'EOF' | tee "$OUT/summary.txt"
-import csv, os, re, struct, sys
+import os, sys
 sys.path.insert(0, "tools")
-from fidelity_audit import SWEEP_LINE_RE  # the sweep's result line, as the audit reads it
+from purelib.logs import START_CENTRES as CENTRES, race_cell  # the sweep's result line and the cell's trace and clock
 
 out = sys.argv[1]
 slow, fast, rate = ([float(x) for x in a.split(":")] for a in sys.argv[2:5])
 start_pct, start_kmh = float(sys.argv[5]), float(sys.argv[6])
 CELL = "time_trial-vineta_k"
-LAPS_RE = re.compile(r"(\d+) laps: ([\d.]+(?:, [\d.]+)*) s")
-CONTACTS_RE = re.compile(r"(\d+) contacts")
-WORDS_RE = re.compile(r"\[pure\] words frame (\d+) t=(\d+): 0x([0-9A-Fa-f]{8})")
-CENTRES = (0.5, 1.0, 1.5, 2.0)
 
 
 def read(v):
     """The cell's outcome, laps (count, times), contacts, flips a race-clock second, game clock rate, start bins."""
-    outcome, laps, times, contacts = None, 0, [], None
-    with open(os.path.join(out, f"{v}.stdout"), errors="replace") as f:
-        for line in f:
-            m = SWEEP_LINE_RE.match(line.strip())
-            if m and m[1] == CELL:
-                outcome, laps = m[2], int(m[5])
-                lm = LAPS_RE.search(m[8])
-                times = [float(x) for x in lm[2].split(", ")] if lm else []
-                cm = CONTACTS_RE.search(m[8])
-                contacts = int(cm[1]) if cm else None
-    rows = []
-    trace = os.path.join(out, v, f"{CELL}.trace.csv")
-    if os.path.exists(trace):
-        with open(trace) as f:
-            rows = [r for r in csv.DictReader(f) if r["race"] == "1" and r["clock"] not in ("", "nan")]
-    pts = [(int(r["frame"]), float(r["clock"])) for r in rows if float(r["clock"]) > 1.0]
-    fps = (pts[-1][0] - pts[0][0]) / (pts[-1][1] - pts[0][1]) if len(pts) > 1 else None
-    bins = []
-    for c in CENTRES:
-        kmh = [float(r["kmh"]) for r in rows
-               if c - 0.25 <= float(r["clock"]) < c + 0.25 and r["kmh"] not in ("", "nan")]
-        bins.append(sum(kmh) / len(kmh) if kmh else None)
-    words = []
-    log = os.path.join(out, v, f"{CELL}.log")
-    if os.path.exists(log) and pts:
-        with open(log, errors="replace") as f:
-            for line in f:
-                m = WORDS_RE.match(line)
-                if m and pts[0][0] <= int(m[1]) <= pts[-1][0]:
-                    value = struct.unpack("<f", bytes.fromhex(m[3])[::-1])[0]
-                    if value > 1000.0:
-                        words.append((int(m[2]) / 1e6, value))
-    clock = (words[-1][1] - words[0][1]) / (words[-1][0] - words[0][0]) if len(words) > 1 else None
-    return dict(outcome=outcome, laps=laps, times=times, contacts=contacts, fps=fps, clock=clock, bins=bins,
-                flips=(pts[0][0], pts[-1][0]) if pts else None)
+    return race_cell(os.path.join(out, f"{v}.stdout"), os.path.join(out, v), CELL)
 
 
 def fmt(x, spec):
@@ -210,9 +156,8 @@ fi
 
 for v in 0 1; do
   d=$OUT/$v
-  mkdir -p "$d/game/ms0/PSP/SAVEDATA" "$d/shots"
-  ln -s "$ROOT/game/EBOOT.ELF" "$d/game/EBOOT.ELF"
-  ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$d/game/disc.iso"
+  fresh_stick "$d/game"
+  mkdir -p "$d/shots"
   {
     echo "$RACE_TO:shot h$RACE_TO"
     cat config/pad_scripts/main_menu.txt config/pad_scripts/time_trial.txt |
@@ -220,7 +165,7 @@ for v in 0 1; do
   } > "$d/route.txt"
   PACE=()
   [ "$SHELL_NAME" = headless ] || PACE=(--env PURE_PACED_FROM=$PACED_FROM)
-  wait_game || exit 2
+  wait_game framerate_check || exit 2
   t0=$SECONDS
   python3 tools/run_boot.py --script "$d/route.txt" --shots "$d/shots" --frames $END --shell "$SHELL_NAME" \
     --backend "$BACKEND" --data-dir out/data/framerate_check --max-lines 60000 --env PURE_GAME_DIR="$d/game" \
@@ -237,36 +182,20 @@ done
 
 python3 - "$OUT" $FRONT_FROM $FRONT_TO $RACE_LOAD $RACE_FROM $RACE_TO $END "$FRONT_MS" "$RACE_MS" "$SLOW_FPS" \
   "$FAST_FPS" <<'EOF' | tee "$OUT/summary.txt"
-import os, re, statistics, sys
+import os, sys
 sys.path.insert(0, "tools")
-from purelib.logs import SHIP_T_RE
+from purelib.logs import flip_log, flip_median_ms as median_ms  # the flip times and the ship lines
 
 out = sys.argv[1]
 front_from, front_to, race_load, race_from, race_to, end = (int(v) for v in sys.argv[2:8])
 front_ms, race_ms, slow, fast = ([float(x) for x in a.split(":")] for a in sys.argv[8:12])
-CALL = "[call] sceDisplay:0x289D82FE "
 
 
 def read(v):
     """The run's flip times (index n - 1 for flip n), its ship lines' (flip, clock) and the sixty-fps lines (text,
     the flips before each)."""
-    ts, clocks, said = [], [], []
-    with open(os.path.join(out, v, "run.log"), errors="replace") as f:
-        for line in f:
-            if line.startswith(CALL):
-                ts.append(int(re.search(r" t=(\d+)", line)[1]))
-            elif line.startswith("[pure] sixty fps:"):
-                said.append((line.strip(), len(ts)))
-            else:
-                m = SHIP_T_RE.match(line)
-                if m:
-                    clocks.append((int(m[1]), float(m[3])))
-    return ts, clocks, said
-
-
-def median_ms(ts, a, b):
-    steps = [ts[n - 1] - ts[n - 2] for n in range(max(a, 2), min(b, len(ts)) + 1)]
-    return statistics.median(steps) / 1000.0 if steps else None
+    ts, ships, said = flip_log(os.path.join(out, v, "run.log"), "[pure] sixty fps:")
+    return ts, [(n, c) for n, _, c in ships], said
 
 
 def within(x, rng):

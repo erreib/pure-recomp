@@ -12,9 +12,10 @@
 # (<out>/<0|1>/game), with PURE_TRACE_CALLS=sceDisplay:0x289D82FE (a `[call]` line per flip, its virtual time t=),
 # PURE_WATCH_SHIP=1, a shot at flip 6100 (h6100) and the run ending at flip END, one with --env PURE_SMOOTH_FLASHES=0
 # and one with 1, on the data directory out/data/flash_check (about 7 s each headless). For each run, over flips
-# 5600 to 6100: the flips whose t is more than tools/fidelity_audit.py's TWO_VBLANK_US after the previous flip's
-# (two vblanks or more), their count and their longest run. TEAM SELECTION and the race load before the race's first
-# one-vblank flip (5707) wait two vblanks in both runs: the frontend's lock (+0x116c 0), which the option leaves alone.
+# 5600 to 6100: the flips whose t is more than the fidelity audit's TWO_VBLANK_US (tools/purelib/logs.py) after the
+# previous flip's (two vblanks or more), their count and their longest run. TEAM SELECTION and the race load before
+# the race's first one-vblank flip (5707) wait two vblanks in both runs: the frontend's lock (+0x116c 0), which the
+# option leaves alone.
 # The fade is the first run of such flips after that (flips 5708 to 5764 in the run with 0, 1.90 s), and its seconds
 # run from the flip before it to its last. PASS when the run with 0 has a fade of at least MIN_FADE flips, the run with
 # 1 has at most MAX_ON two-vblank flips in all from the fade's first flip to 6100, both runs have a `[pure] ship frame`
@@ -27,16 +28,17 @@
 # --race: two Single Race cells of Vineta K through tools/campaign_sweep.py single_race vineta_k --no-damage (the
 # sweep's defaults: headless, paced from the Cross hold, the follower; about 4 minutes each), one with
 # PURE_SMOOTH_FLASHES=0 in the environment and one with 1, each in <out>/<0|1>/, their logs read with
-# tools/fidelity_audit.py's scan_log (its two-vblank stretch rule: STRETCH_MIN flips in a row over TWO_VBLANK_US).
-# PASS when both cells PASS, the run with 1 has no stretch and its mean lap time is within LAP_TOLERANCE of the run
-# with 0's (the race's speed unchanged: the follower drives the same table). Prints both runs' stretches and laps.
+# the fidelity audit's scan_log (tools/purelib/logs.py; its two-vblank stretch rule: STRETCH_MIN flips in a row over
+# TWO_VBLANK_US). PASS when both cells PASS, the run with 1 has no stretch and its mean lap time is within LAP_TOLERANCE
+# of the run with 0's (the race's speed unchanged: the follower drives the same table). Prints both runs' stretches and
+# laps.
 # Waits up to 600 s while another PureNative runs (one game at a time). Prints `flash_check: PASS ...` or
 # `flash_check: FAIL ...` last; exit 0 only on PASS.
 set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
-ROOT=$PWD
+. tools/lib.sh
 
 FROM=5600         # the counted flips: TEAM SELECTION's last 100, the load, the race-start fade, the countdown
 SHOT=6100         # the HUD shot and the end of the counted flips
@@ -64,27 +66,11 @@ while [ $# -gt 0 ]; do
     *) echo "flash_check: unknown argument $1"; usage ;;
   esac
 done
-case $SHELL_NAME in
-  headless|metal) BACKEND=${BACKEND:-metal} ;;
-  vulkan) BACKEND=${BACKEND:-vulkan} ;;
-  *) echo "flash_check: --shell is headless, metal or vulkan, not $SHELL_NAME"; exit 2 ;;
-esac
-case $BACKEND in metal|vulkan) ;; *) echo "flash_check: --backend is metal or vulkan, not $BACKEND"; exit 2 ;; esac
+pick_backend flash_check "headless metal vulkan"
 MODE=fade
 [ "$RACE" = yes ] && MODE=race
 OUT=${OUT:-out/flash_check/$MODE-$BACKEND-$SHELL_NAME}
-
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
-
-# One game at a time (task 034).
-wait_game() {
-  python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
-sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("flash_check: " + m, flush=True),
-                              limit=600) else 2)'
-}
+need_game
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -93,30 +79,23 @@ echo "flash_check: $MODE, shell $SHELL_NAME, backend $BACKEND, out $OUT"
 
 if [ "$MODE" = race ]; then
   for v in 0 1; do
-    wait_game || exit 2
+    wait_game flash_check || exit 2
     t0=$SECONDS
     PURE_SMOOTH_FLASHES=$v python3 tools/campaign_sweep.py single_race vineta_k --no-damage --out "$OUT/$v" \
       --shell "$SHELL_NAME" --backend "$BACKEND" > "$OUT/$v.stdout" 2>&1
     echo "flash_check: PURE_SMOOTH_FLASHES=$v: campaign_sweep exit $?, $((SECONDS - t0)) s, log $OUT/$v/single_race-vineta_k.log"
   done
   python3 - "$OUT" "$LAP_TOLERANCE" <<'EOF' | tee "$OUT/summary.txt"
-import os, re, sys
+import os, sys
 sys.path.insert(0, "tools")
-from fidelity_audit import SWEEP_LINE_RE, STRETCH_MIN, TWO_VBLANK_US, scan_log  # the audit's rule, not a copy
+from purelib.logs import STRETCH_MIN, TWO_VBLANK_US, scan_log, sweep_result  # the audit's rule, not a copy
 
 out, tolerance = sys.argv[1], float(sys.argv[2])
-LAPS_RE = re.compile(r"(\d+) laps: ([\d.]+(?:, [\d.]+)*) s")
 runs = {}
 for v in ("0", "1"):
     log = os.path.join(out, v, "single_race-vineta_k.log")
-    outcome, laps = None, []
-    with open(os.path.join(out, f"{v}.stdout"), errors="replace") as f:
-        for line in f:
-            m = SWEEP_LINE_RE.match(line.strip())
-            if m and m[1] == "single_race-vineta_k":
-                outcome = m[2]
-                lm = LAPS_RE.search(m[8])
-                laps = [float(x) for x in lm[2].split(", ")] if lm else []
+    cell = sweep_result(os.path.join(out, f"{v}.stdout"), "single_race-vineta_k")
+    outcome, laps = cell["outcome"], cell["times"]
     found = scan_log(log) if os.path.exists(log) else {"stretches": []}
     runs[v] = (outcome, laps, found["stretches"])
     mean = sum(laps) / len(laps) if laps else None
@@ -148,9 +127,8 @@ fi
 
 for v in 0 1; do
   d=$OUT/$v
-  mkdir -p "$d/game/ms0/PSP/SAVEDATA" "$d/shots"
-  ln -s "$ROOT/game/EBOOT.ELF" "$d/game/EBOOT.ELF"
-  ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$d/game/disc.iso"
+  fresh_stick "$d/game"
+  mkdir -p "$d/shots"
   {
     echo "$SHOT:shot h$SHOT"
     cat config/pad_scripts/main_menu.txt config/pad_scripts/single_race.txt |
@@ -158,7 +136,7 @@ for v in 0 1; do
   } > "$d/route.txt"
   PACE=()
   [ "$SHELL_NAME" = headless ] || PACE=(--env PURE_PACED_FROM=$PACED_FROM)
-  wait_game || exit 2
+  wait_game flash_check || exit 2
   t0=$SECONDS
   python3 tools/run_boot.py --script "$d/route.txt" --shots "$d/shots" --frames $END --shell "$SHELL_NAME" \
     --backend "$BACKEND" --data-dir out/data/flash_check --max-lines 60000 --env PURE_GAME_DIR="$d/game" \
@@ -173,31 +151,19 @@ for v in 0 1; do
 done
 
 python3 - "$OUT" $FROM $SHOT $END $MIN_FADE $MAX_ON <<'EOF' | tee "$OUT/summary.txt"
-import os, re, sys
+import os, sys
 sys.path.insert(0, "tools")
-from fidelity_audit import TWO_VBLANK_US  # the audit's two-vblank rule
-from purelib.logs import SHIP_T_RE
+from purelib.logs import TWO_VBLANK_US, flip_log  # the audit's two-vblank rule; the flip times and ship lines
 
 out = sys.argv[1]
 first, shot, end, min_fade, max_on = (int(v) for v in sys.argv[2:7])
-CALL = "[call] sceDisplay:0x289D82FE "
 
 
 def read(v):
     """The run's flip times (index n - 1 for flip n), its race start (flip, t) and the smooth-flashes lines (text,
     the flips before each)."""
-    ts, start, said = [], None, []
-    with open(os.path.join(out, v, "run.log"), errors="replace") as f:
-        for line in f:
-            if line.startswith(CALL):
-                ts.append(int(re.search(r" t=(\d+)", line)[1]))
-            elif line.startswith("[pure] smooth flashes:"):
-                said.append((line.strip(), len(ts)))
-            else:
-                m = SHIP_T_RE.match(line)
-                if m and start is None and float(m[3]) > 0.0:
-                    start = (int(m[1]), int(m[2]))
-    return ts, start, said
+    ts, ships, said = flip_log(os.path.join(out, v, "run.log"), "[pure] smooth flashes:")
+    return ts, next(((n, t) for n, t, c in ships if c > 0.0), None), said
 
 
 def slow(ts, n):

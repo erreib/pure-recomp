@@ -1,15 +1,23 @@
 #!/bin/bash
 # The ge_replay check (task 022): replays GE backend recordings (.gerec) outside the game and checks what they present.
 #   tools/gerec/replay_check.sh
-# Recordings are made only when missing, each by one windowed run of a route of tools/frame_regress.sh (pad scripts
-# joined, `shot` steps dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend in the
-# Vulkan shell (PURE_SHELL=vulkan PURE_GE_RECORD_INNER=vulkan, set explicitly: the macOS default is the Metal path,
-# D-008, which has no Vulkan renderer to record), and must pass tools/gerec/gerec_dump.py --summary:
+# A recording is made when it is missing, holds other frames (or another internal scale, for metal_check.sh's), or is
+# older than the current format (tools/gerec/gerec_dump.py --current: its version, or Draw records that end before the
+# texture map, the mip levels or the colour test, dithering and CLIPENABLE, which its replays would never exercise;
+# task 094). Each recording is one windowed run of a route of tools/frame_regress.sh (pad scripts joined, `shot` steps
+# dropped) on an empty memory stick of its own (<name>.game, tools/lib.sh's fresh_stick), drawn by Vulkan through the
+# record backend in the Vulkan shell (PURE_SHELL=vulkan PURE_GE_RECORD_INNER=vulkan, set explicitly: the macOS default
+# is the Metal path, D-008, which has no Vulkan renderer to record), and must pass tools/gerec/gerec_dump.py --summary:
 #   out/gerec/race.gerec       main_menu.txt + single_race.txt, frames 6014-6016 (AT=6014 FRAMES=3), about 3.5 minutes
 #   out/gerec/race_warm.gerec  the same route, frames 6008-6016 (AT=6008 FRAMES=9): six frames that fill the render
 #                              targets before the three that are compared, about 3.5 minutes
 #   out/gerec/frontend.gerec   frontend.txt, frames 690-691 (task 023), about 25 s
 #   out/gerec/title.gerec      frontend.txt, frames 1750-1751 (task 023), about 1 minute
+# Every replay runs on an empty data directory of its own, out/gerec/data/<the replay's log name> (PURE_DATA_DIR,
+# unless the environment names one, as tools/run_boot.py gives every run one: not the player's settings.ini, whose
+# video rows such as the performance overlay change the capture; task 094), with the sprite upscale, the texture
+# detail and the display rate off (PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0: the PSP's texels,
+# levels and vblank, as tools/purelib/port.py pins every other run and as the recordings were made).
 # The steps:
 # 1. race.gerec into vulkan with --compare at tol 0. Reported, not a pass condition: a replay starts with no render
 #    targets, and the first frames of a race recording depend on target pixels drawn before it began (the bottom rows
@@ -21,53 +29,64 @@
 # 5. frontend.gerec and title.gerec into vulkan with --compare at tol 0: must pass (2D screens hold no state across
 #    frames that a recording lacks).
 # Exit 0 when every step passes. Logs and replay outputs are in out/gerec/. Needs the screen (Vulkan opens a window).
+# tools/gerec/metal_check.sh sources this file for its setup, record() and replay() (task 094: one copy), and the
+# steps below do not run then.
 set -u
 cd "$(dirname "$0")/../.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
+. tools/lib.sh
 ROOT=$PWD
-# The build directory is the preset's: arm64 on macOS, win-x64 on Windows (task 054; purelib.port knows).
-BIN=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-# Hard links on Windows: Git Bash's `ln -s` copies (253 MB of disc.iso per run) without Developer Mode (task 054).
-case "$(uname -s)" in MINGW*|MSYS*) LNS="ln" ;; *) LNS="ln -s" ;; esac
+TOOL=${TOOL:-replay_check}
 OUT=out/gerec
-
-[ -x "$BIN" ] || { echo "$BIN missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game          # EXE: the binary purelib.port names (build/arm64 on macOS, build/win-x64 on Windows)
+BIN=$EXE
 mkdir -p "$OUT"
 
 FAILED=
 START=$SECONDS
 step() { echo; echo "== $*"; }
-fail() { echo "replay_check: FAIL: $*"; FAILED="$FAILED|$*"; }
+fail() { echo "$TOOL: FAIL: $*"; FAILED="$FAILED|$*"; }
 
-# record NAME ROUTE AT FRAMES: frames AT to AT+FRAMES-1 of ROUTE to out/gerec/NAME.gerec, unless that file exists.
+# record NAME ROUTE AT FRAMES [SCALE]: frames AT to AT+FRAMES-1 of ROUTE (pad scripts joined by +) to
+# out/gerec/NAME.gerec, at internal scale SCALE (PURE_INTERNAL_SCALE; none: the settings'), unless that file holds
+# them, at that scale, in the current format.
 record() {
-  local name=$1 route=$2 at=$3 frames=$4
+  local name=$1 route=$2 at=$3 frames=$4 scale=${5:-}
   local file="$OUT/$name.gerec" game="$OUT/$name.game" script="$OUT/$name.route.txt"
-  local last=$((at + frames + 10))
+  local last=$((at + frames + 10)) held rc
   if [ -s "$file" ]; then
-    echo "$file exists ($(wc -c < "$file" | tr -d ' ') bytes): not recorded again"
-    return 0
+    held=$(python3 tools/gerec/gerec_dump.py --current "$file" 2>&1)
+    rc=$?
+    if [ $rc -eq 0 ] && [ "${held% *}" = "$at" ] && { [ -z "$scale" ] || [ "${held#* }" = "$scale" ]; }; then
+      echo "$file exists ($(wc -c < "$file" | tr -d ' ') bytes, from frame $at at ${held#* }x, the current format):" \
+        "not recorded again"
+      return 0
+    fi
+    if [ $rc -ne 0 ]; then
+      echo "$file is older than the current format ($held): recording it again"
+    else
+      echo "$file holds frames from ${held% *} at ${held#* }x, not $at${scale:+ at ${scale}x}: recording it again"
+    fi
+    rm -f "$file"
   fi
-  rm -rf "$game" "$file.capture.bmp"
-  mkdir -p "$game/ms0/PSP/SAVEDATA"
-  $LNS "$ROOT/game/EBOOT.ELF" "$game/EBOOT.ELF"
-  $LNS "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$game/disc.iso"
+  rm -rf "$file.capture.bmp"
+  fresh_stick "$game"
   : > "$script"
   for part in $(echo "$route" | tr '+' ' '); do
     grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' "config/pad_scripts/$part" >> "$script"
   done
-  echo "recording $name: $route, frames $at-$((at + frames - 1)), run to frame $last ..."
+  local scale_env=()
+  [ -n "$scale" ] && scale_env=(--env "PURE_INTERNAL_SCALE=$scale")
+  echo "recording $name: $route, frames $at-$((at + frames - 1))${scale:+ at internal scale $scale}, run to frame $last ..."
   local t0=$SECONDS
   # The Vulkan shell and an explicit Vulkan inner backend: the Metal default (D-008) has no Vulkan renderer to record.
   python3 tools/run_boot.py --script "$script" --frames "$last" --shell vulkan \
     --env PURE_GAME_DIR="$ROOT/$game" --env PURE_GE_BACKEND=record --env PURE_GE_RECORD_INNER=vulkan \
     --env PURE_GE_RECORD="$ROOT/$file" \
-    --env PURE_GE_RECORD_AT="$at" --env PURE_GE_RECORD_FRAMES="$frames" \
+    --env PURE_GE_RECORD_AT="$at" --env PURE_GE_RECORD_FRAMES="$frames" ${scale_env[@]+"${scale_env[@]}"} \
     "$OUT/$name.record.log" > "$OUT/$name.record.stdout" 2>&1
-  local rc=$?
+  rc=$?
   echo "recording $name: run_boot exit $rc, $((SECONDS - t0)) s, log $OUT/$name.record.log"
   grep -E '^\[gerec\] saved' "$OUT/$name.record.log"
   if [ ! -s "$file" ]; then
@@ -85,12 +104,33 @@ record() {
 
 # replay LOG ARGS...: one replay, its [replay] lines (and a bisected draw's state) shown; sets rc.
 replay() {
-  local log=$1
+  local log=$1 data
   shift
-  "$BIN" --replay "$@" > "$log" 2>&1
+  # Its own empty data directory, out/gerec/data/<log's name>, unless the environment names one (as tools/run_boot.py
+  # gives every run one): without it the replay read the player's settings.ini, whose video.performance=overlay put
+  # the overlay in the Vulkan capture and failed metal_check (task 094, found by task 093).
+  data=${PURE_DATA_DIR:-$ROOT/$OUT/data/$(basename "$log" .log)}
+  [ -n "${PURE_DATA_DIR:-}" ] || { rm -rf "$data"; mkdir -p "$data"; }
+  # Tasks 073, 075 and 089: the sprite upscale, the texture detail and the display rate off (the PSP's texels, levels
+  # and vblank, as tools/purelib/port.py pins every other run), not settings.ini's.
+  PURE_DATA_DIR="$data" PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0 "$BIN" --replay "$@" \
+    > "$log" 2>&1
   rc=$?
   grep -E '^\[replay\]|^  [a-z]' "$log"
 }
+
+# verdict: the check's last line (`TOOL: PASS (N s)` or `TOOL: FAIL (N s): ...`) and its exit.
+verdict() {
+  echo
+  if [ -n "$FAILED" ]; then
+    echo "$TOOL: FAIL ($((SECONDS - START)) s):$(echo "$FAILED" | tr '|' '\n' | sed '/^$/d; s/^/ /' | tr '\n' ';')"
+    exit 1
+  fi
+  echo "$TOOL: PASS ($((SECONDS - START)) s)"
+  exit 0
+}
+
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0     # sourced by tools/gerec/metal_check.sh: the above only
 
 step "recordings"
 record race main_menu.txt+single_race.txt 6014 3
@@ -146,9 +186,4 @@ for name in frontend title; do
   [ $rc -eq 0 ] || fail "vulkan replay of $name.gerec exit $rc (log $OUT/replay_$name.log)"
 done
 
-echo
-if [ -n "$FAILED" ]; then
-  echo "replay_check: FAIL ($((SECONDS - START)) s):$(echo "$FAILED" | tr '|' '\n' | sed '/^$/d; s/^/ /' | tr '\n' ';')"
-  exit 1
-fi
-echo "replay_check: PASS ($((SECONDS - START)) s)"
+verdict

@@ -138,6 +138,40 @@ def compare(opts):
             "pixel_region": list(box) if box else None, "out": opts.out}
 
 
+
+def compare_files(a, b, tol, max_frac, diff=None, mask=None, region=None):
+    """compare() on two files without the command line's namespace: the result dict (task 094: the one call the
+    checks that compare captures in Python make; diff is --out, region a PSP-screen (x, y, w, h))."""
+    return compare(argparse.Namespace(a=a, b=b, tol=tol, max_frac=max_frac, mask=mask, region=region, out=diff))
+
+
+class NotScaled(ValueError):
+    """A capture whose size is not S times 480x272 (reduce_centres without a scale)."""
+
+
+def reduce_centres(path, reduced, scale=None):
+    """The capture at path reduced to 480x272 by the centre pixel of each S x S block, (x S + S/2, y S + S/2): the
+    backend's rule for guest memory (task 066), by which tools/scale_check.sh, texture_check.sh, sprite_check.sh and
+    sprite_pack.sh compare a capture at internal scale S with the 1x picture (task 094: one copy of the four). Written
+    to `reduced` as a PNG. S is scale, or without one the capture's width over 480, which must then be S times
+    480x272 (NotScaled otherwise). Returns S."""
+    w, h, rgb = load_rgb(path)
+    if scale is None:
+        scale = w // PSP_W
+        if scale < 1 or w != PSP_W * scale or h != PSP_H * scale:
+            raise NotScaled(f"{w}x{h} is not a multiple of 480x272")
+    half = scale // 2
+    rows = []
+    for y in range(PSP_H):
+        start = ((y * scale + half) * w + half) * 3
+        line = rgb[start:start + (w - half) * 3]
+        row = bytearray(PSP_W * 3)
+        for k in range(3):
+            row[k::3] = line[k::scale * 3][:PSP_W]
+        rows.append(bytes(row))
+    png.write_png(reduced, PSP_W, PSP_H, 3, b"".join(rows))
+    return scale
+
 def variance(opts):
     w, h, a = load_rgb(opts.a)
     box = scale_region(opts.region, w, h) if opts.region else (0, 0, w, h)
@@ -358,6 +392,21 @@ def selftest():
         check("variance on a flat region fails", r["result"] == "FAIL", f"max {r['max_variance']:.1f}")
         r = run(path("half.png"), "--region", "300,20,100,100", "--min-variance", "50")
         check("variance on a drawn region passes", r["result"] == "PASS", f"max {r['max_variance']:.1f}")
+
+        quad = bytearray(4 * W * 4 * H * 3)         # a 4x capture whose block centres (2, 2) hold the 1x picture
+        for y in range(H):
+            for x in range(W):
+                at = ((4 * y + 2) * 4 * W + 4 * x + 2) * 3
+                quad[at:at + 3] = base[(y * W + x) * 3:(y * W + x) * 3 + 3]
+        png.write_png(path("quad.png"), 4 * W, 4 * H, 3, bytes(quad))
+        s = reduce_centres(path("quad.png"), path("quad_r.png"))
+        r = compare_files(path("quad_r.png"), path("a.png"), 0, 0.0)
+        check("reduce_centres takes each block's centre pixel", s == 4 and r["fraction"] == 0.0 and not r["resized"])
+        try:
+            reduce_centres(path("odd24.bmp"), path("odd_r.png"))
+            check("reduce_centres refuses a size not S x 480x272", False)
+        except NotScaled:
+            check("reduce_centres refuses a size not S x 480x272", True)
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):

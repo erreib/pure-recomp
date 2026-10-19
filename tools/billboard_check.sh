@@ -12,8 +12,8 @@
 #              Removed first.
 #   --env      extra environment for the run (tools/run_boot.py --env).
 # The route is tools/frame_regress.sh's race route: config/pad_scripts/main_menu.txt + single_race.txt (Vineta K, Cross
-# held from flip 6100), their own shot steps dropped, on an empty memory stick (<out>/game, EBOOT.ELF and disc.iso
-# linked to game/), with one shot at flip 6490 (race time 0:03.9: the orange advert screen ahead on the left, at
+# held from flip 6100), their own shot steps dropped, on an empty memory stick (<out>/game, tools/lib.sh's
+# fresh_stick), with one shot at flip 6490 (race time 0:03.9: the orange advert screen ahead on the left, at
 # x 167-198 y 117-133, a strut across its right half) and the run ending at flip 6500. The run is silent and uses the
 # data directory out/data/billboard_check.
 # The numbers, over the rectangle RECT (PSP pixels x0 y0 x1 y1, ends excluded: x 169-180 y 119-131, left of the
@@ -30,7 +30,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
-ROOT=$PWD
+. tools/lib.sh
 
 SHOT=6490
 END=6500
@@ -55,25 +55,15 @@ while [ $# -gt 0 ]; do
     *) echo "billboard_check: unknown argument $1"; usage ;;
   esac
 done
-case $SHELL_NAME in
-  metal|headless) BACKEND=${BACKEND:-metal} ;;
-  vulkan) BACKEND=${BACKEND:-vulkan} ;;
-  *) echo "billboard_check: --shell is headless, metal or vulkan, not $SHELL_NAME"; exit 2 ;;
-esac
-case $BACKEND in metal|vulkan) ;; *) echo "billboard_check: --backend is metal or vulkan, not $BACKEND"; exit 2 ;; esac
+pick_backend billboard_check "headless metal vulkan"
 OUT=${OUT:-out/billboard_check/$BACKEND-$SHELL_NAME}
 
-# The build directory is the preset's (purelib.port knows).
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game
 
 rm -rf "$OUT"
-mkdir -p "$OUT/game/ms0/PSP/SAVEDATA" "$OUT/shots"
+mkdir -p "$OUT/shots"
 OUT=$(cd "$OUT" && pwd)
-ln -s "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
-ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
+fresh_stick "$OUT/game"
 {
   echo "$SHOT:shot b$SHOT"
   cat config/pad_scripts/main_menu.txt config/pad_scripts/single_race.txt |

@@ -12,8 +12,8 @@
 #   --check  the check below, after the build (or of --pack's folder, without a build).
 #   --pack   check this pack folder instead of building one (implies --check). The only mode on Windows, which has no
 #            Metal backend to build with: the rig gets the pack as a folder copied from the Mac.
-#   --wait   how long to wait for other games to end when the one-game guard refuses a run (default 600; 0 gives up
-#            at once), as tools/sprite_check.sh waits.
+#   --wait   how long to wait for other games to end before each run (tools/frame_regress.sh --wait, and
+#            tools/lib.sh's wait_game before a sweep; default 600, 0 gives up at once).
 # The build (macOS), headless on the Metal backend with PURE_SPRITE_UPSCALE=1 and PURE_SPRITE_DUMP=DIR/dump (the
 # dump collects across runs into one folder; a key already in it is skipped):
 #   - the frame regression suite's 18 scenes' routes (tools/frame_regress.sh --out DIR/regress): the frontend, the main
@@ -48,6 +48,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
+. tools/lib.sh
 
 DIR=out/sprite_pack
 CHECK=no
@@ -93,26 +94,14 @@ say() { echo "$*"; echo "$*" >> "$SUMMARY"; }
 # A path as Python and the game take it: Git Bash's /c/... as C:/... on Windows.
 native() { if [ -n "$WINDOWS" ]; then cygpath -m "$1"; else echo "$1"; fi; }
 
-# guarded LOG CMD...: runs CMD with its output to LOG, again every 20 s while the one-game guard refuses it (another
-# PureNative is running), for up to --wait seconds; returns CMD's status.
+# guarded LOG CMD...: runs CMD with its output to LOG once no other PureNative runs (tools/lib.sh's wait_game, up to
+# --wait seconds; exit 2 after that); returns CMD's status. The suite's runs pass --wait to tools/frame_regress.sh
+# instead, which waits the same way.
 guarded() {
-  local log=$1 waited=0 rc
+  local log=$1
   shift
-  while :; do
-    "$@" > "$log" 2>&1
-    rc=$?
-    grep -q 'another PureNative is running' "$log" || break
-    if [ $waited -ge "$WAIT" ]; then
-      cat "$log"
-      say "sprite_pack: another game kept running for $WAIT s; try again later"
-      exit 2
-    fi
-    [ $waited -eq 0 ] && grep 'pid ' "$log" | sed 's/^ */  waiting for: /'
-    sleep 20
-    waited=$((waited + 20))
-  done
-  [ $waited -gt 0 ] && echo "  (waited $waited s for another game to end)"
-  return $rc
+  wait_game sprite_pack "$WAIT" || { say "sprite_pack: another game kept running for $WAIT s; try again later"; exit 2; }
+  "$@" > "$log" 2>&1
 }
 
 # The keys of a pack folder's textures.ini (its `<key> = <file>` lines), 0 without one.
@@ -128,8 +117,8 @@ if [ -z "$PACK" ]; then
   say "sprite pack $(date '+%Y-%m-%d %H:%M'), commit $(git rev-parse --short HEAD 2>/dev/null || echo unknown):" \
     "headless on Metal with PURE_SPRITE_UPSCALE=1, PURE_SPRITE_DUMP=$DUMP"
   echo "the frame regression suite's routes (tools/frame_regress.sh --out $DIR/regress) ..."
-  guarded "$DIR/regress.stdout" tools/frame_regress.sh --out "$DIR/regress" --shell headless --backend metal \
-    --env PURE_SPRITE_UPSCALE=1 --env "PURE_SPRITE_DUMP=$DUMP"
+  tools/frame_regress.sh --wait "$WAIT" --out "$DIR/regress" --shell headless --backend metal \
+    --env PURE_SPRITE_UPSCALE=1 --env "PURE_SPRITE_DUMP=$DUMP" > "$DIR/regress.stdout" 2>&1
   rc=$?
   if [ $rc -eq 2 ]; then
     cat "$DIR/regress.stdout"
@@ -190,8 +179,9 @@ for state in off on; do
     envs=(--env PURE_TEXTURE_PACK=1 --env PURE_TRACE_TEXTURE_PACK=1)
   fi
   echo "the Vulkan window, pack $state (tools/frame_regress.sh --out $CHECKDIR/$state) ..."
-  guarded "$CHECKDIR/$state.stdout" tools/frame_regress.sh --out "$CHECKDIR/$state" --shell vulkan --backend vulkan \
-    --only "$(echo $CHECK_SCENES | tr ' ' ',')" --env "PURE_DATA_DIR=$(native "$DATA")" "${envs[@]}"
+  tools/frame_regress.sh --wait "$WAIT" --out "$CHECKDIR/$state" --shell vulkan --backend vulkan \
+    --only "$(echo $CHECK_SCENES | tr ' ' ',')" --env "PURE_DATA_DIR=$(native "$DATA")" "${envs[@]}" \
+    > "$CHECKDIR/$state.stdout" 2>&1
   if [ $? -eq 2 ]; then
     cat "$CHECKDIR/$state.stdout"
     say "sprite_pack: tools/frame_regress.sh could not run"
@@ -205,7 +195,6 @@ python3 - "$(native "$PACK")" "$(native "$CHECKDIR")" "$CHECK_SCENES" "$HUD_SCEN
 import os, re, subprocess, sys
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
-import png  # noqa: E402  (tools/png.py)
 
 pack, check, scenes, hud_scenes, game, seconds, summary = sys.argv[1], sys.argv[2], sys.argv[3].split(), \
     sys.argv[4].split(), sys.argv[5], int(sys.argv[6]), sys.argv[7]
@@ -256,28 +245,13 @@ def read_pack(folder):
 
 
 def reduce(path, reduced):
-    """The capture at `path` reduced to 480x272 by the centre pixel of each S x S block, (x S + S/2, y S + S/2) as
-    tools/scale_check.sh and tools/sprite_check.sh reduce, written to `reduced`; (S, None) or (None, why)."""
-    w, h, rgb = imgdiff.load_rgb(path)
-    s = w // 480
-    if s < 1 or w != 480 * s or h != 272 * s:
-        return None, f"{w}x{h} is not a multiple of 480x272"
-    half = s // 2
-    rows = []
-    for y in range(272):
-        start = ((y * s + half) * w + half) * 3
-        line = rgb[start:start + (w - half) * 3]
-        row = bytearray(480 * 3)
-        for k in range(3):
-            row[k::3] = line[k::s * 3][:480]
-        rows.append(bytes(row))
-    png.write_png(reduced, 480, 272, 3, b"".join(rows))
-    return s, None
-
-
-def compare(a, b, tol, max_frac, diff=None):
-    opts = type("Opts", (), dict(a=a, b=b, tol=tol, max_frac=max_frac, mask=None, region=None, out=diff))
-    return imgdiff.compare(opts)
+    """The capture at `path` reduced to 480x272 by the centre pixel of each S x S block (tools/imgdiff.py's
+    reduce_centres, as tools/scale_check.sh and tools/sprite_check.sh reduce), written to `reduced`; (S, None) or
+    (None, why)."""
+    try:
+        return imgdiff.reduce_centres(path, reduced), None
+    except imgdiff.NotScaled as e:
+        return None, str(e)
 
 
 def hud(scene, capture, frame):
@@ -360,7 +334,7 @@ for scene in scenes:
         continue
     w, h, _ = imgdiff.load_rgb(on)
     why = []
-    vs = compare(on, off, DIFF_TOL, 1.0)
+    vs = imgdiff.compare_files(on, off, DIFF_TOL, 1.0)
     if vs["fraction"] < MIN_DIFF:
         why.append(f"differs from the capture without the pack in under {MIN_DIFF:.0%}")
     texts = {}
@@ -373,7 +347,7 @@ for scene in scenes:
                 why.append(bad)
             continue
         diff = os.path.join(check, f"{scene}.{state}.diff.png")
-        r = compare(reduced, ref, tol, limit, diff)
+        r = imgdiff.compare_files(reduced, ref, tol, limit, diff)
         texts[state] = f"{r['fraction']:.4f}"
         if r["result"] == "PASS":
             os.remove(diff)

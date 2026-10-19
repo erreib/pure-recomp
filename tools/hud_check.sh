@@ -12,7 +12,7 @@
 # The run is silent and uses the data directory out/data/hud_check (settings.ini, pipeline caches), not the
 # player's, unless the environment sets PURE_NO_AUDIO or PURE_DATA_DIR (tools/run_boot.py; task 034).
 # The route: config/pad_scripts/main_menu.txt + single_race.txt (Vineta K, Cross held from flip 6100, no steering),
-# their own shot steps dropped, on an empty memory stick (<out>/game, EBOOT.ELF and disc.iso linked to game/), with a
+# their own shot steps dropped, on an empty memory stick (<out>/game, tools/lib.sh's fresh_stick), with a
 # shot every 25 flips from 6200 to 7700 (61 shots; the race goes at about 6250) and the run ending at flip 7710.
 # The shots are read by tools/hud_check.py: the yellow of the CURRENT label (PSP pixels x 2, y 2, 52 x 10) and of
 # the LAP label (x 2, y 232, 26 x 10), red > 180, green > 130, blue < 90. Prints `hud_check: N of M shots have the
@@ -24,7 +24,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
-ROOT=$PWD
+. tools/lib.sh
 
 FIRST=6200
 STEP=25
@@ -57,17 +57,12 @@ case $SHELL_NAME in
 esac
 OUT=${OUT:-out/hud/$SHELL_NAME}
 
-# The build directory is the preset's: arm64 on macOS, win-x64 on Windows (task 054; purelib.port knows).
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game
 
 rm -rf "$OUT"
-mkdir -p "$OUT/game/ms0/PSP/SAVEDATA" "$OUT/shots"
+mkdir -p "$OUT/shots"
 OUT=$(cd "$OUT" && pwd)
-ln -s "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
-ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
+fresh_stick "$OUT/game"
 {
   cat config/pad_scripts/main_menu.txt config/pad_scripts/single_race.txt |
     grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)'

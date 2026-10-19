@@ -62,6 +62,11 @@ import campaign_sweep as cs  # noqa: E402  (tools/campaign_sweep.py, imported fo
 from purelib import logs, port  # noqa: E402  (tools/purelib: the environment, the log readers)
 from purelib.logs import (GE_IGNORED_RE as IGNORED_RE, METAL_FPS_RE, PLAYER_RE, SHIP_T_RE,  # noqa: E402,F401
                           UNDERRUN_RE, UNIMPL_RE)
+# The scan of a cell's log and its rules live in purelib.logs since task 094 (the gates read sweep logs with them
+# without importing this tool); imported back under their names, which tools/scorecard.py uses as fa.NAME.
+from purelib.logs import (GUEST_BAD_RE, HITCH_US, SAVEDATA_RE, STOPPED_RE, STRETCH_MIN,  # noqa: E402,F401
+                          SWEEP_LINE_RE, TAG_RE, THREADS_RE, TRACK_RE, TWO_VBLANK_US, WARN_RE, normalise,
+                          scan_log, stretch_of)
 
 OUT = "out/fidelity"
 QUICK = [("single_race", "vineta_k", "vector"), ("zone", "zone_1", "vector"), ("time_trial", "vineta_k", "vector")]
@@ -71,9 +76,6 @@ FULL = ([("single_race", t, "vector") for t in ALL_TRACKS] + [("single_race", t,
         + [("free_play", t, "vector") for t in ("vineta_k", "sol_2", "karbonis")]
         + [("tournament", lg, "vector") for lg in ("alpha", "beta", "classic")]
         + [("zone", z, "vector") for z in cs.ZONES])
-STRETCH_MIN = 3                 # flips in a row at two vblanks that make a stretch (task 033's rule)
-TWO_VBLANK_US = 25000           # a race flip whose virtual time step exceeds this waited two vblanks (16683 us one)
-HITCH_US = 45000                # one that exceeds this waited three or more: a hitch
 LEAGUE_AT = 5180                # Single Race's league pick; Time Trial and Free Play show LEAGUE SELECTION then too
 EXTENDED_MPS = 30.0             # budget speed for the extended 30-flip cells (the follower is slower there)
 # What a cell does not inherit from the shell (purelib.port.clean_env's drop): traces, and the switches the sweep or
@@ -160,18 +162,6 @@ for _n in range(1, 8):
 for _n in range(0xF0, 0xFA):
     GE_NAMES[_n] = (f"UNKNOWN{_n:02X}", "undocumented (written by the GE init; no known effect)")
 
-# What counts as a warning in the subsystem tags (case-insensitive).
-WARN_RE = re.compile(r"cannot|can't|not (emulated|implemented|supported)|unsupported|fail|error|warn|unknown|"
-                     r"ran out|missing|dropped|too (many|large|big)|overflow|invalid|stall|timeout|lost", re.I)
-TAG_RE = re.compile(r"^\[(render|mpeg|atrac|sas|psmfplayer|savedata|audio|metal|io)\]")
-GUEST_BAD_RE = re.compile(r"error|fail|assert|warn", re.I)
-TRACK_RE = re.compile(r"\[io\] open disc0:/PSP_GAME/USRDIR/Data/(Environments|ClassicsNS|Zone)/([^/]+)/TrackStartup")
-THREADS_RE = re.compile(r"^threads \(virtual time (\d+) ms, vblanks (\d+)\)")
-STOPPED_RE = re.compile(r"Runtime stopped: (.*)")
-SWEEP_LINE_RE = re.compile(r"^\[sweep\] (\S+): (PASS|STALL|HALT|NO RACE|TIMEOUT|STUCK)((?: \([^)]*\))?) at flip (\d+), "
-                           r"(\d+) laps, race time ([\d.]+) s, (\d+) s: (.*)$")
-SAVEDATA_RE = re.compile(r"^\[savedata\] (\w+) \((\d+)\) game=\"(\w*)\" save=\"(\w*)\" file=\"([\w.]*)\"")
-
 
 def cell_label(mode, track, cls):
     return cs.cell_name(mode, track, cls)
@@ -188,159 +178,6 @@ def read_cells(path):
                 sys.exit(f"fidelity_audit: {path}: a cell is MODE TRACK [CLASS], not {raw.strip()!r}")
             cells.append((words[0], words[1], words[2] if len(words) == 3 else "vector"))
     return cells
-
-
-def normalise(text):
-    """A line as a feature: numbers that change from run to run (frames, times, counts) taken out."""
-    text = text.strip()
-    m = UNDERRUN_RE.search(text)
-    if m:
-        return f"[pure] audio capture: channel {m[1]} underrun (the game handed sceAudio a buffer late)"
-    text = re.sub(r"\bframe \d+\b", "frame N", text)
-    text = re.sub(r"\bt=\d+\b", "t=T", text)
-    text = re.sub(r"\bra=0x[0-9A-Fa-f]+", "ra=...", text)
-    return text
-
-
-def scan_log(path, fps=60):
-    """The findings of one sweep log (see the module doc). With fps 30 (Time Trial, Free Play, Zone: two vblanks a
-    flip throughout) no stretches are looked for."""
-    found = {"features": {}, "ignored": {}, "stretches": [], "hitches": [], "tracks": [], "saves": [], "exit": {},
-             "min_fps": None,
-             "unimplemented": None, "stopped": None, "race_start_s": None, "end_s": None, "races": 0}
-    feats = found["features"]
-
-    def add(text):
-        key = normalise(text)
-        feats[key] = feats.get(key, 0) + 1
-
-    prev = None            # (frame, t) of the previous ship line of the race
-    lapn, last_clock = 0, 0.0   # laps begun in the current race (the lap clock restarts at each line crossing)
-    run = []               # the current run of two-vblank flips: (frame, t_us, clock, dist, lap)
-    in_ignored = False
-    unimpl = []
-    in_unimpl = False
-    race_on = False
-    with open(path, errors="replace") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if in_unimpl:
-                if line.startswith("    "):
-                    unimpl.append(line.strip())
-                    continue
-                if line.startswith("  "):
-                    continue
-                in_unimpl = False
-            if in_ignored:
-                m = IGNORED_RE.match(line)
-                if m:
-                    op, count, first = int(m[1], 16), int(m[2]), int(m[3], 16)
-                    found["ignored"][op] = {"count": count, "first": first}
-                    continue
-                in_ignored = False
-            s = SHIP_T_RE.match(line)
-            if s:
-                frame, t, clock, dist, lap = int(s[1]), int(s[2]), float(s[3]), float(s[5]), int(s[6])
-                if race_on and clock < last_clock - 1.0:
-                    lapn += 1
-                last_clock = clock
-                if clock > 0.0 and not race_on:
-                    race_on = True
-                    lapn = 1
-                    found["races"] += 1
-                    if found["race_start_s"] is None:
-                        found["race_start_s"] = t / 1e6
-                if race_on:
-                    found["end_s"] = t / 1e6
-                if (race_on and prev is not None and frame == prev[0] + 1 and clock > 0.0 and lap < 0x10000
-                        and t - prev[1] > HITCH_US):
-                    # A flip three vblanks or more after the one before: the game held up, or the host (paced, the
-                    # kernel's clock then catches up with real time at once, and the audio channels underrun).
-                    found["hitches"].append((frame, round((t - prev[1]) / 1000), round(t / 1e6, 1), round(dist)))
-                if (fps == 60 and race_on and prev is not None and frame == prev[0] + 1 and clock > 0.0
-                        and lap < 0x10000):
-                    if t - prev[1] > TWO_VBLANK_US:
-                        run.append((frame, t, clock, dist, lapn, float(s[4])))
-                    else:
-                        if len(run) >= STRETCH_MIN:
-                            found["stretches"].append(stretch_of(run, found["races"]))
-                        run = []
-                prev = (frame, t)
-                continue
-            if PLAYER_RE.match(line):
-                if len(run) >= STRETCH_MIN:
-                    found["stretches"].append(stretch_of(run, found["races"]))
-                run, prev, race_on = [], None, False
-                continue
-            if line.startswith("[pure] frame ") or line.startswith("[script]") or line.startswith("    ..."):
-                continue
-            m = TRACK_RE.search(line)
-            if m:
-                found["tracks"].append(m[2])
-                continue
-            m = SAVEDATA_RE.match(line)
-            if m:
-                found["saves"].append(f"{m[1]} {m[3]}{m[4]}/{m[5]}")
-                continue
-            if line.startswith("GE commands ignored:"):
-                in_ignored = True
-                continue
-            m = UNIMPL_RE.match(line)
-            if m:
-                in_unimpl = True
-                found["unimplemented"] = f"{m[1]} of {m[2]}"
-                continue
-            m = METAL_FPS_RE.match(line)
-            if m:
-                fr, rate = int(m[1]), float(m[2])
-                if found["race_start_s"] is not None and (found["min_fps"] is None or rate < found["min_fps"][1]):
-                    found["min_fps"] = (fr, rate)
-                continue
-            e = logs.metal_exit(line) or logs.metal_pipelines(line)
-            if e:
-                found["exit"].update(e)
-                continue
-            m = THREADS_RE.match(line)
-            if m:
-                found["exit"].update(virtual_ms=int(m[1]), vblanks=int(m[2]))
-                continue
-            m = STOPPED_RE.search(line)
-            if m:
-                found["stopped"] = m[1].strip()
-                if "quit from the input script" not in m[1] and "PURE_EXIT_AT_FRAME" not in m[1]:
-                    add(line)
-                continue
-            if "[hle-stub]" in line or "unsupported" in line.lower():
-                add(line)
-                continue
-            if UNDERRUN_RE.search(line):
-                add(line)
-                m = re.search(r"channel (\d+) underrun of \d+ frames \((\d+) ms\) at t=(\d+)", line)
-                if m:
-                    found.setdefault("underruns", []).append((int(m[1]), int(m[2]), round(int(m[3]) / 1e6, 2)))
-                continue
-            tag = TAG_RE.match(line)
-            if tag:
-                if tag[1] == "metal" and ("not emulated" in line or "not implemented" in line):
-                    add(line)
-                elif tag[1] in ("metal", "io"):
-                    continue
-                elif WARN_RE.search(line):
-                    add(line)
-                continue
-            if line.startswith("[guest]") and GUEST_BAD_RE.search(line):
-                add(line)
-    if len(run) >= STRETCH_MIN:
-        found["stretches"].append(stretch_of(run, found["races"]))
-    if unimpl:
-        found["unimplemented_list"] = unimpl
-    return found
-
-
-def stretch_of(run, race):
-    first, last = run[0], run[-1]
-    return {"race": race, "flip": first[0], "flips": len(run), "seconds": round((last[1] - first[1]) / 1e6 + 0.0334, 2),
-            "clock": round(first[2], 1), "dist": round(first[3]), "lap": first[4], "kmh": round(first[5])}
 
 
 WAVSTATS_RE = re.compile(r"active fraction ([\d.]+) \((\d+)/(\d+)\), clipping fraction ([\d.]+)")

@@ -2,14 +2,15 @@
 # The frame regression suite (task 020): boots the game through the known routes, captures five scenes, compares each
 # with its PPSSPP reference in ref/ (tools/imgdiff.py) and prints a PASS/FAIL table, also written to <out>/summary.txt.
 # Exit 0 only when every scene passes. Every renderer change runs this before merging, on both paths (D-008). Three
-# bounded runs, one per route, each on an empty memory stick of its own (<out>/game, EBOOT.ELF and disc.iso linked
-# to game/), because main_menu.txt creates and saves a profile. By default (task 034) they run headless on the Metal
-# backend: no window, unpaced, the scenes the backend's own 480x272 pictures, under a minute in all. In a window
-# (--shell metal or vulkan; task 069) the suite captures the window scenes (WINDOW_SCENES below) and each run is
-# unpaced until PACE_MARGIN flips before its route's first scene and paced from there: about 5 minutes at 120 Hz.
+# bounded runs, one per route, each on an empty memory stick of its own (<out>/game, tools/lib.sh's fresh_stick:
+# EBOOT.ELF and disc.iso linked to game/'s), because main_menu.txt creates and saves a profile. By default (task 034)
+# they run headless on the Metal backend: no window, unpaced, the scenes the backend's own 480x272 pictures, under a
+# minute in all. In a window (--shell metal or vulkan; task 069) the suite captures the window scenes (WINDOW_SCENES
+# below) and each run is unpaced until PACE_MARGIN flips before its route's first scene and paced from there: about 5
+# minutes at 120 Hz.
 #   tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR]
 #                          [--only SCENE[,SCENE...]] [--window-scenes | --all-scenes] [--paced-from N | --paced]
-#                          [--env KEY=VAL ...] [--allow-parallel]
+#                          [--env KEY=VAL ...] [--wait [SECONDS] | --allow-parallel]
 #   --backend  sets PURE_GE_BACKEND for the runs, records it in the summary and picks the table's measured column
 #              (default metal, the macOS default since D-008; vulkan is the bootstrap path through MoltenVK).
 #   --shell    sets PURE_SHELL for the runs and records it in the summary beside the backend (default headless): the
@@ -32,9 +33,11 @@
 #   --env      extra environment for every run (tools/run_boot.py --env), e.g. a deliberate regression:
 #              tools/frame_regress.sh --shell vulkan --backend vulkan --only race_hud --env PURE_NO_STENCIL_BUFFER=1
 #              (race_hud FAILs)
-#   --allow-parallel  start even while another PureNative runs. Without it the suite refuses to start then, naming
-#              the process (task 034: one game at a time; a second game beside a windowed run has broken that
-#              run's menu route).
+#   --wait [SECONDS]  while another PureNative runs, wait for it (tools/lib.sh's wait_game) up to SECONDS (default
+#              600) before starting, and exit 2 when it still runs then (task 094; the checks that run the suite pass
+#              their own --wait). Without --wait the suite refuses to start then, naming the process (task 034: one
+#              game at a time; a second game beside a windowed run has broken that run's menu route).
+#   --allow-parallel  start even while another PureNative runs.
 # The runs are silent and use the data directory out/data/frame_regress (settings.ini, pipeline caches), not the
 # player's, unless the environment sets PURE_NO_AUDIO or PURE_DATA_DIR (tools/run_boot.py; task 034).
 # A scene's fraction is the share of pixels that differ by more than `tol` in any channel, with the capture (480x272
@@ -46,7 +49,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
-ROOT=$PWD
+. tools/lib.sh
 
 # The scenes. Route: input scripts in config/pad_scripts/, joined in order with their own `shot` steps dropped; the
 # suite adds `FRAME:shot SCENE` for each scene of the route and runs to the route's last shot + EXTRA_FLIPS. Scenes on
@@ -95,11 +98,12 @@ WINDOW_SET=window
 PACING=scene
 ENVS=()
 PARALLEL=no
+WAIT=
 # Windows (task 055): the Vulkan backend draws only in the Vulkan shell's window, so the suite defaults to it there,
 # with every scene (task 069: no headless run checks the menus there).
 case "$(uname -s)" in MINGW*|MSYS*) BACKEND=vulkan; SHELL_NAME=vulkan; WINDOW_SET=all ;; esac
 usage() {
-  echo "usage: tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]] [--window-scenes | --all-scenes] [--paced-from N | --paced] [--env KEY=VAL ...] [--allow-parallel]"
+  echo "usage: tools/frame_regress.sh [--backend metal|vulkan] [--shell headless|metal|vulkan] [--out DIR] [--only SCENE[,SCENE...]] [--window-scenes | --all-scenes] [--paced-from N | --paced] [--env KEY=VAL ...] [--wait [SECONDS] | --allow-parallel]"
   exit 2
 }
 while [ $# -gt 0 ]; do
@@ -113,33 +117,29 @@ while [ $# -gt 0 ]; do
     --paced-from) [ $# -ge 2 ] || usage; case $2 in ''|*[!0-9]*) usage ;; esac; PACING=$2; shift 2 ;;
     --paced) PACING=shell; shift ;;
     --env) [ $# -ge 2 ] || usage; case $2 in *=*) ;; *) usage ;; esac; ENVS+=(--env "$2"); shift 2 ;;
+    --wait) WAIT=600; shift; case ${1:-} in ''|*[!0-9]*) ;; *) WAIT=$1; shift ;; esac ;;
     --allow-parallel) PARALLEL=yes; shift ;;
     -h|--help) usage ;;
     *) echo "frame_regress: unknown argument $1"; usage ;;
   esac
 done
-case $BACKEND in vulkan|metal) ;; *) echo "frame_regress: --backend is vulkan or metal, not $BACKEND"; exit 2 ;; esac
-case $SHELL_NAME in vulkan|metal|headless) ;; *) echo "frame_regress: --shell is vulkan, metal or headless, not $SHELL_NAME"; exit 2 ;; esac
+pick_backend frame_regress "headless metal vulkan"     # BACKEND stays metal (vulkan on Windows) unless --backend
 [ -n "$SET" ] || { if [ "$SHELL_NAME" = headless ]; then SET=all; else SET=$WINDOW_SET; fi; }
 # The caller's PURE_PACED_FROM, from the environment or an --env (the last one wins, as in tools/run_boot.py).
 GIVEN=${PURE_PACED_FROM:-}
 for e in ${ENVS[@]+"${ENVS[@]}"}; do case $e in PURE_PACED_FROM=*) GIVEN=${e#*=} ;; esac; done
 
-# The build directory is the preset's: arm64 on macOS, win-x64 on Windows (task 054; purelib.port knows).
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game
 
 # One game at a time (task 034): a second PureNative beside a windowed run has delayed its boot and broken its menu
-# route, and one beside this suite's runs would load the machine they are measured on.
+# route, and one beside this suite's runs would load the machine they are measured on. With --wait the suite waits
+# its turn; without, it refuses (`frame_regress: another PureNative is running; one game at a time ...`).
 if [ $PARALLEL = no ]; then
-  others=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import run_boot
-print("\n".join(f"  pid {p}: {c}" for p, c in run_boot.other_games()))')
-  if [ -n "$others" ]; then
-    echo "frame_regress: another PureNative is running; one game at a time (--allow-parallel starts anyway):"
-    echo "$others"
-    exit 2
+  if [ -n "$WAIT" ]; then
+    wait_game frame_regress "$WAIT" || exit 2
+  else
+    python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
+sys.exit(2 if port.refuse("frame_regress") else 0)' || exit 2
   fi
 fi
 DATA=out/data/frame_regress
@@ -172,11 +172,7 @@ mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 rm -rf "$OUT/shots" "$OUT/game"
 rm -f "$OUT"/*.log "$OUT"/*.stdout "$OUT"/*.route.txt "$OUT"/*.diff.png "$OUT/summary.txt"
-mkdir -p "$OUT/shots" "$OUT/game"
-# Hard links on Windows: Git Bash's `ln -s` copies (253 MB of disc.iso per run) without Developer Mode (task 054).
-case "$(uname -s)" in MINGW*|MSYS*) LNS="ln" ;; *) LNS="ln -s" ;; esac
-$LNS "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
-$LNS "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$OUT/game/disc.iso"
+mkdir -p "$OUT/shots"
 
 START=$SECONDS
 SUMMARY=()
@@ -229,8 +225,7 @@ for route in $ROUTES; do
   for part in $(echo "$route" | tr '+' ' '); do
     grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' "config/pad_scripts/$part" >> "$script"
   done
-  rm -rf "$OUT/game/ms0"
-  mkdir -p "$OUT/game/ms0/PSP/SAVEDATA"
+  fresh_stick "$OUT/game"
   echo "run $name: $frames flips, $paced ..."
   t0=$SECONDS
   python3 tools/run_boot.py --script "$script" --shots "$OUT/shots" --frames "$frames" --data-dir "$DATA" \

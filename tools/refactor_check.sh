@@ -14,8 +14,9 @@
 #   --dir      default out/refactor.
 #   --shell, --backend, --env  for --before only (default headless and metal: the suite's own defaults, the backend's
 #              480x272 pictures, unpaced, about a minute); passed on to tools/frame_regress.sh.
-#   --wait     how long to wait for other games to end when the suite's one-game guard refuses to start (default 600;
-#              0 gives up at once). The other worktrees' runs come and go; this one waits its turn rather than fail.
+#   --wait     how long the suite waits for other games to end before it starts (tools/frame_regress.sh --wait;
+#              default 600, 0 gives up at once). The other worktrees' runs come and go; this one waits its turn rather
+#              than fail.
 # PASS (exit 0) only when every scene captured before has a capture after with 0 differing pixels, and the counts
 # the backend prints at exit (the [metal] lines of each route's log, with every time and rate taken out) are the
 # same; FAIL (exit 1) otherwise; exit 2 when it cannot run (no before captures, a suite refused for longer than
@@ -72,27 +73,16 @@ fi
 commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 git diff --quiet HEAD 2>/dev/null || commit="$commit+changes"
 
-# capture WHERE: the suite's scenes with the current build into WHERE/run (tools/frame_regress.sh --out), retried
-# while the one-game guard refuses, for up to --wait seconds.
+# capture WHERE: the suite's scenes with the current build into WHERE/run (tools/frame_regress.sh --out), the suite
+# waiting up to --wait seconds for another game (tools/frame_regress.sh --wait).
 capture() {
-  local where=$1 waited=0 rc
-  local args=(--out "$where/run" --shell "$SHELL_NAME" --backend "$BACKEND")
+  local where=$1 rc
+  local args=(--wait "$WAIT" --out "$where/run" --shell "$SHELL_NAME" --backend "$BACKEND")
   local e
   for e in ${ENVS[@]+"${ENVS[@]}"}; do args+=(--env "$e"); done
-  while :; do
-    tools/frame_regress.sh "${args[@]}" > "$where/frame_regress.stdout" 2>&1
-    rc=$?
-    grep -q '^frame_regress: another PureNative is running' "$where/frame_regress.stdout" || break
-    if [ $waited -ge "$WAIT" ]; then
-      cat "$where/frame_regress.stdout"
-      echo "refactor_check: another game kept running for $WAIT s; try again later"
-      exit 2
-    fi
-    [ $waited -eq 0 ] && sed -n '2,$p' "$where/frame_regress.stdout" | sed 's/^/  waiting for: /'
-    sleep 20
-    waited=$((waited + 20))
-  done
-  [ $waited -gt 0 ] && echo "  (waited $waited s for another game to end)"
+  tools/frame_regress.sh "${args[@]}" > "$where/frame_regress.stdout" 2>&1
+  rc=$?
+  grep -E '^frame_regress: (waiting|.*free after)' "$where/frame_regress.stdout" | sed 's/^frame_regress: /  /'
   if [ $rc -eq 2 ]; then
     cat "$where/frame_regress.stdout"
     echo "refactor_check: tools/frame_regress.sh could not run"
@@ -104,11 +94,14 @@ capture() {
 # counts LOG: the backend's [metal] lines printed at exit and every 600 frames, with what depends on the machine's
 # speed taken out (times and rates; the GPU waits, which depend on when the GPU finishes; and of the pipelines, which
 # of them a draw made or took from the pre-warm, which depends on when Metal's threads finished the pre-warm), and
-# without the start-up lines (the device, the compile time, the pre-warm's path and time).
+# without the start-up lines (the device, the compile time, the pre-warm's path and time). The exit line has gone on
+# past the GPU waits since E7 (`...; N textures upscaled (T ms)`): the waits are taken out wherever they stand and the
+# upscale's time with them (task 094; anchored at the line's end, the filter had left both in, so every run FAILed).
 counts() {
   grep -E '^\[metal\] ' "$1" |
     grep -Ev '^\[metal\] (drawing with|pre-warm|frame trace)' |
-    sed -E 's/ \([0-9.e+-]+ ms waited\)//g; s/, [0-9]+ GPU waits \([0-9.e+-]+ ms\) in [0-9.e+-]+ s$//;
+    sed -E 's/ \([0-9.e+-]+ ms waited\)//g; s/, [0-9]+ GPU waits \([0-9.e+-]+ ms\) in [0-9.e+-]+ s(;|$)/\1/;
+            s/ textures upscaled \([0-9.e+-]+ ms\)/ textures upscaled/;
             s/, [0-9.e+-]+ fps\)/)/;
             s/, [0-9]+ made by a draw \([0-9]+ of them waited for the pre-warm, ([0-9]+) not in the list\), [0-9]+ taken from the pre-warm of ([0-9]+)/, \1 not in the pre-warm list of \2/'
 }

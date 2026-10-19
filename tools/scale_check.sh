@@ -6,15 +6,15 @@
 #   --out      default out/scale: DIR/1 and DIR/S hold each suite's captures and logs (tools/frame_regress.sh --out),
 #              DIR/S/reduced the S captures reduced to 480x272, DIR/<scene>.diff.png the differing pixels of a failing
 #              scene, DIR/summary.txt the table.
-#   --wait     how long to wait for other games to end when the suite's one-game guard refuses to start (default 600;
-#              0 gives up at once), as tools/refactor_check.sh waits.
+#   --wait     how long the suite waits for other games to end before it starts (tools/frame_regress.sh --wait;
+#              default 600, 0 gives up at once).
 # For each scene: the S capture must be 480S x 272S (the backend's display target at the scale, capture_frame); it is
 # reduced to 480x272 by the centre pixel of each S x S block, (x S + S/2, y S + S/2), the rule by which the backend
-# feeds guest memory (D-015), and compared with the 1x capture by tools/imgdiff.py at tol 24: PASS when at most 5% of
-# the pixels differ. The table also gives, for the record, the fraction with tools/imgdiff.py's own nearest neighbour
-# on the full capture ("top-left"), which takes the block's top-left pixel (S x, S y): that pixel's centre lies
-# (S - 1) / 2S of a pixel up and left of the 1x pixel's (3/8 at S = 4), which moves every filtered edge, so it is not
-# the pass condition (docs/metal-backend.md, "Internal scale").
+# feeds guest memory (D-015; tools/imgdiff.py's reduce_centres), and compared with the 1x capture by tools/imgdiff.py at
+# tol 24: PASS when at most 5% of the pixels differ. The table also gives, for the record, the fraction with
+# tools/imgdiff.py's own nearest neighbour on the full capture ("top-left"), which takes the block's top-left pixel (S
+# x, S y): that pixel's centre lies (S - 1) / 2S of a pixel up and left of the 1x pixel's (3/8 at S = 4), which moves
+# every filtered edge, so it is not the pass condition (docs/metal-backend.md, "Internal scale").
 # For the race scenes on Vineta K's grid (race_hud, tt_hud, fp_hud) the bloom's region, BLOOM below, is measured too:
 # its mean luminance (0.299 R + 0.587 G + 0.114 B) in the S capture at its own size against the 1x capture's, PASS
 # within 10% of the 1x mean. The region is where the bloom adds the most on that grid: the light strips under the
@@ -53,27 +53,16 @@ mkdir -p "$DIR"
 DIR=$(cd "$DIR" && pwd)
 START=$SECONDS
 
-# capture S: the suite's scenes, headless on Metal at internal scale S, into DIR/S, retried while the one-game guard
-# refuses, for up to --wait seconds.
+# capture S: the suite's scenes, headless on Metal at internal scale S, into DIR/S, the suite waiting up to --wait
+# seconds for another game (tools/frame_regress.sh --wait).
 capture() {
-  local scale=$1 where="$DIR/$1" waited=0 rc
+  local scale=$1 where="$DIR/$1" rc
   rm -rf "$where"
   mkdir -p "$where"
-  while :; do
-    tools/frame_regress.sh --out "$where" --shell headless --backend metal --env "PURE_INTERNAL_SCALE=$scale" \
-      > "$DIR/frame_regress.$scale.stdout" 2>&1
-    rc=$?
-    grep -q '^frame_regress: another PureNative is running' "$DIR/frame_regress.$scale.stdout" || break
-    if [ $waited -ge "$WAIT" ]; then
-      cat "$DIR/frame_regress.$scale.stdout"
-      echo "scale_check: another game kept running for $WAIT s; try again later"
-      exit 2
-    fi
-    [ $waited -eq 0 ] && sed -n '2,$p' "$DIR/frame_regress.$scale.stdout" | sed 's/^/  waiting for: /'
-    sleep 20
-    waited=$((waited + 20))
-  done
-  [ $waited -gt 0 ] && echo "  (waited $waited s for another game to end)"
+  tools/frame_regress.sh --wait "$WAIT" --out "$where" --shell headless --backend metal \
+    --env "PURE_INTERNAL_SCALE=$scale" > "$DIR/frame_regress.$scale.stdout" 2>&1
+  rc=$?
+  grep -E '^frame_regress: (waiting|.*free after)' "$DIR/frame_regress.$scale.stdout" | sed 's/^frame_regress: /  /'
   if [ $rc -eq 2 ]; then
     cat "$DIR/frame_regress.$scale.stdout"
     echo "scale_check: tools/frame_regress.sh could not run"
@@ -93,7 +82,6 @@ python3 - "$DIR" "$SCALE" "$BLOOM" "$BLOOM_SCENES" "$((SECONDS - START))" <<'EOF
 import os, sys
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
-import png  # noqa: E402  (tools/png.py)
 
 out, scale, bloom, bloom_scenes, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4].split(), sys.argv[5]
 region = tuple(int(v) for v in bloom.split(","))
@@ -104,26 +92,6 @@ lines = []
 def note(text=""):
     print(text)
     lines.append(text)
-
-
-def centres(path, reduced):
-    """The S capture at `path` reduced to 480x272 by each block's centre pixel, written to `reduced`."""
-    w, h, rgb = imgdiff.load_rgb(path)
-    half = scale // 2
-    rows = []
-    for y in range(272):
-        start = ((y * scale + half) * w + half) * 3
-        line = rgb[start:start + (w - half) * 3]
-        row = bytearray(480 * 3)
-        for k in range(3):
-            row[k::3] = line[k::scale * 3][:480]
-        rows.append(bytes(row))
-    png.write_png(reduced, 480, 272, 3, b"".join(rows))
-
-
-def compare(a, b, diff=None):
-    opts = type("Opts", (), dict(a=a, b=b, tol=TOL, max_frac=MAX_FRAC, mask=None, region=None, out=diff))
-    return imgdiff.compare(opts)
 
 
 def luminance(path):
@@ -161,10 +129,10 @@ for scene in scenes:
              f"FAIL (not {480 * scale}x{272 * scale})")
         continue
     reduced = os.path.join(reduced_dir, scene + ".png")
-    centres(a, reduced)
+    imgdiff.reduce_centres(a, reduced, scale)
     diff = os.path.join(out, scene + ".diff.png")
-    r = compare(reduced, b, diff)
-    top_left = compare(a, b)["fraction"]
+    r = imgdiff.compare_files(reduced, b, TOL, MAX_FRAC, diff)
+    top_left = imgdiff.compare_files(a, b, TOL, MAX_FRAC)["fraction"]
     ok = r["result"] == "PASS"
     if ok:
         os.remove(diff)
