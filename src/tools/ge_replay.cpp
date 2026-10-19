@@ -1,5 +1,5 @@
 // ge_replay (task 022): the other half of the A/B method of docs/ge-backend.md. A .gerec file (the record
-// backend, format in vendor/portablekit/host/gpu/ge_record_format.hpp) holds the calls the shell made on a GE backend,
+// backend, format in src/tools/ge_record_format.hpp) holds the calls the shell made on a GE backend,
 // with the guest memory each call read and the image each frame presented. This feeds those calls, in their order, to
 // any registered backend outside the game and compares what it presents with the recorded images, or two backends
 // with each other, and can bisect a frame to the first draw whose pictures differ.
@@ -13,9 +13,9 @@
 
 #include "../gpu/ge_names.hpp"
 #include "../helpers.hpp"
+#include "ge_record_format.hpp"
 
 #include "gpu/ge_backend.hpp"
-#include "gpu/ge_record_format.hpp"
 #include "gpu/ge_state.hpp"
 #include "profile.hpp"
 #include "settings/settings.hpp"
@@ -52,7 +52,7 @@ namespace pure::replay {
 namespace {
 
 namespace gpu = portablekit::gpu;
-namespace gerec = portablekit::gpu::gerec;
+namespace gerec = pure::gerec;
 using gerec::Kind;
 using psprecomp::GuestMemory;
 using Clock = std::chrono::steady_clock;

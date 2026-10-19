@@ -46,7 +46,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0001-cmake-embed-nids-verbatim | 0001 | Bug | candidate | `VERBATIM` on the NID table's embedding command, so a profile's `config/nids.csv` survives the shell |
 | 0002-ge-state-commands | 0004, 0013, 0014, 0017 (ge_state) | Missing feature | candidate | GeState parses the stencil, the write masks, the texture map modes, the mip levels, the colour test, dithering and CLIPENABLE into `DrawCall` |
 | 0003-vulkan-renderer-fixes | 0003, 0004 (renderer), 0005 to 0008, 0013/0014/0017 (comments) | Bug, missing feature | candidate | The Vulkan renderer: framebuffer textures, stencil as alpha, the alpha test's numbering, shadow volumes and dual source, the descriptor pool at shutdown, depth written back at SIGNAL |
-| 0004-ge-backend-and-shell-seams | 0009, 0010, 0012, 0013/0014/0017 (record format) | Missing feature | candidate | `gpu::GeBackend` and `host::Shell` behind the HLE (D-003, D-007): the vulkan, null and record backends, the vulkan and headless shells, the .gerec record format |
+| 0004-ge-backend-and-shell-seams | 0009, 0010, 0012, 0013/0014/0017 (record format) | Missing feature | candidate | `gpu::GeBackend` and `host::Shell` behind the HLE (D-003, D-007): the vulkan and null backends, the vulkan and headless shells (the record backend and its .gerec format live in `src/tools/` since task 095) |
 | 0005-kernel-host-waits-and-pacing | 0011 | Behaviour (headless pace) | candidate | Only network waits hold the unpaced clock to real time; the shell decides whether the clock is paced |
 | 0006-mpeg-ring-not-empty-while-aus-pending | 0002 | Bug | candidate | `sceMpegRingbufferAvailableSize` reports the ring one packet short of empty while access units are queued |
 | 0007-savedata-list-and-no-key-mode | 0015, 0019 | Missing feature | candidate | List requests answered with a choice (script, PSP-style list, or a safe default); saves without a game key written and checked in mode 1 |
@@ -83,7 +83,7 @@ Old 0001. `portablekit_add_game` passes `-DINPUT=a.csv|b.csv` to the shell unquo
 
 ### 0002-ge-state-commands
 The ge_state.{hpp,cpp} sections of old 0004, 0013, 0014 and 0017, in that order. No backend draws with any of it
-here; 0003 and the Metal backend in `src/` read it, and 0004's record format writes it.
+here; 0003 and the Metal backend in `src/` read it, and our record format (`src/tools/ge_record_format.hpp`) writes it.
 - Stencil and write masks (old 0004): the GE state ignored the stencil (0x24, 0xDC, 0xDD) and the write masks (0xE8,
   0xE9). Parses them into `DrawCall::stencil` (`StencilState`), `color_write_mask` and `alpha_write_mask`.
 - Texture mapping modes (old 0013): the GE state ignored TEXMAPMODE (0xC0: the map mode in bits 0..1, the texture
@@ -156,19 +156,18 @@ colour test, nor dithering, nor CLIPENABLE's depth clamp). Needs 0002's stencil 
   write-back. The HLE side (`hle_media.cpp`) goes through the GE backend once 0004 applies.
 
 ### 0004-ge-backend-and-shell-seams
-Old 0009, 0010 and 0012, then the record-format sections of old 0013, 0014 and 0017 and 0017's record_backend.cpp
-section. Needs 0002 (the record format writes every `DrawCall` field) and 0003 (it builds on the renderer's depth
-write-back and its HLE call).
+Old 0009, 0010 and 0012. It carried the record backend and the .gerec format too (with the record-format sections of
+old 0013, 0014 and 0017) until task 095 moved both to `src/tools/` (`record_backend.cpp`, `ge_record_format.hpp`):
+their users are ours (`--replay`, `tools/gerec/`), and the backend registers with `BackendRegistration` as the Metal
+backend does. Needs 0003 (it builds on the renderer's depth write-back and its HLE call).
 - The GE backend seam (old 0009; D-003, docs/ge-backend.md): `gpu::GeBackend` (`host/gpu/ge_backend.hpp`) with a
   registry (`register_backend`, `make_backend`, `BackendRegistration`) and `<prefix>_GE_BACKEND` (vulkan when unset).
   The HLE (`hle_media.cpp`) hands draws, block transfers, read-backs, the frame and depth write-backs, CPU pictures,
   captures and the draw/frame counters to the backend. `vulkan` forwards each call to the renderer method that did
   the work before (`vulkan_ge_backend.cpp`, no change in output; the renderer gains `display_image()`, which names the
   target `present()` shows). `null` draws nothing, presents black and counts draws, and needs no window: with
-  `<prefix>_NO_RENDER` set it is the only backend that runs, without a window or GPU. `record` wraps another backend
-  (`<prefix>_GE_RECORD_INNER`) and writes frames `<prefix>_GE_RECORD_AT` to `+<prefix>_GE_RECORD_FRAMES-1` to
-  `<prefix>_GE_RECORD`: every call with the guest memory it read and each frame's presented image
-  (`ge_record_format.hpp`, read by `tools/gerec/gerec_dump.py`). Adds the four sources to `cmake/PortableKit.cmake`.
+  `<prefix>_NO_RENDER` set it is the only backend that runs, without a window or GPU. Adds the three sources to
+  `cmake/PortableKit.cmake`.
 - The shell seam (old 0010; D-007, docs/ge-backend.md section 8): `host::Shell` (`host/shell/shell.hpp`: lifecycle,
   events and input, presenting, interface) with a registry (`register_shell`, `make_shell`, `ShellRegistration`) and
   `<prefix>_SHELL` (vulkan when unset; `<prefix>_NO_RENDER` means headless). The HLE (`hle_media.cpp`) owns a shell
@@ -191,13 +190,6 @@ write-back and its HLE call).
   Vulkan shell calls `ImGui_ImplSDL3_InitForVulkan` for its renderer's window before the renderer's ImGui Vulkan
   backend (and shuts both down, or leaves neither running on failure), and `Layer::attach` loads the fonts, calls
   only `shell.initialize_ui`, then sets the gamepad mode. The Vulkan path is unchanged.
-- The record format's later fields (old 0013, 0014, 0017): a Draw ends with the texture map state (four u32), then
-  the mip level fields (`Writer::put_levels`, `kLevelBytes`), then the colour test, dithering and CLIPENABLE
-  (`kPixelBytes`). Each came after recordings had been made, so the reader takes a Draw that ends before a part as
-  map mode 0, one level, and no colour test, no dithering, CLIPENABLE off respectively; `kVersion` stays 1.
-  `RecordBackend::submit` also records the texels of every mip level a draw samples (levels 1 to `level_count` - 1
-  when the minification filter's bit 2 is on), so a recording replays mipmapped draws from their own texels instead
-  of zeroed memory.
 
 ### 0005-kernel-host-waits-and-pacing
 Old 0011. Needs 0004 (the HLE sets the pacing where it makes the shell). `Kernel::advance_clock` slept up to 1 ms of
@@ -395,7 +387,8 @@ Metal backend, task 066) had no row. Now they ask the backend the HLE draws with
 in `host/gpu/ge_backend.hpp`, defined in `hle_media.cpp` over its `active_backend()`): the row is drawn when
 `GeBackend::supports_internal_scale()` answers true, its value is `target_size()`, and a change calls
 `set_internal_scale(setting)`, the setting as `BackendConfig::internal_scale` takes it (0 Auto). The defaults are no,
-nothing and 480x272, so the null and record backends have no row; the Vulkan backend (`vulkan_ge_backend.cpp`) answers
+nothing and 480x272, so the null backend has no row (our record backend in `src/tools/` answers as the backend it
+wraps, since task 095); the Vulkan backend (`vulkan_ge_backend.cpp`) answers
 true and forwards both to its renderer, which is what the menu called before, so the Vulkan shell's menu is unchanged
 (the texture filter and texture pack rows keep their renderer gate). `GameProfile::default_internal_scale`
 (`std::optional`, unset by default) is the scale a new player starts with: `settings::defaults_for` applies it, so it

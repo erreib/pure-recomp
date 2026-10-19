@@ -1,8 +1,8 @@
 diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
-index 2af20fc..607cd31 100644
+index 2d9559b..86c9840 100644
 --- a/cmake/PortableKit.cmake
 +++ b/cmake/PortableKit.cmake
-@@ -284,7 +284,14 @@ function(portablekit_add_game target)
+@@ -283,7 +283,14 @@ function(portablekit_add_game target)
              if(PSPRECOMP_GENERATED_OPT_LEVEL STREQUAL "0")
                  set(generated_options "/Od;/bigobj")
              else()
@@ -18,7 +18,7 @@ index 2af20fc..607cd31 100644
              endif()
          else()
              # -ffp-contract=off: every translated instruction rounds on its own, as the VFPU and the FPU do
-@@ -643,7 +650,8 @@ function(_portablekit_add_overlay host_target meta_path output_dir)
+@@ -642,7 +649,8 @@ function(_portablekit_add_overlay host_target meta_path output_dir)
          if(PSPRECOMP_GENERATED_OPT_LEVEL STREQUAL "0")
              target_compile_options(${target} PRIVATE /Od /bigobj)
          else()

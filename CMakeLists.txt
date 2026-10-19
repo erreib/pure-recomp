@@ -20,13 +20,14 @@ endif()
 # Our profile. PROFILE_DIR is the repo root, so the corpus lives in generated/ and the player's files in game/
 # (both git-ignored), as docs/PROFILE_GUIDE.md in the framework lays out.
 # Our own main() (src/host/pure_main.cpp) runs ge_replay for `--replay` and the framework's main, compiled as
-# portablekit_main, otherwise (task 022).
+# portablekit_main, otherwise (task 022). The record backend (PURE_GE_BACKEND=record, which writes what ge_replay
+# reads) is built on every platform, as the framework built it before task 095 moved it here.
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
     SOURCES src/profile/pure_profile.cpp src/profile/enhancements.cpp src/profile/test_hooks.cpp
             src/profile/aspect.cpp src/hle/audio_capture.cpp
-            src/host/pure_main.cpp src/tools/ge_replay.cpp
+            src/host/pure_main.cpp src/tools/ge_replay.cpp src/tools/record_backend.cpp
             ${platform_sources})
 
 # The Windows release (task 061, docs/release.md "Windows"): the windows subsystem, so a player who starts the program
