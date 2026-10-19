@@ -805,6 +805,8 @@ that the docs name only what exists:
   or an old number as "old NNNN" on purpose; a history file may cite an old patch by the name patches/README.md's
   mapping table gives it.
 - **Tasks.** Every `docs/tasks/NNN` cited is a task file.
+- **Tools.** Every tracked file under `tools/` (`__pycache__` aside) is named in docs/developing.md, by its path or a
+  brace form of it, so a new tool gets its row there (task 092).
 
 It prints one line per finding (`FILE:LINE: what`) and a verdict, and exits 0 when there is none, 1 otherwise. Run it
 after editing a doc, and in a task that moves or renames a file, a tool or a patch.
