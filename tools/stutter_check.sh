@@ -25,21 +25,26 @@
 # no live file; they are counted and printed apart. And (b) the readback stall
 # (`[stalls]` readback, the GPU drains for a framebuffer or depth written back to guest memory) averages at most
 # MAX_READBACK_MS a frame over them, weighted by each line's frames. Prints both figures and the worst second either
-# way. The cell itself must PASS (the race reached its results screen). Waits up to 600 s while another PureNative
-# runs (one game at a time). Prints `stutter_check: PASS ...` or `stutter_check: FAIL ...` last; exit 0 only on PASS.
+# way. The cell itself must PASS (the race reached its results screen). And the window must have been on screen (task
+# 094, tools/purelib/logs.py's window guard, the rule tools/display_rate_check.sh --audio judges its run by): a covered
+# window, one on another Space or on a display asleep runs without vsync (task 091), so its race measures nothing. The
+# sweep's unpaced menus (the `[perf]` seconds before the paced flip, their first two left out) present at most the
+# display's refresh a second when vsync holds the window; the run FAILs as `the window was not on screen` when their
+# last three (with PURE_DISPLAY_RATE=1, the race load's) present more than SCREEN_HELD (1.5) times the refresh the
+# `[perf]` lines name (with PURE_DISPLAY_RATE=1, the race's `[pure] display rate` line's), or name none. Waits up to
+# 600 s while another PureNative runs (one game at a time). Prints `stutter_check: PASS ...` or `stutter_check: FAIL
+# ...` last; exit 0 only on PASS.
 set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
+. tools/lib.sh
 
 SLOW_MS=25              # a frame over this misses the race's 60 fps budget by more than half a frame
 MAX_SLOW_FRACTION=0.1   # (a): seconds with such a frame, at most 1 in 10
 MAX_READBACK_MS=2.0     # (b): the readback stall, ms a frame
 
-case $(uname -s) in
-  MINGW*|MSYS*|CYGWIN*) SHELL_NAME=vulkan ;;
-  *) SHELL_NAME=metal ;;
-esac
+SHELL_NAME=$(window_shell)
 BACKEND=
 OUT=
 usage() {
@@ -55,28 +60,16 @@ while [ $# -gt 0 ]; do
     *) echo "stutter_check: unknown argument $1"; usage ;;
   esac
 done
-case $SHELL_NAME in
-  metal) BACKEND=${BACKEND:-metal} ;;
-  vulkan) BACKEND=${BACKEND:-vulkan} ;;
-  *) echo "stutter_check: --shell is metal or vulkan (a window: the check measures wall time), not $SHELL_NAME"; exit 2 ;;
-esac
-case $BACKEND in metal|vulkan) ;; *) echo "stutter_check: --backend is metal or vulkan, not $BACKEND"; exit 2 ;; esac
+pick_backend stutter_check "metal vulkan" "a window: the check measures wall time"
 OUT=${OUT:-out/stutter_check/$BACKEND-$SHELL_NAME}
-
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 echo "stutter_check: shell $SHELL_NAME, backend $BACKEND, out $OUT"
 
-# One game at a time (task 034).
-python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
-sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("stutter_check: " + m, flush=True),
-                              limit=600) else 2)' || exit 2
+wait_game stutter_check || exit 2
 t0=$SECONDS
 FRAMES=()
 [ "${PURE_DISPLAY_RATE:-0}" = 1 ] && FRAMES=(--frames 26000)
@@ -87,33 +80,22 @@ PURE_PERF=log PURE_TRACE_STALLS=1 PURE_TRACE_STALLS_MS=$SLOW_MS PURE_NO_AUDIO=0 
 echo "stutter_check: campaign_sweep exit $?, $((SECONDS - t0)) s, log $OUT/race/single_race-vineta_k.log"
 
 python3 - "$OUT" $SLOW_MS $MAX_SLOW_FRACTION $MAX_READBACK_MS <<'EOF' | tee "$OUT/summary.txt"
-import os, re, sys
+import os, sys
 sys.path.insert(0, "tools")
-from fidelity_audit import SWEEP_LINE_RE  # the sweep's summary line
+from purelib.logs import PACED_RE, perf, slow_frame, stalls, sweep_result, window_guard  # the readers, the guard
 
 out = sys.argv[1]
 slow_ms, max_fraction, max_readback = float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
-PACED_RE = re.compile(r"^\[pure\] paced from frame (\d+)")
-PERF_RE = re.compile(r"^\[perf\] .*\| frame avg ([\d.]+) max ([\d.]+) ms")
-SLOW_RE = re.compile(r"^\[slow-frame\] (\d+) ([\d.]+) ms")
-# The frame's own pacing sleeps: the pacer sleeps only when the game is AHEAD
-# of real time, so that part of a long frame is the schedule holding, not a
-# stutter a player feels. (a) judges the frame without it (the review of task
-# 077: the realign frame after each live-file read was half the FAILs).
-PACING_RE = re.compile(r" pacing ([\d.]+) x\d")
+# slow_frame() takes the frame's own pacing sleeps off: the pacer sleeps only when the game is AHEAD of real time,
+# so that part of a long frame is the schedule holding, not a stutter a player feels. (a) judges the frame without it
+# (the review of task 077: the realign frame after each live-file read was half the FAILs).
 POLL = 10  # the input script reads PURE_INPUT_LIVE on flips that are a multiple of this (host/ui/input_script.cpp)
-STALLS_RE = re.compile(r"^\[stalls\] ms per frame over (\d+) frames:")
-READBACK_RE = re.compile(r" readback ([\d.]+) max")
 
-outcome = None
-with open(os.path.join(out, "race.stdout"), errors="replace") as f:
-    for line in f:
-        m = SWEEP_LINE_RE.match(line.strip())
-        if m and m[1] == "single_race-vineta_k":
-            outcome = m[2]
+outcome = sweep_result(os.path.join(out, "race.stdout"), "single_race-vineta_k")["outcome"]
 log = os.path.join(out, "race", "single_race-vineta_k.log")
-paced, seconds, frames, readback, pending, polls = None, [], 0, 0.0, [], []
+paced, seconds, frames, readback, pending, polls, guard = None, [], 0, 0.0, [], [], None
 if os.path.exists(log):
+    guard = window_guard(log)
     with open(log, errors="replace") as f:
         for line in f:
             if paced is None:
@@ -121,34 +103,34 @@ if os.path.exists(log):
                 if m:
                     paced = int(m[1])
                 continue
-            m = SLOW_RE.match(line)
+            m = slow_frame(line)
             if m:
-                flip, ms = int(m[1]), float(m[2])
-                p = PACING_RE.search(line)
-                if p:
-                    ms -= float(p[1])
+                flip, ms = m
                 if flip % POLL == 0:
                     polls.append(ms)
                 else:
                     pending.append((ms, flip))
                 continue
-            m = PERF_RE.match(line)
-            if m:
+            p = perf(line)
+            if p:
                 worst_slow = max(pending, default=None)
-                seconds.append((len(seconds) + 1, float(m[1]), float(m[2]), worst_slow))
+                seconds.append((len(seconds) + 1, p["frame_avg"], p["frame_max"], worst_slow))
                 pending = []
                 continue
-            m = STALLS_RE.match(line)
-            if m:
-                n = int(m[1])
-                r = READBACK_RE.search(line)
-                frames += n
-                readback += (float(r[1]) if r else 0.0) * n
+            st = stalls(line)
+            if st:
+                frames += st[0]
+                readback += st[1] * st[0]
 fails = []
 if outcome != "PASS":
     fails.append(f"the race cell {outcome or 'has no outcome'}")
 if paced is None:
     fails.append("no `[pure] paced from frame` line")
+# The window guard (tools/purelib/logs.py, display_rate_check.sh --audio's rule): the sweep's unpaced menus present
+# at most SCREEN_HELD times the display's refresh a second when vsync held the window on screen; a covered window
+# runs the race without vsync and its frames measure nothing (task 091).
+if guard is not None and not guard["shown"]:
+    fails.append(guard["problem"])
 slow = [s for s in seconds if s[3] is not None and s[3][0] > slow_ms]
 fraction = len(slow) / len(seconds) if seconds else 1.0
 mean = readback / frames if frames else 0.0
@@ -162,6 +144,9 @@ if not frames:
 elif mean > max_readback:
     fails.append(f"readback {mean:.2f} ms a frame (at most {max_readback:g})")
 print(f"race: {outcome or 'no outcome'}, paced from flip {paced}; {len(seconds)} seconds, {frames} frames")
+if guard is not None:
+    print(f"the window on screen: {'yes' if guard['shown'] else 'no'} (unpaced presents a second judged: "
+          f"{guard['judged'] or '-'}, the display {guard['hz'] or '-'} Hz)")
 print(f"(a) seconds with a frame over {slow_ms:g} ms: {len(slow)} of {len(seconds)} ({fraction:.1%}); apart, the "
       f"live-file flips (a multiple of {POLL}) over it: {len(polls)}, worst {max(polls, default=0.0):.1f} ms")
 print(f"(b) readback: {mean:.2f} ms a frame")
