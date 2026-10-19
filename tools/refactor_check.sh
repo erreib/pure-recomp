@@ -94,11 +94,14 @@ capture() {
 # counts LOG: the backend's [metal] lines printed at exit and every 600 frames, with what depends on the machine's
 # speed taken out (times and rates; the GPU waits, which depend on when the GPU finishes; and of the pipelines, which
 # of them a draw made or took from the pre-warm, which depends on when Metal's threads finished the pre-warm), and
-# without the start-up lines (the device, the compile time, the pre-warm's path and time).
+# without the start-up lines (the device, the compile time, the pre-warm's path and time). The exit line has gone on
+# past the GPU waits since E7 (`...; N textures upscaled (T ms)`): the waits are taken out wherever they stand and the
+# upscale's time with them (task 094; anchored at the line's end, the filter had left both in, so every run FAILed).
 counts() {
   grep -E '^\[metal\] ' "$1" |
     grep -Ev '^\[metal\] (drawing with|pre-warm|frame trace)' |
-    sed -E 's/ \([0-9.e+-]+ ms waited\)//g; s/, [0-9]+ GPU waits \([0-9.e+-]+ ms\) in [0-9.e+-]+ s$//;
+    sed -E 's/ \([0-9.e+-]+ ms waited\)//g; s/, [0-9]+ GPU waits \([0-9.e+-]+ ms\) in [0-9.e+-]+ s(;|$)/\1/;
+            s/ textures upscaled \([0-9.e+-]+ ms\)/ textures upscaled/;
             s/, [0-9.e+-]+ fps\)/)/;
             s/, [0-9]+ made by a draw \([0-9]+ of them waited for the pre-warm, ([0-9]+) not in the list\), [0-9]+ taken from the pre-warm of ([0-9]+)/, \1 not in the pre-warm list of \2/'
 }
