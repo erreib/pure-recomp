@@ -203,7 +203,10 @@ if [ "$MODE" = audio ]; then
       echo "display_rate_check: the probe printed no display rate line (log $OUT/probe.log)"
       exit 2 ;;
   esac
-  read -r END PRESENTS SHOWN < <(python3 - "$OUT/probe.log" "$probe" $AUDIO_FROM $AUDIO_SECONDS <<'EOF'
+  # $(...) around the here document, not < <(...): /bin/bash 3.2 (macOS) scans a process substitution for quotes,
+  # so an apostrophe in the Python below (a comment, a string) ends it with "no closing `)'" and the read falls
+  # through to the route mode's summary (task 097; the rig's bash 5 is fine either way).
+  probe_read=$(python3 - "$OUT/probe.log" "$probe" $AUDIO_FROM $AUDIO_SECONDS <<'EOF'
 import math, statistics, sys
 sys.path.insert(0, "tools")
 from purelib.logs import DISPLAY_HZ_RE, SCREEN_HELD, perf, window_shown  # the window guard's rule
@@ -215,6 +218,7 @@ presents = statistics.median(fps) if fps else max(float(hz) * SCREEN_HELD * 10, 
 print(start + math.ceil(seconds * float(rate)), presents, "yes" if window_shown([presents], float(hz)) else "no")
 EOF
 )
+  read -r END PRESENTS SHOWN <<< "$probe_read"
   SHOWN=${SHOWN%$'\r'}  # Windows Python ends its line \r\n, and read keeps the \r
   [ -n "${END:-}" ] || { echo "display_rate_check: cannot read the probe: $probe (log $OUT/probe.log)"; exit 2; }
   echo "display_rate_check: probe: $probe; the unpaced boot presents $PRESENTS a second; the run ends at flip $END"
