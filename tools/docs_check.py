@@ -237,6 +237,9 @@ def main():
     args = parser.parse_args()
     files = [os.path.relpath(os.path.abspath(f), ROOT) for f in args.files] or tracked_docs()
     patch_stems = {os.path.basename(p)[:-len(".patch")] for p in glob.glob(os.path.join(ROOT, "patches", "*.patch"))}
+    # A patch the series dropped stays nameable: patches/README.md keeps its row with the state "Removed" (task 095).
+    with open(os.path.join(ROOT, "patches", "README.md"), encoding="utf-8") as readme:
+        patch_stems |= {m.group(1) for m in re.finditer(r"^\| (\d{4}-[a-z0-9-]+) \|[^\n]*\| Removed \|", readme.read(), re.M)}
     task_files = {}
     for p in sorted(glob.glob(os.path.join(ROOT, "docs", "tasks", "[0-9][0-9][0-9]-*.md"))):
         name = os.path.basename(p)

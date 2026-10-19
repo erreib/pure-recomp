@@ -1,6 +1,6 @@
 # 095: Patch hygiene (a series workflow, our tool out of the vendor, duplicates and stale notes)
 
-Milestone: cleanup (audit 2026-10-19) | Branch: task/095-patch-hygiene | Status: OPEN
+Milestone: cleanup (audit 2026-10-19) | Branch: task/095-patch-hygiene | Status: MERGED
 
 ## Goal
 The vendor patches carry only framework changes, each written once, with comments that say what is true. The audit
@@ -273,4 +273,11 @@ Open questions:
     series.
 
 ## Review
-(Fills at review) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged into batch/m2 as 3b2c395 (2026-10-19). The branch was rebased on batch/m2's tip (cfcc3be), so the merged
+tree is the worker's and its Verify stands (patches.sh check, the suite, refactor_check, replay_check, metal_check,
+texture_check). The main checkout's vendor tree was brought to the new series by copying only the 26 files that
+differ from the worker's (none under include/psprecomp/, so no corpus rebuild); `tools/patches.sh check` ok (29),
+the profile build clean, the suite 18/18. Spot-read: the series' net (6,900 to 5,889 vendor lines), patches.sh
+`open`/`close`, `drain_recording` (the same calls in the same order). Owed: the doc lines the Result lists (a docs
+pass with 094's), the old patch numbers left in src/gpu comments, the window checks on the Mac and the rig (the
+Result's lists); the rig re-syncs its vendor tree with `tools/vendor_setup.sh` (a ccache rebuild of the corpus).

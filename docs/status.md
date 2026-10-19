@@ -182,9 +182,9 @@ after a change that moves or renames a file, a tool or a patch.
 
 ## Next
 
-- The audit's cleanup (docs/history/audit-2026-10-19.md): 092 docs, 093 src and 094 tools merged 2026-10-19; 095
-  (patch hygiene) running on task/095-patch-hygiene (its task file's Progress says what is left). After it: a docs pass
-  for the lines 094 and 095 list as owed (their Results), then one screen session for the window checks every task
+- The audit's cleanup (docs/history/audit-2026-10-19.md): 092 docs, 093 src, 094 tools and 095 patches (29 now)
+  merged 2026-10-19. Next: a docs pass for the lines 094 and 095 list as owed (their Results; small, the planning
+  session's), then one screen session for the window checks every task
   lists (Erik books it; the gerec recordings record afresh, about 15 minutes), then the scorecard rerun on an idle
   machine (`tools/scorecard.py --only timing`, and `SCORECARD_RACE_CLOCK=ref/race_clock tools/scorecard.py --only
   trajectories` to compare with 2026-10-07): the baseline of 2026-10-19 showed 4 two-vblank stretches on Vineta K,
