@@ -100,36 +100,6 @@ float ship_shield_max(Runtime &rt, std::uint32_t ship) {
     return std::isfinite(full) && full > 0.0f ? full : 0.0f;
 }
 
-// --- PURE_WATCH_MOVIE=1 --------------------------------------------------------------------------------------------
-// README.md: once per flip, while they change: the game's movie object (`DAT_08ab45bc`) and its fields `active`,
-// `ended`, `paused`, reader state, picture-queue capacity, `queued`, `shown` (pictures handed to the renderer), slots
-// (`[pure] movie frame N ...`).
-// The object is the one the per-frame update FUN_089488a8 last stored at DAT_08ab45bc (0 when no movie runs; task
-// 005). Fields: +0 active, +1 ended, +0x124 paused (u8); +0xd0 reader state (0 reading, 1 whole file in the ring, 2
-// stopping); +0x118 picture-queue capacity, +0x120 pictures queued, +0x128 pictures handed to the renderer,
-// +0x10c/+0x110 write/read slots, +0x11c the picture array.
-constexpr std::uint32_t kMovieObjectPtr = 0x08AB45BCu;
-
-void watch_movie(Runtime &rt, std::uint64_t frame) {
-    static const bool on = [] { const char *v = env("WATCH_MOVIE"); return v != nullptr && *v != '\0' && *v != '0'; }();
-    if (!on) return;
-    static std::string last;
-    const std::uint32_t s = rt.memory().load32(kMovieObjectPtr);
-    std::ostringstream o;
-    o << "s=" << item_hex(s);
-    if (s != 0u) {
-        const auto &m = rt.memory();
-        o << " active=" << unsigned(m.load8(s)) << " ended=" << unsigned(m.load8(s + 1u))
-          << " paused=" << unsigned(m.load8(s + 0x124u)) << " reader=" << m.load32(s + 0xd0u)
-          << " cap=" << m.load32(s + 0x118u) << " queued=" << static_cast<std::int32_t>(m.load32(s + 0x120u))
-          << " shown=" << m.load32(s + 0x128u) << " wr=" << m.load32(s + 0x10cu) << " rd=" << m.load32(s + 0x110u)
-          << " pics=" << item_hex(m.load32(s + 0x11cu));
-    }
-    if (o.str() == last) return;
-    last = o.str();
-    std::cout << "[pure] movie frame " << frame << " t=" << kernel().now_us() << " " << last << "\n";
-}
-
 // --- PURE_WATCH_SHIP=1 ---------------------------------------------------------------------------------------------
 // README.md: (task 007) once per flip during a race, while it changes: the player's race record (`.bss` array of
 // 0x1C0-byte entries, position of entry k at `0x08B72010 + k*0x1C0`): race clock, position, velocity, km/h, track
@@ -559,7 +529,6 @@ void flip(Runtime &rt, std::uint64_t frame) {
     watch_words(rt, frame);
     vfpu_dot();
     static const bool watch = env_on("WATCH_SHIP"), no_damage = env_on("TEST_NO_DAMAGE"), grid = env_on("WATCH_GRID");
-    watch_movie(rt, frame);
     watch_rand(rt, frame);
     if (watch || no_damage || grid) {
         const std::uint32_t ship = player_ship(rt, frame);
