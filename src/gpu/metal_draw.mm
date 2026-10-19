@@ -3,13 +3,13 @@
 // the texture and its mapping mode, the pipeline key, the viewport, scissor and depth clamp, and the state set on
 // the encoder when it changed; PURE_METAL_LOG's line per draw.
 #include "metal_backend.hpp"
+#include "ge_names.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
 #include <iostream>
-#include <iterator>
 
 namespace pure::gpu::metal_backend {
 namespace {
@@ -827,12 +827,9 @@ MetalGeBackend::ViewportScissor MetalGeBackend::scissor_of(const DrawCall &call)
 
 void MetalGeBackend::log_draw(const DrawCall &call, const Target &target, const Target *source, std::uint32_t x,
                               std::uint32_t y, const ViewportScissor &scissor, bool fitted) {
-    static const char *const kPrimitives[] = {"points", "lines", "linestrip", "triangles",
-                                              "tristrip", "trifan", "sprites"};
-    const auto primitive = static_cast<std::size_t>(call.primitive);
     // Numbered as the [render] frame lines number frames: the frame these draws are presented as.
     std::cout << "[metal] frame " << frames_ + 1u << " draw " << frame_draws_ << " "
-              << (primitive < std::size(kPrimitives) ? kPrimitives[primitive] : "?") << " x"
+              << primitive_name(call.primitive) << " x"
               << call.vertices.size() << (call.indices.empty() ? "" : " indexed")
               << (call.through ? " through" : " transformed") << " target 0x" << std::hex << target.key.address
               << std::dec << "/" << target.key.stride << "/" << target.key.format;
@@ -841,7 +838,7 @@ void MetalGeBackend::log_draw(const DrawCall &call, const Target &target, const 
     } else {
         if (call.texture.enabled) {
             std::cout << " tex 0x" << std::hex << call.texture.address << std::dec << " "
-                      << format_name(call.texture.format) << " " << call.texture.width << "x"
+                      << texture_format_name(call.texture.format) << " " << call.texture.width << "x"
                       << call.texture.height << " tfx " << call.texture.function
                       << (call.texture.alpha_from_texture ? "/rgba" : "/rgb");
             if (source != nullptr)

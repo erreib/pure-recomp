@@ -11,6 +11,8 @@
 // library to link a tool against). The comparison is tools/imgdiff.py's, so the numbers agree with it.
 #include "ge_replay.hpp"
 
+#include "../gpu/ge_names.hpp"
+
 #include "gpu/ge_backend.hpp"
 #include "gpu/ge_record_format.hpp"
 #include "gpu/ge_state.hpp"
@@ -540,20 +542,6 @@ void apply(std::size_t index, const Record &record, const std::vector<Lane *> &l
 
 // ---- What a differing draw was drawn with ----------------------------------------------------------------------
 
-const char *primitive_name(gpu::PrimitiveType type) {
-    static constexpr const char *names[] = {"points",         "lines",        "line_strip", "triangles",
-                                            "triangle_strip", "triangle_fan", "sprites"};
-    const auto index = static_cast<std::size_t>(type);
-    return index < std::size(names) ? names[index] : "?";
-}
-
-const char *texture_format_name(gpu::TextureFormat format) {
-    static constexpr const char *names[] = {"5650",   "5551",   "4444", "8888", "clut4", "clut8",
-                                            "clut16", "clut32", "dxt1", "dxt3", "dxt5"};
-    const auto index = static_cast<std::size_t>(format);
-    return index < std::size(names) ? names[index] : "?";
-}
-
 const char *target_format_name(std::uint32_t format) {
     static constexpr const char *names[] = {"5650", "5551", "4444", "8888"};
     return format < std::size(names) ? names[format] : "?";
@@ -561,7 +549,7 @@ const char *target_format_name(std::uint32_t format) {
 
 void describe(const gpu::DrawCall &call, std::ostream &out) {
     const auto on = [](bool value) { return value ? "on" : "off"; };
-    out << "  primitive " << primitive_name(call.primitive) << ", " << call.vertices.size() << " vertices, "
+    out << "  primitive " << pure::gpu::primitive_name(call.primitive) << ", " << call.vertices.size() << " vertices, "
         << call.indices.size() << " indices, " << (call.through ? "through" : "transformed") << ", vertex type "
         << hex(call.vertex_type) << "\n";
     out << "  target " << hex(call.target.color_address) << " " << target_format_name(call.target.color_format)
@@ -569,7 +557,7 @@ void describe(const gpu::DrawCall &call, std::ostream &out) {
         << call.target.depth_stride << "\n";
     const gpu::TextureState &t = call.texture;
     if (t.enabled) {
-        out << "  texture " << hex(t.address) << " " << texture_format_name(t.format) << " " << t.width << "x"
+        out << "  texture " << hex(t.address) << " " << pure::gpu::texture_format_name(t.format) << " " << t.width << "x"
             << t.height << " buffer " << t.buffer_width << (t.swizzled ? " swizzled" : "");
         if (t.format >= gpu::TextureFormat::Clut4 && t.format <= gpu::TextureFormat::Clut32)
             out << ", clut " << hex(t.clut_address) << " format " << t.clut_format << " shift " << t.clut_shift

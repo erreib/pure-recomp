@@ -5,6 +5,7 @@
 // pack (task 074), the GE's level rule, and the game options the backend reads (Text and sprites, Texture detail).
 // Textures that lie in a target are metal_targets.mm's.
 #include "metal_backend.hpp"
+#include "ge_names.hpp"
 #include "gpu/texture_decode.hpp"
 #include "gpu/texture_pack.hpp"
 #include "profile.hpp"
@@ -18,7 +19,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <system_error>
 
 namespace pure::gpu::metal_backend {
@@ -109,13 +109,6 @@ std::int32_t ge_log16(float value) {
 
 } // namespace
 
-const char *format_name(TextureFormat format) {
-    static const char *const kNames[] = {"5650", "5551", "4444", "8888", "CLUT4", "CLUT8",
-                                         "CLUT16", "CLUT32", "DXT1", "DXT3", "DXT5"};
-    const auto index = static_cast<std::size_t>(format);
-    return index < std::size(kNames) ? kNames[index] : "?";
-}
-
 std::uint32_t texture_bits(TextureFormat format) {
     switch (format) {
     case TextureFormat::Clut4: return 4u;
@@ -151,7 +144,7 @@ std::uint32_t MetalGeBackend::mip_levels(const GuestMemory &memory, const Textur
         if (why == nullptr) continue;
         if (bad_levels_.insert(state.address).second)
             std::cout << "[metal] texture 0x" << std::hex << state.address << std::dec << " "
-                      << format_name(state.format) << " " << state.width << "x" << state.height << ": level " << n
+                      << texture_format_name(state.format) << " " << state.width << "x" << state.height << ": level " << n
                       << " (0x" << std::hex << level.address << std::dec << " " << level.width << "x"
                       << level.height << ") " << why << "; drawn at level 0 alone\n"
                       << std::flush;
@@ -245,7 +238,7 @@ void MetalGeBackend::dump_sprite(const GuestMemory &memory, std::uint64_t key, c
     std::uint32_t covered_width = 0u, covered_height = 0u;
     if (!pk::compute_texture_pack_key(memory, state, 0u, pack_options(), pack_key, covered_width, covered_height)) {
         std::cout << "[metal] sprite pack: no pack key for texture 0x" << std::hex << state.address << std::dec << " "
-                  << format_name(state.format) << " " << state.width << "x" << state.height << "; left out\n";
+                  << texture_format_name(state.format) << " " << state.width << "x" << state.height << "; left out\n";
         return;
     }
     const std::string entry = pk::format_texture_pack_key(pack_key);
