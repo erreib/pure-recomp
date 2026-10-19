@@ -1,6 +1,6 @@
 # 093: The src leftovers (scaffolding, a probe, duplicate helpers)
 
-Milestone: cleanup (audit 2026-10-19) | Branch: task/093-src-leftovers | Status: OPEN
+Milestone: cleanup (audit 2026-10-19) | Branch: task/093-src-leftovers | Status: MERGED
 
 ## Goal
 Our own code carries only what is used. The audit (docs/history/audit-2026-10-19.md, "src/ and config/") found
@@ -220,4 +220,13 @@ Open questions:
    Nothing uses that pairing.
 
 ## Review
-(Fills at review) Verify rerun: | Spot-read: | Merged: | Notes:
+Merged 1bb0a44 into batch/m2 as 6d51c6a (2026-10-19). Gate (docs/approach.md rule 3): batch/m2 gained only docs
+(task 092) since the branch point, so the merged code is the worker's; the profile build on the merge is clean, and the
+worker's runs stand: the suite 18/18, refactor_check 18/18 pixels (its counts filter is broken, see below), metal_check
+PASS with an empty data directory and with the same figures as the build before, texture_check and sprite_check PASS.
+Spot-read: src/host/pure_main.cpp (the Vulkan shell's default backend), src/helpers.hpp (`env_on` keeps the profile's
+reading; the framework's on-when-set switches still go through `env_set`), the hand-over's removal in
+metal_backend.mm. The docs owed are applied (developing.md, metal-backend.md "The window" rewritten, ge-backend.md,
+verification.md). The two tool defects it found (refactor_check's counts filter anchored at the line's end;
+metal_check and replay_check reading the user's settings.ini) went to task 094. Window checks owed to the screen batch:
+menu_check on both shells, the window suites on both shells, one `PURE_SHELL=vulkan` start with no backend named.

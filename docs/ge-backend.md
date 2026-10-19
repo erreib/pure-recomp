@@ -94,7 +94,7 @@ An unknown name prints the registered ones and falls back to vulkan; an empty va
 | `GE_BACKEND` | `SHELL` `vulkan`, `NO_RENDER` unset | `SHELL` `metal` | `NO_RENDER` set, or `SHELL=headless` |
 |---|---|---|---|
 | vulkan | Vulkan shell, Vulkan draws | draws nothing (the backend needs the Vulkan shell) | no rendering at all, no draw sink, no shell |
-| metal | the Metal backend draws; each picture is read back and shown in the Vulkan window (`PURE_METAL_SHELL=0` turns the hand-over off) | the Metal shell shows the backend's texture: no Vulkan or MoltenVK in the process | headless shell: no window, every draw reaches the backend, which still draws on the GPU |
+| metal | the Metal backend draws; nothing reaches the Vulkan window; `PURE_SHELL=vulkan` alone takes the vulkan backend (task 093) | the Metal shell shows the backend's texture: no Vulkan or MoltenVK in the process | headless shell: no window, every draw reaches the backend, which still draws on the GPU |
 | null | Vulkan shell; the null backend's black Cpu image uploaded into the display target and shown; scripted input through the virtual gamepad | the black Cpu image | headless shell: no window, no GPU, every draw reaches the backend, the pad from the script |
 | record | as its inner backend | as its inner backend | as its inner backend |
 

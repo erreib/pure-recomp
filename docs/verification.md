@@ -347,7 +347,7 @@ as the shell's scaling, runs `--all-scenes` once.
 
 The port's test instruments live in `src/profile/test_hooks.{hpp,cpp}`, apart from the game's profile
 (`src/profile/pure_profile.cpp`): `PURE_TEST_NO_DAMAGE`, `PURE_TEST_UNLOCK_ALL`, `PURE_TEST_RACE_CLOCK`,
-`PURE_VFPU_DOT`, `PURE_WATCH_MOVIE`, `PURE_WATCH_SHIP`, `PURE_WATCH_GRID`, `PURE_WATCH_RAND`, `PURE_WATCH_WORDS`,
+`PURE_VFPU_DOT`, `PURE_WATCH_SHIP`, `PURE_WATCH_GRID`, `PURE_WATCH_RAND`, `PURE_WATCH_WORDS`,
 `PURE_TRACE_RAND` and `PURE_TRACE_CALLS`, each in its own function under its README row's text (README.md marks the
 row test-only). The profile keeps the run-control switches, `PURE_EXIT_AT_FRAME`, `PURE_FRAME_LOG` and
 `PURE_PACED_FROM`: they shape a run (its length, a log line, the pace) and neither change nor watch the game, and

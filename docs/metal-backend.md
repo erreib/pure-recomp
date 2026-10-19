@@ -42,7 +42,6 @@ tools/refactor_check.sh                                   # after it: 0 differin
 |---|---|
 | `PURE_GE_BACKEND=metal` | draw with this backend; with the window open (no `PURE_NO_RENDER`) or without one |
 | `PURE_METAL_LOG=1` | a line per draw and per new target (below). Every 600 frames and at exit the backend prints its counts either way |
-| `PURE_METAL_SHELL=0` | under the Vulkan shell, do not hand the pictures to its window: the window stays black and the input script's `shot` steps capture nothing (see "The window"). Under any other shell there is no hand-over to turn off |
 | `PURE_SHELL=metal` | show the pictures in the Metal shell's window instead of the Vulkan shell's (see "The Metal shell") |
 | `PURE_NO_FB_TEXTURES=1` | every texture decoded from guest memory, none read from a target (the framework's switch, as for Vulkan) |
 | `PURE_NO_DEPTH_READBACK=1` | the framework's switch (patch 0003-vulkan-renderer-fixes, task 019): the HLE does not ask for the depth write-back at a SIGNAL, so the lens flare is never occluded. ge_replay replays a recording's WriteBackDepth records regardless |
@@ -54,7 +53,7 @@ tools/refactor_check.sh                                   # after it: 0 differin
 | `PURE_NO_TEXMAP=1` | (task 036) every draw takes its UVs through the texture scale and offset (texture map mode 0), as before task 036: the texture matrix and environment map modes are not drawn ("Texture mapping modes") |
 | `PURE_NO_MIPMAPS=1` | (task 037) every texture is uploaded and sampled at level 0 alone, as before task 037, whatever levels the GE names ("Mipmaps"); its pictures are those of the build before the task |
 | `PURE_NO_COLOR_TEST=1`, `PURE_NO_DITHER=1`, `PURE_NO_DEPTH_CLAMP=1` | (task 040) each restores what the backend drew before task 040: every fragment kept; 5650, 5551 and 4444 targets blended by the pipeline at 8 bits a channel, never dithered; every transformed draw clipped at both ends of the depth range, MINZ/MAXZ unread. With all three the pictures are those of the build before the task ("The colour test, 16-bit writes and the depth clamp") |
-| `PURE_METAL_SHOW_TARGET=ADDR` | (task 040) each flip presents the target drawn last at ADDR instead of the display: a target the game never shows, such as the race's 565 billboard target (`0x04154000`), in a capture or a `ge_replay --cut ... --out` picture |
+| `PURE_SHOW_TARGET=ADDR` | (task 040; the framework's name since task 093) each flip presents the target drawn last at ADDR instead of the display: a target the game never shows, such as the race's 565 billboard target (`0x04154000`), in a capture or a `ge_replay --cut ... --out` picture |
 | `PURE_INTERNAL_SCALE=N` | (task 066) the framework's `video.internal_scale` for the run: the backend draws its screen-wide targets at N (1 to 6; 0 Auto), read at start ("Internal scale"). Without a window the backend draws at 1 unless this is set |
 | `PURE_SPRITE_UPSCALE=0\|1` | (task 073) the menu's Text and sprites row, `game.sprite_upscale`, for the run: `1` upscales the 2D draws' textures 4x at decode, `0` (the default since 2026-10-12) draws the PSP's texels; every tool run has `0` unless it names it ("Sprite upscale") |
 | `PURE_SPRITE_DUMP=DIR` | (task 073) each upscaled texture written once as `DIR/<key>.src.png` (the decoded input) and `DIR/<key>.png` (the output), for `tools/sprite_proto_check.py`; the textures are the game's, so DIR belongs under `out/` ("Sprite upscale") |
@@ -64,7 +63,7 @@ tools/refactor_check.sh                                   # after it: 0 differin
 When Metal cannot start (no device, or the shaders do not compile), `initialize` fails with the reason and the HLE
 prints `[render] GE backend metal cannot run (...)`. At start the backend prints the device and the shader compile
 time (`[metal] drawing with Apple M4 Pro, internal scale 1: targets 480x272, effects 480x272; shaders compiled in 0.5
-ms; pictures shown in the window`; about 0.7 s the first time, before macOS has cached the compiled library, and 0.5
+ms`; about 0.7 s the first time, before macOS has cached the compiled library, and 0.5
 to 30 ms after). Before task 066 the line read `drawing with Apple M4 Pro at 480x272, shaders compiled ...`.
 
 ## Files
@@ -90,7 +89,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `src/gpu/shaders/ge.metal` | the shaders, plain MSL: `ge_vertex`, `ge_fragment`, `ge_fragment_dual`, `ge_fragment_16`; ported from the framework's `ge.vert` and `ge.frag` (MIT); the texture mapping modes (`map_texture`, task 036), the mip level (task 037), and the colour test, the 16-bit writes and the depth clamp (task 040) are ours, from PPSSPP's hardware notes; the texture detail path in `sample_texture` (task 075, "Texture detail") too |
 | `src/gpu/shaders/embed.cmake` | the build step that turns `ge.metal` into `build/<preset>/generated_metal/ge_metal.hpp`: the file's text byte for byte as a raw string, `pure::metal::kShaderSource`, which `initialize` compiles. Rerun by the build whenever `ge.metal` changes |
 | `src/gpu/sprite_upscale.hpp`, `.cpp` | (task 073) `upscale_sprite`, the 4x resample of a W x H RGBA8 texture ("Sprite upscale"), and `write_png` for `PURE_SPRITE_DUMP` (the framework's vendored stb_image_write); plain C++, no Metal |
-| `src/gpu/metal_shell.hpp`, `.cpp` | `show_in_shell`: a presented picture into the Vulkan window shell (plain C++, so the shell's headers never meet Objective-C) |
+| `src/gpu/ge_names.hpp` | the GE's primitive and texture-format names, shared with `ge_replay` (plain C++) |
 | `tools/gerec/metal_check.sh` | the 3D and race checks (tasks 024 and 025): Metal against Vulkan through ge_replay on the TEAM screen and the race ("The 3D check", "The race check") |
 | `tools/scale_check.sh` | (task 066) the backend at internal scale S against 1: the suite's 18 scenes headless at both, compared after reducing the S captures to 480x272 by their blocks' centre pixels, plus the race scenes' bloom region ("Internal scale") |
 | `tools/refactor_check.sh` | (task 049) the proof that a change moved code and changed no picture: the frame regression suite's 18 scenes captured before the change (`--before`, on the starting commit) and after, compared at `--tol 0`, plus the backend's exit counts per route; PASS only at 0 differing pixels everywhere |
@@ -311,21 +310,12 @@ prints them.
 
 ### The window
 
-Under the Vulkan shell (the default, `PURE_SHELL` unset), the window belongs to `VulkanRenderer`, which presents its own
-target at the display address, and the input script's `shot` steps, which the frame regression suite captures with, read
-that window (`VulkanRenderer::capture_window`, from `ui/input_script.cpp`), not `GeBackend::capture_frame`. With nothing
-in the shell's targets the window is black and a `shot` writes no file at all (checked: `--only lang --env
-PURE_METAL_SHELL=0` ends `FAIL (no capture)`). So, when there is a window, `present_image` reads the picture back and
-hands it to the shell (`show_in_shell` in `metal_shell.cpp`: `VulkanRenderer::upload_frame` at the display address),
-scaled by nearest neighbour to the shell's target size (960x544 at the default 2x) so that the shell's blit copies it
-1:1. The window then shows what Metal drew, and a `shot`, reduced to 480x272 by nearest neighbour as the suite does,
-gives Metal's pixels back exactly: the suite's `lang` shot and the backend's own `capture_frame` of the same frame are
-identical at 480x272. This costs one GPU wait and a 2 MB upload a frame. `PURE_METAL_SHELL=0` turns it off. Under any
-other shell `BackendConfig::vulkan_shell` is null and there is no hand-over and no read-back: `present_image` commits
-the frame and names the target's texture, which the Metal shell samples itself (below) and the headless shell never
-looks at (its `shot` steps are `capture_frame`). The start-up line then ends "pictures shown by the shell, not read
-back". At an internal scale S above 1 the picture read back is 480S x 272S, which `show_in_shell` scales to the shell's
-target the same way ("Internal scale").
+The Metal backend shows its pictures through the Metal shell (`PURE_SHELL=metal`, the macOS default): `present_image`
+commits the frame and names the target's texture, which the Metal shell samples itself (below), and the headless shell
+never looks at (its `shot` steps are `capture_frame`). Under the Vulkan shell the window belongs to `VulkanRenderer` and
+shows only the Vulkan backend's pictures, so `PURE_SHELL=vulkan` alone picks the vulkan backend (`src/host/pure_main.cpp`);
+naming `PURE_GE_BACKEND=metal` there leaves the window black, which nothing uses. Until task 093 the backend read each
+picture back and handed it to the Vulkan window (`PURE_METAL_SHELL`), scaffolding from before the Metal shell existed.
 
 ## Internal scale
 
@@ -358,7 +348,7 @@ check proves: 0 differing pixels on the 18 scenes and the same counts after each
 | Points and lines | one pixel wide at any scale (Metal draws no wider line); none of the recordings (the frontend, the TEAM screen, the race at 1x and 2x) has a point or a line |
 | Guest memory | the frame write-back, `read_back_framebuffer`, a block transfer's source rows (`store_target`) and the depth write-back (`store_depth`) blit the target whole at its size and give the guest the centre pixel of each S x S block, (x S + S/2, y S + S/2) (`guest_pixels`): the game sees a 480x272 picture and depth as before, and the lens flare's 4x4 depth test reads the depth at those centres. A block transfer into a target's memory draws nothing into the target, at any scale, as before: the target's guest-word snapshot then no longer matches, so later binds of that memory decode it from guest memory |
 | CPU pictures | `upload_frame` writes each pixel of the picture as an S x S block |
-| Frames | `present_image` reports the display target's own size (480S x 272S, as `PresentedImage` asks); `capture_frame` writes the BMP at that size; the read-back for the Vulkan shell's hand-over is at that size too |
+| Frames | `present_image` reports the display target's own size (480S x 272S, as `PresentedImage` asks); `capture_frame` writes the BMP at that size |
 | Buffers | the three shared buffers (`readback_`, `frame_writeback_`, `guest_readback_`) hold the largest target: 8.4 MB each at 4, 18.8 MB at 6 |
 
 ### A change while the game runs
@@ -1058,7 +1048,7 @@ the counts it reports are the backend's own.
 | `pipeline_ms`, `texture_ms` | of `submit_ms`: making render pipelines and depth-stencil states (or waiting for the pre-warm to); hashing and decoding textures from guest memory |
 | `present_ms` | `present_image()` at the previous flip, its waits included |
 | `memory_ms` | `write_back_depth`, `write_back_frame`, `block_transfer`, `read_back_framebuffer`, `upload_frame` and `capture_frame`, their waits included |
-| `wait_ms`; `wait_depth_ms`, `wait_frame_ms`, `wait_guest_ms`, `wait_capture_ms`, `wait_ring_ms` | GPU waits in all (within `present_ms` and `memory_ms`), and by where: the SIGNAL's depth write-back, the frame write-back, transfers and read-backs from a target, captures and the Vulkan shell's hand-over, more than two frames in flight |
+| `wait_ms`; `wait_depth_ms`, `wait_frame_ms`, `wait_guest_ms`, `wait_capture_ms`, `wait_ring_ms` | GPU waits in all (within `present_ms` and `memory_ms`), and by where: the SIGNAL's depth write-back, the frame write-back, transfers and read-backs from a target, captures, more than two frames in flight |
 | `pipelines`, `depth_states` | made by a draw in the interval; a draw that waited for the pre-warm counts |
 | `decoded`, `decoded_kb` | textures decoded from guest memory, and their size as uploaded (RGBA8) |
 | `stencil_copies`, `draws`, `passes`, `copies` | copies of the stencil into the alpha, draws, render passes, copies of a target a draw samples while drawing into it |
