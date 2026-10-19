@@ -36,6 +36,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
+. tools/lib.sh
 
 SHELL_NAME=metal
 OUT=
@@ -51,21 +52,12 @@ while [ $# -gt 0 ]; do
     *) echo "menu_check: unknown argument $1"; usage ;;
   esac
 done
-case $SHELL_NAME in
-  metal|vulkan) ;;
-  *) echo "menu_check: --shell is metal or vulkan, not $SHELL_NAME"; exit 2 ;;
-esac
+pick_backend menu_check "metal vulkan"
 OUT=${OUT:-out/menu_check/$SHELL_NAME}
-
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game
 
 # One game at a time (task 034): a second game beside a windowed run can delay its boot and break its route.
-python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
-sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("menu_check: " + m, flush=True),
-                              limit=600) else 2)' || exit 2
+wait_game menu_check || exit 2
 
 rm -rf "$OUT"
 mkdir -p "$OUT/shots"

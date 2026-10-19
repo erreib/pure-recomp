@@ -5,7 +5,8 @@
 #   --out      the route, the run's log and WAVs, and summary.txt (default out/sas_reverb; its files are replaced).
 #   --env      extra environment for the run (tools/run_boot.py --env), e.g. --env PURE_NO_REVERB=1 for the port
 #              without the reverb (the check FAILs: the sound stops dead) or --env PURE_SAS_REVERB_SPU_RATE=1.
-#   --allow-parallel  start even while another PureNative runs (one game at a time otherwise, as frame_regress.sh).
+#   --allow-parallel  start even while another PureNative runs. Otherwise the check waits up to 600 s for it (one
+#              game at a time: tools/lib.sh's wait_game, as frame_regress.sh --wait) and exits 2 if it still runs.
 # The route, both sides from an empty memory stick: the port's main_menu.txt and free_play.txt without its Cross hold
 # (the ship idles on Vineta K's grid), then START at flip 16700, as task 041 ran it (docs/fidelity.md, "Difference
 # 8"); PPSSPP's tools/ppsspp/routes/frontend.txt, free_play_start.txt and free_play_idle_end.txt (START at vblank
@@ -25,7 +26,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
-ROOT=$PWD
+. tools/lib.sh
 
 OUT=out/sas_reverb
 ENVS=()
@@ -43,24 +44,15 @@ REF=ref/audio/free_play_pause.wav
 PRESS_FLIP=16700
 FRAMES=16800
 [ -f "$REF" ] || { echo "sas_reverb_check: $REF missing (PPSSPP's dump; copy it from the main checkout's ref/audio/ or take it as the header says)"; exit 2; }
-[ -x build/arm64/bin/PureNative ] || { echo "sas_reverb_check: build/arm64/bin/PureNative missing (tools/build.sh profile)"; exit 2; }
+need_game
 if [ "$PARALLEL" = 0 ]; then
-  others=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import run_boot
-print("\n".join(f"  pid {p}: {c}" for p, c in run_boot.other_games()))')
-  if [ -n "$others" ]; then
-    echo "sas_reverb_check: another PureNative is running; one game at a time (--allow-parallel starts anyway):"
-    echo "$others"
-    exit 2
-  fi
+  wait_game sas_reverb_check || exit 2
 fi
 
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-rm -rf "$OUT/game"
 rm -f "$OUT"/port.wav* "$OUT/run.log" "$OUT/run.stdout" "$OUT/route.txt" "$OUT/summary.txt"
-mkdir -p "$OUT/game/ms0/PSP/SAVEDATA"
-ln -s "$ROOT/game/EBOOT.ELF" "$OUT/game/EBOOT.ELF"
-ln -s "$ROOT/game/disc.iso" "$OUT/game/disc.iso"
+fresh_stick "$OUT/game"
 
 # The route: main_menu.txt without its shot, free_play.txt without the Cross hold at 5900, then the pause menu's END
 # SESSION as the sweep picks it (the run ends before DOWN, DOWN, Cross matter).

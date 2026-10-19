@@ -35,6 +35,7 @@
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
+. tools/lib.sh
 OUT=out/045
 VENDOR=vendor/portablekit
 # PPSSPP's memory stick and the port's binary as the driver and purelib know them (macOS, or Windows: task 055).
@@ -235,9 +236,7 @@ fi
 # --- the check ------------------------------------------------------------------------------------------------------
 PORT_ONLY=0
 [ "${1:-}" = --port-only ] && PORT_ONLY=1
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game
 for need in "$REF_PPSSPP/$PROFILE/PROFILE.BIN" "$REF_PPSSPP/$DLS/DATA1.BIN" "$REF_PLAIN/$PROFILE/PROFILE.BIN"; do
   [ -f "$need" ] || { echo "$need missing: ref/README.md, \"Saves (task 045)\", says how it was made"; exit 2; }
 done
@@ -258,13 +257,12 @@ for f in "$REF_PPSSPP/$PROFILE"/* "$REF_PPSSPP/$DLS"/* "$REF_PLAIN/$PROFILE"/*; 
   grep -q "$sha" ref/README.md && echo "  ok    $f" || echo "  note  $f: $sha is not the one ref/README.md lists"
 done
 
-# stick NAME [FOLDER...]: a fresh memory stick out/045/NAME/game with these save folders on it.
+# stick NAME [FOLDER...]: a fresh memory stick out/045/NAME/game (tools/lib.sh's fresh_stick) with these save folders
+# on it.
 stick() {
   local name=$1; shift
   local game="$OUT/$name/game"
-  mkdir -p "$game/ms0/PSP/SAVEDATA"
-  ln -sfn "$ROOT/game/EBOOT.ELF" "$game/EBOOT.ELF"
-  ln -sfn "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$game/disc.iso"
+  fresh_stick "$game"
   local f
   for f in "$@"; do cp -Rp "$f" "$game/ms0/PSP/SAVEDATA/"; done
 }
