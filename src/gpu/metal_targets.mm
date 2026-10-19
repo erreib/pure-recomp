@@ -4,6 +4,7 @@
 // depth write-backs, which store a target's pixels or depth in guest memory; a CPU picture copied into a target.
 #include "metal_backend.hpp"
 #include "metal_device.hpp"
+#include "gpu/texture_decode.hpp"
 
 #include <algorithm>
 #include <array>
@@ -125,7 +126,7 @@ Target *MetalGeBackend::find_framebuffer_texture(const GuestMemory &memory, cons
     for (auto &[key, target] : targets_) {
         if (!target->color_defined || target->guest_words.empty()) continue;
         const std::uint32_t bytes_per_pixel = target->bytes_per_pixel();
-        if (texture_bits(texture.format) != bytes_per_pixel * 8u) continue;
+        if (pk::bits_per_texel(texture.format) != bytes_per_pixel * 8u) continue;
         if (!target->contains(texture_address)) continue;
         if (texture.buffer_width != key.stride || (texture_address - key.address) % bytes_per_pixel != 0u) continue;
         const bool exact = texture_address == key.address;

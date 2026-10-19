@@ -65,7 +65,7 @@ index 141111f..905ac5b 100644
  // How two consecutive frames' draws correspond.
  struct Matching {
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 1b0e5a5..f74fcf8 100644
+index 6bf350e..73ac87b 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -77,6 +77,10 @@ constexpr std::uint32_t kSettleFrames = 12u;
@@ -93,7 +93,7 @@ index 1b0e5a5..f74fcf8 100644
      // `idle`: the kernel is waiting for real time, so the present costs the
      // game nothing; otherwise it is made while the game's code runs, within
      // a budget per game frame. Returns whether a present was made.
-@@ -6618,22 +6625,73 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6577,22 +6584,73 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // again. Draws that cover the screen's width (fades, backdrops) and
      // draws that sample a rendered picture (blur, the quest-reward
      // background) belong with the 3D view and stay spread.
@@ -180,7 +180,7 @@ index 1b0e5a5..f74fcf8 100644
              }
          }
      }
-@@ -6875,8 +6933,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6834,8 +6892,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
  
      PushConstants push{};
      // The GE viewport's x and y are folded into clip space (viewport_into_clip),
@@ -193,7 +193,7 @@ index 1b0e5a5..f74fcf8 100644
      push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
                       (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f)};
      if (stored_alpha >= 0) push.viewport[3] += kPushStencilAlpha + 8.0f * static_cast<float>(stored_alpha);
-@@ -6915,8 +6975,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6874,8 +6934,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // for a draw that is not a 2D one, neither through mode nor unlit under
      // an orthographic projection (its w row, projection[3], [7] and [11], all
      // 0), which is how a game draws menus and a HUD in 3D mode. It applies to
@@ -204,7 +204,7 @@ index 1b0e5a5..f74fcf8 100644
      const bool detail_wanted = impl.texture_detail && !call.through && !(orthographic && !call.lighting_enabled);
      if (call.texture.enabled && !call.clear_mode) {
          const Impl::FramebufferTexture &source = framebuffer_source;
-@@ -7130,7 +7190,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -7089,7 +7149,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              }
              perf::count_recorded_draws(1u);
              impl.record_draw_for_replay(call, lit || mapped, skinned_first, state, vertex_start, VK_NULL_HANDLE, 0u,
@@ -213,7 +213,7 @@ index 1b0e5a5..f74fcf8 100644
          } else {
              Impl::DrawGroup &group = impl.group;
              const auto vertex_count = static_cast<std::uint32_t>(vertex_total);
-@@ -7157,7 +7217,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -7116,7 +7176,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                  impl.group_skinned = skinned;
              }
              impl.record_draw_for_replay(call, lit || mapped, skinned_first, state, vertex_start, impl.index_buffer,
@@ -222,7 +222,7 @@ index 1b0e5a5..f74fcf8 100644
              auto *indices = reinterpret_cast<std::uint8_t *>(impl.index_mapped) + impl.index_offset;
              if (rebase == 0u) {
                  std::memcpy(indices, impl.direct_indices.data(), impl.direct_indices.size() * sizeof(std::uint16_t));
-@@ -7209,7 +7269,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -7168,7 +7228,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                                      blend_constants, push};
          impl.record_draw_for_replay(call, lit || mapped, skinned_first, state, vertex_start,
                                      direct ? impl.vertex_buffer : VK_NULL_HANDLE, index_start, draw_count,
@@ -231,7 +231,7 @@ index 1b0e5a5..f74fcf8 100644
      }
      impl.vertex_offset = draw_end;
      ++impl.draws;
-@@ -7711,7 +7771,8 @@ bool VulkanRenderer::Impl::interpolation_wanted() const {
+@@ -7670,7 +7730,8 @@ bool VulkanRenderer::Impl::interpolation_wanted() const {
  void VulkanRenderer::Impl::record_draw_for_replay(const DrawCall &call, bool lit, std::uint32_t skinned,
                                                    const DrawState &state, VkDeviceSize vertex_start,
                                                    VkBuffer indices, VkDeviceSize index_start, std::uint32_t count,
@@ -241,7 +241,7 @@ index 1b0e5a5..f74fcf8 100644
      if (!interpolating) return;
      FrameRecord &frame = recording_frame;
      if (!frame.recorded) return;
-@@ -7754,7 +7815,7 @@ void VulkanRenderer::Impl::record_draw_for_replay(const DrawCall &call, bool lit
+@@ -7713,7 +7774,7 @@ void VulkanRenderer::Impl::record_draw_for_replay(const DrawCall &call, bool lit
          frame.groups.push_back(added);
      }
      ++frame.groups.back().draws;

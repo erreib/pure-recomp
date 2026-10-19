@@ -322,7 +322,10 @@ sampled through a sampler of its own (`mip_sampler`, linear between levels). `te
 8, the part of D that is the same across the draw; `mip_lod` in `ge.frag` adds the rest with the GE's float-bits
 logarithm and samples with `textureLod`, as `sample_texture` in `src/gpu/shaders/ge.metal` (task 037). At an internal
 scale above 1 the auto rule's gradient is taken per PSP pixel. A texture of one level is drawn as before;
-`<prefix>_NO_MIPMAPS` (the name the Metal backend reads) restores the old path.
+`<prefix>_NO_MIPMAPS` (the name the Metal backend reads) restores the old path. Since task 095 the layout helpers
+both backends need are `texture_decode.hpp`'s, written once: `bits_per_texel` (the decoder's, no longer file-local),
+`indexed`, `texture_bytes`, `texture_level`, `sampled_level_count`, `mip_level_problem` (the halving and guest memory
+checks; each backend adds its own render targets) and `ge_log16`; the decoder's two palette tests call `indexed`.
 
 ### 0013-vulkan-colortest-depthclamp
 Task 059. The renderer kept every fragment and clipped every transformed draw at both ends of the depth range; the

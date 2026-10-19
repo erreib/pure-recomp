@@ -1,5 +1,5 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index ed0d570..7d653a6 100644
+index 1f7d40f..3eea158 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -163,6 +163,15 @@ void set_uv_rect(GpuVertex &vertex, float u_min, float v_min, float u_max, float
@@ -289,7 +289,7 @@ index ed0d570..7d653a6 100644
      state.push.viewport = {w, h, 1.0f, 0.0f};
      state.push.texture_params = {0.0f, 0.0f, 0.0f, 1.0f};  // no texture, alpha test ALWAYS
      PipelineKey key{};
-@@ -4467,18 +4526,14 @@ void VulkanRenderer::Impl::trace_framebuffer_texture(const DrawCall &call) {
+@@ -4426,18 +4485,14 @@ void VulkanRenderer::Impl::trace_framebuffer_texture(const DrawCall &call) {
      }
  }
  
@@ -312,7 +312,7 @@ index ed0d570..7d653a6 100644
      Staging &writeback = frame.writeback;
      if (!check(vkCreateBuffer(device, &buffer_info, nullptr, &writeback.buffer), "vkCreateBuffer", error))
          return false;
-@@ -4495,7 +4550,8 @@ bool VulkanRenderer::Impl::create_writeback(std::string &error) {
+@@ -4454,7 +4509,8 @@ bool VulkanRenderer::Impl::create_writeback(std::string &error) {
          writeback_cached ? memory.type
                           : find_memory_type(requirements.memoryTypeBits,
                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -322,7 +322,7 @@ index ed0d570..7d653a6 100644
          std::cout << "[render] frame write-back in memory type " << allocate.memoryTypeIndex
                    << (writeback_cached ? " (host cached" : " (host uncached")
                    << (writeback_coherent ? ", coherent)" : ", not coherent)") << "\n";
-@@ -4504,27 +4560,41 @@ bool VulkanRenderer::Impl::create_writeback(std::string &error) {
+@@ -4463,27 +4519,41 @@ bool VulkanRenderer::Impl::create_writeback(std::string &error) {
      vkBindBufferMemory(device, writeback.buffer, writeback.memory, 0u);
      if (!check(vkMapMemory(device, writeback.memory, 0u, bytes, 0u, &writeback.mapped), "vkMapMemory", error))
          return false;
@@ -378,7 +378,7 @@ index ed0d570..7d653a6 100644
  void VulkanRenderer::Impl::collect_writeback(std::uint32_t from, bool wait) {
      FrameSlot &frame = slots[from];
      if (!frame.writeback_in_flight) return;
-@@ -4535,8 +4605,7 @@ void VulkanRenderer::Impl::collect_writeback(std::uint32_t from, bool wait) {
+@@ -4494,8 +4564,7 @@ void VulkanRenderer::Impl::collect_writeback(std::uint32_t from, bool wait) {
      }
      const perf::Clock::time_point copy_start = perf::Clock::now();
      writeback_pixels.resize(static_cast<std::size_t>(kPspWidth) * kPspHeight);
@@ -388,7 +388,7 @@ index ed0d570..7d653a6 100644
      writeback_ready = frame.writeback_recorded;
      writeback_has_pixels = true;
      frame.writeback_in_flight = false;
-@@ -4551,34 +4620,34 @@ void VulkanRenderer::Impl::record_writeback(std::uint32_t address) {
+@@ -4510,34 +4579,34 @@ void VulkanRenderer::Impl::record_writeback(std::uint32_t address) {
      if (found == targets.end() || (GuestMemory::canonical(address) & 0x1F000000u) != 0x04000000u) return;
      Target &target = found->second;
      if (!target.initialized || target.guest_words.empty() || target.stride < kPspWidth) return;
@@ -443,7 +443,7 @@ index ed0d570..7d653a6 100644
      if (writeback_cached) {
          // Make the copy visible to the host reads after the fence.
          VkBufferMemoryBarrier to_host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
-@@ -4594,6 +4663,7 @@ void VulkanRenderer::Impl::record_writeback(std::uint32_t address) {
+@@ -4553,6 +4622,7 @@ void VulkanRenderer::Impl::record_writeback(std::uint32_t address) {
      }
      transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -451,7 +451,7 @@ index ed0d570..7d653a6 100644
      frame.writeback_recorded = {address, target.stride, target.format};
      frame.writeback_in_flight = true;
  }
-@@ -4662,11 +4732,16 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+@@ -4621,11 +4691,16 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
  
  // A sampled copy of the target, brought up to date with its latest draw. The
  // copy is recorded between render passes, so the pass in progress ends here.
@@ -469,7 +469,7 @@ index ed0d570..7d653a6 100644
                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, target.copy,
                            target.copy_memory, target.copy_view, VK_IMAGE_ASPECT_COLOR_BIT, error)) {
              std::cout << "[render] cannot sample a render target: " << error << "\n";
-@@ -4712,7 +4787,7 @@ VkDescriptorSet VulkanRenderer::Impl::framebuffer_descriptor(Target &target, boo
+@@ -4671,7 +4746,7 @@ VkDescriptorSet VulkanRenderer::Impl::framebuffer_descriptor(Target &target, boo
          VkImageCopy region{};
          region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
          region.dstSubresource = region.srcSubresource;
@@ -478,7 +478,7 @@ index ed0d570..7d653a6 100644
          vkCmdCopyImage(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.copy,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &region);
          perf::count_target_copy();
-@@ -5279,7 +5354,9 @@ void VulkanRenderer::hold_frame(bool hold) {
+@@ -5238,7 +5313,9 @@ void VulkanRenderer::hold_frame(bool hold) {
      const auto shown = impl.targets.find(impl.presented_target);
      if (shown == impl.targets.end() || !shown->second.initialized) return;
      std::string error;
@@ -489,7 +489,7 @@ index ed0d570..7d653a6 100644
                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                             impl.held.color, impl.held.color_memory, impl.held.color_view, VK_IMAGE_ASPECT_COLOR_BIT,
-@@ -5293,7 +5370,6 @@ void VulkanRenderer::hold_frame(bool hold) {
+@@ -5252,7 +5329,6 @@ void VulkanRenderer::hold_frame(bool hold) {
      // expects of a game frame.
      const VkImage source = shown->second.color;
      const VkImage copy_to = impl.held.color;
@@ -497,7 +497,7 @@ index ed0d570..7d653a6 100644
      impl.run_commands([&](VkCommandBuffer commands) {
          impl.transition(commands, source, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-@@ -5381,9 +5457,10 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+@@ -5340,9 +5416,10 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
      if (!ready || recording ||
          (extent.width == target_extent.width && extent.height == target_extent.height))
          return;
@@ -511,7 +511,7 @@ index ed0d570..7d653a6 100644
      vkDeviceWaitIdle(device);
      // A held frame has the old size; let the game's own frames show again.
      if (holding) {
-@@ -5393,12 +5470,11 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+@@ -5352,12 +5429,11 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
      }
      std::map<std::uint32_t, Target> old_targets = std::move(targets);
      targets.clear();
@@ -525,7 +525,7 @@ index ed0d570..7d653a6 100644
          if (target == nullptr) {
              std::cout << "[render] cannot resize a render target: " << error << "\n";
              continue;
-@@ -5417,10 +5493,11 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+@@ -5376,10 +5452,11 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
              transition(commands, target->color, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
              VkImageBlit blit{};
              blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
@@ -540,7 +540,7 @@ index ed0d570..7d653a6 100644
              vkCmdBlitImage(commands, old_target->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target->color,
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &blit, VK_FILTER_LINEAR);
              transition(commands, target->color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-@@ -5674,11 +5751,14 @@ void VulkanRenderer::present_ui(bool show_game) {
+@@ -5633,11 +5710,14 @@ void VulkanRenderer::present_ui(bool show_game) {
      if (!impl.recording) begin_frame();
      impl.end_pass();
      VkImage source = VK_NULL_HANDLE;
@@ -557,7 +557,7 @@ index ed0d570..7d653a6 100644
      impl.follow_window();
  }
  
-@@ -5809,17 +5889,17 @@ void VulkanRenderer::upload_frame(std::uint32_t display_address, const std::uint
+@@ -5768,17 +5848,17 @@ void VulkanRenderer::upload_frame(std::uint32_t display_address, const std::uint
      blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
      blit.srcOffsets[1] = {static_cast<std::int32_t>(width), static_cast<std::int32_t>(height), 1};
      blit.dstSubresource = blit.srcSubresource;
@@ -581,7 +581,7 @@ index ed0d570..7d653a6 100644
          const VkClearColorValue black{{0.0f, 0.0f, 0.0f, 1.0f}};
          const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
          vkCmdClearColorImage(impl.command_buffer, target->color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1u,
-@@ -6566,6 +6646,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6525,6 +6605,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // pipeline and never dithered, as before.
      static const bool no_dither = portablekit::env("NO_DITHER") != nullptr;
      const bool sixteen = call.target.color_format <= 2u && !no_dither;
@@ -591,7 +591,7 @@ index ed0d570..7d653a6 100644
      if (sixteen) {
          key.sixteen = 1u + call.target.color_format;
          if (key.blend) {
-@@ -6579,8 +6662,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6538,8 +6621,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              key.dither_rows = {(call.dither.rows[0] & 0xFFFFu) | (call.dither.rows[1] & 0xFFFFu) << 16u,
                                 (call.dither.rows[2] & 0xFFFFu) | (call.dither.rows[3] & 0xFFFFu) << 16u};
          }
@@ -602,7 +602,7 @@ index ed0d570..7d653a6 100644
          key.pixel_scale = {std::bit_cast<std::uint32_t>(across), std::bit_cast<std::uint32_t>(down)};
      }
      int stored_alpha = -1;
-@@ -6725,7 +6808,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6684,7 +6767,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // the rule (1 auto, 2 constant, 3 slope), bit 7 linear between levels
      // (min_filter bit 1; else the nearest level), bits 8 and up the constant
      // part plus 2048. g is per PSP pixel: at an internal scale above 1 the
@@ -612,7 +612,7 @@ index ed0d570..7d653a6 100644
      if (texture_levels > 1u) {
          std::int32_t rule = 1;
          std::int32_t constant = 0;
-@@ -6740,9 +6824,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6699,9 +6783,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              break;
          default: break;  // auto, and the undefined mode 3 as auto
          }
@@ -624,7 +624,7 @@ index ed0d570..7d653a6 100644
          constant = std::clamp(constant, -2048, 2047);
          push.texture_params[0] += static_cast<float>(32 * rule + ((call.texture.min_filter & 2u) != 0u ? 128 : 0) +
                                                       256 * (constant + 2048));
-@@ -6769,7 +6853,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6728,7 +6812,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                  if ((call.clear_flags & 4u) != 0u) overwritten |= 2u;
              }
          }
@@ -633,7 +633,7 @@ index ed0d570..7d653a6 100644
          if (!impl.pass_active) return;
      }
      // A blend that reads the destination's alpha reads the PSP's stencil.
-@@ -6799,11 +6883,12 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6758,11 +6842,12 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // reversed one.
      // A target holds the game's 480x272 screen whatever its size, so a PSP
      // pixel is scale_x by scale_y of its pixels: equal at a multiple of
@@ -651,7 +651,7 @@ index ed0d570..7d653a6 100644
      if (!call.through && call.viewport.x_scale != 0.0f && call.viewport.y_scale != 0.0f) {
          const ViewportState &vp = call.viewport;
          if (vp.z_scale != 0.0f) {
-@@ -6850,10 +6935,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6809,10 +6894,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
          return static_cast<std::int32_t>(
              std::clamp(std::lround(edge * scale), 0l, static_cast<long>(size)));
      };
@@ -666,7 +666,7 @@ index ed0d570..7d653a6 100644
      VkRect2D vk_scissor{};
      vk_scissor.offset = {left, top};
      vk_scissor.extent = {static_cast<std::uint32_t>(right - left), static_cast<std::uint32_t>(bottom - top)};
-@@ -7058,8 +7143,7 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+@@ -7017,8 +7102,7 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
      std::vector<std::uint32_t> fresh_pixels;
      std::vector<std::uint32_t> &pixels = Impl::reuse_buffers() ? impl.readback_pixels : fresh_pixels;
      pixels.resize(static_cast<std::size_t>(kPspWidth) * kPspHeight);
@@ -676,7 +676,7 @@ index ed0d570..7d653a6 100644
      const perf::Clock::time_point store_start = perf::Clock::now();
      perf::note_stall(perf::Stall::Copy, store_start - copy_start);
      impl.store_frame(memory, frame.writeback_recorded, pixels.data());
-@@ -7137,7 +7221,8 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+@@ -7096,7 +7180,8 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
      const perf::Clock::time_point start = perf::Clock::now();
      if (!impl.recording) begin_frame();
      impl.end_pass();
@@ -686,7 +686,7 @@ index ed0d570..7d653a6 100644
      const VkDeviceSize bytes = static_cast<VkDeviceSize>(extent.width) * extent.height * texel_bytes;
      if (impl.depth_readback_size < bytes) {
          impl.destroy_depth_readback();
-@@ -7150,7 +7235,6 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+@@ -7109,7 +7194,6 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
              return false;
          }
      }
@@ -694,7 +694,7 @@ index ed0d570..7d653a6 100644
      impl.transition(impl.command_buffer, target.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, impl.depth_aspect());
      VkBufferImageCopy copy{};
-@@ -7177,25 +7261,21 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+@@ -7136,25 +7220,21 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
      const perf::Clock::duration waited =
          impl.drain_recording("a depth write-back", "frame goes on after a depth write-back", false);
  
@@ -726,7 +726,7 @@ index ed0d570..7d653a6 100644
          for (std::uint32_t x = 0; x < kPspWidth; ++x) {
              const std::uint8_t *texel = row + static_cast<std::size_t>(columns[x]) * texel_bytes;
              std::uint32_t z = 0u;
-@@ -7438,8 +7518,8 @@ void VulkanRenderer::Impl::submit_frame() {
+@@ -7397,8 +7477,8 @@ void VulkanRenderer::Impl::submit_frame() {
  
  // The frame the game just flipped becomes the newer one: its picture is
  // copied, and it is matched against the frame before.
@@ -737,7 +737,7 @@ index ed0d570..7d653a6 100644
      const perf::SplitScope split(perf::Split::Interp);
      FrameRecord &frame = recording_frame;
      frame.recorded = frame.recorded && interpolating;
-@@ -7470,7 +7550,10 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
+@@ -7429,7 +7509,10 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
      VkImageCopy copy{};
      copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
      copy.dstSubresource = copy.srcSubresource;
@@ -749,7 +749,7 @@ index ed0d570..7d653a6 100644
      vkCmdCopyImage(command_buffer, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, picture.color,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copy);
      perf::count_target_copy();
-@@ -7613,10 +7696,12 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
+@@ -7572,10 +7655,12 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
      const Target &newer_image = pictures[newer_picture];
      const Target &older_image = pictures[newer_picture ^ 1u];
      VkImage image = newer_image.color;
@@ -762,7 +762,7 @@ index ed0d570..7d653a6 100644
          const bool paired = matching.cut == nullptr && older_frame.valid && older_frame.recorded && newer_frame.recorded;
          const bool textures_kept = destroyed_texture_clock <= older_frame.texture_clock;
          const bool can_blend = present.t > 0.001f && paired && textures_kept;
-@@ -7639,6 +7724,7 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
+@@ -7598,6 +7683,7 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
                  present_timed[slot] = true;
              }
              image = target.color;
@@ -770,7 +770,7 @@ index ed0d570..7d653a6 100644
              blended = true;
          } else if (!error.empty()) {
              std::cout << "[render] frame interpolation has no room to blend: " << error << "\n";
-@@ -7646,7 +7732,7 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
+@@ -7605,7 +7691,7 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
          }
      }
      ui_draw_data = frame_ui;
@@ -779,7 +779,7 @@ index ed0d570..7d653a6 100644
      // <prefix>_INTERPOLATION_EXTRA_MS: busy CPU time added to each blended
      // present, to try the step-down on a fast machine as if it were a slow one.
      static const double extra_ms = [] {
-@@ -7699,7 +7785,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+@@ -7658,7 +7744,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
      VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
      pass.renderPass = render_pass;
      pass.framebuffer = target.framebuffer;
@@ -788,7 +788,7 @@ index ed0d570..7d653a6 100644
      vkCmdBeginRenderPass(commands, &pass, VK_SUBPASS_CONTENTS_INLINE);
      perf::count_render_pass();
      // The input attachment every pipeline's shader declares (patch 0014). The
-@@ -7715,7 +7801,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+@@ -7674,7 +7760,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
      clears[0].clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
      clears[1].aspectMask = depth_aspect();
      clears[1].clearValue.depthStencil = {0.0f, 0u};
@@ -797,7 +797,7 @@ index ed0d570..7d653a6 100644
      vkCmdClearAttachments(commands, static_cast<std::uint32_t>(clears.size()), clears.data(), 1u, &whole);
  
      // The slot's scratch area: blended vertices and object blocks.
-@@ -8198,8 +8284,12 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+@@ -8157,8 +8243,12 @@ bool VulkanRenderer::present(std::uint32_t display_address,
      if (show_target != 0u)
          if (const auto shown = impl.targets.find(show_target); shown != impl.targets.end()) displayed = shown;
      VkImage source = displayed != impl.targets.end() ? displayed->second.color : VK_NULL_HANDLE;
@@ -811,7 +811,7 @@ index ed0d570..7d653a6 100644
      if (display_address != impl.display_addresses[0]) {
          impl.display_addresses[1] = impl.display_addresses[0];
          impl.display_addresses[0] = display_address;
-@@ -8261,7 +8351,7 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+@@ -8220,7 +8310,7 @@ bool VulkanRenderer::present(std::uint32_t display_address,
          impl.frame_ui = impl.ui_draw_data;
          impl.ui_draw_data = nullptr;
          const std::int64_t moment_us = moment ? to_us(*moment) : to_us(now);
@@ -820,7 +820,7 @@ index ed0d570..7d653a6 100644
          impl.submit_frame();
          ++impl.frames;
          impl.present_clock.set_presents_per_frame(pacing::presents_per_frame(impl.governor.rate()));
-@@ -8292,7 +8382,7 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+@@ -8251,7 +8341,7 @@ bool VulkanRenderer::present(std::uint32_t display_address,
      }
      {
          const perf::SplitScope split(perf::Split::Present);
@@ -829,7 +829,7 @@ index ed0d570..7d653a6 100644
      }
      ++impl.frames;
      if (impl.frame_rate != settings::FrameRate::Fps30) impl.report_interpolation();
-@@ -8373,8 +8463,8 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
+@@ -8332,8 +8422,8 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
      auto shown = impl.targets.find(impl.presented_target);
      if (shown == impl.targets.end()) return false;
      const VkImage captured = shown->second.color;
@@ -840,7 +840,7 @@ index ed0d570..7d653a6 100644
      const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * 4u;
      VkBuffer staging{};
      VkDeviceMemory staging_memory{};
-@@ -8452,8 +8542,8 @@ PresentedImage VulkanRenderer::display_image(std::uint32_t display_address) cons
+@@ -8411,8 +8501,8 @@ PresentedImage VulkanRenderer::display_image(std::uint32_t display_address) cons
      if (displayed == impl.targets.end()) return image;
      // The Vulkan shell shows the target by its display address; no handle leaves the renderer.
      image.api = ImageApi::Vulkan;

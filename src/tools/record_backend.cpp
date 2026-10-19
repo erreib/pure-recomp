@@ -22,6 +22,7 @@
 #include "ge_record_format.hpp"
 
 #include "gpu/ge_backend.hpp"
+#include "gpu/texture_decode.hpp"
 #include "profile.hpp"
 
 #include <algorithm>
@@ -59,9 +60,11 @@ std::uint64_t content_hash(const std::uint8_t *data, std::size_t size) {
 
 std::uint32_t target_bytes_per_pixel(std::uint32_t format) { return format == 3u ? 4u : 2u; }
 
-// The bytes decoding a texture reads from its address (texture_decode.cpp):
-// rows of the buffer width, or the blocks of a DXT texture.
-std::size_t texture_bytes(const TextureState &texture) {
+// The bytes a recording keeps of a texture from its address: rows of the
+// buffer width (or of the width, when that is wider), or the blocks of a DXT
+// texture, across the same width. At least what the framework's
+// texture_bytes() says decoding reads.
+std::size_t recorded_texture_bytes(const TextureState &texture) {
     const std::uint32_t width = texture.width;
     const std::uint32_t height = texture.height;
     const std::uint32_t across = texture.buffer_width != 0u ? std::max(texture.buffer_width, width) : width;
@@ -79,11 +82,6 @@ std::size_t texture_bytes(const TextureState &texture) {
     case TextureFormat::Dxt5: return static_cast<std::size_t>((across + 3u) / 4u) * ((height + 3u) / 4u) * 16u;
     }
     return 0u;
-}
-
-bool indexed(TextureFormat format) {
-    return format == TextureFormat::Clut4 || format == TextureFormat::Clut8 || format == TextureFormat::Clut16 ||
-           format == TextureFormat::Clut32;
 }
 
 class RecordBackend final : public GeBackend {
@@ -139,7 +137,7 @@ public:
         if (phase_ == Phase::Recording) {
             note_vram(memory);
             if (call.texture.enabled) {
-                record_memory(memory, call.texture.address, texture_bytes(call.texture));
+                record_memory(memory, call.texture.address, recorded_texture_bytes(call.texture));
                 // The mip levels after the first, when the minification filter
                 // samples them (bit 2): each from its own address, at its own
                 // size and row length, with level 0's format.
@@ -152,7 +150,7 @@ public:
                         texels.buffer_width = level.buffer_width;
                         texels.width = level.width;
                         texels.height = level.height;
-                        record_memory(memory, level.address, texture_bytes(texels));
+                        record_memory(memory, level.address, recorded_texture_bytes(texels));
                     }
                 }
                 if (indexed(call.texture.format))

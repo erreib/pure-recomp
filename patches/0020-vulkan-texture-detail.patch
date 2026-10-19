@@ -71,7 +71,7 @@ index 73f2e2a..dad06e9 100644
          if (function == 0) {          // modulate
              color *= texel;
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 7d653a6..01d090d 100644
+index 3eea158..e2f4e88 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -129,7 +129,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
@@ -242,7 +242,7 @@ index 7d653a6..01d090d 100644
      if (texture.view != VK_NULL_HANDLE) vkDestroyImageView(device, texture.view, nullptr);
      if (texture.image != VK_NULL_HANDLE) vkDestroyImage(device, texture.image, nullptr);
      if (texture.memory != VK_NULL_HANDLE) vkFreeMemory(device, texture.memory, nullptr);
-@@ -4326,7 +4388,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+@@ -4312,7 +4374,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
  }
  
  VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memory, const DrawCall &call,
@@ -251,7 +251,7 @@ index 7d653a6..01d090d 100644
      const perf::SplitScope split(perf::Split::Texture);
      Texture &texture = texture_for(memory, call, levels);
      if (texture.replacement && pack) {
-@@ -4338,9 +4400,33 @@ VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memo
+@@ -4324,9 +4386,33 @@ VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memo
          }
      }
      levels = texture.levels;
@@ -285,7 +285,7 @@ index 7d653a6..01d090d 100644
  void VulkanRenderer::Impl::apply_texture_pack() {
      const bool wanted = pack_wanted && !pack_held;
      if (pack_applied == wanted && !pack_reload) return;
-@@ -5634,6 +5720,11 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
+@@ -5593,6 +5679,11 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
          write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
          write.pImageInfo = &image_info;
          vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
@@ -297,7 +297,7 @@ index 7d653a6..01d090d 100644
      };
      rewrite(impl.white_texture);
      for (auto &[key, texture] : impl.textures) rewrite(texture);
-@@ -5783,6 +5874,10 @@ void VulkanRenderer::begin_frame() {
+@@ -5742,6 +5833,10 @@ void VulkanRenderer::begin_frame() {
      impl.collect_writeback(impl.slot, false);
      impl.report_pipelines(false);
      impl.apply_texture_pack();
@@ -308,7 +308,7 @@ index 7d653a6..01d090d 100644
      impl.replacements.begin_frame(impl.frames);
      if (texture_pack_trace() && impl.pack && impl.frames % 60u == 0u) {
          std::cout << "[texpack] frame " << impl.frames << ": " << impl.replaced_draws << " draws replaced in 60 frames, "
-@@ -6774,6 +6869,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6733,6 +6828,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
  
      VkDescriptorSet texture_descriptor = impl.white_texture.descriptor;
      std::uint32_t texture_levels = 1u;  // the mip levels the descriptor's image has
@@ -322,7 +322,7 @@ index 7d653a6..01d090d 100644
      if (call.texture.enabled && !call.clear_mode) {
          const Impl::FramebufferTexture &source = framebuffer_source;
          const VkDescriptorSet copy =
-@@ -6790,9 +6892,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6749,9 +6851,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              push.texture_params[0] += kPushPlaced;
          } else {
              texture_levels = impl.mip_levels(memory, call.texture);
@@ -334,7 +334,7 @@ index 7d653a6..01d090d 100644
      // Texture map modes 1 and 2 (texture_params.x bit 3): the vertex shader
      // takes the coordinates from the object block; in mode 1 (bit 4) the
      // fragment shader divides s and t by q.
-@@ -6810,6 +6913,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6769,6 +6872,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // part plus 2048. g is per PSP pixel: at an internal scale above 1 the
      // auto rule's constant adds 16 x log2 of the scale of the target drawn
      // into (none for a 480x272 one, patch 0018).
@@ -350,7 +350,7 @@ index 7d653a6..01d090d 100644
      if (texture_levels > 1u) {
          std::int32_t rule = 1;
          std::int32_t constant = 0;
-@@ -6824,12 +6936,23 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6783,12 +6895,23 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              break;
          default: break;  // auto, and the undefined mode 3 as auto
          }
@@ -377,7 +377,7 @@ index 7d653a6..01d090d 100644
      }
  
      if (!impl.pass_active || impl.current_target != call.target.color_address) {
-@@ -8626,6 +8749,7 @@ void VulkanRenderer::shutdown() {
+@@ -8585,6 +8708,7 @@ void VulkanRenderer::shutdown() {
      vkDestroySampler(impl.device, impl.clamp_sharp_sampler, nullptr);
      vkDestroySampler(impl.device, impl.mip_sampler, nullptr);
      vkDestroySampler(impl.device, impl.mip_sharp_sampler, nullptr);

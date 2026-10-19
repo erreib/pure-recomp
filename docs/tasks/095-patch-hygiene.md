@@ -97,7 +97,9 @@ another game started, wait and rerun it.
 (worker, kept current at each commit; a later session resumes from here)
 - Done: 1 (`tools/patches.sh open` / `close`), 2 (0025 dropped), 3 (record backend in src/tools/), 4 (0004 trimmed),
   5 (read-back once: `drain_recording`, `host_read_memory`, `invalidate_writeback(memory, coherent)` in 0003).
-- Left: 6 (small duplicates), 7 (stale notes), Verify, Result. README rows go with each item.
+  6, texture helpers (texture_decode.hpp exports, used by vulkan_renderer.cpp and metal_textures.mm).
+- Left: 6's rest (MenuTab alias, vblank period once, WINDOW_SIZE parse, NO_RENDER static), 7 (stale notes),
+  Verify, Result. README rows go with each item.
 - Workflow: `tools/patches.sh open`, edit in out/patch-series, fixup + `GIT_SEQUENCE_EDITOR=true git rebase -i
   --autosquash <pin>` (or an `edit` stop for a patch the later ones rework), `tools/patches.sh close`, build, commit.
 
