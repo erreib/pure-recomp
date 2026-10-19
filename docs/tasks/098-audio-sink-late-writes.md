@@ -35,7 +35,9 @@ the resyncs the dips used to cost. Then the rig at 100 Hz (097, the rig's step 4
 
 ## Result
 Status: PARTIAL. The patch is in batch/m2 (`tools/patches.sh check`: 30), the build clean, the headless suite
-18/18. The window probe was not run (no screen booked); it is row 7 of task 097.
+18/18. The window probe ran on the Mac in task 097's batch (its Result, finding 3): PASS under both rules with the
+same `[audio]` figures to the frame (`lates=0`, `ratio=1.000`, 20 channel-restart resyncs), because the Mac never
+runs a channel late at 119.4 Hz. The dip regime the patch is for is the rig's: task 097, the rig's step 4 (Erik).
 
 What ran (2026-10-19, out/098/):
 - `tools/frame_regress.sh`: PASS, 18/18 (sound off there; nothing moved).

@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-19 (task 098). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-19 (task 097's Mac batch). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack | on the roadmap, not scheduled (Next) |
-| Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) and the scorecard rerun (096) wait for Erik's screen and an idle machine |
+| Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; its rig steps are Erik's |
 
 ## Works
 
@@ -54,7 +54,7 @@ a 100 Hz display).
 | Controls | keyboard (two layouts), mouse, gamepads, rebinding in the menu (docs/controls.md; `tools/controls_check.py`) |
 | The app and the zip | `tools/bundle.sh` makes `Wipeout Pure.app`, `tools/bundle_windows.sh` the Windows zip, eight checks each (docs/release.md); 0.1.0 published on GitHub with both archives; last staged 0.1.0-bc0a86a on the Mac and e4f1fb7 on the rig (2026-10-15) |
 | The harness | the headless suite (18 scenes, about 25 s), the window suites (7 scenes, about 5 minutes a path), the HUD check, the enhancements' checks, the sweep, the scorecard and the fidelity tools; on the rig under Git Bash (the ConPTY runner, PPSSPP 1.20.4), all but `tools/refactor_check.sh`; docs/verification.md |
-| Fidelity | the M8 audit's fourteen differences fixed, explained or accepted (docs/fidelity.md); the scorecard's timing and trajectories lanes rerun 2026-10-19 (task 097, "The scorecard rerun"): timing close, the players faithful on 11 of 12 circuits as docs/fidelity.md says |
+| Fidelity | the M8 audit's fourteen differences fixed, explained or accepted (docs/fidelity.md); the window checks of tasks 092 to 095 and 098 PASS on the Mac (task 097, 2026-10-19); the scorecard's timing and trajectories lanes rerun 2026-10-19 (task 097, "The scorecard rerun"): timing close, the players faithful on 11 of 12 circuits as docs/fidelity.md says |
 
 ## Follow-ups
 
@@ -110,8 +110,11 @@ The enhancements:
   drop vblanks or slow down under about 95% is a pacer call; worktree builds there lose the renderer (`SDL3_ROOT`)
   (docs/timing.md, "On the rig's 100 Hz display"; [091](tasks/091-display-rate-storms.md)).
 - The audio sink keeps a late producer's content and rebuilds its lead by slowing the device 1% (task 098, patch
-  0031-audio-sink-late-writes, D-023); unproven in a window: its probe is task 097's row 7, the rig's 100 Hz run is Erik's
-  ([098](tasks/098-audio-sink-late-writes.md), [081](tasks/081-audio-sink-grace.md)).
+  0031-audio-sink-late-writes, D-023); on the Mac a no-op by measurement (nothing runs late at 119.4 Hz), so its
+  proof is the rig's 100 Hz run, Erik's ([098](tasks/098-audio-sink-late-writes.md), task 097's step 4).
+- The `[audio]` line's `dropped=` reads 33 k to 43 k frames a second in every windowed run since at least
+  2026-10-14 (the runaway trim, a lead of 7424 under a ring of 8192): a counter to understand before it is believed,
+  and the candidate root of the rig's hiccups if real ([097](tasks/097-screen-batch.md), finding 4).
 
 Fidelity, the game and the saves:
 - The follower stalls on Sinucit, Manor Top and Karbonis and is marginal on Citta Nuova; Zone has no racing line
@@ -185,11 +188,12 @@ after a change that moves or renames a file, a tool or a patch.
 ## Next
 
 - The audit's cleanup (docs/history/audit-2026-10-19.md): 092 docs, 093 src, 094 tools and 095 patches (29 now)
-  merged 2026-10-19, and the doc lines 094 and 095 owed applied the same day. Next: the screen batch, task 097 (Erik
-  books the screen; about 80 minutes, the gerec recordings last; `tools/verify_task.sh 097`). The scorecard's timing and
-  trajectories lanes reran 2026-10-19 (task 097, "The scorecard rerun"): no new finding. E8's audio sink (task 098, patch 0031-audio-sink-late-writes,
-  task 081's fork b+) is in batch/m2 unproven in a window: row 7 of the screen batch is its probe (both rules, by
-  `PURE_AUDIO_SNAP=1`), then Erik's race on the rig at 100 Hz says whether the early-race skips are gone.
+  merged 2026-10-19, and the doc lines 094 and 095 owed applied the same day. The screen batch (task 097) ran on the Mac
+  2026-10-19: every row PASS, the gerec recordings fresh, one tool defect found and fixed (the sound probe was void
+  under bash 3.2 since task 094). The scorecard's timing and trajectories lanes reran the same day: no new finding.
+  batch/m2 is ready for `main` when Erik says so. Next: Erik's rig steps (task 097: the vendor resync, the Vulkan
+  suite, stutter and menu checks, the synchronous read-back race, and the sound probe at 100 Hz under both sink rules,
+  which is task 098's proof), then the `dropped=` counter (Follow-ups, E8) as the next audio task.
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
