@@ -142,13 +142,20 @@ constexpr double kMaxDisplayHz = 240.0;  // and one above 240 Hz runs the vblank
 // E8: the race's vblank runs this fraction under the display's refresh (task 091's measurement: docs/timing.md "E8").
 constexpr double kDisplayMargin = 0.005;
 
-// E4: the 30-fps modes' byte set back to 1 while the race backend lives.
-void sixty_fps(psprecomp::GuestMemory &m) {
+// E8: whether the race backend lives, E4's gate: DAT_08a8c5f4 (set by the backend's constructor during the race load,
+// zeroed by its destructor) and the frame object both in user RAM. Every race mode, whatever the lock byte +0x116c says
+// (0 in the 30-fps modes at Original and while the save dialog runs, 1 otherwise).
+bool race_backend(const psprecomp::GuestMemory &m) {
     const std::uint32_t backend = m.load32(kBackendPtr);
     const std::uint32_t frame = m.load32(kFrameObjectPtr);
-    if (backend < kUserBase || backend >= kUserEnd || frame < kUserBase || frame + kFreeRunning >= kUserEnd ||
-        m.load8(frame + kFreeRunning) != 0u)
-        return;
+    return backend >= kUserBase && backend < kUserEnd && frame >= kUserBase && frame < kUserEnd;
+}
+
+// E4: the 30-fps modes' byte set back to 1 while the race backend lives.
+void sixty_fps(psprecomp::GuestMemory &m) {
+    if (!race_backend(m)) return;
+    const std::uint32_t frame = m.load32(kFrameObjectPtr);
+    if (frame + kFreeRunning >= kUserEnd || m.load8(frame + kFreeRunning) != 0u) return;
     m.store8(frame + kFreeRunning, 1u);
     static bool announced = false;
     if (!announced) {
@@ -195,15 +202,6 @@ double display_margin() {
         return end != v && named >= 0.0 && named < 0.5 ? named : kDisplayMargin;
     }();
     return margin;
-}
-
-// E8: whether the race backend lives, E4's gate: DAT_08a8c5f4 (set by the backend's constructor during the race load,
-// zeroed by its destructor) and the frame object both in user RAM. Every race mode, whatever the lock byte +0x116c says
-// (0 in the 30-fps modes at Original and while the save dialog runs, 1 otherwise).
-bool race_backend(const psprecomp::GuestMemory &m) {
-    const std::uint32_t backend = m.load32(kBackendPtr);
-    const std::uint32_t frame = m.load32(kFrameObjectPtr);
-    return backend >= kUserBase && backend < kUserEnd && frame >= kUserBase && frame < kUserEnd;
 }
 
 // E8: the kernel's vblank period from the option, the display's rate, the margin and the race backend, set and
