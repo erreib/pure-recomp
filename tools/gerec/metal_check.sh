@@ -2,14 +2,15 @@
 # The Metal GE backend against the Vulkan one through ge_replay (tasks 024 and 025; docs/metal-backend.md, "The 3D
 # check" and "The race check").
 #   tools/gerec/metal_check.sh [TEAM_FRAME]        TEAM_FRAME defaults to 5650
-# Recordings are made only when missing, each by one windowed run of main_menu.txt + single_race.txt (`shot` steps
-# dropped) on an empty memory stick of its own, drawn by Vulkan through the record backend in the Vulkan shell
-# (PURE_SHELL=vulkan PURE_GE_RECORD_INNER=vulkan, set explicitly: the macOS default is the Metal path, D-008), as
-# tools/gerec/replay_check.sh makes them, and must pass gerec_dump.py --summary:
+# The setup, the recordings and the replays are tools/gerec/replay_check.sh's (this sources it; task 094): a recording
+# is made when it is missing, holds other frames or another internal scale, or is older than the current format
+# (gerec_dump.py --current), by one windowed run of main_menu.txt + single_race.txt (`shot` steps dropped) on an empty
+# memory stick of its own, drawn by Vulkan through the record backend in the Vulkan shell (PURE_SHELL=vulkan
+# PURE_GE_RECORD_INNER=vulkan, set explicitly: the macOS default is the Metal path, D-008), and must pass
+# gerec_dump.py --summary; every replay has the sprite upscale, the texture detail and the display rate off:
 #   out/gerec/team.gerec       frames TEAM_FRAME and TEAM_FRAME+1 at internal scale 1 (PURE_INTERNAL_SCALE=1), the
 #                              TEAM SELECTION screen (frames 5503-5701 of the route: 5650 is in its middle, so a run
-#                              that drifts by a few tens of frames still lands on it). Recorded again when the file
-#                              holds other frames or another scale. About 3 minutes
+#                              that drifts by a few tens of frames still lands on it). About 3 minutes
 #   out/gerec/race_1x.gerec    frames 6008-6016 at internal scale 1, the race; about 3.5 minutes
 #   out/gerec/race_warm.gerec  the same frames at the settings' scale (2x), replay_check.sh's; about 3.5 minutes
 # A replay draws at the scale its recording was made at, so the 1x recordings compare Vulkan at 1x with Metal at 1x
@@ -29,109 +30,16 @@
 #    at 2x against 1x, where the 2x-to-1x reduction moves edges from the first alpha-tested draws on.
 # Exit 0 when steps 1 to 3 pass. Logs are in out/gerec/metal_*.log. Needs the screen (Vulkan opens a window).
 set -u
-cd "$(dirname "$0")/../.."
-export PURE_ROOT="$PWD"
-. tools/env.sh
-ROOT=$PWD
-BIN=build/arm64/bin/PureNative
-OUT=out/gerec
 TEAM_FRAME=${1:-5650}
+case "$TEAM_FRAME" in ''|*[!0-9]*) echo "usage: tools/gerec/metal_check.sh [TEAM_FRAME]"; exit 2 ;; esac
+TOOL=metal_check
+. "$(dirname "$0")/replay_check.sh"     # the setup, record(), replay(), step(), fail() and verdict()
 ROUTE=main_menu.txt+single_race.txt
 
-case "$TEAM_FRAME" in ''|*[!0-9]*) echo "usage: tools/gerec/metal_check.sh [TEAM_FRAME]"; exit 2 ;; esac
-[ -x "$BIN" ] || { echo "$BIN missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
-mkdir -p "$OUT"
-
-FAILED=
-START=$SECONDS
-step() { echo; echo "== $*"; }
-fail() { echo "metal_check: FAIL: $*"; FAILED="$FAILED|$*"; }
-
-# held FILE: "FIRST SCALE", the first frame a recording holds (its Begin record) and the scale of its first image
-# (width / 480); empty when the file does not parse that far.
-held() {
-  python3 - "$1" <<'EOF' 2>/dev/null
-import struct, sys
-data = open(sys.argv[1], "rb").read()
-at, first = 12, None
-while at + 5 <= len(data):
-    kind, size = struct.unpack_from("<BI", data, at)
-    if kind == 1:
-        first = struct.unpack_from("<I", data, at + 5)[0]
-    elif kind == 11:  # FrameEnd: frame, display, 2 x u64, draws, records, api, width
-        print(first, struct.unpack_from("<I", data, at + 5 + 33)[0] // 480)
-        break
-    at += 5 + size
-EOF
-}
-
-# record NAME AT FRAMES SCALE: frames AT to AT+FRAMES-1 of the route to out/gerec/NAME.gerec at internal scale SCALE
-# (empty: the settings'), unless that file holds them at that scale.
-record() {
-  local name=$1 at=$2 frames=$3 scale=$4
-  local file="$OUT/$name.gerec" game="$OUT/$name.game" script="$OUT/$name.route.txt"
-  local last=$((at + frames + 10))
-  if [ -s "$file" ]; then
-    local first_scale
-    first_scale=$(held "$file")
-    if [ "${first_scale% *}" = "$at" ] && { [ -z "$scale" ] || [ "${first_scale#* }" = "$scale" ]; }; then
-      echo "$file exists ($(wc -c < "$file" | tr -d ' ') bytes, from frame $at at ${first_scale#* }x): not recorded again"
-      return 0
-    fi
-    echo "$file holds frames from ${first_scale% *} at ${first_scale#* }x, not $at at ${scale}x: recording it again"
-    rm -f "$file"
-  fi
-  rm -rf "$game"
-  mkdir -p "$game/ms0/PSP/SAVEDATA"
-  ln -s "$ROOT/game/EBOOT.ELF" "$game/EBOOT.ELF"
-  ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$game/disc.iso"
-  : > "$script"
-  for part in $(echo "$ROUTE" | tr '+' ' '); do
-    grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' "config/pad_scripts/$part" >> "$script"
-  done
-  local scale_env=()
-  [ -n "$scale" ] && scale_env=(--env "PURE_INTERNAL_SCALE=$scale")
-  echo "recording $name: $ROUTE, frames $at-$((at + frames - 1))${scale:+ at internal scale $scale}, run to frame $last ..."
-  local t0=$SECONDS
-  # The Vulkan shell and an explicit Vulkan inner backend: the Metal default (D-008) has no Vulkan renderer to record.
-  python3 tools/run_boot.py --script "$script" --frames "$last" --shell vulkan \
-    --env PURE_GAME_DIR="$ROOT/$game" --env PURE_GE_BACKEND=record --env PURE_GE_RECORD_INNER=vulkan \
-    --env PURE_GE_RECORD="$ROOT/$file" \
-    --env PURE_GE_RECORD_AT="$at" --env PURE_GE_RECORD_FRAMES="$frames" ${scale_env[@]+"${scale_env[@]}"} \
-    "$OUT/$name.record.log" > "$OUT/$name.record.stdout" 2>&1
-  local rc=$?
-  echo "recording $name: run_boot exit $rc, $((SECONDS - t0)) s, log $OUT/$name.record.log"
-  grep -E '^\[gerec\] saved' "$OUT/$name.record.log"
-  if [ ! -s "$file" ]; then
-    fail "recording $name: no $file"
-    return 1
-  fi
-  if ! python3 tools/gerec/gerec_dump.py --summary "$file" > "$OUT/$name.dump.txt" 2>&1; then
-    tail -8 "$OUT/$name.dump.txt"
-    fail "recording $name: gerec_dump rejects $file"
-    rm -f "$file"
-    return 1
-  fi
-  sed -n '/^  frame/,$p' "$OUT/$name.dump.txt"
-}
-
-# replay LOG ARGS...: one replay, its [replay] lines (and a bisected draw's state) shown; sets rc.
-replay() {
-  local log=$1
-  shift
-  # Tasks 073, 075 and 089: the sprite upscale, the texture detail and the display rate off (the PSP's texels, levels
-  # and vblank, as tools/purelib/port.py pins every other run), not settings.ini's.
-  PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0 "$BIN" --replay "$@" > "$log" 2>&1
-  rc=$?
-  grep -E '^\[replay\]|^  [a-z]' "$log"
-}
-
 step "recordings"
-record team "$TEAM_FRAME" 2 1
-record race_1x 6008 9 1
-record race_warm 6008 9 ""
+record team "$ROUTE" "$TEAM_FRAME" 2 1
+record race_1x "$ROUTE" 6008 9 1
+record race_warm "$ROUTE" 6008 9
 
 if [ -s "$OUT/team.gerec" ]; then
   step "1. team.gerec (frames $TEAM_FRAME-$((TEAM_FRAME + 1))): what its draws are"
@@ -180,9 +88,4 @@ for name in race_1x race_warm; do
   [ $rc -le 1 ] || fail "$name.gerec: vulkan against metal exit $rc (log $OUT/metal_${name}_first_diff.log)"
 done
 
-echo
-if [ -n "$FAILED" ]; then
-  echo "metal_check: FAIL ($((SECONDS - START)) s):$(echo "$FAILED" | tr '|' '\n' | sed '/^$/d; s/^/ /' | tr '\n' ';')"
-  exit 1
-fi
-echo "metal_check: PASS ($((SECONDS - START)) s)"
+verdict
