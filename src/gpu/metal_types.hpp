@@ -112,7 +112,7 @@ struct FragmentUniforms {
     std::array<std::uint32_t, 4> alpha_test{};
     std::array<float, 4> fog{};               // rgb: the fog colour; w: 1 when fogged
     std::array<std::uint32_t, 4> stencil{};  // x: 1 when the alpha stored is y (the PSP's stencil), not the fragment's
-    // The mip level the GE samples (task 037): x the rule (kLevelNone, kLevelAuto, kLevelConstant, kLevelSlope),
+    // The mip level the GE samples (task 037): x the rule (0 none, kLevelAuto, kLevelConstant, kLevelSlope),
     // y the part of the level D (in 1/16 levels) that does not change across the draw, z and w level 0's size.
     std::array<float, 4> level{};
     // x: the highest D, 16 x (levels - 1). Texture detail (task 075, D-019), with the option on: y the shift
@@ -136,9 +136,9 @@ struct FragmentUniforms {
 };
 static_assert(sizeof(FragmentUniforms) == 240u, "FragmentUniforms must match shaders/ge.metal");
 
-// FragmentUniforms::level.x: how the level is chosen. None samples level 0 with the derivatives Metal takes (a
-// texture without levels); the others are TEXLEVEL's modes 0 to 2 plus one, the level computed in the shader.
-constexpr float kLevelNone = 0.0f;
+// FragmentUniforms::level.x: how the level is chosen. 0, as the uniforms start, samples level 0 with the derivatives
+// Metal takes (a texture without levels); the others are TEXLEVEL's modes 0 to 2 plus one, the level computed in the
+// shader.
 constexpr float kLevelAuto = 1.0f;
 constexpr float kLevelConstant = 2.0f;
 constexpr float kLevelSlope = 3.0f;
@@ -347,8 +347,7 @@ struct TraceRow {
     Stats counts;  // this interval's (a difference of two snapshots)
     double shell_ms{};
     double drawable_ms{};
-    std::uint32_t shell_presents{};
-    std::uint32_t occluded{};  // of those presents, made while the window was occluded
+    std::uint32_t occluded{};  // the shell's presents made while the window was occluded
 };
 
 // The pre-warm (task 033): render pipelines made asynchronously at start from config/metal_pipelines.txt. The

@@ -78,16 +78,6 @@ bool take_field(const std::map<std::string, unsigned> &fields, const char *name,
     return true;
 }
 
-// A field added after the list was first written (task 040's color_test and sixteen): 0 when the line has none.
-template <typename T>
-bool take_later_field(const std::map<std::string, unsigned> &fields, const char *name, T &out, unsigned largest) {
-    if (fields.find(name) == fields.end()) {
-        out = T{};
-        return true;
-    }
-    return take_field(fields, name, out, largest);
-}
-
 bool from_fields(const std::map<std::string, unsigned> &fields, RenderKey &key) {
     return take_field(fields, "blend", key.blend, 1u) && take_field(fields, "source", key.source) &&
            take_field(fields, "destination", key.destination) && take_field(fields, "operation", key.operation) &&
@@ -95,8 +85,7 @@ bool from_fields(const std::map<std::string, unsigned> &fields, RenderKey &key) 
            take_field(fields, "alpha_destination", key.alpha_destination) &&
            take_field(fields, "dual_source", key.dual_source, 1u) && take_field(fields, "textured", key.textured, 1u) &&
            take_field(fields, "alpha_test", key.alpha_test, 1u) &&
-           take_later_field(fields, "color_test", key.color_test, 1u) &&
-           take_later_field(fields, "sixteen", key.sixteen, 1u);
+           take_field(fields, "color_test", key.color_test, 1u) && take_field(fields, "sixteen", key.sixteen, 1u);
 }
 
 bool from_fields(const std::map<std::string, unsigned> &fields, DepthStencilKey &key) {
