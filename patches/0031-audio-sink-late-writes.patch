@@ -1,5 +1,5 @@
 diff --git a/host/audio/audio_sink.cpp b/host/audio/audio_sink.cpp
-index cac7873..43f4b86 100644
+index cac7873..32aa1c9 100644
 --- a/host/audio/audio_sink.cpp
 +++ b/host/audio/audio_sink.cpp
 @@ -26,6 +26,13 @@ namespace {
@@ -24,18 +24,19 @@ index cac7873..43f4b86 100644
  
      WavWriter dump;
      std::vector<std::int16_t> scratch;
-@@ -114,6 +122,10 @@ struct AudioSink::Impl {
+@@ -114,6 +122,11 @@ struct AudioSink::Impl {
      // dry, so `silent` misses it).
      std::uint64_t window_resyncs{};
      std::uint64_t window_resynced{};
-+    // A producer's write that reached the device late by less than kLateLimit: the frames already played are
-+    // dropped (`late`), the rest is written where it belongs, no jump, and a lead rebuild is armed (`lates`).
++    // A producer's write that reached the device under its kPrebufferFrames lead (`lates`): a lead rebuild is
++    // armed; the frames already played, if it was behind the device, are dropped (`late`) and the rest is written
++    // where it belongs, no jump.
 +    std::uint64_t window_lates{};
 +    std::uint64_t window_late{};
      std::int32_t window_peak{};
      double window_energy{};
      std::uint64_t total_frames{};
-@@ -121,7 +133,14 @@ struct AudioSink::Impl {
+@@ -121,7 +134,14 @@ struct AudioSink::Impl {
      std::uint64_t total_dropped{};
      std::uint64_t total_resyncs{};
      std::uint64_t total_resynced{};
@@ -50,7 +51,7 @@ index cac7873..43f4b86 100644
  
      float gain{1.0f};
  #if defined(PORTABLEKIT_HAS_SDL_AUDIO)
-@@ -169,14 +188,16 @@ struct AudioSink::Impl {
+@@ -169,14 +189,16 @@ struct AudioSink::Impl {
          if (trace) {
              const std::uint64_t lead = write_end > read_position ? write_end - read_position : 0u;
              std::printf("[audio] %llus frames=%llu peak=%d rms=%.1f silent=%llu dropped=%llu resyncs=%llu "
@@ -69,7 +70,7 @@ index cac7873..43f4b86 100644
              std::fflush(stdout);
          }
          window_frames = 0u;
-@@ -184,6 +205,8 @@ struct AudioSink::Impl {
+@@ -184,6 +206,8 @@ struct AudioSink::Impl {
          window_dropped = 0u;
          window_resyncs = 0u;
          window_resynced = 0u;
@@ -78,7 +79,7 @@ index cac7873..43f4b86 100644
          window_peak = 0;
          window_energy = 0.0;
      }
-@@ -219,6 +242,7 @@ void AudioSink::initialize() {
+@@ -219,6 +243,7 @@ void AudioSink::initialize() {
      if (impl.started) return;
      impl.started = true;
      impl.trace = portablekit::env("TRACE_AUDIO") != nullptr;
@@ -86,7 +87,7 @@ index cac7873..43f4b86 100644
      impl.enabled = portablekit::env("NO_AUDIO") == nullptr;
      const settings::Settings &player = settings::current();
      impl.gain = player.mute ? 0.0f : static_cast<float>(player.volume) / 100.0f;
-@@ -269,12 +293,15 @@ void AudioSink::shutdown() {
+@@ -269,12 +294,15 @@ void AudioSink::shutdown() {
      std::lock_guard<std::mutex> guard(impl.lock);
      if (impl.dump.active()) impl.dump.close();
      if (impl.trace) {
@@ -104,17 +105,22 @@ index cac7873..43f4b86 100644
          std::fflush(stdout);
      }
  }
-@@ -313,6 +340,9 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+@@ -313,6 +341,14 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
                      std::uint32_t left_volume, std::uint32_t right_volume) {
      if (count == 0u) return;
      Impl &impl = *impl_;
 +    float ratio = 1.0f;
 +    bool set_ratio = false;
++#if defined(PORTABLEKIT_HAS_SDL_AUDIO)
++    const bool device = impl.stream != nullptr;
++#else
++    const bool device = false;
++#endif
 +    {
      std::lock_guard<std::mutex> guard(impl.lock);
  
      // A buffer larger than the whole ring would overwrite its own start; only
-@@ -324,16 +354,41 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+@@ -324,16 +360,47 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
          count = kRingFrames;
      }
  
@@ -134,11 +140,17 @@ index cac7873..43f4b86 100644
          impl.window_resynced += target - cursor;
          impl.total_resynced += target - cursor;
          cursor = target;
-+    } else if (cursor < impl.read_position + kPrebufferFrames / 4u) {
-+        // A producer that fell briefly behind (a dip ate its lead) keeps its
-+        // content: only the frames the device has already played are dropped,
-+        // the rest lands where it belongs, and the device is slowed a little
-+        // for a few seconds so every channel regains its lead without a gap.
++    } else if (!impl.snap_late && device && cursor < impl.read_position + kPrebufferFrames) {
++        // A producer under the lead the sink is designed to hold (a dip is
++        // eating it) keeps its content: only the frames the device has already
++        // played are dropped, the rest lands where it belongs, and the device
++        // is slowed a little for a few seconds so every channel regains its
++        // lead without a gap. Armed this early, the rebuild starts while a lead
++        // is left: a producer at real time cannot close a deficit by itself,
++        // and until the ratio has, the device plays the deficit as silence on
++        // every write (task 501). Without a device nothing is slowed and the
++        // self-draining ring sits at exactly this lead, so nothing arms.
++        // Under the old rule (snap_late) nothing arms either: the A/B stays.
 +        if (cursor < impl.read_position) {
 +            const std::size_t played = static_cast<std::size_t>(impl.read_position - cursor);
 +            const std::size_t drop = std::min(played, count);
@@ -160,7 +172,7 @@ index cac7873..43f4b86 100644
      }
  
      // The ring cannot hold what a runaway producer wants to write. Retire the
-@@ -369,6 +424,13 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+@@ -369,6 +436,13 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
          impl.scratch.resize(ready * kChannels);
          impl.retire(ready, impl.scratch.data(), true);
      }

@@ -669,4 +669,15 @@ A producer persistently below real time still snaps, so the harness's slow races
 measure of this decision is `PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio` at full speed (resyncs 0, the
 dips visible as `lates=`) and Erik's ear on the rig at 100 Hz (task 097, row 7 and the rig's step 4).
 
-**Status.** Accepted 2026-10-19, unproven in a window (task 098).
+**Status.** Accepted 2026-10-19; measured in a window on the Mac (task 097: a no-op there, nothing runs late at
+119.4 Hz) and on the rig at 100 Hz (tasks 500 and 501).
+
+**2026-10-19, task 501.** The rig measured a consequence the decision did not foresee. "A dip costs a few ms of one
+channel's content" holds only while a lead is left: a producer at real time cannot close a deficit by itself, so
+once its cursor is behind the device, every write drops its played frames and the device plays that many frames of
+silence, write after write, until the 1% ratio has eaten the deficit at 441 frames a second (task 500, run 1: 19961
+frames of silence in 84 pieces over 2 s, ten times the old rule's one jump). The three runs that stayed clean did so
+because the race load's landing happened to arm the recovery while 777 to 2595 frames of lead remained. So the
+arming threshold moved from a quarter of `kPrebufferFrames` to the whole of it, with a device present only (the
+no-device ring sits at exactly that lead): the rebuild starts while a lead is left and the deficit never forms. The
+ratio and the recovery length stand; a cursor more than `kLateLimit` behind still snaps.

@@ -271,7 +271,11 @@ The rig (RTX 3080, an i5-8600K, a 100 Hz display) runs the race at Display at 10
   late producer (task 081's fork) is the candidate. Task 098 (2026-10-19, patch 0031-audio-sink-late-writes, D-023)
   makes the sink keep a late producer's content and rebuild the lead by slowing the device 1% for about 4.6 s;
   the rig's runs (task 500, 2026-10-19) PASS the probe on a quiet machine once channel restarts are counted apart,
-  and show the dip two ways (docs/tasks/500-rig-batch.md, reading 1; `PURE_AUDIO_SNAP=1` restores the old rule). Also notable: this route held full speed at 100 Hz where task
+  and show the dip two ways (docs/tasks/500-rig-batch.md, reading 1; `PURE_AUDIO_SNAP=1` restores the old rule).
+  Task 501 (the same day) arms the recovery from a 2048-frame lead instead of 512, so the race load's landing starts
+  it while a lead is left: on the rig the lead's minimum over the race's first ten seconds reads 1091 to 1707 frames
+  across the runs, no silence after the load's second, and the dip at race second 4 passes under an already-armed
+  ratio (docs/tasks/501-audio-sink-early-arming.md, Result). Also notable: this route held full speed at 100 Hz where task
   091-display-rate-storms' stutter_check route measured 85%; the difference (stutter_check's tracing and live-file
   harness, the route, internal scale Auto here) is unexplained and wants a look before the storms' verdict is
   quoted to players. Erik's ear on the staged build (2026-10-15): "betterish", but more audio hiccups than the
