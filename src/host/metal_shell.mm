@@ -47,10 +47,10 @@
 #include "shell/shell.hpp"
 
 #include "gpu/ge_backend.hpp"
+#include "gpu/vulkan_renderer.hpp"  // its window title, fast-forward interval and Aspect rule, which this shell shares
 #include "kernel/kernel.hpp"
 #include "perf/frame_stats.hpp"
 #include "perf/perf_overlay.hpp"
-#include "portablekit_build_label.hpp"
 #include "profile.hpp"
 #include "settings/settings.hpp"
 
@@ -90,9 +90,6 @@ using Clock = std::chrono::steady_clock;
 
 constexpr std::uint32_t kPspWidth = pk::gpu::kScreenWidth;
 constexpr std::uint32_t kPspHeight = pk::gpu::kScreenHeight;
-// A load running faster than real time shows a flip only when the window has not had one for this long, about 30
-// times a second (the Vulkan renderer's kFastForwardPresentInterval), so vsync never holds the load back.
-constexpr auto kFastForwardInterval = std::chrono::milliseconds(33);
 // Behind the setup screens, as in the Vulkan shell: the dark brown of the project's logo.
 constexpr double kBackground[3] = {0.075, 0.055, 0.045};
 // The performance overlay's textures, written by the CPU and sampled by the GPU: one is rewritten while the GPU may
@@ -123,15 +120,6 @@ fragment float4 shell_fragment(Shown in [[stage_in]], texture2d<float> picture [
 }
 )";
 
-// The Aspect ratio as this shell draws it (task 086): Original, Stretch, or Fill for a game that widens its own view
-// (GameProfile::view_aspect_frame, as the Vulkan renderer's usable_aspect() rules); Fill for another game is drawn as
-// Original, keeping the PSP's shape.
-pk::settings::Aspect usable_aspect(pk::settings::Aspect aspect) {
-    return aspect == pk::settings::Aspect::Fill && pk::game().view_aspect_frame == nullptr
-               ? pk::settings::Aspect::Original
-               : aspect;
-}
-
 // For a check of another shape (task 086, as patch 0027-window-size-switch does for the Vulkan window):
 // PURE_WINDOW_SIZE=WxH, a size in pixels, 1 to 16384 each way; false when unset or malformed.
 bool window_size_switch(int &width, int &height) {
@@ -140,14 +128,6 @@ bool window_size_switch(int &width, int &height) {
     char tail = 0;
     return std::sscanf(size, "%dx%d%c", &width, &height, &tail) == 2 && width >= 1 && height >= 1 &&
            width <= 16384 && height <= 16384;
-}
-
-// The window's title when ShellConfig has none: the program's name and the build label, as the Vulkan shell's
-// gpu::default_window_title() makes it.
-std::string default_title() {
-    std::string title = pk::game().app_name;
-    if (*pk::kBuildLabel != '\0') title += std::string(" (") + pk::kBuildLabel + ")";
-    return title;
 }
 
 class MetalShell final : public ph::Shell {
@@ -174,7 +154,7 @@ public:
             SDL_WindowFlags flags = SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
             if (player.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
             const std::uint32_t scale = std::clamp<std::uint32_t>(player.window_scale, 1u, pk::settings::kMaxWindowScale);
-            const std::string title = config.title.empty() ? default_title() : config.title;
+            const std::string title = config.title.empty() ? pk::gpu::default_window_title() : config.title;
             int window_width = static_cast<int>(kPspWidth * scale);
             int window_height = static_cast<int>(kPspHeight * scale);
             int switch_width = 0, switch_height = 0;
@@ -413,8 +393,10 @@ public:
             last_game_ = game;
             ++flips_;
             const Clock::time_point now = Clock::now();
+            // A load running faster than real time shows a flip only when the window has not had one for this long,
+            // about 30 times a second, so vsync never holds the load back.
             if (fast_forward_ && capture_path_.empty()) {
-                if (now - fast_forward_shown_ < kFastForwardInterval) {
+                if (now - fast_forward_shown_ < pk::gpu::kFastForwardPresentInterval) {
                     ui_draw_data_ = nullptr;
                     report(trace, false);
                     return false;
@@ -513,9 +495,9 @@ public:
     }
     // Original, Stretch or Fill (task 086): under Fill the Metal backend draws at the drawable's shape from its next
     // frame (metal_device.hpp's set_fill) and the game is told that shape; for a game that cannot widen its view, Fill
-    // is drawn as Original.
+    // is drawn as Original (GameProfile::view_aspect_frame, the Vulkan renderer's rule).
     void set_aspect(pk::settings::Aspect aspect) override {
-        aspect_ = usable_aspect(aspect);
+        aspect_ = pk::gpu::VulkanRenderer::usable_aspect(aspect);
         pure::metal::set_fill(aspect_ == pk::settings::Aspect::Fill);
     }
     void set_sharp_screen(bool sharp) override { sharp_ = sharp; }
