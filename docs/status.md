@@ -12,7 +12,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | P0 | environment, spikes S1 to S10 | done 2026-10-05, but S9 (the HLE coverage tool) was never made |
 | M1 | scaffold, codegen, link, the game on the corpus | done 2026-10-05 |
 | M2 | frontend on screen | done 2026-10-06: every frontend scene 0 pixels from PPSSPP's on Metal |
-| M3 | race start on Vineta K, faithful 3D | done 2026-10-07: race_hud 0.0149 on Metal |
+| M3 | race start on Vineta K, faithful 3D | done 2026-10-07 |
 | M4 | audio and video | done 2026-10-07 (task 013; the SAS reverb, task 043) |
 | M5 | saves and the whole campaign | done 2026-10-07: every mode, class and circuit; the save list (039); PSP-format saves (045) |
 | M6 | native Metal backend | done 2026-10-06 (tasks 021 to 027); Metal is the macOS default (D-008) |
@@ -48,7 +48,7 @@ a 100 Hz display).
 | The game | the whole single-player game: every mode, class, league and circuit; the movies, the music and the sound with the SAS reverb; saves in the PSP's format with the save list, import, export and backups; the twelve US download packs |
 | Mac, Metal (the default) | the Metal shell and backend (D-008): the drawable at the display's pixels, internal scale Auto, Fill, texture detail, the flashes smoothed, the 30-fps modes at 60, the race at 119.40 Hz on the 120 Hz display (E8), the performance overlay (F3) |
 | Mac, Vulkan | the framework's Vulkan shell and renderer on MoltenVK: internal scale, Fill, texture detail and the game's rows as on Metal (the sprite upscale is Metal's; Vulkan takes art as a texture pack); E8's sound holds at the margin on both shells |
-| Windows, Vulkan | the rig: the game at 60 fps with E2 to E6 and E8, the guest at 5.35 ms a frame (PPSSPP 6.5 ms on the same CPU); at the Display rate on its 100 Hz display the sound skips early in the race (Follow-ups) |
+| Windows, Vulkan | the rig: the game at 60 fps with E2 to E6 and E8, the corpus inlined (task 083); at the Display rate on its 100 Hz display the sound skips early in the race (Follow-ups) |
 | Headless | `PURE_SHELL=headless` with the `metal` backend (real pictures) or `null`, thousands of frames a second; on Windows nothing draws headless, so blind runs take the null backend (`purelib.port.BLIND`) |
 | Esc menu | rows by what the game and the shell can do (D-014): Resolution, Aspect ratio, Performance, the game's rows (30 fps modes, Flashes, Text and sprites, Texture detail, Display rate), Download packs in System; `tools/menu_check.sh` on both shells |
 | Controls | keyboard (two layouts), mouse, gamepads, rebinding in the menu (docs/controls.md; `tools/controls_check.py`) |
@@ -69,17 +69,21 @@ The renderers and the GE:
 - The dithered billboard has no PPSSPP reference at the same point of its cycle; 5551 and 4444 targets, the doubled
   factors, ABSDIFF and CLIPENABLE off are drawn but unexercised ([040](tasks/040-colour-test-dither-clamp.md)).
 - Vulkan above internal scale 1: a through-mode draw that samples a target loses the tile clamp (a seam at x 638-639
-  of race_warm at 2x); bilinear at a REPEAT seam; no `PURE_NO_...` switch for the wrap ([063](tasks/063-fb-texture-wrap.md)).
-- E3's leftovers: `ge_replay --scale`; the frame write-back copies whole rows; no switch back to the Vulkan
-  renderer's old target sizes; settings.hpp's `defaults_for` comment; no scripted live Resolution change; block
-  transfers into a scaled target invalidate ([066](tasks/066-metal-internal-scale.md), [068](tasks/068-vulkan-effects-at-1x.md)).
-- Task 062's leftovers: `snapshot_guest_words` computes its own extent, `prewarm_.path` is unread, two trace flags sit in
-  `trace_` ([062](tasks/062-metal-backend-simplify.md)).
+  of race_warm at 2x); bilinear at a REPEAT seam; no `PURE_NO_...` switch for the wrap
+  ([063](tasks/063-fb-texture-wrap.md)).
+- E3's leftovers: `ge_replay --scale`; the frame write-back copies whole rows; no switch back to the Vulkan renderer's
+  old target sizes; settings.hpp's `defaults_for` comment; no scripted live Resolution change; block transfers into a
+  scaled target invalidate ([066](tasks/066-metal-internal-scale.md), [068](tasks/068-vulkan-effects-at-1x.md)).
+- Task 062's leftovers: `snapshot_guest_words` computes its own extent, `prewarm_.path` is unread, two trace flags sit
+  in `trace_` ([062](tasks/062-metal-backend-simplify.md)).
 - The recordings under out/gerec/ predate texture mapping, mips, the colour test, dither and CLIPENABLE, and
-  `tools/gerec/metal_check.sh` fails on fresh ones with batch/m2's code too (task 093; [089](tasks/089-display-rate.md)).
+  `tools/gerec/metal_check.sh` fails on fresh ones with batch/m2's code too (task 093;
+  [089](tasks/089-display-rate.md)).
 - The record backend does not forward patch 0017-internal-scale-by-backend's scale calls (task 095).
-- A `.gerec` format 2 that seeds the targets, only if a cold replay must match its recording ([022](tasks/022-ge-replay.md)).
-- The Vulkan swapchain and its presents hold the game thread on a missed refresh ([091](tasks/091-display-rate-margin.md)).
+- A `.gerec` format 2 that seeds the targets, only if a cold replay must match its recording
+  ([022](tasks/022-ge-replay.md)).
+- The Vulkan swapchain and its presents hold the game thread on a missed refresh
+  ([091](tasks/091-display-rate-margin.md)).
 
 The enhancements:
 - E1, not started: the confirm row and labels are the framework's first game's; no keyboard Triangle with
@@ -88,34 +92,43 @@ The enhancements:
 - The Esc menu: the bindings list's framework labels, the Vulkan shell's Touch section on a desktop, Restore control
   defaults resets hidden rows ([064](tasks/064-menu-rows-by-capability.md)).
 - E2: the movies stretch under Fill on both renderers ([086](tasks/086-metal-fill.md)).
-- E4: Original chosen in a free-running race applies at the next race; a save dialog in a race runs free; the
-  frontend at 60 is not audited ([072](tasks/072-sixty-fps-modes.md)).
+- E4: Original chosen in a free-running race applies at the next race; a save dialog in a race runs free; the frontend
+  at 60 is not audited ([072](tasks/072-sixty-fps-modes.md)).
 - E5: `tools/refactor_check.sh`'s count strip since task 073; texture_check's Vulkan lane reruns on pipeline creation
-  and drifts at load boundaries on the rig; no count of enhanced draws on the Vulkan perf line ([076](tasks/076-vulkan-texture-detail.md)).
-- E6: flash_check `--race`'s lap bound is coarse; the Flashes row's place after Restore ([070](tasks/070-smooth-flashes.md)).
+  and drifts at load boundaries on the rig; no count of enhanced draws on the Vulkan perf line
+  ([076](tasks/076-vulkan-texture-detail.md)).
+- E6: flash_check `--race`'s lap bound is coarse; the Flashes row's place after Restore
+  ([070](tasks/070-smooth-flashes.md)).
 - E7: sprite_check's margin on team_select and class_select, no byte cap on the texture cache, the TEAM ship sentence
-  in docs/metal-backend.md, the pack's race cells behind an option, the 40-key bar, the scaler's hairlines ([073](tasks/073-sprite-upscale.md), [074](tasks/074-sprite-pack.md)).
+  in docs/metal-backend.md, the pack's race cells behind an option, the 40-key bar, the scaler's hairlines
+  ([073](tasks/073-sprite-upscale.md), [074](tasks/074-sprite-pack.md)).
 - E8: the first speed pad fires 0.1 s early at 120 (not traced); `kIdleVBlankLimit` and `sceDisplayGetFramePerSec`;
-  the Vulkan Frame rate row at a game rate of 119.4; Erik's eye on the race at 120 and the menus (docs/timing.md, "E8").
+  the Vulkan Frame rate row at a game rate of 119.4; Erik's eye on the race at 120 and the menus (docs/timing.md,
+  "E8").
 - E8 on the rig: `--audio --shell vulkan` FAILs on early-race resyncs at either margin while the race holds full
   speed; the storms route held 85% where this one holds 100%, unexplained; the E8 gate must pin `PURE_DISPLAY_HZ=100`;
   drop vblanks or slow down under about 95% is a pacer call; worktree builds there lose the renderer (`SDL3_ROOT`)
   (docs/timing.md, "On the rig's 100 Hz display"; [091](tasks/091-display-rate-storms.md)).
-- The audio sink's tolerance of a late producer, task 081's fork, demoted to polish ([081](tasks/081-audio-sink-grace.md)).
+- The audio sink's tolerance of a late producer, task 081's fork, demoted to polish
+  ([081](tasks/081-audio-sink-grace.md)).
 
 Fidelity, the game and the saves:
 - The follower stalls on Sinucit, Manor Top and Karbonis and is marginal on Citta Nuova; Zone has no racing line
-  ([032](tasks/032-unlock-all-and-breadth.md), [042](tasks/042-prewarm-list-and-bundle.md), [018](tasks/018-campaign-modes.md)).
+  ([032](tasks/032-unlock-all-and-breadth.md), [042](tasks/042-prewarm-list-and-bundle.md),
+  [018](tasks/018-campaign-modes.md)).
 - The weather tracks cannot be compared frame to frame with PPSSPP: the mist's phase follows the menu timing
   ([038](tasks/038-surface-brightness.md)).
-- The SAS reverb's two constants are fitted to PPSSPP's output ([043](tasks/043-sas-reverb.md); docs/fidelity.md, "Open").
-- The boot's loading screen follows host time, so log-heavy runs do not repeat ([049](tasks/049-metal-backend-split.md)).
+- The SAS reverb's two constants are fitted to PPSSPP's output ([043](tasks/043-sas-reverb.md); docs/fidelity.md,
+  "Open").
+- The boot's loading screen follows host time, so log-heavy runs do not repeat
+  ([049](tasks/049-metal-backend-split.md)).
 - Saves: a plain save from before task 045 exports plain until re-saved; mode 5's padding is unchecked; the profile's
   heap pointers sit 0x200 above PPSSPP's ([045](tasks/045-savedata-no-key-mode.md)).
 - The save list: SAVE opens on the first free slot, LISTSAVE on a full stick cancels headless, the look is not the
   PSP's dialog ([039](tasks/039-save-list.md)).
 - DLC: a pack-aware profile's load without the packs is untried; PROFILE > DELETE may list the packs; no PPSSPP
-  reference with packs; the EU and JP packs later ([077](tasks/077-download-packs.md), [078](tasks/078-download-packs-menu.md)).
+  reference with packs; the EU and JP packs later ([077](tasks/077-download-packs.md),
+  [078](tasks/078-download-packs-menu.md)).
 - The scorecard: coverage reads the 2026-10-06 matrix, functions entered are not measured, the stretch row rests on
   one race a side; not run since 2026-10-08 (task 096; [044](tasks/044-accuracy-scorecard.md)).
 
@@ -160,7 +173,8 @@ after a change that moves or renames a file, a tool or a patch.
 
 - A finer virtual-time answer than the kernel's 1 ms starvation tick ([046](tasks/046-ai-seed-and-contact.md), a
   kernel patch).
-- The vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`; [033](tasks/033-frame-time-dips.md)).
+- The vblank-timed present's 5.5 ms of latency, to judge by playing (`PURE_METAL_PACE=0`;
+  [033](tasks/033-frame-time-dips.md)).
 - Recorded laps of Sinucit, Manor Top and Karbonis (`tools/record_lap.sh`) to replace the follower there.
 - Offering the upstream candidates (docs/upstream.md): on hold until more is known (the audit, Erik's call).
 - The 100 Hz race at the Display rate: drop vblanks or slow down (a pacer design for docs/decisions.md).
@@ -168,7 +182,8 @@ after a change that moves or renames a file, a tool or a patch.
 
 ## Next
 
-- The audit's cleanup: this task (092), then 093 to 096 (docs/history/audit-2026-10-19.md, "Findings and where they go").
+- The audit's cleanup: this task (092), then 093 to 096 (docs/history/audit-2026-10-19.md, "Findings and where they
+  go").
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal

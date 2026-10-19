@@ -105,10 +105,10 @@ window, unpaced, the scenes the backend's own 480x272 pictures, about 25 s in al
 runs the same backend in the Metal shell's window (the macOS default for players since D-008) and `--shell vulkan
 --backend vulkan` the Vulkan path. In a window (task 069) the suite captures the seven window scenes, the five race
 scenes and `title` and `main_menu`, and each run is unpaced until 300 flips before its route's first scene and paced
-to real time from there: about 5 minutes a path, where the 18 scenes paced from boot took about 20 ([the wall
-times](history/verification.md#the-window-checks-paced-from-the-scene-task-069-2026-10-10)). `--all-scenes` runs the 18 in a
-window (about 8 minutes), `--paced` paces each run from boot as before. Which path to run for which change: "Which path
-for which change" below.
+to real time from there: about 5 minutes a path, where the 18 scenes paced from boot took about 20
+([the wall times](history/verification.md#the-window-checks-paced-from-the-scene-task-069-2026-10-10)).
+`--all-scenes` runs the 18 in a window (about 8 minutes), `--paced` paces each run from boot as before. Which path
+to run for which change: "Which path for which change" below.
 The race HUD check ("The race HUD check" below) covers the race after the suite's last race scene. The suite boots
 the game once per route (seven routes), captures each scene of the route, and compares each capture with its
 reference in `ref/` using `tools/imgdiff.py`. It prints a table with PASS or FAIL per scene and writes the same text
@@ -256,10 +256,11 @@ check covers the race itself.
 - `--shell metal` (the default, kept by task 034: the check tests the window) checks the Metal shell's window
   shots; `--shell vulkan` the Vulkan shell's, with the Vulkan backend; in a window the run is unpaced until flip 5900,
   300 flips before the first shot, and paced to real time from there (task 069; `PURE_PACED_FROM`, which the caller's
-  environment or `--env` overrides): 82 s, where paced from boot it took 227 s. `--shell headless` checks the Metal
-  backend's own 480x272 captures (`capture_frame`), unpaced, about 15 s. The run is silent and
-  uses the data directory `out/data/hud_check` (task 034). `--backend` names another backend. Outputs go to `--out`,
-  by default `out/hud/<shell>` (the route, the run's log, the shots and the summary), removed first.
+  environment or `--env` overrides): about 80 s
+  ([the wall times](history/verification.md#the-window-checks-paced-from-the-scene-task-069-2026-10-10)).
+  `--shell headless` checks the Metal backend's own 480x272 captures (`capture_frame`), unpaced, about 15 s. The run
+  is silent and uses the data directory `out/data/hud_check` (task 034). `--backend` names another backend. Outputs
+  go to `--out`, by default `out/hud/<shell>` (the route, the run's log, the shots and the summary), removed first.
 
 Until task 031 the Metal shell's window showed the race without its HUD in most shots (11 of 61) while the suite
 passed: [the race HUD check](history/verification.md#the-race-hud-check-task-031-2026-10-06).
