@@ -1,8 +1,16 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 894e223..6bf350e 100644
+index 894e223..205039a 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -2296,8 +2296,21 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -1,6 +1,7 @@
+ #include "../profile.hpp"
+ #include "portablekit_build_label.hpp"
+ #include "shell/sdl_pad.hpp"
++#include "shell/shell.hpp"
+ #include "vulkan_renderer.hpp"
+ 
+ #include "frame_interpolation.hpp"
+@@ -2296,8 +2297,13 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      // under them). The safe area keeps the picture clear of a camera cutout.
      window_flags |= SDL_WINDOW_FULLSCREEN;
  #endif
@@ -12,17 +20,54 @@ index 894e223..6bf350e 100644
 +    int window_height = static_cast<int>(kPspHeight * window_scale);
 +    // Test-only: <prefix>_WINDOW_SIZE=WxH opens the window at that size instead
 +    // (a check of another shape, such as 21:9); anything else is ignored.
-+    if (const char *size = portablekit::env("WINDOW_SIZE"); size != nullptr) {
-+        int width = 0, height = 0;
-+        char tail = 0;
-+        if (std::sscanf(size, "%dx%d%c", &width, &height, &tail) == 2 && width >= 1 && height >= 1 &&
-+            width <= 16384 && height <= 16384) {
-+            window_width = width;
-+            window_height = height;
-+            std::cout << "[render] window " << width << "x" << height << " (WINDOW_SIZE)\n";
-+        }
-+    }
++    if (host::window_size_switch(window_width, window_height))
++        std::cout << "[render] window " << window_width << "x" << window_height << " (WINDOW_SIZE)\n";
 +    impl.window = SDL_CreateWindow(config.title.c_str(), window_width, window_height, window_flags);
      if (impl.window == nullptr) {
          error = std::string("SDL_CreateWindow failed: ") + SDL_GetError();
          return false;
+diff --git a/host/shell/shell.cpp b/host/shell/shell.cpp
+index 291bcfb..61fc24a 100644
+--- a/host/shell/shell.cpp
++++ b/host/shell/shell.cpp
+@@ -3,6 +3,7 @@
+ #include "../profile.hpp"
+ #include "../registry.hpp"
+ 
++#include <cstdio>
+ #include <utility>
+ 
+ namespace portablekit::host {
+@@ -27,6 +28,17 @@ std::string selected_shell() {
+     return name != nullptr && *name != '\0' ? std::string(name) : std::string("vulkan");
+ }
+ 
++bool window_size_switch(int &width, int &height) {
++    const char *size = portablekit::env("WINDOW_SIZE");
++    if (size == nullptr) return false;
++    int w = 0, h = 0;
++    char tail = 0;
++    if (std::sscanf(size, "%dx%d%c", &w, &h, &tail) != 2 || w < 1 || h < 1 || w > 16384 || h > 16384) return false;
++    width = w;
++    height = h;
++    return true;
++}
++
+ ShellRegistration::ShellRegistration(const char *name, const char *description, ShellFactory factory) {
+     register_shell(name, std::move(factory), description != nullptr ? description : "");
+ }
+diff --git a/host/shell/shell.hpp b/host/shell/shell.hpp
+index bffbbb8..c39a34b 100644
+--- a/host/shell/shell.hpp
++++ b/host/shell/shell.hpp
+@@ -232,6 +232,10 @@ void register_shell(std::string name, ShellFactory factory, std::string descript
+ [[nodiscard]] std::string shell_description(std::string_view name);
+ // The shell <prefix>_SHELL names; "vulkan" when it is unset or empty.
+ [[nodiscard]] std::string selected_shell();
++// Test-only: <prefix>_WINDOW_SIZE=WxH, the size in pixels a shell opens its
++// window at for a check of another shape (such as 21:9), 1 to 16384 each way.
++// False, and `width` and `height` untouched, when it is unset or malformed.
++[[nodiscard]] bool window_size_switch(int &width, int &height);
+ 
+ // One line in a shell's source file registers it before main():
+ //   const ShellRegistration registration("headless", "no window", [] { return std::make_unique<HeadlessShell>(); });

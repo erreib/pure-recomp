@@ -1,16 +1,21 @@
 diff --git a/host/gpu/frame_pacing.cpp b/host/gpu/frame_pacing.cpp
-index f4ba161..4e7e8e1 100644
+index f4ba161..8d89d2b 100644
 --- a/host/gpu/frame_pacing.cpp
 +++ b/host/gpu/frame_pacing.cpp
-@@ -19,13 +19,27 @@ int &frame_vblanks() {
+@@ -19,13 +19,30 @@ int &frame_vblanks() {
      return vblanks;
  }
  
 +constexpr std::int64_t kPspVBlankUs = kGameFrameUs / 2;
 +
-+std::int64_t &period_us() {
-+    static std::int64_t period = kPspVBlankUs;
-+    return period;
++std::int64_t (*&period_source())() {
++    static std::int64_t (*source)() = nullptr;
++    return source;
++}
++
++std::int64_t period_us() {
++    const std::int64_t period = period_source() != nullptr ? period_source()() : 0;
++    return period > 0 ? period : kPspVBlankUs;
 +}
 +
  } // namespace
@@ -18,13 +23,11 @@ index f4ba161..4e7e8e1 100644
  void set_game_frame_vblanks(int vblanks) noexcept { frame_vblanks() = std::clamp(vblanks, 1, 4); }
  
 -std::int64_t game_frame_us() noexcept { return kGameFrameUs / 2 * frame_vblanks(); }
-+void set_vblank_period_us(std::int64_t period) noexcept { period_us() = period > 0 ? period : kPspVBlankUs; }
++void set_vblank_period_source(std::int64_t (*period_us)()) noexcept { period_source() = period_us; }
 +
-+std::int64_t vblank_period_us() noexcept { return period_us(); }
++std::int64_t game_frame_us() noexcept { return period_us() * frame_vblanks(); }
  
 -double game_rate() noexcept { return 60.0 / static_cast<double>(frame_vblanks()); }
-+std::int64_t game_frame_us() noexcept { return period_us() * frame_vblanks(); }
-+
 +double game_rate() noexcept {
 +    return 60.0 * static_cast<double>(kPspVBlankUs) / static_cast<double>(period_us()) /
 +           static_cast<double>(frame_vblanks());
@@ -32,7 +35,7 @@ index f4ba161..4e7e8e1 100644
  
  double presents_per_frame(double rate) noexcept {
      const double presents = rate / game_rate();
-@@ -77,6 +91,15 @@ void PresentClock::reset() noexcept {
+@@ -77,6 +94,15 @@ void PresentClock::reset() noexcept {
  std::int64_t PresentClock::delay_us() const noexcept { return frame_us_ - first_step_us_ + work_us_; }
  
  void PresentClock::flip(std::int64_t time_us, std::int64_t now_us) noexcept {
@@ -49,19 +52,19 @@ index f4ba161..4e7e8e1 100644
      // The code time a present allows for: the (kWorkRank + 1)th longest of
      // the window, so that a few late frames do not keep every present late.
 diff --git a/host/gpu/frame_pacing.hpp b/host/gpu/frame_pacing.hpp
-index 5ecd057..e75ca10 100644
+index 5ecd057..4891cb3 100644
 --- a/host/gpu/frame_pacing.hpp
 +++ b/host/gpu/frame_pacing.hpp
 @@ -39,8 +39,17 @@ inline constexpr std::int64_t kGameFrameUs = 2 * 16'683;
  // frames a second, 1 for one at 60 (GameProfile::frame_vblanks). Set once,
  // before any clock or governor is made; 2 until then.
  void set_game_frame_vblanks(int vblanks) noexcept;
-+// The vblank's period, in microseconds: the PSP's (kGameFrameUs / 2) unless
-+// the kernel runs the vblank at another rate (Kernel::vblank_period_us, which
-+// the HLE passes on at every flip). A present clock made before a change
-+// follows it at its next flip.
-+void set_vblank_period_us(std::int64_t period_us) noexcept;
-+[[nodiscard]] std::int64_t vblank_period_us() noexcept;
++// The vblank's period is the kernel's (Kernel::vblank_period_us), kept there
++// alone: the HLE hands pacing the function that reads it (this file is built
++// without the kernel). Until then, or when it answers 0, the PSP's
++// (kGameFrameUs / 2). A present clock made before a change follows it at its
++// next flip.
++void set_vblank_period_source(std::int64_t (*period_us)()) noexcept;
 +// frame_vblanks vblanks of that period.
  [[nodiscard]] std::int64_t game_frame_us() noexcept;
 -// The game's own rate as the Frame rate setting names it: 30 or 60.
@@ -72,7 +75,7 @@ index 5ecd057..e75ca10 100644
  
  // The rates the Frame rate setting offers, slowest first; the game's own
 diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
-index 10332e5..5f75a29 100644
+index 10332e5..26b25c6 100644
 --- a/host/hle/hle_media.cpp
 +++ b/host/hle/hle_media.cpp
 @@ -24,6 +24,7 @@
@@ -106,18 +109,7 @@ index 10332e5..5f75a29 100644
      previous = start;
      known = true;
      return start;
-@@ -302,6 +307,10 @@ void present_frame(Runtime &rt) {
-     }
-     // The shell that shows the frame (a window, or the headless one).
-     host::Shell *shell = active_shell();
-+#if defined(PORTABLEKIT_HAS_RENDERER)
-+    // Frame interpolation's game frame follows the kernel's vblank.
-+    gpu::pacing::set_vblank_period_us(static_cast<std::int64_t>(kernel().vblank_period_us()));
-+#endif
-     // The guest passes a VRAM offset when the high byte is zero.
-     const std::uint32_t address = (media().display.framebuffer & 0xFF000000u) == 0u
-                                       ? (media().display.framebuffer | 0x04000000u)
-@@ -658,9 +667,9 @@ void register_display_ctrl(HleRegistrar &hle) {
+@@ -658,9 +663,9 @@ void register_display_ctrl(HleRegistrar &hle) {
      });
  }
  
@@ -130,7 +122,7 @@ index 10332e5..5f75a29 100644
  
  // Waiting for the display to start its vertical blank, which is how a game
  // paces its frame loop. Without these the loop spins: a stub returns at once,
-@@ -689,7 +698,7 @@ void register_vblank_waits(HleRegistrar &hle) {
+@@ -689,7 +694,7 @@ void register_vblank_waits(HleRegistrar &hle) {
      hle.add("sceDisplay", "sceDisplayWaitVblank", [](Runtime &, AllegrexContext &ctx) {
          trace_pacing("sceDisplayWaitVblank");
          static const bool returns = portablekit::env("VBLANK_WAIT_RETURNS") != nullptr;
@@ -139,7 +131,7 @@ index 10332e5..5f75a29 100644
              kernel().finish(ctx, 1u);
              return;
          }
-@@ -713,18 +722,18 @@ void register_vblank_waits(HleRegistrar &hle) {
+@@ -713,18 +718,18 @@ void register_vblank_waits(HleRegistrar &hle) {
          kernel().finish(ctx, 0u);
      });
      // The display's position in its frame, from emulated time since the last
@@ -161,11 +153,22 @@ index 10332e5..5f75a29 100644
      });
      hle.add("sceDisplay", "sceDisplayGetVcount", [](Runtime &, AllegrexContext &ctx) {
          trace_pacing("sceDisplayGetVcount", static_cast<std::int64_t>(kernel().vblank_count()));
+@@ -1256,6 +1261,10 @@ gpu::GeBackend *ensure_shell_and_backend() {
+     media().shell = std::move(shell);
+     // A shell without a window shows nothing at the display's pace: the clock runs free.
+     kernel().set_paced(media().shell->has_window());
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    // Frame interpolation's game frame follows the kernel's vblank, which only the kernel keeps.
++    gpu::pacing::set_vblank_period_source([] { return static_cast<std::int64_t>(kernel().vblank_period_us()); });
++#endif
+     if (media().shell->has_window()) {
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+         ui::attach(*media().shell);
 diff --git a/host/kernel/kernel.cpp b/host/kernel/kernel.cpp
-index 094a27a..f37b544 100644
+index 11eaaf4..74210c8 100644
 --- a/host/kernel/kernel.cpp
 +++ b/host/kernel/kernel.cpp
-@@ -535,7 +535,8 @@ std::optional<std::uint64_t> Kernel::next_event_us() const {
+@@ -536,7 +536,8 @@ std::optional<std::uint64_t> Kernel::next_event_us() const {
  
  void Kernel::process_timers() {
      while (now_us_ >= next_vblank_us_) {

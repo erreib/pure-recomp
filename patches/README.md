@@ -72,7 +72,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0027-window-size-switch | (task 084) | Tooling | candidate | `<prefix>_WINDOW_SIZE=WxH` opens the Vulkan renderer's window at W x H instead of 480x272 times `video.window_scale`, so a check can run a window of another shape (21:9 for `tools/aspect_check.sh`, the Fill aspect of D-020); unset or malformed, the window is as before |
 | 0028-vulkan-orthographic-fit | (task 085) | Behaviour | candidate | Under the Fill aspect the Vulkan renderer's interface fit (2D draws into the shown framebuffer pulled in about the screen's centre to square pixels) takes transformed draws under an orthographic projection with lighting off too, not only through mode: their clip x and y scaled after `viewport_into_clip`, in the draw's transform and in its frame-interpolation summary alike; a draw at least 470 of the 480 PSP pixels wide through its transform stays spread unless it is textured and lies within the screen (2 PSP pixels of margin each side: a layer of interface art); `<prefix>_NO_ORTHOGRAPHIC_FIT` fits through-mode draws alone, as before; Original and Stretch draw as before |
 | 0029-windows-file-url | (the planning session, 2026-10-13, after Erik's Windows play) | Bug fix | **candidate of the first order (every Windows port's folder buttons)** | The menu's folder buttons (Open the data folder, the saves, backups, textures and fonts folders) build a `file://` URL for `SDL_OpenURL` by percent-encoding the whole path, so a Windows path came out `file://C%3A%5CUsers%5C...`, which Explorer refuses: nothing opened. The three copies of `file_url` (menu.cpp, font_menu.cpp, save_screen.cpp) now put three slashes before an absolute path, keep the drive's colon and turn backslashes into slashes: `file:///C:/Users/...`; macOS and Linux paths come out as before (`file:///Users/...`) |
-| 0030-vblank-period | (task 089) | Behaviour | candidate | The kernel's vblank period a runtime value: `Kernel::vblank_period_us()` and `set_vblank_period_us()` (default `kVBlankPeriodUs`, the PSP's 16683 us; a new period applies from the next vblank, which stays where it was due, and the count of vblanks stands), read by the tick (`process_timers`), `last_vblank_us()` (now the vblank's own time, kept at the tick), the media HLE's frame grid (`frame_start_us`'s step), vblank duration, hcount and vblank flag, and frame interpolation's game frame (`pacing::set_vblank_period_us`, passed on at each flip; `game_frame_us()` and `game_rate()` follow it, 60 at the PSP's period as before, 120 for a game at 60 whose vblank runs at 120 Hz, and a present clock follows a change at its next flip). Nothing moves at the default period |
+| 0030-vblank-period | (task 089) | Behaviour | candidate | The kernel's vblank period a runtime value: `Kernel::vblank_period_us()` and `set_vblank_period_us()` (default `kVBlankPeriodUs`, the PSP's 16683 us; a new period applies from the next vblank, which stays where it was due, and the count of vblanks stands), read by the tick (`process_timers`), `last_vblank_us()` (now the vblank's own time, kept at the tick), the media HLE's frame grid (`frame_start_us`'s step), vblank duration, hcount and vblank flag, and frame interpolation's game frame (read from the kernel through `pacing::set_vblank_period_source`; `game_frame_us()` and `game_rate()` follow it, 60 at the PSP's period as before, 120 for a game at 60 whose vblank runs at 120 Hz, and a present clock follows a change at its next flip). Nothing moves at the default period |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -207,7 +207,8 @@ real time per clock step while any thread was in a `WaitType::Host` wait, so a n
 about 19 frames a second. `wait_host` takes `real_time` (only the adhoc network waits pass it) and the sleep applies
 to those alone; `Kernel::set_paced(bool)` lets the HLE pace the clock by the shell (a shell with a window is paced,
 the headless one is not), with `<prefix>_NO_RENDER` deciding until the shell exists. Headless frontend route: 2200
-frames in 1.1 s instead of 115 s, same draws, same events. Windowed runs unchanged.
+frames in 1.1 s instead of 115 s, same draws, same events. Windowed runs unchanged. `<prefix>_NO_RENDER` is read
+once (a static, as before the patch), not at every pacing call.
 
 ### 0006-mpeg-ring-not-empty-while-aus-pending
 Old 0002. `sceMpegRingbufferAvailableSize` reported the ring empty while the demuxer still held access units (the
@@ -452,7 +453,8 @@ for every frame; 0 for a key no option has). `host/ui/menu.cpp`: `game_rows(tab)
 row is locked with "Set by <variable>" when the environment decides it), saving on change; the `<prefix>_MENU_DUMP`
 lines list the rows as the others; each tab's Restore button puts that tab's options back to their defaults (not one
 the environment decides). A game that lists no option gets no section and no key: every tab and settings.ini are as
-before. Our profile lists one, Flashes (`game.smooth_flashes`, `src/profile/enhancements.cpp`).
+before. Our profile lists one, Flashes (`game.smooth_flashes`, `src/profile/enhancements.cpp`). The menu's own tab
+type (0016's `Menu::Tab`) is `MenuTab` itself, an alias since task 095.
 
 ### 0020-vulkan-texture-detail
 Task 076 (D-019, E5; the Metal backend's half was task 075). The renderer picked a mipmapped draw's level as the GE does
@@ -565,8 +567,9 @@ so every window it opens has the PSP's shape until the player resizes it. A chec
 draws its 3D view at the window's shape) needs a window of another shape from the first frame, the same in every run.
 `<prefix>_WINDOW_SIZE=WxH`, read once beside `SDL_CreateWindow`, opens the window at W x H (1 to 16384 each) and
 prints `[render] window WxH (WINDOW_SIZE)`; unset, or anything but two positive numbers joined by an `x`, and the
-window is as before. Nothing else reads it: the menu's Window size row and a later resize work as they did. Applies to
-the pin alone. Upstream: a candidate, tooling any port's window checks can use.
+window is as before. Nothing else reads it: the menu's Window size row and a later resize work as they did. The parse
+is `host::window_size_switch()` (`shell/shell.hpp`, task 095), which our Metal shell calls too. Applies to the pin
+alone. Upstream: a candidate, tooling any port's window checks can use.
 
 ### 0028-vulkan-orthographic-fit
 Task 085 (D-020, point 3). Under Fill the target has the window's shape, so each of the game's 480x272 pixels is wider
@@ -609,8 +612,10 @@ hcount and the vblank flag, whose two `16683` literals were the same constant) a
 interpolation's game frame. The period is now the kernel's `vblank_period_us()`, set by `set_vblank_period_us()`
 (0 restores the PSP's); `last_vblank_us()` is kept at the tick, so a change of period leaves it the vblank's own
 time; a change applies from the next vblank, which stays where it was due (never moved into the past), and the count
-of vblanks so far stands. The media HLE passes the period to `gpu::pacing::set_vblank_period_us()` at each flip
-(frame_pacing.cpp is in the renderer's sources, which the kernel does not link): `game_frame_us()` is the period
+of vblanks so far stands. The period is kept by the kernel alone: frame_pacing.cpp, which is built without the
+kernel (the renderer's sources, the framework's interpolation tests), reads it through the function the media HLE
+hands `gpu::pacing::set_vblank_period_source()` when it makes the shell (task 095; until then a copy passed on at
+each flip, and an uncalled `pacing::vblank_period_us()`): `game_frame_us()` is the period
 times the game's frame in vblanks and `game_rate()` 60 x 16683 / period / that count, exactly 30 or 60 at the PSP's
 period as before, so the menu's Frame rate row, which offers only rates above `game_rate()`, offers the game's own
 rate and Match display when a game at 60 runs its vblank at 120 Hz. A present clock whose frame no longer matches

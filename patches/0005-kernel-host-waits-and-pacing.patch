@@ -26,7 +26,7 @@ index 835217a..8efef9f 100644
  #if defined(PORTABLEKIT_HAS_RENDERER)
          ui::attach(*media().shell);
 diff --git a/host/kernel/kernel.cpp b/host/kernel/kernel.cpp
-index 4c8cf07..094a27a 100644
+index 4c8cf07..11eaaf4 100644
 --- a/host/kernel/kernel.cpp
 +++ b/host/kernel/kernel.cpp
 @@ -384,7 +384,8 @@ void Kernel::delay_current(AllegrexContext &ctx, std::uint64_t microseconds, std
@@ -63,18 +63,18 @@ index 4c8cf07..094a27a 100644
      });
      if (host_wait) std::this_thread::sleep_for(std::chrono::microseconds(std::min(step_us, kHostWaitPollUs)));
  }
-@@ -454,10 +460,11 @@ void Kernel::advance_clock(std::uint64_t target_us) {
+@@ -454,10 +460,12 @@ void Kernel::advance_clock(std::uint64_t target_us) {
  bool Kernel::pace_to_real_time() {
      // Virtual time jumps to the next event whenever every thread waits, so
      // without this the game runs as fast as frames can be presented: two to
 -    // three times PSP speed on a 60-90 Hz display. Runs without a window, and
 -    // the unthrottled setting (<prefix>_UNTHROTTLED), keep the unpaced clock.
--    static const bool windowed = portablekit::env("NO_RENDER") == nullptr;
--    if (!windowed || settings::current().unthrottled) {
 +    // three times PSP speed on a 60-90 Hz display. A shell without a window
 +    // (set_paced(false): the headless one, or <prefix>_NO_RENDER), and the
 +    // unthrottled setting (<prefix>_UNTHROTTLED), keep the unpaced clock.
-+    const bool paced = paced_.value_or(portablekit::env("NO_RENDER") == nullptr);
+     static const bool windowed = portablekit::env("NO_RENDER") == nullptr;
+-    if (!windowed || settings::current().unthrottled) {
++    const bool paced = paced_.value_or(windowed);
 +    if (!paced || settings::current().unthrottled) {
          // Turning pacing back on starts from the current moment.
          pacing_started_ = false;
