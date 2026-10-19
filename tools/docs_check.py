@@ -4,7 +4,7 @@
     python3 tools/docs_check.py [--quiet] [FILE.md ...]
 
 The files: README.md, ref/README.md, patches/README.md and every .md under docs/ except docs/tasks/ (the task files
-are the record: they cite what existed when they were written, and are not rewritten). Four checks, on fenced code
+are the record: they cite what existed when they were written, and are not rewritten). Five checks, on fenced code
 blocks too except for links:
 
   paths    every `tools/...`, `src/...`, `config/...`, `docs/...`, `packaging/...` and `third_party/...` path a doc names
@@ -12,9 +12,9 @@ blocks too except for links:
            member present, or a stem (`src/tools/ge_replay` for `ge_replay.cpp`); a placeholder in capitals (TRACK,
            MODE, NAME, FILE, DIR and the like, `PLACEHOLDERS`) stands for any name
            (`config/pad_scripts/drive/TRACK.txt`). A path counts when it starts a word (not
-           `vendor/portablekit/tools/...` or `~/dev/x/src/...`). docs/vendor-map.md, docs/codegen-baseline.md and
-           docs/research.md are spike reports about other repositories (PortableKit, Yakumo, PSPRecomp), whose
-           `src/` and `tools/` are theirs, and the history files under docs/history/ are dated records that keep the
+           `vendor/portablekit/tools/...` or `~/dev/x/src/...`). docs/codegen-baseline.md and docs/research.md are
+           spike reports about other repositories (PortableKit, Yakumo, PSPRecomp), whose `src/` and `tools/` are
+           theirs, and the history files under docs/history/ are dated records that keep the
            names of their day: this check skips both kinds.
   links    every relative Markdown link `[text](target)` resolves: the file exists, and a `#anchor` names a heading of
            it (GitHub's rule: lower case, punctuation dropped, spaces to hyphens, -1, -2 for repeats).
@@ -24,6 +24,9 @@ blocks too except for links:
            purpose. The mapping table of patches/README.md ("Old numbers") is skipped, and a history file may cite
            an old patch by the name that table gives it (`patches/0009-ge-backend-seam.patch` as it was then).
   tasks    every `docs/tasks/NNN` (with or without its slug) is a task file.
+  tools    (task 092) every tracked file under tools/ (`git ls-files tools`, `__pycache__` aside) is named in
+           docs/developing.md, by its path or a brace form of it (`tools/ppsspp/routes/{a,b}.txt`); checked when
+           docs/developing.md is among the files read. Without git, every file under tools/ counts.
 
 Exit 0 when every check passes, else 1 with one line per finding (FILE:LINE: what). Standard library only.
 """
@@ -31,11 +34,12 @@ import argparse
 import glob
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Spike reports whose tools/ and src/ paths are other repositories' (they say so in their opening lines).
-EXTERNAL = {"docs/vendor-map.md", "docs/codegen-baseline.md", "docs/research.md"}
+EXTERNAL = {"docs/codegen-baseline.md", "docs/research.md"}
 # The words the docs use for "any name" inside a path.
 PLACEHOLDERS = ("TRACK", "MODE", "NNNN", "NNN", "NAME", "FILE", "DIR", "CELL", "SCENE", "ADDR", "TAG", "PACK")
 PATH_PREFIXES = ("tools/", "src/", "config/", "docs/", "packaging/", "third_party/")
@@ -201,6 +205,30 @@ def check_file(rel, patch_stems, task_files, findings):
                                                                        else ""))
 
 
+def tools_files():
+    """The tracked files under tools/ (every file there when git cannot say), without __pycache__."""
+    try:
+        out = subprocess.run(["git", "-C", ROOT, "ls-files", "-z", "tools"], capture_output=True, check=True).stdout
+        files = [p for p in out.decode("utf-8").split("\0") if p]
+    except (OSError, subprocess.CalledProcessError):
+        files = []
+        for base, _, names in os.walk(os.path.join(ROOT, "tools")):
+            files += [os.path.relpath(os.path.join(base, n), ROOT).replace(os.sep, "/") for n in names]
+    return sorted(f for f in files if "__pycache__" not in f.split("/"))
+
+
+def check_tools_named(findings):
+    """Every tracked tools/ file has a row in docs/developing.md (task 092: one line a tool there)."""
+    named = set()
+    with open(os.path.join(ROOT, "docs", "developing.md"), encoding="utf-8") as f:
+        for line in f:
+            for m in PATH_RE.finditer(line):
+                named.update(expand(clean(m.group(1))))
+    for path in tools_files():
+        if path not in named:
+            findings.append(f"docs/developing.md: {path} is not named (every tracked tools/ file has a row there)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Checks that the docs name only what exists.")
     parser.add_argument("files", nargs="*", help="the docs to check (default: README.md, ref/README.md, "
@@ -216,6 +244,8 @@ def main():
     findings = []
     for rel in files:
         check_file(rel, patch_stems, task_files, findings)
+    if "docs/developing.md" in files:
+        check_tools_named(findings)
     for line in findings:
         print(line)
     if not args.quiet or findings:

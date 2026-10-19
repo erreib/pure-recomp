@@ -3,7 +3,8 @@
 What docs/verification.md recorded of each check's first runs and its before-and-after tables, moved here by task 053
 (2026-10-07); how each check works stays in [docs/verification.md](../verification.md). Task 053 changed only the patch
 numbers, which task 052 regrouped (patches/README.md maps them), naming each by the patch that holds the change now and
-the task that made it. Tools and limits are as they were on the dates given.
+the task that made it. Tools and limits are as they were on the dates given. Since task 092 the fidelity layer's checks are
+described in [docs/fidelity.md](../fidelity.md#the-fidelity-layers-checks).
 
 ## The frame regression suite as task 020 made it (2026-10-06)
 
@@ -236,3 +237,72 @@ old `run_boot.py` and the sweep's old pty reader against `PtyRun` on a stand-in 
 exit, deadline, signal, an exit status, a slow writer, a 30,000-line flood), with and without the line cap, gave the
 same logs, lines, stdout and codes; `fidelity_audit.py --rescan` of the cached 46-cell matrix gave the same cells and
 tables; `pp_lines.py --port` on a grid log gave the same samples.
+
+## The window checks paced from the scene (task 069, 2026-10-10)
+
+
+Wall times on this Mac (Apple M4 Pro, its 120 Hz panel), before (the tools of 76f9143) and after, the suite's and the
+check's own times (not the wait for another worktree's game to end):
+
+| Run | Before: paced from boot | After: paced from the scene |
+|---|---|---|
+| `tools/frame_regress.sh --shell metal --backend metal` | 19m 48s, 18/18 (frontend 72 s, main_menu 158 s, the race routes 174 to 198 s) | 5m 10s, 7/7 (the window scenes: 24, 48, 55, 58, 58 and 67 s; three runs, the same to the second); `--all-scenes` 7m 46s, 18/18 (62, 48, 86, 71, 71, 52 and 75 s; race_hud 0.0158, another grid (below)) |
+| `tools/frame_regress.sh --shell vulkan --backend vulkan` | 19m 48s, 18/18 (71 s, 157 s, 174 to 198 s) | 5m 11s, 7/7 (23, 48, 54, 59, 58 and 67 s; three runs); `--all-scenes` 7m 46s, 18/18 |
+| `tools/hud_check.sh` | 227 s, 61 of 61 | 82 s, 61 of 61 |
+
+- A window run still presents every flip at the display's rate when unpaced (both shells present at vsync): 120
+  flips a second here, four times the 30 a second of the paced menus. A route
+  costs its first scene's flip over 120 s plus its paced flips over 30 s, and the 300-flip margin costs 7.5 s a route
+  over an unpaced one (45 s of the window suite's 5 minutes). On a 60 Hz display the unpaced part takes twice as long.
+- The captures: every window scene's capture paced from the scene equals the one paced from boot, pixel for pixel, in
+  both shells (and in the Metal window the headless capture scaled). A Metal frame trace (`PURE_METAL_TRACE`) of the Single Race and Zone routes shows the switch settling at once: before it the pictures reach the screen every 8.3 ms (unpaced, 120 Hz), from the first paced flip every 33.3 ms (the 30-fps menus; one picture a vsync late a dozen flips on), and the flips before each scene keep their rate (race_hud's last 87 flips 16.7 ms each, the longest 20.4 ms at the capture's own flip; zone_hud's and zone_change's last 60 at 33.3 ms, one picture shown at 41.7 ms). No hitch reaches a scene.
+
+What task 069 measured of the window columns' wobble, moved from docs/verification.md ("Fast, silent test runs")
+by task 092:
+
+What task 069 measured, for the record (its cause was not chased):
+the Metal window scored the headless values on all five race scenes, pixel for pixel, in one run paced from boot,
+three paced from the scene, and race_hud in three more Single Race runs (two paced from flip 4465); the Vulkan window drew its race scenes the
+same to the pixel in one run paced from boot and four paced from the scene; the HUD check's 61 shots paced from flip
+5900 equalled, shot for shot, the main checkout's run of the same commit paced from boot. Two runs drew another
+race: the Metal window's `--all-scenes` run (Single Race paced from 4465), whose AI ships loaded in another order
+(race_hud 0.0158 against 0.0148), and a HUD check paced from boot, whose first load took 601 ms of game time where
+the others' took 584 (its fourth 367 against 351), which loaded other AI ships and billboards and differed from the
+others in all 61 shots. So the race's seed (docs/fidelity.md, difference 13) moved in 2 of these 16 window runs, one
+paced from boot and one from before TEAM SELECTION; with the window scenes every race route is paced from after it.
+
+## The checks table as it stood (2026-10-19, before task 092)
+
+docs/verification.md's table before task 092 gave each check its pass bar, guard and wall time in one cell;
+its rows as they were:
+
+| Check | Command | What it guards | Section |
+|---|---|---|---|
+| frame regression | `tools/frame_regress.sh` | 18 scenes against PPSSPP, headless on Metal in about 25 s; the merge gate for renderer changes | "Frame regression suite" |
+| race HUD | `tools/hud_check.sh` | the race's HUD in 61 shots of the Metal window | "The race HUD check" |
+| flashes (E6) | `tools/flash_check.sh [--race]` | the enhancement E6 (task 070, D-016), the one check run with it on: the race-start fade at two vblanks for 57 flips with `PURE_SMOOTH_FLASHES=0` and none with 1, the race and its HUD in both (about 15 s headless); `--race` a swept Vineta K race with each, no two-vblank stretch with 1 and lap times within 5% (about 8 minutes) | docs/timing.md, "E6"; "Fast, silent test runs" |
+| stutter (task 077) | `tools/stutter_check.sh` | wall time: one swept race in the window with the shipped defaults and sound, at most 1 in 10 seconds with a frame over 25 ms (the live-file flips apart) and the readback stall at most 2 ms a frame (about 6 minutes) | docs/developing.md tools table |
+| sprite upscale (E7) | `tools/sprite_check.sh` | the enhancement E7 (task 073, D-018), the one check run with it on: seven scenes headless at internal scale 4 with `PURE_SPRITE_UPSCALE=0` and 1, each capture with 1 reduced to 480x272 within its scene's limit of the reference, different from the capture with 0 in at least 1% of its pixels, the HUD found in the three race scenes, the main menu's upscales under 2 s (about 40 s); `tools/sprite_proto_check.py DUMP` the scaler against its prototype on `PURE_SPRITE_DUMP`'s textures | docs/metal-backend.md, "Sprite upscale"; "Fast, silent test runs" |
+| texture detail (E5) | `tools/texture_check.sh` | the enhancement E5 (task 075, D-019), the one check run with it on: race_hud, tt_hud, fp_hud and zone_hud headless at internal scale 4 with `PURE_TEXTURE_DETAIL=0` and 1, each capture with 1 reduced to 480x272 within its scene's limit of the reference; for the three Vineta K scenes, different from the capture with 0 in at least 1% of its pixels, more high-frequency energy, and the HUD found; at least 10000 enhanced draws on the race_hud route, and race_hud at scale 1 with 1 within its limit (about 40 s). `--shell vulkan` (task 076, patch 0020-vulkan-texture-detail): the four scenes in the Vulkan window at its own scale, S its width over 480, the same bars, and `[render] texture detail: on` with 1 and `off` with 0 in place of the count (2 to 5 minutes: its off runs are made again while they make pipelines, which moves a paced race) | docs/metal-backend.md, "Texture detail" and "The Vulkan renderer"; "Fast, silent test runs" |
+| the 3D view's shape (E2) | `tools/aspect_check.sh [--shell metal]` | the enhancement E2 (task 084, D-020), the game's 3D view at the window's shape under the Vulkan renderer's Fill: the race_hud route in a 1260x540 Vulkan window (`PURE_WINDOW_SIZE`, patch 0027-window-size-switch) with `video.aspect=original` and `fill`; the Fill capture's central strip against the Original one's within 10% at tol 32 between the HUD's bars (the same view; measured 0.069, a stretched picture 0.465), its outer strips holding the scene, the override's calls widened under Fill and left alone under Original, both lanes' draws at the frame printed; since task 085 (patch 0028-vulkan-orthographic-fit, the 2D interface fitted under Fill) also the same strips over the HUD's bands within 5% (measured 0.0205, a stretched picture 0.442) and the main_menu route in both lanes, the central strips within 5% at tol 24 (measured 0.0205) and the Fill capture's outer strips not black (about 4 minutes, up to 6 while the pipeline caches warm). `--shell metal` (task 086): the same lanes and bars on the Metal shell and backend, the window's drawable 1260x540 pixels and the backend at Auto (0.063 between the HUD's bars, 0.047 over the strip with the HUD fitted; about 30 s) | docs/developing.md tools table; D-020; docs/metal-backend.md, "Fill" |
+| frame rate (E4) | `tools/framerate_check.sh [--race]` | the enhancement E4 (task 072, D-017), the one check run with it on: the Time Trial route with `PURE_SIXTY_FPS=0` and 1, the frontend at two vblanks in both, the race at two vblanks and 30 flips a race-clock second with 0, one vblank and 60 with 1, the `[pure] sixty fps: on` line only from the race load, the HUD drawn (about 15 s headless); `--race` a swept Vineta K Time Trial with each: 30 against 60 flips a second, both game clocks within 1% of real time, the standing start within 5% or 10 km/h (about 7 minutes) | docs/timing.md, "E4"; "Fast, silent test runs" |
+| display rate (E8) | `tools/display_rate_check.sh [--race \| --audio [--shell vulkan]] [--margin F]` | the enhancement E8 (task 089, D-022), the one check run with it on: the Time Trial route headless with `PURE_SIXTY_FPS=1` in both lanes, `PURE_DISPLAY_RATE=0` against `PURE_DISPLAY_RATE=1 PURE_DISPLAY_HZ=120`: the frontend at 29 to 31 flips a virtual second in both (the period follows the display only while the race backend lives), the race at 58 to 61 flips a race-clock second against 120 x (1 - margin) plus or minus 3 (the margin 0.005 since task 091, read from the lines), the race-start fade the same seconds within 10% in twice the flips, the HUD drawn, the `[pure] display rate` lines (the race's from the race load on) (about 20 s); `--race` a swept Vineta K Time Trial at each: the flips a second, both game clocks within 1% of real time, the standing start to 1.5 s within 5% or 10 km/h, the contacts a lap within 50%, and the 2.0 s bin, the first speed pad and the laps reported (about 8 minutes); `--audio` (task 091) a Single Race with sound in the window at the display's own refresh and the shipped defaults: at most 1 resync of the audio sink (the race load's) and no second under 95% speed, the seconds under 99% reported; it refuses or FAILs a run whose window is not on screen (covered windows present without vsync), so the window must be uncovered (about 2.5 minutes, one shell a run) | docs/timing.md, "E8"; "Fast, silent test runs" |
+| billboards | `tools/billboard_check.sh` | an advert screen shows the advert, not bars (task 063): headless on Metal in about 10 s, or `--backend vulkan --shell vulkan` | docs/fidelity.md, difference 15 |
+| Metal against Vulkan | `tools/gerec/metal_check.sh` | the two backends on the TEAM screen and the race, through ge_replay | docs/metal-backend.md, "The 3D check" |
+| ge_replay | `tools/gerec/replay_check.sh` | the replay itself | docs/ge-backend.md, section 7 |
+| no change | `tools/refactor_check.sh` | a change that moves code changes no pixel and no count | docs/metal-backend.md, "Files" |
+| internal scale | `tools/scale_check.sh [S]` | the Metal backend at internal scale S (default 4) against 1 (task 066, D-015's bar): the 18 scenes headless at both, each S capture 480S x 272S and, reduced to 480x272 by nearest neighbour, within 5% of pixels at tol 24 of the 1x one; the race scenes' bloom region within 10% of its mean luminance; about a minute | docs/metal-backend.md, "Internal scale" |
+| audio | `PURE_AUDIO_WAV`, `tools/wavstats.py`, `tools/audio_compare.py` | the game's sound, against PPSSPP's dump | "Audio" |
+| SAS reverb | `tools/sas_reverb_check.sh` | the reverb's tail at a pause against PPSSPP's | "The SAS reverb check" |
+| saves | `tools/save_roundtrip.sh`, `tools/save_interchange.sh` | the round trip of profiles; saves both ways with PPSSPP | docs/savedata.md; "The save interchange check" |
+| scorecard | `tools/scorecard.py` | how close the port is to the original, six categories | "The accuracy scorecard" |
+| trajectories, race clock pinned | `tools/ai_seed_check.sh` | the scorecard's trajectories on PPSSPP's race clock | docs/fidelity.md, difference 13 |
+| VFPU rounding | `tools/vfpu_probe.py`, `tools/vfpu_model.py` | the port's VFPU results against PPSSPP's and the PSP's rule | "The VFPU dot-product check" |
+| controls | `tools/controls_check.py` | docs/controls.md's tables against the framework's sources | docs/controls.md |
+| the Esc menu | `tools/menu_check.sh [--shell vulkan]` | the menu's rows (`PURE_MENU_DUMP`) against what this game and the shell have (task 064): no Network tab, no camera or mouse rows, Resolution first in both shells (task 067: the GE backend's scale), Aspect ratio with Fill in both (tasks 084 and 086), Performance and the F3 line in both (task 090), and in the Metal shell no frame-rate cap, touch or texture rows and "Metal on"; the game's own rows (30 fps modes, Flashes, Text and sprites, Texture detail) at the Video tab's end in both; about 25 s in the window | docs/controls.md, "Rows the menu leaves out" |
+| the performance overlay | `tools/overlay_check.sh` | the Metal shell's overlay (task 090): the race_hud route in the Metal window twice, `video.performance=off` and `overlay`, the capture at flip 6016: the overlay's rectangle (top-left, inset 4 x scale, 196x72 x scale) at least 20% changed at tol 24 (measured 0.96) and not black, the rest of the capture within race_hud's 0.10 at tol 32 (measured 0.0000), the HUD's labels outside the rectangle in both, and the overlay's lines read back with its own font (`FPS 60.0 GAME 59.9 SPD 100%`); about 25 s | docs/metal-backend.md, "The Metal shell" |
+| the app | `tools/bundle.sh --check DIR` | the app bundle: signature, libraries, no game data, setup and a run | docs/release.md |
+| the Windows zip | `tools/bundle_windows.sh --check DIR` | the release folder: its files, its DLLs, no game data, setup and a run | docs/release.md, "Windows" |
+| what goes public (task 087) | `tools/release_check.sh [--history] [--archive ZIP ...]` | HEAD's files hold no game path, name or header, nothing over 1 MiB, no binary but the three icons, no key-sized hex run or 16-byte array off the allow list of hashes, no token, no home path outside the record; `--history` every commit's paths and file versions; `--archive` a release zip (no game file, BUILDINFO.txt naming a clean commit, its tag for a release); about 1 s, 5 s with `--history` | docs/release.md, "Publishing" |
+| the docs | `tools/docs_check.py` | every path, link, patch and task file the docs name exists | "The docs check" |
+| a task | `tools/verify_task.sh NNN` | the Verify line of `docs/tasks/NNN-*.md`, PASS or FAIL | CLAUDE.md |

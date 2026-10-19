@@ -246,9 +246,32 @@ refresh every 1 / (rate x margin) seconds (1.7 s at 0.005), the same picture sho
   - Reported, not bounded: the mean lap 58.60 against 58.27 s (-0.57%), the 2.0 s bin 168.2 against 176.5 km/h, and
     the first speed pad 0.050 s and 2.53 m early (at the exact rate, 0.085 to 0.1 s and 4.2 to 4.6 m).
 - **Open.** The swapchain's image count and the presents themselves, which hold the game thread on a missed refresh,
-  are a renderer question this task leaves alone (vendor/). The rig's 100 Hz display (docs/windows.md) is unmeasured.
+  are a renderer question this task leaves alone (vendor/). The rig's 100 Hz display: below.
   The Vulkan Frame rate row's offer at a game rate of 119.4 is unchecked: `game_rate()` reads 119.52 there, and the
   governor interpolates only above the game's rate plus 0.5, so 120 adds nothing.
+
+### On the rig's 100 Hz display
+The rig (RTX 3080, an i5-8600K, a 100 Hz display) runs the race at Display at 100 Hz, 99.50 Hz with the margin
+(10050 us a vblank). Moved here by task 092 from docs/windows.md's rig checklist and docs/status.md's E8 notes.
+- **The storms** (task 091-display-rate-storms, 2026-10-14):
+  Measured 2026-10-14 (task 091-display-rate-storms, before the margin): on this rig (RTX 3080, its CPU)
+  the 100 Hz race does not fit 10 ms, storms or not. A race frame costs about 11.7 ms of host work whatever the
+  rate (game 3.3, sceDisplay's host work 2.1, render 4.3, fence 1.6 ms), so the race holds 85 fps and runs at
+  85% speed, with the effect storms dipping to 76 to 80%. Original (60, with 6 ms to spare a frame) is the
+  smooth setting on this machine. A clean Display rate at 100 Hz needs about 2.5 ms a frame more headroom
+  (25%: the mean overrun plus the storms' 0.7 ms), and more at 120 Hz. The margin's 10050 us vblank widens the
+  budget by only 0.05 ms, so these figures stand with it.
+- **The sound**: The rig's 100 Hz run (2026-10-15, e4f1fb7 plus the probe's CR fix): `--audio --shell vulkan` FAIL, 4 resyncs at
+  the margin 0.005 and 3 at margin 0, at the same audio seconds both times (the race load, then about 4 and 9 s
+  into the race; clean after). Speed held: medians 99.5 (100.0) presents and game flips a second, no second under
+  95%. So the rig's skips are not the margin's mechanism (no time lost to misses) but an early-race settling: the
+  sink's lead falls from about 7400 frames in the menus to 1000 to 3000 at the race start. The sink's tolerance of a
+  late producer (task 081's fork) is the candidate. Also notable: this route held full speed at 100 Hz where task
+  091-display-rate-storms' stutter_check route measured 85%; the difference (stutter_check's tracing and live-file
+  harness, the route, internal scale Auto here) is unexplained and wants a look before the storms' verdict is
+  quoted to players. Erik's ear on the staged build (2026-10-15): "betterish", but more audio hiccups than the
+  Mac build. Parked for now. The probe needed a fix to run on Windows at all: its Python prints `yes\r\n`, `read` kept the
+  `\r`, and every run refused as "not on screen" (tools/display_rate_check.sh, one line).
 
 ## Frame structure (from `out/frame.txt`)
 - `FUN_088ed190` is the GE init: `sceGeEdramGetAddr`, `sceKernelCreateEventFlag`, `sceGeSetCallback` (one callback
