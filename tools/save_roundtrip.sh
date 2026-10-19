@@ -1,6 +1,6 @@
 #!/bin/bash
-# The save round trip of M5 (task 014): three windowed runs on a memory stick of their own (PURE_GAME_DIR=out/014/game,
-# EBOOT.ELF and disc.iso linked from game/), so the checkout's game/ms0 is never touched.
+# The save round trip of M5 (task 014): five runs on a memory stick of their own (PURE_GAME_DIR=out/014/game, made by
+# tools/lib.sh's fresh_stick: EBOOT.ELF and disc.iso linked from game/), so the checkout's game/ms0 is never touched.
 #   1. NEW   empty ms0, config/pad_scripts/main_menu.txt (profile NAME0000, tag AAA, save question YES): the game's
 #            LISTSAVE writes UCUS98612P0000 with PARAM.SFO, PROFILE.BIN and ICON0.PNG; PARAM.SFO names the folder and
 #            the pilot; MAIN MENU is reached. A capture of SET NAME on the empty stick ("NAME") is the control.
@@ -17,13 +17,27 @@
 #   5. LIST  a restart (config/pad_scripts/profile_list_load.txt): the boot LOAD lists both profiles on the newest,
 #            P0001; Cross loads it and SET NAME shows NAME1111. Both folders hold their own pilots.
 # Exit 0 only when all five hold. Logs, captures and the stick stay in out/014/ (the save list's captures in
-# out/014/run4/ and run5/). About 13 minutes: input scripts need the renderer's pad, so every run is windowed. The runs are silent and use the data directory
-# out/data/save_roundtrip (settings.ini, save backups), not the player's, unless the environment sets PURE_NO_AUDIO or
-# PURE_DATA_DIR (tools/run_boot.py; task 034).
-#   tools/save_roundtrip.sh
+# out/014/run4/ and run5/). Runs 1 to 3 are headless on the Metal backend, unpaced, the captures its own 480x272
+# pictures (purelib.port's DRAWING; on Windows, where nothing draws headless, the Vulkan window): the headless shell
+# reads the input scripts at pad level, as tools/save_interchange.sh runs the same routes since task 026 (task 094; they
+# had been windowed for scripts that once needed the renderer's pad). Runs 4 and 5 stay in the window (PureNative's
+# default shell): the save list they choose in is the host's interface, drawn only in a window; headless the framework
+# answers LISTSAVE and LISTLOAD itself (the first free slot, the newest save) and no list opens. About 3 minutes (runs 4
+# and 5 paced, 9850 flips), where five windowed runs took 13. --headless runs 1 to 3 only, without a window (about 10
+# s), and says runs 4 and 5 were not run. The runs are silent and use the data directory out/data/save_roundtrip
+# (settings.ini, save backups), not the player's, unless the environment sets PURE_NO_AUDIO or PURE_DATA_DIR
+# (tools/run_boot.py; task 034).
+#   tools/save_roundtrip.sh [--headless]
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
+. tools/lib.sh
+HEADLESS=no
+case "${1:-}" in
+  "") ;;
+  --headless) HEADLESS=yes ;;
+  *) echo "usage: tools/save_roundtrip.sh [--headless]"; exit 2 ;;
+esac
 OUT=out/014
 GAME=$OUT/game
 SAVE=$GAME/ms0/PSP/SAVEDATA
@@ -36,32 +50,33 @@ DIGITS=200,92,115,26   # PSP pixels: the 5th to 8th letters of the SET NAME fiel
 MIN_NAME_VARIANCE=500  # measured: 1545 with NAME0000 loaded, 0 on the empty stick
 MIN_ONES_VARIANCE=200  # measured: 449 with NAME1111 loaded (thin digits), 0 on the empty stick (task 039)
 
-# The binary purelib.port names (build/arm64 on macOS, build/win-x64 on Windows); on Windows hard links stand in
-# for the symlinks (Git Bash's ln -s copies) and GNU stat for BSD stat (task 055).
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE.as_posix())')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
+# GNU stat for BSD stat on Windows (task 055).
 case "$(uname -s)" in
-MINGW*|MSYS*) LNS="ln -f"; mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; } ;;
-*) LNS="ln -sfn"; mtime() { stat -f %m "$1" 2>/dev/null || echo 0; } ;;
+MINGW*|MSYS*) mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; } ;;
+*) mtime() { stat -f %m "$1" 2>/dev/null || echo 0; } ;;
 esac
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
+need_game
+# Runs 1 to 3: the shell and backend whose pictures are read headless (Metal on macOS; the Vulkan window on Windows).
+read -r SHELL_NAME BACKEND < <(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
+print(*port.DRAWING)')
+BACKEND=${BACKEND%$'\r'}   # Windows Python ends its line \r\n, and read keeps the \r
+SHELL_ARGS=(--shell "$SHELL_NAME" --backend "$BACKEND")
+WHERE="shell $SHELL_NAME, backend $BACKEND"
 
-mkdir -p "$GAME"
-$LNS "$ROOT/game/EBOOT.ELF" "$GAME/EBOOT.ELF"
-$LNS "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$GAME/disc.iso"
-rm -rf "$GAME/ms0" "$OUT"/run1 "$OUT"/run2 "$OUT"/run3 "$OUT"/run4 "$OUT"/run5
-mkdir -p "$SAVE"
+fresh_stick "$GAME"
+rm -rf "$OUT"/run1 "$OUT"/run2 "$OUT"/run3 "$OUT"/run4 "$OUT"/run5
 
 FAILS=0
 ok()   { echo "  ok    $*"; }
 bad()  { echo "  FAIL  $*"; FAILS=$((FAILS + 1)); }
 
-# run NAME SCRIPT FRAMES [--env K=V ...]: one bounded windowed run, log in out/014/NAME.log, captures in out/014/NAME/.
+# run NAME SCRIPT FRAMES [--env K=V ...]: one bounded run (SHELL_ARGS: headless, or the window), log in
+# out/014/NAME.log, captures in out/014/NAME/.
 run() {
   local name=$1 script=$2 frames=$3; shift 3
-  echo "$name: $(basename "$script"), $frames frames"
-  python3 tools/run_boot.py --script "$script" --shots "$OUT/$name" --frames "$frames" --seconds 400 \
+  echo "$name: $(basename "$script"), $frames frames, $WHERE"
+  python3 tools/run_boot.py ${SHELL_ARGS[@]+"${SHELL_ARGS[@]}"} --script "$script" --shots "$OUT/$name" \
+    --frames "$frames" --seconds 400 \
     --data-dir out/data/save_roundtrip \
     --env PURE_GAME_DIR="$ROOT/$GAME" --env PURE_TRACE_SAVEDATA=1 "$@" "$OUT/$name.log" > "$OUT/$name.stdout" 2>&1
   local rc=$?
@@ -219,6 +234,16 @@ load_checks run3
 [ -d "$SAVE/$DLC" ] && [ -z "$(ls -A "$SAVE/$DLC")" ] && ok "$DLC left as it was (empty)" || bad "$DLC changed"
 OUTCOME[3]="run 3 DLC door (+ empty $DLC): $(verdict "seen by the SAVEDATA scan, $dlc_note; profile loaded, saved and shown (variance $v); last frame reached")"
 TOTAL=$((TOTAL + FAILS))
+
+# 4 and 5 choose in the save list, the host's interface: in the window (PureNative's default shell), unless --headless.
+if [ $HEADLESS = yes ]; then
+  for i in 1 2 3; do echo "${OUTCOME[$i]}"; done
+  echo "runs 4 and 5 not run (--headless: the save list they choose in is drawn only in a window)"
+  if [ $TOTAL -eq 0 ]; then echo "save round trip: PASS (runs 1 to 3, --headless)"; exit 0; fi
+  echo "save round trip: FAIL ($TOTAL checks, runs 1 to 3, --headless)"; exit 1
+fi
+SHELL_ARGS=()
+WHERE="in the window"
 
 # 4. A second profile, through the save list (task 039).
 FAILS=0
