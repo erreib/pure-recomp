@@ -8,8 +8,8 @@
 #              --out), DIR/1/reduced the 1 captures reduced to 480x272, DIR/hud/<scene>/h<frame>.bmp the race scenes'
 #              1 captures for tools/hud_check.py, DIR/<scene>.diff.png the differing pixels of a scene whose reduction
 #              fails, DIR/summary.txt the table.
-#   --wait     how long to wait for other games to end when the suite's one-game guard refuses to start (default 600;
-#              0 gives up at once), as tools/scale_check.sh waits.
+#   --wait     how long the suite waits for other games to end before it starts (tools/frame_regress.sh --wait;
+#              default 600, 0 gives up at once).
 # PASS when, for every scene:
 #   - the 1 capture is 1920x1088 (the display target at internal scale 4);
 #   - reduced to 480x272 by the centre pixel of each 4 x 4 block (tools/scale_check.sh's rule and code, copied: the
@@ -48,28 +48,18 @@ mkdir -p "$DIR"
 DIR=$(cd "$DIR" && pwd)
 START=$SECONDS
 
-# capture V: the scenes headless on Metal at internal scale 4 with PURE_SPRITE_UPSCALE=V, into DIR/V, retried while
-# the one-game guard refuses, for up to --wait seconds. The suite's own verdict (each capture against its reference at
-# its own size, by nearest neighbour) does not matter here.
+# capture V: the scenes headless on Metal at internal scale 4 with PURE_SPRITE_UPSCALE=V, into DIR/V, the suite waiting
+# up to --wait seconds for another game (tools/frame_regress.sh --wait). The suite's own verdict (each capture against
+# its reference at its own size, by nearest neighbour) does not matter here.
 capture() {
-  local v=$1 where="$DIR/$1" waited=0 rc
+  local v=$1 where="$DIR/$1" rc
   rm -rf "$where"
   mkdir -p "$where"
-  while :; do
-    tools/frame_regress.sh --out "$where" --shell headless --backend metal --only "$(echo $SCENES | tr ' ' ',')" \
-      --env "PURE_INTERNAL_SCALE=$SCALE" --env "PURE_SPRITE_UPSCALE=$v" > "$DIR/frame_regress.$v.stdout" 2>&1
-    rc=$?
-    grep -q '^frame_regress: another PureNative is running' "$DIR/frame_regress.$v.stdout" || break
-    if [ $waited -ge "$WAIT" ]; then
-      cat "$DIR/frame_regress.$v.stdout"
-      echo "sprite_check: another game kept running for $WAIT s; try again later"
-      exit 2
-    fi
-    [ $waited -eq 0 ] && sed -n '2,$p' "$DIR/frame_regress.$v.stdout" | sed 's/^/  waiting for: /'
-    sleep 20
-    waited=$((waited + 20))
-  done
-  [ $waited -gt 0 ] && echo "  (waited $waited s for another game to end)"
+  tools/frame_regress.sh --wait "$WAIT" --out "$where" --shell headless --backend metal \
+    --only "$(echo $SCENES | tr ' ' ',')" --env "PURE_INTERNAL_SCALE=$SCALE" --env "PURE_SPRITE_UPSCALE=$v" \
+    > "$DIR/frame_regress.$v.stdout" 2>&1
+  rc=$?
+  grep -E '^frame_regress: (waiting|.*free after)' "$DIR/frame_regress.$v.stdout" | sed 's/^frame_regress: /  /'
   if [ $rc -eq 2 ]; then
     cat "$DIR/frame_regress.$v.stdout"
     echo "sprite_check: tools/frame_regress.sh could not run"

@@ -14,8 +14,9 @@
 #   --dir      default out/refactor.
 #   --shell, --backend, --env  for --before only (default headless and metal: the suite's own defaults, the backend's
 #              480x272 pictures, unpaced, about a minute); passed on to tools/frame_regress.sh.
-#   --wait     how long to wait for other games to end when the suite's one-game guard refuses to start (default 600;
-#              0 gives up at once). The other worktrees' runs come and go; this one waits its turn rather than fail.
+#   --wait     how long the suite waits for other games to end before it starts (tools/frame_regress.sh --wait;
+#              default 600, 0 gives up at once). The other worktrees' runs come and go; this one waits its turn rather
+#              than fail.
 # PASS (exit 0) only when every scene captured before has a capture after with 0 differing pixels, and the counts
 # the backend prints at exit (the [metal] lines of each route's log, with every time and rate taken out) are the
 # same; FAIL (exit 1) otherwise; exit 2 when it cannot run (no before captures, a suite refused for longer than
@@ -72,27 +73,16 @@ fi
 commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 git diff --quiet HEAD 2>/dev/null || commit="$commit+changes"
 
-# capture WHERE: the suite's scenes with the current build into WHERE/run (tools/frame_regress.sh --out), retried
-# while the one-game guard refuses, for up to --wait seconds.
+# capture WHERE: the suite's scenes with the current build into WHERE/run (tools/frame_regress.sh --out), the suite
+# waiting up to --wait seconds for another game (tools/frame_regress.sh --wait).
 capture() {
-  local where=$1 waited=0 rc
-  local args=(--out "$where/run" --shell "$SHELL_NAME" --backend "$BACKEND")
+  local where=$1 rc
+  local args=(--wait "$WAIT" --out "$where/run" --shell "$SHELL_NAME" --backend "$BACKEND")
   local e
   for e in ${ENVS[@]+"${ENVS[@]}"}; do args+=(--env "$e"); done
-  while :; do
-    tools/frame_regress.sh "${args[@]}" > "$where/frame_regress.stdout" 2>&1
-    rc=$?
-    grep -q '^frame_regress: another PureNative is running' "$where/frame_regress.stdout" || break
-    if [ $waited -ge "$WAIT" ]; then
-      cat "$where/frame_regress.stdout"
-      echo "refactor_check: another game kept running for $WAIT s; try again later"
-      exit 2
-    fi
-    [ $waited -eq 0 ] && sed -n '2,$p' "$where/frame_regress.stdout" | sed 's/^/  waiting for: /'
-    sleep 20
-    waited=$((waited + 20))
-  done
-  [ $waited -gt 0 ] && echo "  (waited $waited s for another game to end)"
+  tools/frame_regress.sh "${args[@]}" > "$where/frame_regress.stdout" 2>&1
+  rc=$?
+  grep -E '^frame_regress: (waiting|.*free after)' "$where/frame_regress.stdout" | sed 's/^frame_regress: /  /'
   if [ $rc -eq 2 ]; then
     cat "$where/frame_regress.stdout"
     echo "refactor_check: tools/frame_regress.sh could not run"

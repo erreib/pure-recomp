@@ -20,7 +20,8 @@
 #           main_menu.png at flip 4700), DIR/strip.<lane>.png and DIR/menu.strip.<lane>.png the central strips at
 #           480x272, DIR/strip.diff.png, DIR/strip.hud.diff.png and DIR/menu.strip.diff.png their differing pixels,
 #           DIR/summary.txt the figures.
-#   --wait  how long to wait for another PureNative to end before each lane (default 600; 0 gives up at once).
+#   --wait  how long to wait for another PureNative to end before each lane (tools/frame_regress.sh --wait; default
+#           600, 0 gives up at once).
 # The captures are the window's pixels, 1260x540. Under Original the PSP's picture is shown at its own shape in the
 # centre, 953x540 from x 153 (black either side); under Fill the target has the window's shape, the game draws its
 # 3D view at it, and the renderer fits the 2D interface to square pixels about the centre (patch
@@ -112,20 +113,11 @@ print(path)
 EOF
 )
   while :; do
-    python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
-sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("aspect_check: " + m, flush=True),
-                              limit=float(sys.argv[1])) else 2)' "$WAIT" || exit 2
-    tools/frame_regress.sh --out "$dest" --shell "$SHELL_NAME" --backend "$SHELL_NAME" --only "$scene" \
+    tools/frame_regress.sh --wait "$WAIT" --out "$dest" --shell "$SHELL_NAME" --backend "$SHELL_NAME" --only "$scene" \
       --env "PURE_DATA_DIR=$data" --env "PURE_WINDOW_SIZE=$SIZE" --env PURE_TRACE_ASPECT=1 \
       ${extra[@]+"${extra[@]}"} ${LANE_ENV[@]+"${LANE_ENV[@]}"} > "$out" 2>&1
     rc=$?
     rounds=$((rounds + 1))
-    if grep -q '^frame_regress: another PureNative is running' "$out"; then
-      [ $rounds -lt 3 ] && continue
-      cat "$out"
-      echo "aspect_check: another game kept starting; try again later"
-      exit 2
-    fi
     # The suite's verdict (the capture against the PSP reference) does not matter here; a run that could not start
     # does.
     if [ $rc -eq 2 ]; then

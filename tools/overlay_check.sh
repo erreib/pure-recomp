@@ -11,7 +11,8 @@
 #           the window capture, the run's log), DIR/overlay.png the overlay lane's rectangle as captured,
 #           DIR/rect.diff.png and DIR/rest.diff.png the differing pixels inside and outside it, DIR/summary.txt the
 #           figures.
-#   --wait  how long to wait for another PureNative to end before each lane (default 600; 0 gives up at once).
+#   --wait  how long to wait for another PureNative to end before each lane (tools/frame_regress.sh --wait; default
+#           600, 0 gives up at once).
 # The rectangle is where the shell draws the overlay: scale = perf::overlay_scale(capture height) (the height over
 # 360, at least 1), inset 4 x scale from the top-left corner, 196 x scale by 72 x scale (3, 12 and 588x216 in the
 # default 1920x1088 drawable of a 2x display). PASS when:
@@ -76,13 +77,10 @@ with open(settings, "w") as f:
 print(path)
 EOF
 )
-  python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
-sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("overlay_check: " + m, flush=True),
-                              limit=float(sys.argv[1])) else 2)' "$WAIT" || exit 2
-  tools/frame_regress.sh --out "$DIR/$name" --shell metal --backend metal --only race_hud \
+  tools/frame_regress.sh --wait "$WAIT" --out "$DIR/$name" --shell metal --backend metal --only race_hud \
     --env "PURE_DATA_DIR=$data" > "$out" 2>&1
   rc=$?
-  if grep -q '^frame_regress: another PureNative is running' "$out" || [ $rc -eq 2 ]; then
+  if [ $rc -eq 2 ]; then
     cat "$out"
     echo "overlay_check: tools/frame_regress.sh could not run"
     exit 2
