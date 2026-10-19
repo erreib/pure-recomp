@@ -13,7 +13,7 @@
 namespace pure::gpu::metal_backend {
 
 // The stencil reference as the target's alpha holds it: the top bit of a 5551 target, the top nibble of a
-// 4444 one, all of 8888 (patch 0006's stored_reference).
+// 4444 one, all of 8888 (patch 0003's stored_reference).
 std::uint32_t stored_reference(const DrawCall &call) {
     const std::uint32_t reference = call.stencil.reference & 0xFFu;
     if (call.target.color_format == 1u) return (reference & 0x80u) != 0u ? 0xFFu : 0u;
@@ -35,7 +35,7 @@ int stencil_alpha(const DrawCall &call) {
     }
 }
 
-// Whether the draw leaves its target's alpha equal to the stencil (patch 0006's alpha_follows_stencil). The
+// Whether the draw leaves its target's alpha equal to the stencil (patch 0003's alpha_follows_stencil). The
 // alpha is written only by fragments that pass every test, with stencil_alpha()'s value, so it cannot follow an
 // sfail operation where the stencil test can fail, a zfail operation where the depth test can fail, INVERT,
 // INCR or DECR on pass, or a write mask that keeps some bits.
@@ -52,7 +52,7 @@ bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail) {
 }
 
 // Copies the stencil into the open pass's target alpha, which draws since the last copy left different
-// from it (patch 0006's resolve_stencil_alpha), inside the pass and without reading the stencil in a
+// from it (patch 0003's resolve_stencil_alpha), inside the pass and without reading the stencil in a
 // shader: a quad over the whole target writes alpha 0, then one quad per stencil bit passes the stencil
 // test (EQUAL under a compare mask of that bit) where the bit is set and adds the bit's value to the alpha
 // (ONE + ONE, alpha written alone, stencil write mask 0). Sums of multiples of 1/255 are exact in an 8-bit

@@ -8,7 +8,7 @@
 // (tasks 023 and 024), transformed sprites as rectangles already projected (their lighting and fog taken
 // from the second vertex), the GE's texture mapping modes (task 036: the texture matrix and the environment map,
 // which the framework's shaders do not have), the mip level by the GE's rule (task 037), the five texture
-// functions, the alpha test by the GE's numbering (0 NEVER, 1 ALWAYS: patch 0005) and the FIX source factor;
+// functions, the alpha test by the GE's numbering (0 NEVER, 1 ALWAYS: patch 0003) and the FIX source factor;
 // the stencil value stored as the target's alpha instead of the fragment's, with the fragment's own alpha handed
 // to a source-alpha blend as a second output (dual-source blending, ge_fragment_dual) as patches 0004 and 0006 do
 // (task 025). Task 040 added the colour test, the writes into 16-bit targets (ge_fragment_16: the blend done in the
@@ -309,7 +309,7 @@ vertex VertexOut ge_vertex(uint vid [[vertex_id]],
 }
 
 // The GE's logarithm for the mip level, in 1/16 levels: the float's exponent and the top four bits of its mantissa
-// (a piecewise linear log2, floored to 1/16), of |x|. ge_log16 in metal_textures.mm.
+// (a piecewise linear log2, floored to 1/16), of |x|. pk::ge_log16 in texture_decode.hpp.
 float ge_log16(float x) {
     return float(int((as_type<uint>(x) >> 19u) & 0xFFFu) - 127 * 16);
 }
@@ -431,7 +431,7 @@ float4 shade(Varyings in, constant FragmentUniforms &u, texture2d<float> image, 
 }
 
 // The PSP never stores a fragment's own alpha: the target's alpha is the stencil, which a draw writes only
-// through its stencil operations (patch 0004). With u.stencil.x the value replaces the alpha; otherwise the
+// through its stencil operations (patches 0002 and 0003). With u.stencil.x the value replaces the alpha; otherwise the
 // pipeline does not write alpha at all (or the draw is a clear, which writes its colour's alpha).
 float4 stored(float4 color, constant FragmentUniforms &u) {
     if (u.stencil.x != 0u) color.a = float(u.stencil.y) / 255.0f;
@@ -528,7 +528,7 @@ fragment float4 ge_fragment_16(Varyings in [[stage_in]],
     return stored(float4(sixteen_bit(rgb, in.position.xy, u), color.a), u);
 }
 
-// A draw that stores a stencil value under a blend that reads the source alpha (patch 0006's kAlphaDual): the
+// A draw that stores a stencil value under a blend that reads the source alpha (patch 0003's kAlphaDual): the
 // blend reads the fragment's own alpha from the second output.
 fragment DualOutput ge_fragment_dual(Varyings in [[stage_in]],
                                      constant FragmentUniforms &u [[buffer(0)]],

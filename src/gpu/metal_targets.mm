@@ -249,7 +249,7 @@ void MetalGeBackend::read_back_framebuffer(std::uint32_t address, GuestMemory &m
 }
 
 // The depth of the target at `color_address` as the GE keeps it, z = round(depth x 65535) in 16 bits, in
-// rows of `depth_stride` pixels from `depth_address` (patch 0008): the lens flare's SIGNAL handler reads a
+// rows of `depth_stride` pixels from `depth_address` (patch 0003): the lens flare's SIGNAL handler reads a
 // 4x4 block of it around the sun. Screen-wide depth buffers only, as the Vulkan backend writes them.
 bool MetalGeBackend::write_back_depth(std::uint32_t color_address, std::uint32_t depth_address,
                                       std::uint32_t depth_stride, GuestMemory &memory, const char *why) {

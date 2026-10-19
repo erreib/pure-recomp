@@ -10,7 +10,7 @@
 //              centre pixel), under the Metal shell's Fill aspect at the drawable's shape, 272S rows high (task
 //              086). A pass draws into one target; switching targets ends it.
 //   stencil    the GE's stencil test and operations on the attachment; the colour target's alpha kept as
-//              the PSP's stencil by patch 0006's rule: written by the zpass REPLACE/ZERO where the colour
+//              the PSP's stencil by patch 0003's rule: written by the zpass REPLACE/ZERO where the colour
 //              path can (dual-source blending under a source-alpha blend), copied from the attachment where
 //              it cannot, before a destination-alpha read and at the end of the pass.
 //   textures   a bind that lies in a target samples that target, the one starting at the address first
