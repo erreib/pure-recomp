@@ -204,6 +204,11 @@ which is the port's question to answer, not the framework's. VR's 72 and 90 Hz w
 files earlier patches change (kernel.cpp, hle_media.cpp, frame_pacing.cpp); offer it after 0005, whose pacing it
 shares.
 
+### 0031-audio-sink-late-writes: candidate, with 0024
+The sink keeps a late producer's content and rebuilds its lead by slowing the device 1% for a few seconds instead of
+inserting 46 ms of silence (task 098, D-023). It completes 0024's counter and shares its case: any port whose guest
+dips below real time for a moment clicks the same way. Offer the two together.
+
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); comments that cite this repo's tasks, fidelity differences and old patch
 numbers. If a future patch is ours only (a test hook, a seam only our profile uses), it stays a patch of its own so

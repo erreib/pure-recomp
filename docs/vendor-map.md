@@ -41,6 +41,7 @@ recompile), the interpreter, the kernel, the HLE, the GE parser and texture deco
 - 0028-vulkan-orthographic-fit: the 2D fit under Fill
 - 0029-windows-file-url: the folder buttons on Windows
 - 0030-vblank-period: `Kernel::set_vblank_period_us` (E8)
+- 0031-audio-sink-late-writes: the sink keeps a late producer's content, `kRecoveryRatio` (D-023)
 
 ## Replaced
 - The GE backend: `src/gpu/` registers `metal` (`BackendRegistration`), the macOS default (D-008;

@@ -1,0 +1,176 @@
+diff --git a/host/audio/audio_sink.cpp b/host/audio/audio_sink.cpp
+index cac7873..43f4b86 100644
+--- a/host/audio/audio_sink.cpp
++++ b/host/audio/audio_sink.cpp
+@@ -26,6 +26,13 @@ namespace {
+ constexpr std::size_t kRingFrames = 8192u;
+ // The device is kept two guest buffers ahead of the write cursor.
+ constexpr std::size_t kPrebufferFrames = 2048u;
++// A producer whose cursor is this far behind the device has stalled or restarted, not merely run late (a channel
++// that keeps real time is never more than a buffer or two behind): it is snapped forward as before, a resync.
++constexpr std::uint64_t kLateLimit = kPrebufferFrames;
++// While a lead is rebuilt the device consumes the ring this much slower (about 17 cents of pitch), for as many
++// device frames as it takes to regain kPrebufferFrames at that rate: 2048 / 0.01, about 4.6 s.
++constexpr float kRecoveryRatio = 0.99f;
++constexpr std::uint64_t kRecoveryFrames = static_cast<std::uint64_t>(kPrebufferFrames / (1.0f - kRecoveryRatio));
+ 
+ [[nodiscard]] std::int16_t saturate(std::int32_t value) noexcept {
+     return static_cast<std::int16_t>(std::clamp(value, -32768, 32767));
+@@ -101,6 +108,7 @@ struct AudioSink::Impl {
+     bool closed{};
+     bool enabled{true};
+     bool trace{};
++    bool snap_late{};  // <PREFIX>_AUDIO_SNAP: the old rule, every late producer snapped forward (an A/B switch)
+ 
+     WavWriter dump;
+     std::vector<std::int16_t> scratch;
+@@ -114,6 +122,10 @@ struct AudioSink::Impl {
+     // dry, so `silent` misses it).
+     std::uint64_t window_resyncs{};
+     std::uint64_t window_resynced{};
++    // A producer's write that reached the device late by less than kLateLimit: the frames already played are
++    // dropped (`late`), the rest is written where it belongs, no jump, and a lead rebuild is armed (`lates`).
++    std::uint64_t window_lates{};
++    std::uint64_t window_late{};
+     std::int32_t window_peak{};
+     double window_energy{};
+     std::uint64_t total_frames{};
+@@ -121,7 +133,14 @@ struct AudioSink::Impl {
+     std::uint64_t total_dropped{};
+     std::uint64_t total_resyncs{};
+     std::uint64_t total_resynced{};
++    std::uint64_t total_lates{};
++    std::uint64_t total_late{};
+     std::uint64_t seconds{};
++    // The device's read position at which the slowed consumption ends (0: not recovering) and the ratio the
++    // stream was last given. Both change only in `mix`; the stream call is made outside `lock`, because the device
++    // callback holds the stream's lock while it takes ours.
++    std::uint64_t recover_until{};
++    float ratio{1.0f};
+ 
+     float gain{1.0f};
+ #if defined(PORTABLEKIT_HAS_SDL_AUDIO)
+@@ -169,14 +188,16 @@ struct AudioSink::Impl {
+         if (trace) {
+             const std::uint64_t lead = write_end > read_position ? write_end - read_position : 0u;
+             std::printf("[audio] %llus frames=%llu peak=%d rms=%.1f silent=%llu dropped=%llu resyncs=%llu "
+-                        "resynced=%llu lead=%llu\n",
++                        "resynced=%llu lead=%llu lates=%llu late=%llu ratio=%.3f\n",
+                         static_cast<unsigned long long>(seconds),
+                         static_cast<unsigned long long>(window_frames), window_peak, rms,
+                         static_cast<unsigned long long>(window_silent),
+                         static_cast<unsigned long long>(window_dropped),
+                         static_cast<unsigned long long>(window_resyncs),
+                         static_cast<unsigned long long>(window_resynced),
+-                        static_cast<unsigned long long>(lead));
++                        static_cast<unsigned long long>(lead),
++                        static_cast<unsigned long long>(window_lates),
++                        static_cast<unsigned long long>(window_late), static_cast<double>(ratio));
+             std::fflush(stdout);
+         }
+         window_frames = 0u;
+@@ -184,6 +205,8 @@ struct AudioSink::Impl {
+         window_dropped = 0u;
+         window_resyncs = 0u;
+         window_resynced = 0u;
++        window_lates = 0u;
++        window_late = 0u;
+         window_peak = 0;
+         window_energy = 0.0;
+     }
+@@ -219,6 +242,7 @@ void AudioSink::initialize() {
+     if (impl.started) return;
+     impl.started = true;
+     impl.trace = portablekit::env("TRACE_AUDIO") != nullptr;
++    impl.snap_late = portablekit::env("AUDIO_SNAP") != nullptr;
+     impl.enabled = portablekit::env("NO_AUDIO") == nullptr;
+     const settings::Settings &player = settings::current();
+     impl.gain = player.mute ? 0.0f : static_cast<float>(player.volume) / 100.0f;
+@@ -269,12 +293,15 @@ void AudioSink::shutdown() {
+     std::lock_guard<std::mutex> guard(impl.lock);
+     if (impl.dump.active()) impl.dump.close();
+     if (impl.trace) {
+-        std::printf("[audio] total frames=%llu silent=%llu dropped=%llu resyncs=%llu resynced=%llu\n",
++        std::printf("[audio] total frames=%llu silent=%llu dropped=%llu resyncs=%llu resynced=%llu lates=%llu "
++                    "late=%llu\n",
+                     static_cast<unsigned long long>(impl.total_frames),
+                     static_cast<unsigned long long>(impl.total_silent),
+                     static_cast<unsigned long long>(impl.total_dropped),
+                     static_cast<unsigned long long>(impl.total_resyncs),
+-                    static_cast<unsigned long long>(impl.total_resynced));
++                    static_cast<unsigned long long>(impl.total_resynced),
++                    static_cast<unsigned long long>(impl.total_lates),
++                    static_cast<unsigned long long>(impl.total_late));
+         std::fflush(stdout);
+     }
+ }
+@@ -313,6 +340,9 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+                     std::uint32_t left_volume, std::uint32_t right_volume) {
+     if (count == 0u) return;
+     Impl &impl = *impl_;
++    float ratio = 1.0f;
++    bool set_ratio = false;
++    {
+     std::lock_guard<std::mutex> guard(impl.lock);
+ 
+     // A buffer larger than the whole ring would overwrite its own start; only
+@@ -324,16 +354,41 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+         count = kRingFrames;
+     }
+ 
+-    // A cursor behind the device belongs to a producer that stalled; restart it
+-    // at the write target rather than writing frames that already played. Each
+-    // jump is a click: counted, so a drifting device clock shows in the trace.
+-    if (cursor < impl.read_position + kPrebufferFrames / 4u) {
++    // A cursor far behind the device belongs to a producer that stalled or
++    // restarted; it is restarted at the write target rather than writing
++    // frames that already played. Each jump is a click: counted, so a
++    // drifting device clock shows in the trace.
++    if (cursor + kLateLimit < impl.read_position ||
++        (impl.snap_late && cursor < impl.read_position + kPrebufferFrames / 4u)) {
+         const std::uint64_t target = impl.read_position + kPrebufferFrames;
+         ++impl.window_resyncs;
+         ++impl.total_resyncs;
+         impl.window_resynced += target - cursor;
+         impl.total_resynced += target - cursor;
+         cursor = target;
++    } else if (cursor < impl.read_position + kPrebufferFrames / 4u) {
++        // A producer that fell briefly behind (a dip ate its lead) keeps its
++        // content: only the frames the device has already played are dropped,
++        // the rest lands where it belongs, and the device is slowed a little
++        // for a few seconds so every channel regains its lead without a gap.
++        if (cursor < impl.read_position) {
++            const std::size_t played = static_cast<std::size_t>(impl.read_position - cursor);
++            const std::size_t drop = std::min(played, count);
++            frames += drop * kChannels;
++            cursor += drop;
++            count -= drop;
++            impl.window_late += drop;
++            impl.total_late += drop;
++        }
++        ++impl.window_lates;
++        ++impl.total_lates;
++        impl.recover_until = impl.read_position + kRecoveryFrames;
++    }
++    if (impl.recover_until != 0u && impl.read_position >= impl.recover_until) impl.recover_until = 0u;
++    ratio = impl.recover_until != 0u ? kRecoveryRatio : 1.0f;
++    if (ratio != impl.ratio) {
++        impl.ratio = ratio;
++        set_ratio = true;
+     }
+ 
+     // The ring cannot hold what a runaway producer wants to write. Retire the
+@@ -369,6 +424,13 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+         impl.scratch.resize(ready * kChannels);
+         impl.retire(ready, impl.scratch.data(), true);
+     }
++    }
++#if defined(PORTABLEKIT_HAS_SDL_AUDIO)
++    if (set_ratio && impl.stream != nullptr) SDL_SetAudioStreamFrequencyRatio(impl.stream, ratio);
++#else
++    (void)set_ratio;
++    (void)ratio;
++#endif
+ }
+ 
+ } // namespace portablekit::audio

@@ -266,7 +266,9 @@ The rig (RTX 3080, an i5-8600K, a 100 Hz display) runs the race at Display at 10
   into the race; clean after). Speed held: medians 99.5 (100.0) presents and game flips a second, no second under
   95%. So the rig's skips are not the margin's mechanism (no time lost to misses) but an early-race settling: the
   sink's lead falls from about 7400 frames in the menus to 1000 to 3000 at the race start. The sink's tolerance of a
-  late producer (task 081's fork) is the candidate. Also notable: this route held full speed at 100 Hz where task
+  late producer (task 081's fork) is the candidate. Task 098 (2026-10-19, patch 0031-audio-sink-late-writes, D-023)
+  makes the sink keep a late producer's content and rebuild the lead by slowing the device 1% for about 4.6 s;
+  the rig's run with it is owed (`PURE_AUDIO_SNAP=1` restores the old rule for the A/B). Also notable: this route held full speed at 100 Hz where task
   091-display-rate-storms' stutter_check route measured 85%; the difference (stutter_check's tracing and live-file
   harness, the route, internal scale Auto here) is unexplained and wants a look before the storms' verdict is
   quoted to players. Erik's ear on the staged build (2026-10-15): "betterish", but more audio hiccups than the

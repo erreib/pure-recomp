@@ -645,3 +645,28 @@ Vulkan still skipped. The cost is one refresh shown twice every 1.7 s. The sink'
 
 **Status.** Accepted 2026-10-14, amended the same day and 2026-10-15. Tasks 089 and 091.
 
+
+## D-023  2026-10-19  E8: the audio sink keeps a late producer's content (task 081's fork b+)
+
+**Context.** Task 081 found what the sink's stalled-producer jump really was: a continuous channel whose lead a dip
+had eaten, its cursor at the device's read position, snapped 2048 frames forward, 46 ms of silence in that channel
+after every dip (the clicks Erik hears, and the rig's early-race skips at 100 Hz, docs/timing.md "On the rig's 100 Hz
+display"). It also showed that dropping the played frames without rebuilding a lead near-mutes a channel whose
+producer stays below real time (the harness's 85% race). The fork it left: (a) a smaller jump; (b) keep the content
+and gap only the lateness; (b+) b plus an inaudible lead rebuild by lowering the SDL stream's frequency ratio;
+(c) HLE backpressure, ruled out by every brief.
+
+**Decision.** (b+), with a stall floor: a cursor more than 2048 frames behind the device is a stall or restart and
+snaps as before (counted `resyncs=`); a cursor less behind drops only the frames already played (`late=`, `lates=`),
+writes the rest where it belongs, and the device runs at ratio 0.99 (17 cents low) until it has read 204800 more
+frames (about 4.6 s), which rebuilds 2048 frames of lead for every channel that keeps real time. Patch
+0031-audio-sink-late-writes; `PURE_AUDIO_SNAP=1` keeps the old rule for an A/B. Not (a): a smaller gap is still a
+gap each dip. Not (b) alone: it rides at zero lead and crackles on jitter. Not (c): the HLE's blocking output is the
+kernel's territory and would change the game's timing.
+
+**Consequences.** A dip costs a few ms of one channel's content and 4.6 s of a 1% pitch drop instead of a click.
+A producer persistently below real time still snaps, so the harness's slow races keep their resync counts; the
+measure of this decision is `PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio` at full speed (resyncs 0, the
+dips visible as `lates=`) and Erik's ear on the rig at 100 Hz (task 097, row 7 and the rig's step 4).
+
+**Status.** Accepted 2026-10-19, unproven in a window (task 098).
