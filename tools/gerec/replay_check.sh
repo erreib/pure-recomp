@@ -13,9 +13,11 @@
 #                              targets before the three that are compared, about 3.5 minutes
 #   out/gerec/frontend.gerec   frontend.txt, frames 690-691 (task 023), about 25 s
 #   out/gerec/title.gerec      frontend.txt, frames 1750-1751 (task 023), about 1 minute
-# Every replay runs with the sprite upscale, the texture detail and the display rate off (PURE_SPRITE_UPSCALE=0
-# PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0: the PSP's texels, levels and vblank, as tools/purelib/port.py pins every
-# other run and as the recordings were made), not settings.ini's.
+# Every replay runs on an empty data directory of its own, out/gerec/data/<the replay's log name> (PURE_DATA_DIR,
+# unless the environment names one, as tools/run_boot.py gives every run one: not the player's settings.ini, whose
+# video rows such as the performance overlay change the capture; task 094), with the sprite upscale, the texture
+# detail and the display rate off (PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0: the PSP's texels,
+# levels and vblank, as tools/purelib/port.py pins every other run and as the recordings were made).
 # The steps:
 # 1. race.gerec into vulkan with --compare at tol 0. Reported, not a pass condition: a replay starts with no render
 #    targets, and the first frames of a race recording depend on target pixels drawn before it began (the bottom rows
@@ -102,11 +104,17 @@ record() {
 
 # replay LOG ARGS...: one replay, its [replay] lines (and a bisected draw's state) shown; sets rc.
 replay() {
-  local log=$1
+  local log=$1 data
   shift
+  # Its own empty data directory, out/gerec/data/<log's name>, unless the environment names one (as tools/run_boot.py
+  # gives every run one): without it the replay read the player's settings.ini, whose video.performance=overlay put
+  # the overlay in the Vulkan capture and failed metal_check (task 094, found by task 093).
+  data=${PURE_DATA_DIR:-$ROOT/$OUT/data/$(basename "$log" .log)}
+  [ -n "${PURE_DATA_DIR:-}" ] || { rm -rf "$data"; mkdir -p "$data"; }
   # Tasks 073, 075 and 089: the sprite upscale, the texture detail and the display rate off (the PSP's texels, levels
   # and vblank, as tools/purelib/port.py pins every other run), not settings.ini's.
-  PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0 "$BIN" --replay "$@" > "$log" 2>&1
+  PURE_DATA_DIR="$data" PURE_SPRITE_UPSCALE=0 PURE_TEXTURE_DETAIL=0 PURE_DISPLAY_RATE=0 "$BIN" --replay "$@" \
+    > "$log" 2>&1
   rc=$?
   grep -E '^\[replay\]|^  [a-z]' "$log"
 }
