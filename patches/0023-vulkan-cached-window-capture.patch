@@ -1,5 +1,5 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 0a98bc5..435818d 100644
+index 5193b89..f5b1073 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -3604,9 +3604,20 @@ void VulkanRenderer::Impl::submit_and_present(VkCommandBuffer commands, VkFence

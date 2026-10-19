@@ -1,5 +1,5 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index d6b1e33..0a98bc5 100644
+index d6b1e33..5193b89 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -1233,8 +1233,26 @@ struct VulkanRenderer::Impl : host::SdlPad {
