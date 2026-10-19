@@ -68,10 +68,11 @@
 # on macOS (a display asleep holds no vsync). A probe first, the boot's first PROBE_FLIPS flips unpaced with
 # PURE_PERF=log (<out>/probe.log), reads the shell's display from its `[pure] display rate` line and refuses with
 # exit 2 when that says `off` (no display above 60.5 Hz: nothing to measure) or when the unpaced boot presented more
-# than SCREEN_HELD times the display's refresh a second: vsync holds a window on screen to its refresh, and a window
-# that is covered or on another Space presents without it (hundreds a second), so its race would measure nothing
+# than SCREEN_HELD (1.5) times the display's refresh a second: vsync holds a window on screen to its refresh, and a
+# window that is covered or on another Space presents without it (hundreds a second), so its race would measure nothing
 # (task 091 found a browser window covering the game's in most runs; tools/winwatch.m says what covers it). The run
-# itself is judged the same way at its race load and FAILs as `the window was not on screen` when it was not. From the
+# itself is judged the same way at its race load and FAILs as `the window was not on screen` when it was not: the
+# window guard of tools/purelib/logs.py (SCREEN_HELD, window_guard), which tools/stutter_check.sh shares. From the
 # race load's `[pure] display rate` line to the run's end: PASS when the `[audio]` lines count at most MAX_RESYNCS
 # resync (the race load's, as at the PSP's rate), no `[perf]` second after the first AUDIO_SKIP (the load, and the
 # unpaced flips to AUDIO_FROM) is under MIN_SPEED% speed (a freeze-sized loss), and the run reached its last flip. The
@@ -86,7 +87,7 @@ set -u
 cd "$(dirname "$0")/.."
 export PURE_ROOT="$PWD"
 . tools/env.sh
-ROOT=$PWD
+. tools/lib.sh
 
 HZ=120             # the display rate of the run with 1
 FRONT_FROM=4000    # the frontend's counted flips: MAIN MENU and SINGLE PLAYER's screens
@@ -122,7 +123,6 @@ AUDIO_SKIP=3       # the race's first [perf] seconds, not bounded: the load and 
 MAX_RESYNCS=1      # the race load's, as at the PSP's rate
 MIN_SPEED=95       # a [perf] second's speed, at least (%): under it the game froze for a twentieth of a second or more
 SLIP_SPEED=99      # seconds under this are counted and printed, not bounded: slips the audio's lead absorbs
-SCREEN_HELD=1.5    # unpaced presents a second over this times the display's refresh: the window was not on screen
 PROBE_FLIPS=600    # the probe's unpaced boot
 
 MODE=route
@@ -150,35 +150,16 @@ if [ -n "$MARGIN" ] && ! python3 -c 'import sys; sys.exit(0 if 0.0 <= float(sys.
   exit 2
 fi
 if [ "$MODE" = audio ]; then
-  if [ -z "$SHELL_NAME" ]; then
-    case $(uname -s) in
-      MINGW*|MSYS*|CYGWIN*) SHELL_NAME=vulkan ;;
-      *) SHELL_NAME=metal ;;
-    esac
-  fi
-  case $SHELL_NAME in
-    metal|vulkan) ;;
-    *) echo "display_rate_check: --shell is metal or vulkan (a window: the check measures wall time), not $SHELL_NAME"
-       exit 2 ;;
-  esac
+  SHELL_NAME=${SHELL_NAME:-$(window_shell)}
+  BACKEND=
+  pick_backend display_rate_check "metal vulkan" "a window: the check measures wall time"
   OUT=${OUT:-out/display_rate_check/audio-$SHELL_NAME}
 else
   [ -z "$SHELL_NAME" ] || { echo "display_rate_check: --shell goes with --audio (the route and --race are headless)"; exit 2; }
   OUT=${OUT:-out/display_rate_check/$MODE}
 fi
 unset PURE_DISPLAY_HZ PURE_DISPLAY_MARGIN    # the lanes name the display's rate and the margin themselves
-
-EXE=$(python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; print(port.EXE)')
-[ -x "$EXE" ] || { echo "$EXE missing: tools/build.sh profile"; exit 2; }
-[ -f game/EBOOT.ELF ] || { echo "game/EBOOT.ELF missing: tools/setup_game.sh"; exit 2; }
-[ -e game/disc.iso ] || { echo "game/disc.iso dangles; stop here, do not look for the image elsewhere"; exit 2; }
-
-# One game at a time (task 034).
-wait_game() {
-  python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port
-sys.exit(0 if port.wait_until(port.other_games, port.REFUSED, lambda m: print("display_rate_check: " + m, flush=True),
-                              limit=600) else 2)'
-}
+need_game
 
 # The lane's switches: 0 the PSP's rate, 1 the display's (named), with --margin's margin.
 lane_env() {
@@ -193,11 +174,7 @@ OUT=$(cd "$OUT" && pwd)
 if [ "$MODE" = audio ]; then
   echo "display_rate_check: audio, shell $SHELL_NAME, backend $SHELL_NAME, the display's own refresh, margin" \
     "${MARGIN:-the default}, out $OUT"
-  stick() {
-    python3 -c 'import sys; sys.path.insert(0, "tools"); from purelib import port; port.fresh_stick(sys.argv[1])' \
-      "$OUT/game" || exit 2
-  }
-  stick
+  fresh_stick "$OUT/game"
   cat config/pad_scripts/main_menu.txt config/pad_scripts/single_race.txt |
     grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' |
     sed -E "s/^6100:pad a [0-9]+\$/6100:pad a $AUDIO_HOLD/" > "$OUT/route.txt"
@@ -213,7 +190,7 @@ if [ "$MODE" = audio ]; then
 
   # The probe: the shell's display, from the line the profile prints at start, and whether the window is on screen,
   # from the unpaced boot's presents a second (PROBE_FLIPS flips, about 5 s when vsync holds them).
-  wait_game || exit 2
+  wait_game display_rate_check || exit 2
   ${AWAKE[@]+"${AWAKE[@]}"} python3 tools/run_boot.py --shell "$SHELL_NAME" --backend "$SHELL_NAME" \
     --frames $PROBE_FLIPS --data-dir "$OUT/data" "${AENV[@]}" --env PURE_PERF=log \
     --env "PURE_PACED_FROM=$PROBE_FLIPS" "$OUT/probe.log" > "$OUT/probe.stdout" 2>&1
@@ -226,14 +203,16 @@ if [ "$MODE" = audio ]; then
       echo "display_rate_check: the probe printed no display rate line (log $OUT/probe.log)"
       exit 2 ;;
   esac
-  read -r END PRESENTS SHOWN < <(python3 - "$OUT/probe.log" "$probe" $AUDIO_FROM $AUDIO_SECONDS $SCREEN_HELD <<'EOF'
-import math, re, statistics, sys
-log, probe, start, seconds, held_by = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), float(sys.argv[5])
-hz, rate = re.search(r"(\d+) Hz display, the game at ([\d.]+) Hz", probe).groups()
+  read -r END PRESENTS SHOWN < <(python3 - "$OUT/probe.log" "$probe" $AUDIO_FROM $AUDIO_SECONDS <<'EOF'
+import math, statistics, sys
+sys.path.insert(0, "tools")
+from purelib.logs import DISPLAY_HZ_RE, SCREEN_HELD, perf, window_shown  # the window guard's rule
+log, probe, start, seconds = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+hz, rate = DISPLAY_HZ_RE.search(probe).groups()
 with open(log, errors="replace") as f:
-    fps = [float(m[1]) for m in (re.match(r"\[perf\] fps ([\d.]+) ", line) for line in f) if m][1:]
-presents = statistics.median(fps) if fps else max(float(hz) * held_by * 10, 1.0)
-print(start + math.ceil(seconds * float(rate)), presents, "yes" if presents <= held_by * float(hz) else "no")
+    fps = [p["fps"] for p in map(perf, f) if p][1:]
+presents = statistics.median(fps) if fps else max(float(hz) * SCREEN_HELD * 10, 1.0)
+print(start + math.ceil(seconds * float(rate)), presents, "yes" if window_shown([presents], float(hz)) else "no")
 EOF
 )
   SHOWN=${SHOWN%$'\r'}  # Windows Python ends its line \r\n, and read keeps the \r
@@ -246,8 +225,8 @@ EOF
     exit 2
   fi
 
-  stick
-  wait_game || exit 2
+  fresh_stick "$OUT/game"
+  wait_game display_rate_check || exit 2
   t0=$SECONDS
   ${AWAKE[@]+"${AWAKE[@]}"} python3 tools/run_boot.py --shell "$SHELL_NAME" --backend "$SHELL_NAME" \
     --script "$OUT/route.txt" --frames "$END" --sound --data-dir "$OUT/data" --seconds 400 "${AENV[@]}" \
@@ -256,42 +235,32 @@ EOF
   rc=$?
   echo "display_rate_check: run_boot exit $rc, $((SECONDS - t0)) s, log $OUT/run.log"
   python3 - "$OUT/run.log" "$SHELL_NAME" "$END" "$MARGIN" $AUDIO_SKIP $MAX_RESYNCS $MIN_SPEED $((SECONDS - t0)) \
-    $SCREEN_HELD $SLIP_SPEED <<'EOF' | tee "$OUT/summary.txt"
-import re, statistics, sys
+    $SLIP_SPEED <<'EOF' | tee "$OUT/summary.txt"
+import statistics, sys
+sys.path.insert(0, "tools")
+from purelib.logs import DISPLAY_RACE_RE, audio_resyncs, perf as perf_of, window_guard  # the readers, the guard
 
 log, shell, end, margin_arg = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 skip, max_resyncs, min_speed, seconds = int(sys.argv[5]), int(sys.argv[6]), float(sys.argv[7]), sys.argv[8]
-held_by, slip_speed = float(sys.argv[9]), float(sys.argv[10])
-RACE_RE = re.compile(r"^\[pure\] display rate: (\d+) Hz display, the game at ([\d.]+) Hz \(margin ([^,]+), (\d+) us "
-                     r"a vblank\)$")
-AUDIO_RE = re.compile(r"^\[audio\] (\d+)s .* resyncs=(\d+) ")
-PERF_RE = re.compile(r"^\[perf\] fps ([\d.]+) game ([\d.]+) speed (\d+)%")
-PACED = "[pure] paced from frame"
-race, resyncs, perf, reached, menus, load, paced = None, [], [], False, [], [], False
+slip_speed = float(sys.argv[9])
+race, resyncs, perf, reached = None, [], [], False
 with open(log, errors="replace") as f:
     for line in f:
         line = line.rstrip("\n")
         if line.startswith(f"[pure] exit at frame {end}"):
             reached = True
-        if line.startswith(PACED):
-            paced = True
         if race is None:
-            m = RACE_RE.match(line)
+            m = DISPLAY_RACE_RE.match(line)
             if m:
                 race = (int(m[1]), float(m[2]), m[3], int(m[4]))
-            m = PERF_RE.match(line)
-            if m:
-                menus.append(float(m[1]))
             continue
-        m = AUDIO_RE.match(line)
-        if m and int(m[2]):
-            resyncs.append((int(m[1]), int(m[2])))
+        a = audio_resyncs(line)
+        if a and a[1]:
+            resyncs.append(a)
             continue
-        m = PERF_RE.match(line)
-        if m:
-            perf.append((float(m[1]), float(m[2]), int(m[3])))
-            if not paced:
-                load.append(float(m[1]))
+        p = perf_of(line)
+        if p:
+            perf.append((p["fps"], p["game"], p["speed"]))
 fails = []
 if race is None:
     fails.append("no race load line (`[pure] display rate: N Hz display, the game at ...`)")
@@ -299,15 +268,13 @@ if race is None:
 hz, rate, margin, period = race
 if margin_arg and race[0] and float(margin) != float(margin_arg):
     fails.append(f"the margin in force {margin}, not --margin's {margin_arg}")
-# Whether vsync held the run: unpaced, a window on screen presents at most the display's refresh a second; one that is
-# not (covered, on another Space, the display asleep) presents hundreds, and its race measures nothing.
-menus = menus[2:]               # the first two seconds start the game
+# Whether vsync held the run (tools/purelib/logs.py's window guard, which tools/stutter_check.sh shares): the unpaced
+# seconds of the race load, else the menus' last three, at most SCREEN_HELD times the display's refresh.
+guard = window_guard(log)
+menus, load, shown = guard["menus"], guard["load"], guard["shown"]
 menus_fps = statistics.median(menus) if menus else None
-shown = bool(race[0]) and all(f <= held_by * hz for f in (load or menus[-3:]))
 if race[0] and not shown:
-    fails.append(f"the window was not on screen at the race load (unpaced presents {load or menus[-3:]} a second, "
-                 f"over {held_by:g} x {hz}): vsync did not hold the run, so it measured nothing; run it again with the "
-                 f"window shown")
+    fails.append(guard["problem"])
 counted = perf[skip:]
 slips = [(n + skip + 1, s) for n, (_, _, s) in enumerate(counted) if s < slip_speed]
 freezes = [(n, s) for n, s in slips if s < min_speed]
@@ -348,7 +315,7 @@ if [ "$MODE" = race ]; then
   for v in 0 1; do
     frames=$RACE_FRAMES0
     [ "$v" = 1 ] && frames=$RACE_FRAMES1
-    wait_game || exit 2
+    wait_game display_rate_check || exit 2
     t0=$SECONDS
     env $(lane_env $v) PURE_SIXTY_FPS=1 PURE_WATCH_WORDS=08a8c3dc python3 tools/campaign_sweep.py time_trial vineta_k \
       --out "$OUT/$v" --shell headless --backend metal --frames "$frames" > "$OUT/$v.stdout" 2>&1
@@ -358,9 +325,10 @@ if [ "$MODE" = race ]; then
   done
   python3 - "$OUT" "$FPS60" "$RACE_SPAN" "$CLOCK_RATE" "$START_TO" "$START_PCT" "$START_KMH" "$CONTACT_PCT" \
     "$PAD_KMH_S" "$HZ" "$MARGIN" <<'EOF' | tee "$OUT/summary.txt"
-import csv, os, re, struct, sys
+import os, sys
 sys.path.insert(0, "tools")
-from fidelity_audit import SWEEP_LINE_RE  # the sweep's result line, as the audit reads it
+from purelib.logs import (DISPLAY_OFF as OFF, DISPLAY_RATE, START_CENTRES as CENTRES,  # the readers
+                          display_margin, race_cell)
 
 out = sys.argv[1]
 fps0 = [float(x) for x in sys.argv[2].split(":")]
@@ -369,89 +337,12 @@ rate = [float(x) for x in sys.argv[4].split(":")]
 start_to, start_pct, start_kmh, contact_pct, pad_kmh_s = (float(x) for x in sys.argv[5:10])
 hz, margin_arg = int(sys.argv[10]), sys.argv[11]
 CELL = "time_trial-vineta_k"
-LAPS_RE = re.compile(r"(\d+) laps: ([\d.]+(?:, [\d.]+)*) s")
-CONTACTS_RE = re.compile(r"(\d+) contacts")
-WORDS_RE = re.compile(r"\[pure\] words frame (\d+) t=(\d+): 0x([0-9A-Fa-f]{8})")
-RATE_RE = re.compile(r"\[pure\] display rate: .*")
-OUTSIDE_RE = re.compile(r"^\[pure\] display rate: (\d+) Hz display, the game at ([\d.]+) Hz in a race \(margin ([^)]+)\), "
-                        r"the PSP's 59\.94 Hz outside one$")
-RACE_LINE_RE = re.compile(r"^\[pure\] display rate: (\d+) Hz display, the game at ([\d.]+) Hz \(margin ([^,]+), (\d+) us "
-                          r"a vblank\)$")
-CENTRES = (0.5, 1.0, 1.5, 2.0)
-
-
-def margin_of(texts):
-    """The margin and the period the run at the display's rate names (texts: its display-rate lines, the one outside a
-    race first, then the race's, which may alternate) and what is wrong with them: the display hz in both, one margin
-    (--margin's when given), the period round(1e6 / (hz x (1 - margin))) and the game's rate 1e6 / period."""
-    outside = OUTSIDE_RE.match(texts[0]) if texts else None
-    races = [t for t in texts if t != texts[0]]
-    race = RACE_LINE_RE.match(races[0]) if races else None
-    if not outside or not race or any(t != races[0] for t in races):
-        return None, None, [f"display rate lines {texts} (the line outside a race first, then the race's)"]
-    margin, period, problems = float(race[3]), int(race[4]), []
-    want = int(1e6 / (hz * (1.0 - margin)) + 0.5)
-    if int(outside[1]) != hz or int(race[1]) != hz:
-        problems.append(f"the lines name a {outside[1]} and a {race[1]} Hz display, not {hz}")
-    if float(outside[3]) != margin:
-        problems.append(f"the lines name the margins {outside[3]} and {race[3]}")
-    if margin_arg and margin != float(margin_arg):
-        problems.append(f"the margin {race[3]}, not --margin's {margin_arg}")
-    if period != want:
-        problems.append(f"the period {period} us, not round(1e6 / ({hz} x (1 - {race[3]}))) = {want}")
-    if not outside[2] == race[2] == f"{1e6 / period:.2f}":
-        problems.append(f"the game's rate {outside[2]} and {race[2]} Hz, not 1e6 / {period} = {1e6 / period:.2f}")
-    return margin, period, problems
 
 
 def read(v):
-    """The cell's outcome, laps (count, times), contacts, flips a race-clock second, game clock rate, start bins and
-    its display-rate lines."""
-    outcome, laps, times, contacts = None, 0, [], None
-    with open(os.path.join(out, f"{v}.stdout"), errors="replace") as f:
-        for line in f:
-            m = SWEEP_LINE_RE.match(line.strip())
-            if m and m[1] == CELL:
-                outcome, laps = m[2], int(m[5])
-                lm = LAPS_RE.search(m[8])
-                times = [float(x) for x in lm[2].split(", ")] if lm else []
-                cm = CONTACTS_RE.search(m[8])
-                contacts = int(cm[1]) if cm else None
-    rows = []
-    trace = os.path.join(out, v, f"{CELL}.trace.csv")
-    if os.path.exists(trace):
-        with open(trace) as f:
-            rows = [r for r in csv.DictReader(f) if r["race"] == "1" and r["clock"] not in ("", "nan")]
-    pts = [(int(r["frame"]), float(r["clock"])) for r in rows if float(r["clock"]) > 1.0]
-    fps = (pts[-1][0] - pts[0][0]) / (pts[-1][1] - pts[0][1]) if len(pts) > 1 else None
-    pad = None
-    speeds = [(float(r["clock"]), float(r["kmh"]), float(r["dist"])) for r in rows
-              if r["kmh"] not in ("", "nan") and r["dist"] not in ("", "nan")]
-    for (c0, k0, d0), (c1, k1, d1) in zip(speeds, speeds[1:]):
-        if c0 > 0.0 and c1 > c0 and (k1 - k0) / (c1 - c0) > pad_kmh_s:
-            pad = (c0, d0)
-            break
-    bins = []
-    for c in CENTRES:
-        kmh = [float(r["kmh"]) for r in rows
-               if c - 0.25 <= float(r["clock"]) < c + 0.25 and r["kmh"] not in ("", "nan")]
-        bins.append(sum(kmh) / len(kmh) if kmh else None)
-    words, said = [], []
-    log = os.path.join(out, v, f"{CELL}.log")
-    if os.path.exists(log):
-        with open(log, errors="replace") as f:
-            for line in f:
-                if RATE_RE.match(line):
-                    said.append(line.strip())
-                    continue
-                m = WORDS_RE.match(line)
-                if m and pts and pts[0][0] <= int(m[1]) <= pts[-1][0]:
-                    value = struct.unpack("<f", bytes.fromhex(m[3])[::-1])[0]
-                    if value > 1000.0:
-                        words.append((int(m[2]) / 1e6, value))
-    clock = (words[-1][1] - words[0][1]) / (words[-1][0] - words[0][0]) if len(words) > 1 else None
-    return dict(outcome=outcome, laps=laps, times=times, contacts=contacts, fps=fps, clock=clock, bins=bins,
-                flips=(pts[0][0], pts[-1][0]) if pts else None, said=said, pad=pad)
+    """The cell's outcome, laps (count, times), contacts, flips a race-clock second, game clock rate, start bins, the
+    first speed pad and its display-rate lines."""
+    return race_cell(os.path.join(out, f"{v}.stdout"), os.path.join(out, v), CELL, pad_kmh_s, DISPLAY_RATE)
 
 
 def fmt(x, spec):
@@ -464,10 +355,9 @@ def mean(xs):
 
 runs = {v: read(v) for v in ("0", "1")}
 fails = []
-OFF = "[pure] display rate: off"
 if runs["0"]["said"] != [OFF]:
     fails.append(f"0: display rate lines {runs['0']['said']} (not [{OFF!r}])")
-margin, period, problems = margin_of(runs["1"]["said"])
+margin, period, problems = display_margin(runs["1"]["said"], hz, margin_arg)
 fails += [f"1: {p}" for p in problems]
 centre = hz * (1.0 - (margin if margin is not None else float(margin_arg or 0.0)))
 fps1 = (centre - span, centre + span)
@@ -532,9 +422,8 @@ for v in 0 1; do
   d=$OUT/$v
   end=$END0 shot=$SHOT0
   [ "$v" = 1 ] && end=$END1 shot=$SHOT1
-  mkdir -p "$d/game/ms0/PSP/SAVEDATA" "$d/shots"
-  ln -s "$ROOT/game/EBOOT.ELF" "$d/game/EBOOT.ELF"
-  ln -s "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' game/disc.iso)" "$d/game/disc.iso"
+  fresh_stick "$d/game"
+  mkdir -p "$d/shots"
   {
     echo "$shot:shot h$shot"
     cat config/pad_scripts/main_menu.txt config/pad_scripts/time_trial.txt |
@@ -542,7 +431,7 @@ for v in 0 1; do
   } > "$d/route.txt"
   ENVS=()
   for kv in $(lane_env $v); do ENVS+=(--env "$kv"); done
-  wait_game || exit 2
+  wait_game display_rate_check || exit 2
   t0=$SECONDS
   python3 tools/run_boot.py --script "$d/route.txt" --shots "$d/shots" --frames $end --shell headless \
     --backend metal --data-dir out/data/display_rate_check --max-lines 80000 --env PURE_GAME_DIR="$d/game" \
@@ -559,9 +448,10 @@ done
 
 python3 - "$OUT" $FRONT_FROM $FRONT_TO $FADE_FROM $RACE_CLOCK_FROM $RACE_CLOCK_TO $END0 $END1 "$FRONT_MS" "$RACE0_MS" \
   "$RACE1_MS" "$FPS30" "$FPS60" "$RACE_SPAN" $FADE_PCT "$FADE_FLIPS" $RACE_LOAD $HZ "$MARGIN" <<'EOF' | tee "$OUT/summary.txt"
-import os, re, statistics, sys
+import os, sys
 sys.path.insert(0, "tools")
-from purelib.logs import SHIP_T_RE
+from purelib.logs import (DISPLAY_RACE_RE, PSP_VBLANK_US as PSP_US, display_margin, flip_log,  # the readers
+                          flip_median_ms as median_ms, flips_per_second as per_second)
 
 out = sys.argv[1]
 front_from, front_to, fade_from = (int(v) for v in sys.argv[2:5])
@@ -572,67 +462,14 @@ span = float(sys.argv[14])
 fade_pct = float(sys.argv[15])
 fade_flips = [float(x) for x in sys.argv[16].split(":")]
 race_load, hz, margin_arg = int(sys.argv[17]), int(sys.argv[18]), sys.argv[19]
-CALL = "[call] sceDisplay:0x289D82FE "
-OUTSIDE_RE = re.compile(r"^\[pure\] display rate: (\d+) Hz display, the game at ([\d.]+) Hz in a race \(margin ([^)]+)\), "
-                        r"the PSP's 59\.94 Hz outside one$")
-RACE_LINE_RE = re.compile(r"^\[pure\] display rate: (\d+) Hz display, the game at ([\d.]+) Hz \(margin ([^,]+), (\d+) us "
-                          r"a vblank\)$")
-PSP_US = 16683
-
-
-def margin_of(texts):
-    """The margin and the period the run at the display's rate names (texts: its display-rate lines, the one outside a
-    race first, then the race's, which may alternate) and what is wrong with them: the display hz in both, one margin
-    (--margin's when given), the period round(1e6 / (hz x (1 - margin))) and the game's rate 1e6 / period."""
-    outside = OUTSIDE_RE.match(texts[0]) if texts else None
-    races = [t for t in texts if t != texts[0]]
-    race = RACE_LINE_RE.match(races[0]) if races else None
-    if not outside or not race or any(t != races[0] for t in races):
-        return None, None, [f"display rate lines {texts} (the line outside a race first, then the race's)"]
-    margin, period, problems = float(race[3]), int(race[4]), []
-    want = int(1e6 / (hz * (1.0 - margin)) + 0.5)
-    if int(outside[1]) != hz or int(race[1]) != hz:
-        problems.append(f"the lines name a {outside[1]} and a {race[1]} Hz display, not {hz}")
-    if float(outside[3]) != margin:
-        problems.append(f"the lines name the margins {outside[3]} and {race[3]}")
-    if margin_arg and margin != float(margin_arg):
-        problems.append(f"the margin {race[3]}, not --margin's {margin_arg}")
-    if period != want:
-        problems.append(f"the period {period} us, not round(1e6 / ({hz} x (1 - {race[3]}))) = {want}")
-    if not outside[2] == race[2] == f"{1e6 / period:.2f}":
-        problems.append(f"the game's rate {outside[2]} and {race[2]} Hz, not 1e6 / {period} = {1e6 / period:.2f}")
-    return margin, period, problems
 
 
 def read(v):
     """The run's flip times (index n - 1 for flip n), its ship lines' (flip, clock), the display-rate lines (text,
     the flips before each) and the vblank period they name."""
-    ts, clocks, said, period = [], [], [], PSP_US
-    with open(os.path.join(out, v, "run.log"), errors="replace") as f:
-        for line in f:
-            if line.startswith(CALL):
-                ts.append(int(re.search(r" t=(\d+)", line)[1]))
-            elif line.startswith("[pure] display rate:"):
-                said.append((line.strip(), len(ts)))
-                m = RACE_LINE_RE.match(line.strip())
-                if m:
-                    period = int(m[4])
-            else:
-                m = SHIP_T_RE.match(line)
-                if m:
-                    clocks.append((int(m[1]), float(m[3])))
-    return ts, clocks, said, period
-
-
-def median_ms(ts, a, b):
-    steps = [ts[n - 1] - ts[n - 2] for n in range(max(a, 2), min(b, len(ts)) + 1)]
-    return statistics.median(steps) / 1000.0 if steps else None
-
-
-def per_second(ts, a, b):
-    """Flips a second of virtual time over flips a..b."""
-    b = min(b, len(ts))
-    return (b - a) / ((ts[b - 1] - ts[a - 1]) / 1e6) if b > a and ts[b - 1] > ts[a - 1] else None
+    ts, ships, said = flip_log(os.path.join(out, v, "run.log"), "[pure] display rate:")
+    period = next((int(m[4]) for m in map(DISPLAY_RACE_RE.match, reversed([t for t, _ in said])) if m), PSP_US)
+    return ts, [(n, c) for n, _, c in ships], said, period
 
 
 def within(x, rng):
@@ -669,7 +506,7 @@ for v, name in (("0", "PSP"), ("1", "120 Hz")):
     ts, clocks, said, period = read(v)
     texts = [t for t, _ in said]
     if v == "1":
-        margin, named, problems = margin_of(texts)
+        margin, named, problems = display_margin(texts, hz, margin_arg)
         fails += [f"{name}: {p}" for p in problems]
         centre = hz * (1.0 - (margin if margin is not None else float(margin_arg or 0.0)))
         fps120 = (centre - span, centre + span)

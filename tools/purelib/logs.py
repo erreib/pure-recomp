@@ -670,7 +670,8 @@ def selftest():
         start = [perf_line(400.0), perf_line(300.0)]                 # the game's first two seconds: not judged
         paced = ["[pure] paced from frame 5900", perf_line(5000.0)]   # paced seconds are not unpaced ones
         g = window_guard(write("on.log", start + [perf_line(120.0)] * 40 + [race, perf_line(116.1)] + paced))
-        check("window_guard on screen (E8)", (g["shown"], g["judged"], g["hz"], g["problem"]), (True, [116.1], 120, None))
+        check("window_guard on screen (E8)", (g["shown"], g["judged"], g["hz"], g["problem"]),
+              (True, [116.1], 120, None))
         g = window_guard(write("covered.log", start + [perf_line(1771.4)] * 3 + [race, perf_line(404.5)] + paced))
         check("window_guard covered (E8)", (g["shown"], g["problem"].startswith(NOT_SHOWN + " at the race load")),
               (False, True))
