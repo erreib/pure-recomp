@@ -58,10 +58,10 @@ index cddc85a..141111f 100644
  struct Matching {
      // For each draw of the older frame, the index of the same draw in the
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index 523a8ba..262b60a 100644
+index e203c08..f76682c 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -6190,7 +6190,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6152,7 +6152,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      if (pipeline == VK_NULL_HANDLE) return;
  
      PushConstants push{};
@@ -72,7 +72,7 @@ index 523a8ba..262b60a 100644
      push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
                       (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f)};
      if (stored_alpha >= 0) push.viewport[3] += kPushStencilAlpha + 8.0f * static_cast<float>(stored_alpha);
-@@ -6293,10 +6295,14 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6255,10 +6257,14 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // The GE viewport maps normalised device coordinates onto the screen as
      //   screen = ndc * scale + offset - region_offset
      // with a negative y scale (PSP device y points up, the screen down) and a z
@@ -91,7 +91,7 @@ index 523a8ba..262b60a 100644
      // A target holds the game's 480x272 screen whatever its size, so a PSP
      // pixel is scale_x by scale_y of its pixels: equal at a multiple of
      // 480x272, different under Fill.
-@@ -6306,13 +6312,6 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6268,13 +6274,6 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                             static_cast<float>(impl.target_extent.height), 0.0f, 1.0f};
      if (!call.through && call.viewport.x_scale != 0.0f && call.viewport.y_scale != 0.0f) {
          const ViewportState &vp = call.viewport;

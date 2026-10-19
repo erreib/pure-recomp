@@ -92,7 +92,6 @@ public:
         : inner_(std::move(inner)), inner_name_(std::move(inner_name)) {}
     ~RecordBackend() override { shutdown(); }
 
-    const char *name() const noexcept override { return "record"; }
     bool needs_window() const noexcept override { return inner_->needs_window(); }
 
     bool initialize(const BackendConfig &config, std::string &error) override {

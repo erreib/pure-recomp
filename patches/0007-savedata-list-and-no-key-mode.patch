@@ -771,7 +771,7 @@ index ff3e769..c8211d1 100644
  bool write_save(const std::filesystem::path &memory_stick, const SaveFiles &files, const SaveContents &contents,
                  std::string &error);
 diff --git a/host/shell/headless_shell.cpp b/host/shell/headless_shell.cpp
-index 8869597..69b0f50 100644
+index 8874c97..f6f6ffc 100644
 --- a/host/shell/headless_shell.cpp
 +++ b/host/shell/headless_shell.cpp
 @@ -9,6 +9,7 @@
@@ -782,7 +782,7 @@ index 8869597..69b0f50 100644
  //   quit                    pump_events() returns false: the run ends
  // key, mouse, click, text and drop need a window; each is reported once and
  // ignored.
-@@ -186,6 +187,10 @@ private:
+@@ -181,6 +182,10 @@ private:
              quit_ = true;
              return false;
          }

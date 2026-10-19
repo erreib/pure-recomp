@@ -255,7 +255,8 @@ public:
         }
     }
 
-    void shutdown() override {
+    // The destructor's (host::Shell has no shutdown: nothing calls one through it).
+    void shutdown() {
         @autoreleasepool {
             wait_idle();
             if (ui_ready_ && ImGui::GetCurrentContext() != nullptr) shutdown_ui();
@@ -353,9 +354,6 @@ public:
         static const pk::input::touch::Controls none;
         return none;
     }
-    bool mouse_captured() const noexcept override { return mouse_captured_; }
-    bool quit_requested() const noexcept override { return quit_; }
-    void request_quit() noexcept override { quit_ = true; }
     void set_game_input(bool enabled) override {
         // Buttons held when the game gets its input back stay hidden from it until released.
         if (enabled && !input_.game_input) input_.suppress_held = true;
@@ -536,7 +534,8 @@ public:
         return true;
     }
 
-    void shutdown_ui() override {
+    // shutdown()'s, for the interface's two ImGui backends.
+    void shutdown_ui() {
         if (!ui_ready_) return;
         wait_idle();
         ImGui_ImplMetal_Shutdown();
@@ -872,7 +871,7 @@ private:
             rgba[i + 2u] = bgra[i];
             rgba[i + 3u] = 255u;
         }
-        if (pk::gpu::write_bmp_file(path, rgba.data(), width, height))
+        if (pk::gpu::write_bmp(path, rgba.data(), width, height))
             std::cout << "[render] window " << width << "x" << height << " -> " << path << std::endl;
         else
             std::cout << "[render] cannot write " << path << std::endl;

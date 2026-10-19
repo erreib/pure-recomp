@@ -71,7 +71,7 @@ index 73f2e2a..dad06e9 100644
          if (function == 0) {          // modulate
              color *= texel;
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index d81df00..d6b1e33 100644
+index d3d2af6..5cf4349 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
 @@ -129,7 +129,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
@@ -95,7 +95,7 @@ index d81df00..d6b1e33 100644
  // The fragment shader stores the stencil value in bits 3..10 of viewport.w as
  // the target's alpha instead of the fragment's (stencil_alpha below).
  constexpr float kPushStencilAlpha = 4.0f;
-@@ -730,6 +735,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -692,6 +697,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
          std::uint16_t max_seen_v{};
          // Mip levels in the image (mip_levels()); 1 for a texture without.
          std::uint32_t levels{1u};
@@ -108,7 +108,7 @@ index d81df00..d6b1e33 100644
      };
  
      RendererConfig config;
-@@ -937,6 +948,14 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -899,6 +910,14 @@ struct VulkanRenderer::Impl : host::SdlPad {
      std::array<std::uint32_t, 2> display_addresses{};
      bool sharp_screen{};
      bool sharp_textures{};
@@ -123,7 +123,7 @@ index d81df00..d6b1e33 100644
      std::string device_name;
  
      // Dear ImGui draws in its own render pass over the finished swapchain
-@@ -1375,6 +1394,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1337,6 +1356,10 @@ struct VulkanRenderer::Impl : host::SdlPad {
      // (textureLod) by the GE's rule and rounds it for the nearest mip filter.
      VkSampler mip_sampler{};
      VkSampler mip_sharp_sampler{};
@@ -134,7 +134,7 @@ index d81df00..d6b1e33 100644
      std::map<PipelineKey, VkPipeline> pipelines;
      // Pipelines compiled in earlier runs, kept in the data directory
      // (pipeline_cache.bin) so that a new area does not compile its shaders
-@@ -1727,8 +1750,11 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1689,8 +1712,11 @@ struct VulkanRenderer::Impl : host::SdlPad {
      void apply_texture_pack();
      // `levels`: the mip levels wanted (mip_levels()) in, the levels of the
      // image the descriptor samples out (1 for a replacement or white).
@@ -147,7 +147,7 @@ index d81df00..d6b1e33 100644
      std::uint64_t texture_clock{};
      // texture_key results for the display list being walked, by the state that
      // feeds the key; cleared by begin_display_list().
-@@ -1911,8 +1937,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1873,8 +1899,12 @@ struct VulkanRenderer::Impl : host::SdlPad {
                               0u, nullptr, 0u, nullptr, 1u, &barrier);
      }
  
@@ -162,7 +162,7 @@ index d81df00..d6b1e33 100644
          return sharp_textures ? sharp_sampler : sampler;
      }
      [[nodiscard]] VkSampler framebuffer_sampler() const {
-@@ -2192,6 +2222,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2154,6 +2184,12 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      impl.aspect = usable_aspect(player.aspect);
      impl.sharp_screen = player.sharp_screen;
      impl.sharp_textures = player.sharp_textures;
@@ -175,7 +175,7 @@ index d81df00..d6b1e33 100644
      impl.trace_interpolation = portablekit::env("TRACE_INTERPOLATION") != nullptr;
      if (const interpolation::CutThresholds *thresholds = portablekit::game().interpolation_thresholds)
          impl.cut_thresholds = *thresholds;
-@@ -2357,6 +2393,13 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2319,6 +2355,13 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
          enabled_features.dualSrcBlend = VK_TRUE;
          impl.dual_source = true;
      }
@@ -189,7 +189,7 @@ index d81df00..d6b1e33 100644
      // CLIPENABLE's depth clamp (patch 0013): the pipeline clamps instead of
      // clipping at the depth range's ends (depthClampEnable) and the vertex
      // shader clips at the near plane and MINZ/MAXZ (gl_ClipDistance).
-@@ -2578,16 +2621,20 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2540,16 +2583,20 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
          return false;
  
      // Evicted textures keep their sets until their frame has finished, so
@@ -213,7 +213,7 @@ index d81df00..d6b1e33 100644
      pool_info.poolSizeCount = static_cast<std::uint32_t>(pool_sizes.size());
      pool_info.pPoolSizes = pool_sizes.data();
      if (!check(vkCreateDescriptorPool(impl.device, &pool_info, nullptr, &impl.descriptor_pool),
-@@ -2665,6 +2712,19 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+@@ -2627,6 +2674,19 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
      if (!check(vkCreateSampler(impl.device, &sampler_info, nullptr, &impl.mip_sharp_sampler), "vkCreateSampler",
                 error))
          return false;
@@ -233,7 +233,7 @@ index d81df00..d6b1e33 100644
  
      // Command buffer, synchronization and the vertex staging buffer.
      VkCommandPoolCreateInfo command_pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-@@ -4113,6 +4173,8 @@ void VulkanRenderer::Impl::release_frame_uploads(std::uint32_t from) {
+@@ -4075,6 +4135,8 @@ void VulkanRenderer::Impl::release_frame_uploads(std::uint32_t from) {
  
  void VulkanRenderer::Impl::destroy_texture(Texture &texture) {
      if (texture.descriptor != VK_NULL_HANDLE) vkFreeDescriptorSets(device, descriptor_pool, 1u, &texture.descriptor);
@@ -242,7 +242,7 @@ index d81df00..d6b1e33 100644
      if (texture.view != VK_NULL_HANDLE) vkDestroyImageView(device, texture.view, nullptr);
      if (texture.image != VK_NULL_HANDLE) vkDestroyImage(device, texture.image, nullptr);
      if (texture.memory != VK_NULL_HANDLE) vkFreeMemory(device, texture.memory, nullptr);
-@@ -4321,7 +4383,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+@@ -4283,7 +4345,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
  }
  
  VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memory, const DrawCall &call,
@@ -251,7 +251,7 @@ index d81df00..d6b1e33 100644
      const perf::SplitScope split(perf::Split::Texture);
      Texture &texture = texture_for(memory, call, levels);
      if (texture.replacement && pack) {
-@@ -4333,9 +4395,33 @@ VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memo
+@@ -4295,9 +4357,33 @@ VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memo
          }
      }
      levels = texture.levels;
@@ -285,7 +285,7 @@ index d81df00..d6b1e33 100644
  void VulkanRenderer::Impl::apply_texture_pack() {
      const bool wanted = pack_wanted && !pack_held;
      if (pack_applied == wanted && !pack_reload) return;
-@@ -5646,6 +5732,11 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
+@@ -5608,6 +5694,11 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
          write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
          write.pImageInfo = &image_info;
          vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
@@ -297,7 +297,7 @@ index d81df00..d6b1e33 100644
      };
      rewrite(impl.white_texture);
      for (auto &[key, texture] : impl.textures) rewrite(texture);
-@@ -5795,6 +5886,10 @@ void VulkanRenderer::begin_frame() {
+@@ -5757,6 +5848,10 @@ void VulkanRenderer::begin_frame() {
      impl.collect_writeback(impl.slot, false);
      impl.report_pipelines(false);
      impl.apply_texture_pack();
@@ -308,7 +308,7 @@ index d81df00..d6b1e33 100644
      impl.replacements.begin_frame(impl.frames);
      if (texture_pack_trace() && impl.pack && impl.frames % 60u == 0u) {
          std::cout << "[texpack] frame " << impl.frames << ": " << impl.replaced_draws << " draws replaced in 60 frames, "
-@@ -6786,6 +6881,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6748,6 +6843,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
  
      VkDescriptorSet texture_descriptor = impl.white_texture.descriptor;
      std::uint32_t texture_levels = 1u;  // the mip levels the descriptor's image has
@@ -322,7 +322,7 @@ index d81df00..d6b1e33 100644
      if (call.texture.enabled && !call.clear_mode) {
          const Impl::FramebufferTexture &source = framebuffer_source;
          const VkDescriptorSet copy =
-@@ -6802,9 +6904,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6764,9 +6866,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              push.texture_params[0] += kPushPlaced;
          } else {
              texture_levels = impl.mip_levels(memory, call.texture);
@@ -334,7 +334,7 @@ index d81df00..d6b1e33 100644
      // Texture map modes 1 and 2 (texture_params.x bit 3): the vertex shader
      // takes the coordinates from the object block; in mode 1 (bit 4) the
      // fragment shader divides s and t by q.
-@@ -6822,6 +6925,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6784,6 +6887,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
      // part plus 2048. g is per PSP pixel: at an internal scale above 1 the
      // auto rule's constant adds 16 x log2 of the scale of the target drawn
      // into (none for a 480x272 one, patch 0018).
@@ -350,7 +350,7 @@ index d81df00..d6b1e33 100644
      if (texture_levels > 1u) {
          std::int32_t rule = 1;
          std::int32_t constant = 0;
-@@ -6836,12 +6948,23 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+@@ -6798,12 +6910,23 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
              break;
          default: break;  // auto, and the undefined mode 3 as auto
          }
@@ -377,7 +377,7 @@ index d81df00..d6b1e33 100644
      }
  
      if (!impl.pass_active || impl.current_target != call.target.color_address) {
-@@ -8676,6 +8799,7 @@ void VulkanRenderer::shutdown() {
+@@ -8630,6 +8753,7 @@ void VulkanRenderer::shutdown() {
      vkDestroySampler(impl.device, impl.clamp_sharp_sampler, nullptr);
      vkDestroySampler(impl.device, impl.mip_sampler, nullptr);
      vkDestroySampler(impl.device, impl.mip_sharp_sampler, nullptr);

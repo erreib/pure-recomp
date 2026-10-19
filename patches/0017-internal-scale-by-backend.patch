@@ -1,5 +1,5 @@
 diff --git a/host/gpu/ge_backend.hpp b/host/gpu/ge_backend.hpp
-index 98cd6f9..b2d720e 100644
+index 12120b8..da3ffe4 100644
 --- a/host/gpu/ge_backend.hpp
 +++ b/host/gpu/ge_backend.hpp
 @@ -30,6 +30,7 @@
@@ -10,7 +10,7 @@ index 98cd6f9..b2d720e 100644
  #include <cstdint>
  #include <functional>
  #include <memory>
-@@ -140,6 +141,17 @@ public:
+@@ -136,6 +137,17 @@ public:
  
      [[nodiscard]] virtual std::uint64_t draws_submitted() const noexcept = 0;
      [[nodiscard]] virtual std::uint64_t frames_presented() const noexcept = 0;
@@ -28,7 +28,7 @@ index 98cd6f9..b2d720e 100644
  };
  
  using BackendFactory = std::function<std::unique_ptr<GeBackend>()>;
-@@ -153,6 +165,10 @@ void register_backend(std::string name, BackendFactory factory, std::string desc
+@@ -149,6 +161,10 @@ void register_backend(std::string name, BackendFactory factory, std::string desc
  [[nodiscard]] std::string backend_description(std::string_view name);
  // The backend <prefix>_GE_BACKEND names; "vulkan" when it is unset or empty.
  [[nodiscard]] std::string selected_backend();
@@ -40,10 +40,10 @@ index 98cd6f9..b2d720e 100644
  // One line in a backend's source file registers it before main():
  //   const BackendRegistration registration("null", "draws nothing", [] { return std::make_unique<NullBackend>(); });
 diff --git a/host/gpu/vulkan_ge_backend.cpp b/host/gpu/vulkan_ge_backend.cpp
-index 5f52f4f..f227c0f 100644
+index 0d201d0..6a0138b 100644
 --- a/host/gpu/vulkan_ge_backend.cpp
 +++ b/host/gpu/vulkan_ge_backend.cpp
-@@ -61,6 +61,14 @@ public:
+@@ -60,6 +60,14 @@ public:
      std::uint64_t frames_presented() const noexcept override {
          return renderer_ ? renderer_->frames_presented() : 0u;
      }

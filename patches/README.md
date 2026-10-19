@@ -167,7 +167,10 @@ backend does. Needs 0003 (it builds on the renderer's depth write-back and its H
   the work before (`vulkan_ge_backend.cpp`, no change in output; the renderer gains `display_image()`, which names the
   target `present()` shows). `null` draws nothing, presents black and counts draws, and needs no window: with
   `<prefix>_NO_RENDER` set it is the only backend that runs, without a window or GPU. Adds the three sources to
-  `cmake/PortableKit.cmake`.
+  `cmake/PortableKit.cmake`. Task 095 trimmed the interface to what is called through it: no `GeBackend::name()`;
+  `PresentedImage` keeps `api`, the size, `pixels` (Cpu) and `image` (Metal's texture), the Vulkan backend naming
+  its target by display address alone; one BMP writer, `gpu::write_bmp` (moved out of the renderer, so the null
+  backend writes the same file without it); and both registries one template, `Registry<T>` (`host/registry.hpp`).
 - The shell seam (old 0010; D-007, docs/ge-backend.md section 8): `host::Shell` (`host/shell/shell.hpp`: lifecycle,
   events and input, presenting, interface) with a registry (`register_shell`, `make_shell`, `ShellRegistration`) and
   `<prefix>_SHELL` (vulkan when unset; `<prefix>_NO_RENDER` means headless). The HLE (`hle_media.cpp`) owns a shell
@@ -183,12 +186,14 @@ backend does. Needs 0003 (it builds on the renderer's depth write-back and its H
   axis names (`gamepad.cpp`), the input script's grammar (`script_steps.cpp`). The interface layer attaches to a
   `Shell` with a window (`Layer::attach(host::Shell &)`); the menu's resolution, texture filter and texture pack rows
   use the Vulkan renderer through `active_renderer()`. Adds the six sources to `cmake/PortableKit.cmake`. No change in
-  what the Vulkan path shows (the frame regression captures are pixel-identical).
+  what the Vulkan path shows (the frame regression captures are pixel-identical). Since task 095 `Shell` has no
+  `shutdown`, `shutdown_ui`, `mouse_captured`, `quit_requested` or `request_quit`: nothing called them through it, and
+  a shell's destructor frees what it made.
 - The UI platform init in the shell (old 0012): `Layer::attach` started ImGui's SDL3 platform backend with
   `ImGui_ImplSDL3_InitForVulkan` for every shell, which is wrong for a shell that draws with another API (the Metal
   shell, task 027, needs `ImGui_ImplSDL3_InitForMetal`). The platform init moves into `Shell::initialize_ui`: the
   Vulkan shell calls `ImGui_ImplSDL3_InitForVulkan` for its renderer's window before the renderer's ImGui Vulkan
-  backend (and shuts both down, or leaves neither running on failure), and `Layer::attach` loads the fonts, calls
+  backend (and leaves neither running on failure), and `Layer::attach` loads the fonts, calls
   only `shell.initialize_ui`, then sets the gamepad mode. The Vulkan path is unchanged.
 
 ### 0005-kernel-host-waits-and-pacing

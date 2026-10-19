@@ -36,10 +36,10 @@ index 8ffdb28..e8072a0 100644
  
  // Defined by the port, exactly once. Everything under host/ reads the game
 diff --git a/host/shell/shell.hpp b/host/shell/shell.hpp
-index 66f9a3e..1abfa11 100644
+index 5136ecd..bffbbb8 100644
 --- a/host/shell/shell.hpp
 +++ b/host/shell/shell.hpp
-@@ -187,6 +187,30 @@ public:
+@@ -181,6 +181,30 @@ public:
      virtual void set_perf_overlay(bool visible) = 0;
      [[nodiscard]] virtual std::string device_name() const = 0;
  

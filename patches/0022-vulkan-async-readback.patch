@@ -1,8 +1,8 @@
 diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
-index d6b1e33..5193b89 100644
+index 5cf4349..5a128b4 100644
 --- a/host/gpu/vulkan_renderer.cpp
 +++ b/host/gpu/vulkan_renderer.cpp
-@@ -1233,8 +1233,26 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1195,8 +1195,26 @@ struct VulkanRenderer::Impl : host::SdlPad {
      Staging depth_readback{};
      VkDeviceSize depth_readback_size{};
      bool depth_readback_coherent{true};
@@ -31,7 +31,7 @@ index d6b1e33..5193b89 100644
  
      // Frames in flight. With two (the default) the CPU records a frame while
      // the GPU still draws the one before, so their times overlap instead of
-@@ -1262,6 +1280,15 @@ struct VulkanRenderer::Impl : host::SdlPad {
+@@ -1224,6 +1242,15 @@ struct VulkanRenderer::Impl : host::SdlPad {
          std::uint32_t writeback_width{};
          bool writeback_in_flight{};
          WritebackFrame writeback_recorded{};
@@ -47,7 +47,7 @@ index d6b1e33..5193b89 100644
          // A frame the game wrote itself (upload_frame()).
          Staging movie{};
          std::uint32_t gpu_timer_pending{};  // queries the frame wrote, read after its fence
-@@ -5870,6 +5897,7 @@ void VulkanRenderer::begin_frame() {
+@@ -5832,6 +5859,7 @@ void VulkanRenderer::begin_frame() {
      if (!impl.ready || impl.recording) return;
      // The next slot: its fence is the frame slot_count frames back.
      impl.slot = (impl.slot + 1u) % impl.slot_count;
@@ -55,7 +55,7 @@ index d6b1e33..5193b89 100644
      Impl::FrameSlot &frame = impl.slots[impl.slot];
      impl.command_buffer = frame.commands;
      impl.frame_fence = frame.fence;
-@@ -7278,15 +7306,16 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+@@ -7240,15 +7268,16 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
                    << " back for a block transfer\n";
  }
  
@@ -75,7 +75,7 @@ index d6b1e33..5193b89 100644
      // The CPU reads it, so cached memory first, as for the frame write-back.
      VkPhysicalDeviceMemoryProperties memory_properties{};
      vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
-@@ -7310,22 +7339,77 @@ bool VulkanRenderer::Impl::create_depth_readback(VkDeviceSize bytes, std::string
+@@ -7272,22 +7301,77 @@ bool VulkanRenderer::Impl::create_depth_readback(VkDeviceSize bytes, std::string
      VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
      allocate.allocationSize = requirements.size;
      allocate.memoryTypeIndex = static_cast<std::uint32_t>(chosen);
@@ -163,7 +163,7 @@ index d6b1e33..5193b89 100644
  }
  
  bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t depth_address,
-@@ -7341,8 +7425,7 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+@@ -7303,8 +7387,7 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
      depth_address = 0x04000000u | (depth_address & 0x001FFFF0u);
      if (depth_stride < kPspWidth) return false;
      const std::size_t guest_bytes = static_cast<std::size_t>(depth_stride) * kPspHeight * 2u;
@@ -173,7 +173,7 @@ index d6b1e33..5193b89 100644
      // Bytes per texel of the depth aspect copied into a buffer.
      std::uint32_t texel_bytes = 4u;
      switch (impl.depth_format) {
-@@ -7359,128 +7442,175 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
+@@ -7321,128 +7404,175 @@ bool VulkanRenderer::write_back_depth(std::uint32_t color_address, std::uint32_t
      Impl::Target &target = found->second;
      const VkExtent2D extent = target.extent;  // the target's own (patch 0018)
      const VkDeviceSize bytes = static_cast<VkDeviceSize>(extent.width) * extent.height * texel_bytes;

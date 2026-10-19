@@ -36,7 +36,6 @@ class MetalGeBackend final : public pk::GeBackend {
 public:
     ~MetalGeBackend() override { shutdown(); }
 
-    const char *name() const noexcept override { return "metal"; }
     bool needs_window() const noexcept override { return false; }
 
     bool initialize(const pk::BackendConfig &config, std::string &error) override;

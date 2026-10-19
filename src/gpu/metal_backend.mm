@@ -391,7 +391,6 @@ pk::PresentedImage MetalGeBackend::present_image(std::uint32_t display_address) 
         if (prewarm_.shared && !prewarm_.reported) report_prewarm_done();
         if (shown != nullptr) {
             image.api = pk::ImageApi::Metal;
-            image.address = shown->key.address;
             // The target's own size: 480S x 272S for a display target at internal scale S (D-015), under Fill the
             // drawable's shape at 272S rows (task 086).
             image.width = shown->width();
@@ -408,7 +407,7 @@ bool MetalGeBackend::capture_frame(const std::string &path) {
     @autoreleasepool {
         // At the target's own size (480S x 272S at internal scale S): the suite's comparisons resize.
         if (picture_frame_ != frames_) read_back(*presented_);
-        return pk::write_bmp_file(path, picture_.data(), picture_width_, picture_height_);
+        return pk::write_bmp(path, picture_.data(), picture_width_, picture_height_);
     }
 }
 
