@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-19 (task 500's rig batch). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-19 (task 501, the sink's early arming, merged). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -27,7 +27,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | E5 | texture detail (D-019) | done 2026-10-12, both renderers (tasks 075, 076) |
 | E6 | a steady frame rate through the flashes (D-016) | done 2026-10-11 (task 070) |
 | E7 | the frontend's resolution (D-018) | done 2026-10-11 (tasks 073, 074); Original by default since 2026-10-12 |
-| E8 | the display rate (D-022) | done 2026-10-15 (tasks 089, 091-display-rate-margin); the rig's 100 Hz sound probe PASSes since 2026-10-19 (task 500), the sink's early-race shape there still to tune |
+| E8 | the display rate (D-022) | done 2026-10-15 (tasks 089, 091-display-rate-margin); the rig's 100 Hz sound probe PASSes since 2026-10-19 (task 500), the sink's early-race shape fixed the same day (task 501); Erik's ear on a played race owed |
 | DLC | the US download packs (D-005) | done 2026-10-12 (tasks 077-download-packs, 078-download-packs-menu) |
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
@@ -48,7 +48,7 @@ a 100 Hz display).
 | The game | the whole single-player game: every mode, class, league and circuit; the movies, the music and the sound with the SAS reverb; saves in the PSP's format with the save list, import, export and backups; the twelve US download packs |
 | Mac, Metal (the default) | the Metal shell and backend (D-008): the drawable at the display's pixels, internal scale Auto, Fill, texture detail, the flashes smoothed, the 30-fps modes at 60, the race at 119.40 Hz on the 120 Hz display (E8), the performance overlay (F3) |
 | Mac, Vulkan | the framework's Vulkan shell and renderer on MoltenVK: internal scale, Fill, texture detail and the game's rows as on Metal (the sprite upscale is Metal's; Vulkan takes art as a texture pack); E8's sound holds at the margin on both shells |
-| Windows, Vulkan | the rig: the game at 60 fps with E2 to E6 and E8, the corpus inlined (task 083); at the Display rate on its 100 Hz display the sound probe PASSes with task 098's sink on a quiet machine (task 500); the early-race dip can still surface as silence when the lead drains to zero (Follow-ups) |
+| Windows, Vulkan | the rig: the game at 60 fps with E2 to E6 and E8, the corpus inlined (task 083); at the Display rate on its 100 Hz display the sound probe PASSes with task 098's sink armed early (task 501: the race load's landing starts the lead rebuild, the dip at race second 4 passes with no silence); whether a played race keeps real time there with a gamepad is Erik's to measure (docs/windows.md, "Open on the rig") |
 | Headless | `PURE_SHELL=headless` with the `metal` backend (real pictures) or `null`, thousands of frames a second; on Windows nothing draws headless, so blind runs take the null backend (`purelib.port.BLIND`) |
 | Esc menu | rows by what the game and the shell can do (D-014): Resolution, Aspect ratio, Performance, the game's rows (30 fps modes, Flashes, Text and sprites, Texture detail, Display rate), Download packs in System; `tools/menu_check.sh` on both shells |
 | Controls | keyboard (two layouts), mouse, gamepads, rebinding in the menu (docs/controls.md; `tools/controls_check.py`) |
@@ -106,20 +106,24 @@ The enhancements:
   the Vulkan Frame rate row at a game rate of 119.4; Erik's eye on the race at 120 and the menus (docs/timing.md,
   "E8").
 - E8 on the rig: `--audio --shell vulkan` PASSes since task 500 (098's sink, the probe counting channel restarts
-  apart) on a quiet machine and FAILs under other load (a quarter-second host stall with Chrome and the editor busy);
-  the storms route held 85% where this one holds 100%, unexplained; the E8 gate must pin `PURE_DISPLAY_HZ=100`;
+  and, since task 501, the race load's snaps apart) on a quiet machine and FAILs under other load (a quarter-second
+  host stall with Chrome and the editor busy: `tools/audio_hiccups.py` names them); the storms route holds 85 to 90%
+  where this one holds 100%, the sweep's live-file steering the leading candidate, a played race with `PURE_PERF=log`
+  the test (task 501, "The gate"); the E8 gate must pin `PURE_DISPLAY_HZ=100`;
   drop vblanks or slow down under about 95% is a pacer call; worktree builds there lose the renderer (`SDL3_ROOT`)
   (docs/timing.md, "On the rig's 100 Hz display"; [091](tasks/091-display-rate-storms.md),
   [500](tasks/500-rig-batch.md)).
 - The audio sink keeps a late producer's content and rebuilds its lead by slowing the device 1% (task 098, patch
   0031-audio-sink-late-writes, D-023); on the Mac a no-op by measurement (nothing runs late at 119.4 Hz); on the rig
-  (task 500) it takes the early-race dip two ways: clean when the race load's early arming keeps the lead off zero,
-  or 0.45 s of silence in 84 pieces when the lead drains to zero (the 1% recovery closes a deficit slower than the
-  drain). The arming threshold and the recovery pair are the next sink task
-  ([098](tasks/098-audio-sink-late-writes.md), [500](tasks/500-rig-batch.md) reading 1).
-- The `[audio]` line's `dropped=` reads 33 k to 43 k frames a second in every windowed run since at least
-  2026-10-14 (the runaway trim, a lead of 7424 under a ring of 8192): a counter to understand before it is believed,
-  and the candidate root of the rig's hiccups if real ([097](tasks/097-screen-batch.md), finding 4).
+  (task 500) it took the early-race dip two ways, clean or 0.45 s of silence in 84 pieces when the lead drained to
+  zero, until task 501 armed the recovery from the full 2048-frame lead (five runs clean after the load); what is
+  left is the race load's own snap (one or two, the load's stalls, counted apart) and Erik's ear
+  ([098](tasks/098-audio-sink-late-writes.md), [500](tasks/500-rig-batch.md) reading 1,
+  [501](tasks/501-audio-sink-early-arming.md)).
+- The `[audio]` line's `dropped=` in the tools' windowed runs is their unpaced menus (the producer three times
+  ahead of real time, the ring trimming): 0 on every paced line and in a run paced from the start, so not a
+  player's condition ([501](tasks/501-audio-sink-early-arming.md), "The gate"; [097](tasks/097-screen-batch.md),
+  finding 4).
 
 Fidelity, the game and the saves:
 - The follower stalls on Sinucit, Manor Top and Karbonis and is marginal on Citta Nuova; Zone has no racing line
@@ -197,9 +201,13 @@ after a change that moves or renames a file, a tool or a patch.
   2026-10-19: every row PASS, the gerec recordings fresh, one tool defect found and fixed (the sound probe was void
   under bash 3.2 since task 094). The scorecard's timing and trajectories lanes reran the same day: no new finding.
   The rig's batch (task 500) ran the same day: every row PASS, the sound probe PASS at 100 Hz once channel restarts
-  are counted apart and the machine is quiet. batch/m2 is ready for `main` when Erik says so. Next: the sink's
-  early-race shape on the rig (task 500, reading 1: the arming threshold and the recovery pair), then the `dropped=`
-  counter (Follow-ups, E8).
+  are counted apart and the machine is quiet. Task 501 (the same day, merged) armed the sink's recovery from the
+  full lead, and the probe now counts the race load's snaps apart; `dropped=` turned out to be the harness's unpaced
+  menus. batch/m2 is ready for `main` when Erik says so. Next: Erik's ear on a played race at Display with the trace
+  (docs/windows.md, "Open on the rig"; `tools/audio_hiccups.py` reads it), which also says whether a played race
+  keeps real time at 100 Hz with a gamepad; under 95% the pacer call (Open calls) is the next design, near 100 the
+  storms verdict is the harness's. The Mac's probe on both shells at this merge (planning session, expected
+  unchanged).
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
