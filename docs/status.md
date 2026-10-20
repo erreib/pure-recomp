@@ -34,6 +34,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
 | Crowd | 3D crowd and people models in place of the track-side sprites | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
+| Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
 
 ## Works
@@ -262,5 +263,19 @@ after a change that moves or renames a file, a tool or a patch.
   simply absent; the bloom and billboard passes read targets drawn with the old view; the sky). Then the camera's
   controls in the Esc menu's shape, the capture row, and the Vulkan path. A capture is the player's own, never in
   this repository.
+- 3D backgrounds in place of the 2D skies (Erik, 2026-10-20; not scheduled): each track's sky is a cube of flat
+  images the game draws in the opaque world (docs/ge-effects.md: the sky cube's faces end the opaque pass, just
+  before the GE SIGNAL at which the game reads the depth buffer for the sun block, which samples the sky's depth);
+  drawn instead as a model or a layered scene (a dome, clouds with parallax, the horizon's buildings in depth) that
+  moves with the camera. Nothing looked at yet. The first task is a survey on the race routes: the sky cube's draws
+  on each track (the textures, the matrices, what depth they write and what the sun block's read-back needs of it),
+  what a substitution hook keys on (the sky
+  texture's hash, as the texture pack keys do), how the camera's orientation reaches the backend (the view matrix
+  in GE state), and whether the bloom and billboard passes read the sky. Then a scene format of our own for a sky
+  (made for this port, never the game's or another game's bytes; the HD pack's sky image is a pack's, drawn by the
+  loader, not this), one track on Metal with an Esc-menu row and Original one choice away, then the rest and the
+  Vulkan path, each with a check counting substituted sky draws on the race route. Shares the survey and the hook
+  with the crowd models above: the two are one substitution mechanism keyed by texture, so the survey task covers
+  both.
 - E1, the controls; the VR spike (task 088, on the rig); the candidates named after E7: the frontend at 60 fps and the
   menu-XML spike (new in-game options).
