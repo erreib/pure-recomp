@@ -4,8 +4,9 @@
 # <key>.png (the 4x picture) and the line `<key> = <key>.png` under textures.ini's [hashes], the key the framework's
 # pack loader computes for the same texture (hash xxh64, ignoreAddress; src/gpu/metal_textures.mm, docs/metal-backend.md
 # "Sprite upscale"). This tool builds the pack from the routes that visit every menu and HUD, and checks it in the
-# Vulkan window. The pack holds the game's art: it stays under out/ and is never committed.
-#   tools/sprite_pack.sh [--out DIR] [--check] [--pack DIR] [--wait SECONDS]
+# Vulkan window, or since task 100 in the Metal window (the Metal backend's own pack loader). The pack holds the game's
+# art: it stays under out/ and is never committed.
+#   tools/sprite_pack.sh [--out DIR] [--check] [--pack DIR] [--shell metal|vulkan] [--wait SECONDS]
 #   --out    default out/sprite_pack: DIR/pack the pack (textures.ini and the PNGs), DIR/dump the dump's own files
 #            (task 073's <key>.src.png and <key>.png), DIR/regress and DIR/sweep the build's runs, DIR/check the check's
 #            runs (off/ and on/) and its data directory, DIR/summary.txt what was printed.
@@ -13,6 +14,10 @@
 #   --pack   check this pack folder instead of building one (implies --check). The only mode on Windows, which has no
 #            Metal backend to build with: the rig gets the pack as a folder copied from the Mac. Any PPSSPP-format pack
 #            of PNG or ZIM images (task 099: the HD pack of D-024, given by its folder, never copied into the repository).
+#   --shell  the window the check draws in, with its own GE backend: vulkan (the default; the Vulkan renderer's loader,
+#            host/gpu/replacement_textures.cpp) or metal (macOS: the Metal backend's, src/gpu/metal_texture_pack.mm,
+#            task 100), each run at internal scale 2 (PURE_INTERNAL_SCALE=2, 960x544 captures: what Auto gives in the
+#            default window, and what the Vulkan window draws), where run_boot.py would pin the Metal backend to 1.
 #   --wait   how long to wait for other games to end before each run (tools/frame_regress.sh --wait, and
 #            tools/lib.sh's wait_game before a sweep; default 600, 0 gives up at once).
 # The build (macOS), headless on the Metal backend with PURE_SPRITE_UPSCALE=1 and PURE_SPRITE_DUMP=DIR/dump (the
@@ -27,15 +32,16 @@
 # The check (--check), on either system: the pack read as the loader reads it (textures.ini's [options] and [hashes],
 # the files it names counted, and those missing); then a data directory of its own, DIR/check/data (a fresh scratch one, as
 # tools/purelib/port.py makes them), with the pack copied in at textures/UCUS98612, where the Vulkan renderer looks
-# for an installed pack; and the scenes main_menu and race_hud captured in the Vulkan window (tools/frame_regress.sh
-# --shell vulkan --backend vulkan --only main_menu,race_hud: each run unpaced until 300 flips before its scene, paced
-# from there) twice, into DIR/check/off with PURE_TEXTURE_PACK=0 (video.texture_pack off: the originals) and into
-# DIR/check/on with PURE_TEXTURE_PACK=1 and PURE_TRACE_TEXTURE_PACK=1 (every lookup, decode and upload logged).
+# for an installed pack; and the scenes main_menu and race_hud captured in the window of --shell (tools/frame_regress.sh
+# --shell S --backend S --only main_menu,race_hud: each run unpaced until 300 flips before its scene, paced from
+# there) twice, into DIR/check/off with PURE_TEXTURE_PACK=0 (video.texture_pack off: the originals) and into
+# DIR/check/on with PURE_TEXTURE_PACK=1 and PURE_TRACE_TEXTURE_PACK=1 (every lookup, decode and upload logged); both
+# with PURE_PERF=log, whose one-second lines give the frame times with the pack and without.
 # PASS when:
 #   - the pack holds at least 40 keys, and not every file its [hashes] name is missing (the count of missing files and
 #     the first three are printed: the HD pack names 2549 files it does not hold and still replaces);
 #   - each run with the pack logged `[texpack] N textures from <data>/textures/UCUS98612` with N the pack's keys (the
-#     framework opened it: TexturePack::open);
+#     framework opened it: TexturePack::open; the Metal backend prints the Vulkan renderer's lines);
 #   - the runs with the pack drew replacements: at least 10 distinct images of the pack uploaded
 #     (`[texpack] frame F: uploaded NAME`, a .png or a .zim, which happens when a draw first samples it), and draws
 #     replaced on each route; per route the keys the lookups found, the images decoded (`[texpack] decoded NAME`) and
@@ -47,7 +53,7 @@
 #     capture with the pack, reduced to 480x272 by the centre pixel of each S x S block (S its width over 480: the
 #     Vulkan window's captures are the window's pixels, 960x544 in the default window, S 2), is within the scene's
 #     limit of its reference at the scene's tol, both read from tools/frame_regress.sh's table (the capture without the
-#     pack reduced the same way is printed beside it); for any other pack (new art, such as the HD pack) the figure is
+#     pack reduced the same way is printed beside it; the Metal window's captures are 960x544 too, S 2); for any other pack (new art, such as the HD pack) the figure is
 #     printed and is not a rule;
 #   - race_hud's capture with the pack passes tools/hud_check.py (the HUD found).
 # Prints the table and `sprite_pack: PASS` or `FAIL` last. Exit 0 PASS (or a build without --check that made a pack),
@@ -62,6 +68,7 @@ DIR=out/sprite_pack
 CHECK=no
 PACK=
 WAIT=600
+SHELL_NAME=vulkan
 # The race routes to their results screens: tools/campaign_sweep.py MODE TRACK, with --no-damage.
 RACE_CELLS="single_race:vineta_k time_trial:vineta_k"
 CHECK_SCENES="main_menu race_hud"
@@ -70,7 +77,7 @@ GAME_ID=UCUS98612
 WINDOWS=
 case "$(uname -s)" in MINGW*|MSYS*) WINDOWS=1 ;; esac
 usage() {
-  echo "usage: tools/sprite_pack.sh [--out DIR] [--check] [--pack DIR] [--wait SECONDS]"
+  echo "usage: tools/sprite_pack.sh [--out DIR] [--check] [--pack DIR] [--shell metal|vulkan] [--wait SECONDS]"
   exit 2
 }
 while [ $# -gt 0 ]; do
@@ -78,12 +85,22 @@ while [ $# -gt 0 ]; do
     --out) [ $# -ge 2 ] || usage; DIR=$2; shift 2 ;;
     --check) CHECK=yes; shift ;;
     --pack) [ $# -ge 2 ] || usage; PACK=$2; CHECK=yes; shift 2 ;;
+    --shell) [ $# -ge 2 ] || usage; SHELL_NAME=$2; shift 2 ;;
     --wait) [ $# -ge 2 ] || usage; WAIT=$2; shift 2 ;;
     -h|--help) usage ;;
     *) echo "sprite_pack: unknown argument $1"; usage ;;
   esac
 done
 case $WAIT in ''|*[!0-9]*) echo "sprite_pack: --wait takes seconds, not $WAIT"; exit 2 ;; esac
+case $SHELL_NAME in
+  vulkan) WINDOW_NAME="the Vulkan window"; RENDERER_NAME="the Vulkan renderer" ;;
+  metal) WINDOW_NAME="the Metal window"; RENDERER_NAME="the Metal backend" ;;
+  *) echo "sprite_pack: --shell takes metal or vulkan, not $SHELL_NAME"; exit 2 ;;
+esac
+if [ -n "$WINDOWS" ] && [ $SHELL_NAME = metal ]; then
+  echo "sprite_pack: no Metal window on Windows; --shell vulkan"
+  exit 2
+fi
 if [ -n "$WINDOWS" ] && [ -z "$PACK" ]; then
   echo "sprite_pack: nothing to build on Windows (the pack comes from the Metal backend): copy out/sprite_pack/pack"
   echo "from the Mac and run tools/sprite_pack.sh --check --pack DIR"
@@ -169,7 +186,7 @@ CHECKDIR="$DIR/check"
 DATA="$CHECKDIR/data"
 rm -rf "$CHECKDIR"
 mkdir -p "$CHECKDIR"
-say "sprite pack check $(date '+%Y-%m-%d %H:%M'): $PACK in the Vulkan window, $CHECK_SCENES without and with it"
+say "sprite pack check $(date '+%Y-%m-%d %H:%M'): $PACK in $WINDOW_NAME, $CHECK_SCENES without and with it"
 # A fresh scratch data directory (port.SCRATCH_SETTINGS: the enhancements off, the menu hint seen) with the pack
 # installed where the loader looks without a folder setting: textures/<disc id>.
 python3 - "$(native "$PACK")" "$(native "$DATA")" "$GAME_ID" <<'EOF' || exit 2
@@ -186,8 +203,10 @@ for state in off on; do
   else
     envs=(--env PURE_TEXTURE_PACK=1 --env PURE_TRACE_TEXTURE_PACK=1)
   fi
-  echo "the Vulkan window, pack $state (tools/frame_regress.sh --out $CHECKDIR/$state) ..."
-  tools/frame_regress.sh --wait "$WAIT" --out "$CHECKDIR/$state" --shell vulkan --backend vulkan \
+  envs+=(--env PURE_PERF=log)
+  [ $SHELL_NAME = metal ] && envs+=(--env PURE_INTERNAL_SCALE=2)
+  echo "$WINDOW_NAME, pack $state (tools/frame_regress.sh --out $CHECKDIR/$state) ..."
+  tools/frame_regress.sh --wait "$WAIT" --out "$CHECKDIR/$state" --shell $SHELL_NAME --backend $SHELL_NAME \
     --only "$(echo $CHECK_SCENES | tr ' ' ',')" --env "PURE_DATA_DIR=$(native "$DATA")" "${envs[@]}" \
     > "$CHECKDIR/$state.stdout" 2>&1
   if [ $? -eq 2 ]; then
@@ -199,13 +218,14 @@ for state in off on; do
 done
 
 python3 - "$(native "$PACK")" "$(native "$CHECKDIR")" "$CHECK_SCENES" "$HUD_SCENES" "$GAME_ID" \
-  "$((SECONDS - START))" "$(native "$SUMMARY")" <<'EOF'
+  "$((SECONDS - START))" "$(native "$SUMMARY")" "$WINDOW_NAME" "$RENDERER_NAME" <<'EOF'
 import os, re, subprocess, sys
 sys.path.insert(0, "tools")
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
 
 pack, check, scenes, hud_scenes, game, seconds, summary = sys.argv[1], sys.argv[2], sys.argv[3].split(), \
     sys.argv[4].split(), sys.argv[5], int(sys.argv[6]), sys.argv[7]
+window, renderer = sys.argv[8], sys.argv[9]
 MIN_KEYS, MIN_DRAWN = 40, 10
 DIFF_TOL, MIN_DIFF = 24, 0.01           # with the pack against without: at least 1% of pixels over tol 24
 log_lines = []
@@ -335,7 +355,7 @@ for route in sorted(routes):
     opened.append((route, found))
 for route, found in opened:
     ok = found is not None and found[0] == len(keys) and found[1].replace("\\", "/").endswith("textures/" + game)
-    note(f"opened by the Vulkan renderer, route {route}: "
+    note(f"opened by {renderer}, route {route}: "
          + (f"{found[0]} textures from {found[1]}" if found else "no `[texpack] N textures from` line")
          + f": {'PASS' if ok else 'FAIL'}")
     if not ok:
@@ -359,7 +379,7 @@ if refused:
     failures.append("images refused")
 
 note("")
-note(f"each scene in the Vulkan window: the capture with the pack against the one without at tol {DIFF_TOL} (at least "
+note(f"each scene in {window}: the capture with the pack against the one without at tol {DIFF_TOL} (at least "
      f"{MIN_DIFF:.0%}), both reduced to 480x272 by their blocks' centre pixels against the scene's reference at the "
      f"scene's tol and limit (tools/frame_regress.sh), and the race HUD (tools/hud_check.py):")
 note(f"{'scene':<10} {'size':>9} {'on vs off':>9} {'off red.':>9} {'on red.':>8} {'limit':>6} {'tol':>4} {'HUD':>4}  result")

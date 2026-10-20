@@ -13,9 +13,11 @@
 # (PURE_PACED_FROM), paced from there; about 25 s. Silent, on the data directory out/data/menu_check.
 # The lists (Wipeout Pure's profile: no ad hoc play, no right-stick or mouse camera): four tabs, no Network; no Camera
 # choice, camera inversion or mouse rows. Both shells: Resolution first (the GE backend's internal scale, patch
-# 0017-internal-scale-by-backend, task 067; locked by the run's PURE_INTERNAL_SCALE=1). Metal: no Texture filter or
-# texture pack rows (the Vulkan renderer's), no Frame rate or Lower when behind, no Touch screen rows, "Metal on".
-# Vulkan: all of those, "Vulkan on". Both: Performance after Fast loading and the F3 row after Esc (the Metal shell
+# 0017-internal-scale-by-backend, task 067; locked by the run's PURE_INTERNAL_SCALE=1). Both: the Texture pack row and
+# its rows (Import texture pack..., Open the textures folder: "[texture pack rows]"), under the Metal shell since task 100
+# (patch 0034-texture-pack-host: the shell registers the Metal backend's pack loader). Metal: no Texture filter row
+# (the Vulkan renderer's own sampler choice; the Metal backend's pack host does not expose one), no Frame rate or Lower
+# when behind, no Touch screen rows, "Metal on". Vulkan: all of those, "Vulkan on". Both: Performance after Fast loading and the F3 row after Esc (the Metal shell
 # draws the overlay since task 090). Aspect ratio offers Original, Stretch and Fill in both:
 # Fill needs a game that widens its view (GameProfile::view_aspect_frame), which this one does since task 084 (D-020),
 # and a shell that draws it, which the Metal shell does since task 086. Both: the Video tab ends with the game's own options
@@ -86,7 +88,8 @@ bindings = ["Move forward", "Move left", "Move back", "Move right", "△", "○ 
 expected = {
     "tabs": ["Video", "Audio", "Controls", "System"],
     "Video": ["Resolution", "Display", "Window size", "Aspect ratio (Original / Stretch / Fill)", "Scaling filter"]
-             + ([] if metal else ["Texture filter", "Texture pack", "[texture pack rows]"]) + ["Vsync"]
+             + ([] if metal else ["Texture filter"])  # the renderer's sampler; the pack host has no filter
+             + ["Texture pack", "[texture pack rows]"] + ["Vsync"]
              + ([] if metal else ["Frame rate", "Lower when behind"]) + ["Game speed", "Fast loading", "Performance"]
              + ["[font rows]", "Restore video defaults", "30 fps modes", "Flashes", "Text and sprites",
                 "Texture detail", "Display rate"],
