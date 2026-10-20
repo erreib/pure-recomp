@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
-| Crowd | 3D crowd and people models in place of the track-side sprites | the survey done 2026-10-20 (task 101, merged): the crowd is 4 fixed strip draws a frame on two grandstands, about 205 quads 2.2 to 2.5 units tall sampling a 64x64 CLUT4 sheet of 56 figures (the HD pack's 256x256), alpha-tested cut-outs in the opaque pass; the Time Trial figure is the pit marshal, 6 quads 2 units tall on the start line's booths; `PureNative --replay FILE.gerec --extract FRAME` writes a frame as an OBJ scene with its textures (out/101/). Next: Erik's model style and scale from the OBJ, then the substitution design (a decision) |
+| Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | the survey done 2026-10-20 (task 101); the design decided the same day (D-025: a substituting `models` GE backend, vertex-coloured `.pmdl` models from Erik's glTF exports, a "Crowds and people" row); task 102, the pit marshal, dispatched with a placeholder figure; Erik models the marshal in Blender 5.0.1 from out/101/person_pitguy_hd.png |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
@@ -256,11 +256,12 @@ after a change that moves or renames a file, a tool or a patch.
   32x64 (HD 128x256). The tool: `PureNative --replay FILE.gerec --extract FRAME --out DIR [--keys K,...]` writes
   the frame as an OBJ scene in the track's frame (y up, one world scale) with a material per draw, the textures
   as PNGs named by the pack's keys and a JSON of every draw's state and bounds; `tools/zim_to_png.py` shows a
-  pack's image. Erik opens out/101/ (the race scene, the crowd alone, the marshal, the images) to settle the model
-  style and scale; then a decision on the substitution: a hook keyed by the texture's pack key that draws a model
-  set (instanced figures at each quad's base, facing the quad's normal, lit as the quad was, writing the same
-  depth, behind the alpha-tested quad or in its place) on both backends, an Esc-menu row with Original one choice
-  away, and a check counting substituted draws on the race route. A "record now" key for recordings at a played
+  pack's image. D-025 (2026-10-20) settles the substitution: a `models` GE backend of ours wrapping the platform's, which
+  recognises a draw by its texture's pack key and submits model draws (vertex colours, no texture, the quad's
+  fog, depth, stencil and tint) in place of each quad; models are Erik's Blender work exported as glTF with vertex
+  colours and converted by the importer task 102 adds to `.pmdl` under models/, shipped in the app's resources; the
+  row is "Crowds and people", Original or Models. Task 102 (dispatched) builds all of it for the pit marshal with
+  a placeholder figure; Erik's marshal model replaces it by name. The crowd (figures per quad from a set) follows. A "record now" key for recordings at a played
   moment is a small task when wanted (101, Open questions).
 - Photo mode during races (Erik, 2026-10-20; not scheduled): pause a race (the Esc menu already holds the guest),
   move a free camera around the frozen scene, hide the HUD, and save a capture at a chosen resolution. Nothing

@@ -738,3 +738,51 @@ applies to the pack's own levels, which have none: the renderer's mip generation
 path's existing behaviour. The pack's 1.4 Gpx decode to 5.7 GB of RGBA8 if every image were resident; the loader's
 256 MB decode window and the renderer's 1 GB GPU budget (`PURE_TEXTURE_PACK_MEMORY`) bound it, and the task measures
 a race's and the menus' resident set.
+
+## D-025  2026-10-20  Crowds and figures as models: a substituting GE backend, vertex-coloured models, a menu row
+
+**Context.** Task 101's survey (docs/research.md "The crowd, surveyed"): the crowd is four triangle-strip draws a
+frame, about 205 vertical quads on two grandstands, each quad one row of a 64x64 sheet of 56 figures; the Time Trial
+figure is the pit marshal, six single quads 2 units tall on the start line's booths. All are fixed in the world (the
+scenery's uniform world matrix, 2293.69), drawn in the opaque pass with an alpha test as cut-outs, no blending, a
+vertex tint, fog on, lighting off, depth written, stencil ALWAYS 0x04. Both backends draw from the decoded
+`DrawCall.vertices` (the Vulkan renderer takes raw guest bytes only when `raw_vertices` is set), and a DrawCall can
+name no texture outside guest memory. Erik wants a model of the marshal first, made in Blender from the HD pack's
+image, then the crowd, as an Esc-menu option worded like "improved crowds and human models". Blender 5.0.1 is
+installed; nothing to update.
+
+**Decision.** (1) The substitution is a GE backend of ours that wraps the platform's (`models`, registered like the
+record backend, src/tools/record_backend.cpp's `BackendRegistration`; `PURE_GE_BACKEND` defaults to it on both
+platforms, its inner the platform's default, `PURE_GE_MODELS_INNER` to choose): `submit` passes every draw through
+unchanged while the row is Original; at Models it recognises a draw by its texture's pack key
+(`compute_texture_pack_key`, the HD pack's rule, memoised per texture address and frame), splits the strip into
+quads, and for each quad submits model draws to the inner backend instead of the quad. No vendor change: the Metal
+shell's texture pack host registration asks the wrapper for its inner. (2) A model draw is a `DrawCall` with
+`PrimitiveType::Triangles`, the model's vertices placed by the quad (base at the midpoint of its bottom edge, up
+along its vertical edge, front along the normal the UVs define: u increasing to the right as seen from the front;
+scaled so the model's unit height equals the quad's), the quad's world, view and projection, `texture.enabled`
+false, `has_vertex_color` true with the model's colours multiplied by the quad's vertex tint, lighting off (the
+model's shading is baked into its colours at import), and the quad's fog, depth, stencil, viewport, target, cull
+off and alpha test. No texture plumbing: textured models would need a texture in guest memory (a reserved region
+above the user partition, or a pack key the loader replaces), a later decision if vertex colours prove too plain.
+(3) Models are ours: Erik's work in Blender, exported as glTF with vertex colours (COLOR_0), converted by
+the importer task 102 adds into `.pmdl` (a small binary of ours: positions, colours, indices, the height normalised to
+1 and a fixed key light baked in) under `models/` in the repository, shipped in the app's resources like
+config/metal_pipelines.txt. A model is matched to a texture key by `models/models.ini` (`<key> = <name>.pmdl
+[figures=N]`): one figure per quad for the marshal; for a crowd row, N figures spaced along the quad, picked from a
+set by a hash of the quad's position so the same figures stand in the same places every frame. (4) The row:
+`crowd_models`, "Crowds and people", choices Original and Models, Video tab, in src/profile/enhancements.cpp's
+`kOptions` (the env lock `PURE_CROWD_MODELS=0|1` comes with it), default Original until the crowd models exist,
+then Models. (5) The check, the models check task 102 adds, headless on the Metal backend (the frame regression's way): the
+race and Time Trial routes with the row at Models, the `[models] frame F: N draws replaced by M model draws` lines
+counted, the capture differing from the Original one, and the opaque pass's depth still read by the sun block (the
+scene's reference figures within the suite's limits elsewhere). The marshal is task 102; the crowd follows once the
+figure set exists.
+
+**Consequences.** The wrapper sits in every run, so tools that name a backend keep naming the inner ones
+(`--backend metal|vulkan|null|record`) and `PURE_GE_BACKEND=models` is the default they do not touch; the record
+backend records the wrapper's output when its inner is `models` and the quads otherwise. The option's draws are
+counted in the perf line's enhanced draws. The models' triangle budget is the arc's cost: the marshal up to 2000
+triangles, a crowd figure about 300 (205 quads x 10 figures x 300 is 600 k triangles a frame, the Metal backend's
+race frame is about 60 k today, so the crowd needs levels of detail or fewer figures per quad: measured when it
+comes). The fidelity rule stands: Original draws exactly what the PSP draws.
