@@ -449,16 +449,21 @@ the Metal backend through the wrapper.
   vertices (not the Vulkan renderer's raw vertices), the texture at most 256 texels a side: the texture's HD pack
   key (`compute_texture_pack_key`, xxh64, the address and the mip levels ignored: the pack's own keys) is computed
   once per texture (address, palette, format, size) and frame and looked up in the table's `[figures]`
-  (`<key> = <file>.pmdl figures=N`). The pit marshal's six keys are `pitguy.zim` on six tracks.
+  (`<key> = <file>.pmdl figures=N`, or `<key> = set=NAME spacing=UNITS [near=U far=U] [tint=0|1]` for a crowd,
+  task 104). The pit marshal's six keys are `pitguy.zim` on six tracks, the crowd's nine `crowd.zim` on nine.
 - **Quads.** A strip's consecutive pair of non-degenerate triangles (the corners n to n+3; the crowd's degenerate
   joins are skipped), a list's pair that shares an edge. Each quad's corners in world space: up from the low-v side
   to the high-v side, or back, whichever points to world +y, its length the quad's height; right from low u to high
-  u, made square to up; front = up x right (D-025's rule), turned round when it points away from the viewer (the eye
-  of the draw's view matrix). On the pit marshal the rule gives +x for draws 149 to 151, but the game draws 152 to 154
-  with u reversed (the same sprite mirrored: a cut-out drawn without culling shows a front view from either side), so
-  for those it gives -x and the model showed the race its back (task 102's first 4x capture: a white helmet where the
-  visor should be). The viewer's side is what the PSP shows, a front, and +x for all six from the race. The cost: a
-  figure turns round when the camera crosses its plane (edge-on, as the ship passes the booths).
+  u, made square to up; the front the winding normal of the quad's first triangle as the GE orders it
+  (cross(B - A, C - A) of corners 0, 1, 2; a strip's odd triangle is (n+1, n, n+2)), made square to up, with no turn
+  toward the viewer (task 104, D-025 as amended). On the extracted frames that normal is +x for all six marshals
+  (toward the oncoming race) and toward the road for both grandstands, whatever the UVs' direction (the game draws
+  marshals 152 to 154 with u mirrored). The rules before it each gave some figure its back: up x right (task 102's
+  first capture, a white helmet where the visor should be), the viewer's side each frame (a figure turning round as
+  the ship crossed its plane), the side first seen (the Time Trial's intro camera sees the booths from the far side
+  first). A set's figures stand on world +y instead, the rise of the v edge their height: some stand quads are
+  parallelograms whose v edges slant 3.6 to 7.1 units along the tier for a rise of 2.3 to 2.4, and figures stood
+  along the slant lay on the tier.
 - **The model draw.** For each quad (N figures side by side across it for `figures=N`): the model (y up, front +z,
   feet at 0, height 1; models/README.md) turned so its y is up and its z the front, scaled by the quad's height,
   stood on the midpoint of the quad's bottom edge, in world space; a `DrawCall` copied from the quad's (view,
@@ -468,6 +473,21 @@ the Metal backend through the wrapper.
   culling off (the importer cannot promise a Blender mesh's winding; depth sorts the faces), `vertex_address` 0 and
   `primitive_count` the triangle count. Both backends draw it from `vertices`, as any decoded draw. The quad is not
   drawn.
+- **Sets (task 104).** A crowd key names a set (`[set NAME]`, its files one a line; models/README.md): a quad stands
+  `max(1, round(width / spacing))` figures, figure f the set's model `hash(place, f) % size` (splitmix64 of the
+  quad's base to a tenth of a unit, then of f), turned about up by up to 12 degrees either way and scaled by up to 6%
+  from the same hash, so the same people stand in the same spots every frame. `tint=1` (the default) multiplies
+  their colours by the quad's tint, as for the marshal (one stand is white, the other 0xFFB7B0A8).
+- **Density.** The eye's distance d to the quad's base: every figure under `near`, those with f % 2 equal to the
+  place's hash bit from `near` to `far`, those with f % 4 equal to its two bits beyond `far` (a subset of the half,
+  so a figure kept far off is kept nearer too and none swaps at a boundary). The nine crowd lines take near 80 and
+  far 200: at 120 and 300 the race frame drew 1574 figures and took 22 ms to render headless.
+- **Batching.** The figures of one game draw (a set's or the marshal's) are concatenated, vertices and offset
+  indices, into as few triangle-list draws as u16 indices allow (65535 vertices, about 210 figures a draw), each with
+  the quad's state: the Metal backend expands and uploads a draw's vertices each submit, so a draw per figure would
+  cost more than the triangles. The race frame: 4 crowd draws become 15 model draws with the marshals'. The cost is
+  the inner backend's: it expands the indices (about 1035 a figure) into 48-byte vertices, about 10 of the 13 ms the
+  frame's replacing takes for 1359 figures (the trace prints both).
 - **Skinning (task 103).** A version 2 model (joints, weights, clips; models/README.md) is skinned on the CPU for
   each figure before the placement above, so the model draw stays an ordinary draw (no GE bone matrices, no renderer
   change): the figure's clip (the first in the file, or `clip=NAME` on its models.ini line) at the figure's time, each
@@ -479,15 +499,17 @@ the Metal backend through the wrapper.
 - **The time rule.** The clips run on wall time, not the frame count (the game runs at 60, 120 or the menus' 30):
   `std::chrono::steady_clock` read at each `begin_frame()`, the clock advanced by the difference capped at 100 ms, so a
   pause, a stall or the Esc menu (no frames) does not skip a clip ahead. A figure's time is the clock plus its phase
-  (a hash of its quad's place, the key that remembers its side, times the clip's duration), modulo the duration, so
+  (a hash of its quad's place times the clip's duration), modulo the duration, so
   the marshals do not wave in unison. `PURE_MODELS_CLOCK=frames` makes the clock the shown frame / 60 s and
   `PURE_MODELS_SYNC=1` every phase 0: a headless capture of frame N then shows the same pose every run.
-- **Trace.** `PURE_TRACE_MODELS=1`: `[models] frame F: N draws replaced by M model draws, K quads` every 60 frames and
-  for each captured frame (`(captured)`), then, when a figure was skinned, `; clip NAME t=SECONDS (animated), skinned
-  in N us` (the frame's first animated figure, the frame's skinning time). The tt_hud and race_hud frames replace 6
-  draws (6 quads); only the three at the left of the straight are on screen in tt_hud.
+- **Trace.** `PURE_TRACE_MODELS=1`: `[models] frame F: N draws replaced (C by a set) by M model draws, K quads, P
+  figures, V vertices` every 60 frames and for each captured frame (`(captured)`), then, when a figure was skinned,
+  `; clip NAME t=SECONDS (animated), skinned in N us` (the frame's first animated figure, the frame's skinning time),
+  then `; replaced in N us, M of them the inner backend's`. The tt_hud and race_hud frames replace 10 draws (4 by the
+  crowd set; 196 quads); only the three marshals at the left of the straight are on screen in tt_hud.
 - **The check.** `tools/models_check.sh` (docs/developing.md): headless on Metal, the row off and on, the counts,
-  the picture changed and within each scene's limit plus 0.02 of its reference; and the wave: tt_hud at 4x at frames
+  the picture changed (tt_hud in the marshals' box; race_hud's stands by 2000 pixels, its HUD still found) and within
+  each scene's limit plus 0.02 of its reference (0.10 for race_hud, whose stands are new art); and the wave: tt_hud at 4x at frames
   5890 and 5950 on the frames clock (the clip at 2.15 s and 3.15 s), the marshals' box changed, the deck under their
   feet not.
 - **Models.** `models/` (models/README.md): `models.ini`, the `.pmdl` files `tools/model_import.py` makes from a glTF
