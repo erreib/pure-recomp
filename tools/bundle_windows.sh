@@ -15,6 +15,8 @@
 #   BUILDINFO.txt        the version, the commit, the toolchain and the pins
 #   licenses/            FFmpeg-LICENSE.txt and FFmpeg-SOURCE.txt (the build's), PortableKit's, SDL3's, Dear ImGui's,
 #                        tiny-AES-c's, xxHash's and Zstandard's licences, and packaging/THIRD_PARTY_NOTICES.md
+#   models/              models/models.ini and models/*.pmdl, the models backend's figures (task 102), which it looks
+#                        for beside the executable
 # The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty]; at a release, HEAD exactly at
 # the tag v<project version> with no uncommitted change, the version alone, 0.1.0 (task 087). A v-tag at HEAD that is
 # not v<project version> stops the pack. BUILDINFO.txt names the commit either way (docs/release.md, "Publishing").
@@ -71,6 +73,7 @@ EXE="$FOLDER/$NAME.exe"
 DLLS="SDL3.dll avcodec-61.dll avutil-59.dll swresample-5.dll"
 LICENSES="FFmpeg-LICENSE.txt FFmpeg-SOURCE.txt PortableKit-LICENSE.txt SDL3-LICENSE.txt DearImGui-LICENSE.txt
 tiny-AES-c-UNLICENSE.txt xxHash-LICENSE.txt Zstandard-LICENSE.txt THIRD_PARTY_NOTICES.md"
+MODELS=$(cd models && ls models.ini *.pmdl | tr '\n' ' ')   # the models backend's figures (task 102), in models/
 DOCS="README.txt licenses/THIRD_PARTY_NOTICES.md"   # our own texts for the player (the content check lists their hits)
 # Where the source lives (task 087): README.txt names it. The GitHub account in it is the user's name, which the
 # machine check looks for, so the check reads DOCS without this address.
@@ -84,7 +87,8 @@ usage() { sed -n '2,3p' "$0"; exit 2; }
 expected_files() {   # the folder's files, sorted
   { printf '%s\n' "$NAME.exe" LICENSE.txt README.txt BUILDINFO.txt
     for f in $DLLS; do printf '%s\n' "$f"; done
-    for f in $LICENSES; do printf 'licenses/%s\n' "$f"; done; } | LC_ALL=C sort
+    for f in $LICENSES; do printf 'licenses/%s\n' "$f"; done
+    for f in $MODELS; do printf 'models/%s\n' "$f"; done; } | LC_ALL=C sort
 }
 
 # The version the artifacts are named after (task 087; the same function is in tools/bundle.sh): the project
@@ -159,6 +163,8 @@ stage() {
   [ -n "$zstd_license" ] || { echo "bundle_windows: no Zstandard licence under $BUILD/_deps/zstd (cmake/Zstd.cmake)"; exit 1; }
   cp "$zstd_license" "$FOLDER/licenses/Zstandard-LICENSE.txt"
   cp packaging/THIRD_PARTY_NOTICES.md "$FOLDER/licenses/"
+  mkdir -p "$FOLDER/models"
+  for f in $MODELS; do cp "models/$f" "$FOLDER/models/" || exit 1; done
   {
     printf '%s %s for Windows x64\r\n' "$NAME" "$v"
     printf 'Built from: pure-recomp %s\r\n' "$(git rev-parse HEAD)"

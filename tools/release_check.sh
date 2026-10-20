@@ -15,7 +15,8 @@
 #             umd_data* param.sfo pi.wad icon0.png pic1.png data.bin ms0 savedata psp_game), in any case
 #   size      no file over 1 MiB, 1048576 bytes (the function map is 318 KB, the largest patch 215 KB)
 #   binaries  every file is text (no NUL in its first 8000 bytes, git's rule) but packaging/icon.png,
-#             packaging/macos/Wipeout Pure.icns and packaging/windows/pure.ico
+#             packaging/macos/Wipeout Pure.icns, packaging/windows/pure.ico and the models, models/*.pmdl (task 102:
+#             ours, made by tools/model_import.py)
 #   keys      no run of 32 or more hex digits (16 bytes: a download pack's XTEA key or an AES key; the packs' RSA
 #             modulus is 512 digits) and no 16-byte array literal ({ or [ around 16 0xNN bytes or 4 0xNNNNNNNN words;
 #             16 \xNN escapes in a row), unless the allow list of hashes takes it:
@@ -35,7 +36,7 @@
 # --history adds every commit (`git log --all`, the stash left out: it is this machine's and never pushed):
 #   history   the paths and names rules on every path ever added (git log --all --no-renames --diff-filter=A
 #             --name-only -m); the keys and tokens rules on every file version ever committed (git rev-list --objects
-#             --all), with no binary but the known three and no game file by its header (below)
+#             --all), with no binary but the known ones and no game file by its header (below)
 # --archive ZIP (repeatable, or several after one --archive; out/release-macos/dist/pure-recomp-*.zip,
 # out/release-windows/dist/pure-recomp-*.zip):
 #   archive   no entry with a game-data path part (the names rule); no entry is a disc image (CD001 at 32769), a PSP
@@ -53,6 +54,12 @@ import bisect, fnmatch, os, re, subprocess, sys, time, zipfile
 T0 = time.time()
 LIMIT = 1 << 20
 KNOWN_BINARIES = ("packaging/icon.png", "packaging/macos/Wipeout Pure.icns", "packaging/windows/pure.ico")
+KNOWN_BINARY_PATTERNS = ("models/*.pmdl",)   # the models backend's figures (task 102)
+
+
+def known_binary(path):
+    return path in KNOWN_BINARIES or any(fnmatch.fnmatchcase(path, p) for p in KNOWN_BINARY_PATTERNS)
+
 # .gitignore's paths and what each holds: at the top, and (unanchored there) anywhere.
 TOP_IGNORED = {"disc": "the extracted disc", "game": "the runtime's game directory", "generated": "the corpus",
                "generated-variants": "corpus variants", "overlays": "overlay builds", "vendor": "the vendored framework",
@@ -301,8 +308,8 @@ def check_tree(report):
             continue
         data = blobs.get(oid, b"")
         if is_binary(data):
-            if path not in KNOWN_BINARIES:
-                binaries.append(f"{path}: a binary file ({int(size)} bytes), not one of the three known")
+            if not known_binary(path):
+                binaries.append(f"{path}: a binary file ({int(size)} bytes), not a known one (the three, models/*.pmdl)")
             what = game_header(data[:32774])
             if what:
                 bad_names.append(f"{path}: {what} by its header")
@@ -329,7 +336,7 @@ def check_tree(report):
                  "or the other ignored paths", f"{len(entries)} files")
     report.check("names", bad_names, "no game-data extension, game file name or game file header")
     report.check("size", big, "no file over 1 MiB", f"largest {largest[1]}, {largest[0]} bytes; limit {LIMIT}")
-    report.check("binaries", binaries, "no binary file but the known three", f"{n_binary} binary files")
+    report.check("binaries", binaries, "no binary file but the known three and models/*.pmdl", f"{n_binary} binary files")
     report.check("keys", key_findings, "no key-sized hex run or 16-byte array", f"the allow list took {allowed}")
     report.check("tokens", token_findings, "no GitHub, GitLab or AWS token, no PEM block")
     n_notes = sum(len(v) for v in home_notes.values())
@@ -377,8 +384,8 @@ def check_history(report):
     for oid, data in blobs.items():
         path = objects[oid]
         if is_binary(data):
-            if path not in KNOWN_BINARIES:
-                findings.append(f"{path} (blob {oid[:12]}): a binary file ({len(data)} bytes), not one of the three known")
+            if not known_binary(path):
+                findings.append(f"{path} (blob {oid[:12]}): a binary file ({len(data)} bytes), not a known one (the three, models/*.pmdl)")
             what = game_header(data[:32774])
             if what:
                 findings.append(f"{path} (blob {oid[:12]}): {what} by its header")
@@ -395,7 +402,7 @@ def check_history(report):
             findings.append(f"{path}:{n} (blob {oid[:12]}, first in {introducing_commit(value, path)}): {what}")
     size = sum(len(b) for b in blobs.values())
     allowed = ", ".join(f"{v} {k}" for k, v in sorted(keys.allowed.items())) or "none"
-    report.check("history", findings, "no game path, name or header, no binary but the known three, no key or token",
+    report.check("history", findings, "no game path, name or header, no binary but the known ones, no key or token",
                  f"{commits} commits, {len(added)} paths ever added, {len(blobs)} file versions ({size / 1e6:.1f} MB) "
                  f"read in {time.time() - t:.1f} s; the allow list took {allowed}")
 

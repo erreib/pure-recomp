@@ -168,7 +168,7 @@ PURE_..." beside it.
    defaults" puts every binding and every row of the tab back (rows an environment variable decides excepted).
 
 The Video tab ends with a Game section (since task 070, patch 0019-game-option-rows: the options our profile lists in
-`GameProfile::options`, `src/profile/enhancements.cpp`). It holds five rows. 30 fps modes (since task 072): 60 fps (the
+`GameProfile::options`, `src/profile/enhancements.cpp`). It holds six rows. 30 fps modes (since task 072): 60 fps (the
 default) runs Time Trial, Free Play and Zone at the display's rate, as Single Race and Tournament already run;
 Original keeps them at 30 fps, as the PSP does (E4, D-017; docs/timing.md, "E4"). The menus run at 30 fps either way.
 (The row is not called Frame rate: under the Vulkan shell that is the renderer's frame-rate cap, higher up.) Flashes:
@@ -188,9 +188,12 @@ frames a second, and Time Trial, Free Play and Zone 120 with the 30 fps modes ro
 race runs a fraction under the display's rate (0.5%: 119.4 on a 120 Hz display, since task 091) so that a frame
 that misses the display's refresh can be won back and the sound stays continuous; the help says so. The menus keep
 the PSP's pace, and on a 60 Hz display nothing changes. Original keeps the PSP's 59.94 Hz everywhere (E8,
-D-022; docs/timing.md, "E8"). "Restore video defaults" puts all five back to their defaults; `PURE_SIXTY_FPS`,
-`PURE_SMOOTH_FLASHES`, `PURE_SPRITE_UPSCALE`, `PURE_TEXTURE_DETAIL` and `PURE_DISPLAY_RATE` lock them for a run ("Set
-by PURE_SIXTY_FPS"), as every tool run does.
+D-022; docs/timing.md, "E8"). Crowds and people (since task 102, D-025): Models draws the figures by the track as 3D
+models where the port has one, the start line's pit marshals today (`models/`, docs/ge-backend.md "The models
+backend"), on both renderers; Original (the default until the crowd's models exist) draws the PSP's flat cut-outs.
+"Restore video defaults" puts all six back to their defaults; `PURE_SIXTY_FPS`, `PURE_SMOOTH_FLASHES`,
+`PURE_SPRITE_UPSCALE`, `PURE_TEXTURE_DETAIL`, `PURE_DISPLAY_RATE` and `PURE_CROWD_MODELS` lock them for a run ("Set
+by PURE_SIXTY_FPS"), as every tool run does for the first five.
 
 The System tab holds, in order: the Game section (Resume, Pause the game when the menu opens, Open the data folder,
 Set up game data again…, Quit game), Saves (Import save…, Export save…, Back up saves…, Open the saves folder, Open the
@@ -257,8 +260,9 @@ driver), the name's `input.name_entry` and `input.name`, and the touch controls'
 The game's own options are `game.<key>=<index>`, the index of the row's choice: `game.sixty_fps=1` (30 fps modes:
 60 fps, the default) or `0` (Original), `game.smooth_flashes=1` (Flashes: Smooth, the default) or `0` (Original),
 `game.sprite_upscale=1` (Text and sprites: Upscaled) or `0` (Original, the default since 2026-10-12), and
-`game.texture_detail=1` (Texture detail: Enhanced, the default) or `0` (Original), and `game.display_rate=1`
-(Display rate: Display, the default) or `0` (Original).
+`game.texture_detail=1` (Texture detail: Enhanced, the default) or `0` (Original), `game.display_rate=1`
+(Display rate: Display, the default) or `0` (Original), and `game.crowd_models=1` (Crowds and people: Models) or `0`
+(Original, the default).
 An index out of range is ignored with `[settings] ignoring KEY=VALUE` and reads as the default, and a `game.` key
 this port has no option for is dropped when the file is next written.
 

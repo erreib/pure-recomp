@@ -2,7 +2,10 @@
 # The menu check (task 064, D-014): opens the Esc menu at the title in a window with PURE_MENU_DUMP=1 (patch
 # 0016-menu-rows-by-capability) and checks each tab's rows against the lists this game and this shell should show.
 #   tools/menu_check.sh [--shell metal|vulkan] [--out DIR]
-#   --shell  the window shell, with its own GE backend (default metal, the macOS default): the Metal shell answers no
+#   --shell  the window shell, with its own GE backend under the models backend, as a player runs it (task 102:
+#            PURE_GE_BACKEND=models, PURE_GE_MODELS_INNER the shell's; so the Metal shell's Texture pack rows show
+#            that it finds the Metal backend's pack host through the wrapper) (default metal, the macOS default): the
+#            Metal shell answers no
 #            to frame interpolation and touch controls; the Vulkan shell yes to all. Both answer yes to Fill (the Metal
 #            shell since task 086) and to the performance overlay (the Metal shell since task 090).
 #   --out    default out/menu_check/<shell>: the run's log (run.log), its shots (shots/title.png, shots/menu.png: the
@@ -26,7 +29,8 @@
 # sprites (task 073; game.sprite_upscale, locked by the run's PURE_SPRITE_UPSCALE=0; shown under the Vulkan shell too,
 # where it does nothing until a texture pack exists) and Texture detail (task 075; game.texture_detail, locked by the
 # run's PURE_TEXTURE_DETAIL=0; shown under the Vulkan shell too, which draws the PSP's levels until its own task) and
-# Display rate (task 089; game.display_rate, locked by the run's PURE_DISPLAY_RATE=0, both shells),
+# Display rate (task 089; game.display_rate, locked by the run's PURE_DISPLAY_RATE=0, both shells) and Crowds and
+# people (task 102; game.crowd_models, Original by default, both shells),
 # all tools/purelib/port.py's pin (the game's row is not called
 # Frame rate: under the Vulkan shell that is the renderer's frame-rate cap). Both: the System tab's Download packs
 # section after the save rows (task 078, patch 0021-content-packs): the count row, its value in parentheses ("N of 12
@@ -65,8 +69,12 @@ rm -rf "$OUT"
 mkdir -p "$OUT/shots"
 echo "menu_check: shell $SHELL_NAME, out $OUT"
 t0=$SECONDS
+# The models backend over the shell's own (run_boot.py pins internal scale 1 only for a run it sees as metal, so the
+# Metal run names it, as before task 102).
+backend=(--backend models --env PURE_GE_MODELS_INNER="$SHELL_NAME")
+[ "$SHELL_NAME" = metal ] && backend+=(--env PURE_INTERNAL_SCALE=1)
 python3 tools/run_boot.py --script config/pad_scripts/menu_check.txt --shots "$OUT/shots" --frames 2250 \
-  --shell "$SHELL_NAME" --backend "$SHELL_NAME" --data-dir out/data/menu_check \
+  --shell "$SHELL_NAME" "${backend[@]}" --data-dir out/data/menu_check \
   --env PURE_MENU_DUMP=1 --env PURE_PACED_FROM=2050 "$OUT/run.log" > "$OUT/run.stdout" 2>&1
 echo "menu_check: run_boot exit $?, $((SECONDS - t0)) s, log $OUT/run.log"
 
@@ -92,7 +100,7 @@ expected = {
              + ["Texture pack", "[texture pack rows]"] + ["Vsync"]
              + ([] if metal else ["Frame rate", "Lower when behind"]) + ["Game speed", "Fast loading", "Performance"]
              + ["[font rows]", "Restore video defaults", "30 fps modes", "Flashes", "Text and sprites",
-                "Texture detail", "Display rate"],
+                "Texture detail", "Display rate", "Crowds and people"],
     "Audio": ["Volume", "Mute", "Device", "Restore audio defaults"],
     "Controls": ["Connected", "Confirm button", "Stick dead zone", "Trigger point", "Right stick (D-pad / Off)",
                  "Right stick D-pad point", "When the game asks for a name", "Pilot name"] + bindings
