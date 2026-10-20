@@ -453,9 +453,12 @@ the Metal backend through the wrapper.
 - **Quads.** A strip's consecutive pair of non-degenerate triangles (the corners n to n+3; the crowd's degenerate
   joins are skipped), a list's pair that shares an edge. Each quad's corners in world space: up from the low-v side
   to the high-v side, or back, whichever points to world +y, its length the quad's height; right from low u to high
-  u, made square to up; front = up x right. On the pit marshal that front is +x within about 37 degrees, the way the
-  task 101 survey found the figures facing, so the rule stands as D-025 gave it (the camera, at +x, sees the cut-out
-  with u increasing to its left: the PSP's sprite is mirrored there, which a flat front view hides).
+  u, made square to up; front = up x right (D-025's rule), turned round when it points away from the viewer (the eye
+  of the draw's view matrix). On the pit marshal the rule gives +x for draws 149 to 151, but the game draws 152 to 154
+  with u reversed (the same sprite mirrored: a cut-out drawn without culling shows a front view from either side), so
+  for those it gives -x and the model showed the race its back (task 102's first 4x capture: a white helmet where the
+  visor should be). The viewer's side is what the PSP shows, a front, and +x for all six from the race. The cost: a
+  figure turns round when the camera crosses its plane (edge-on, as the ship passes the booths).
 - **The model draw.** For each quad (N figures side by side across it for `figures=N`): the model (y up, front +z,
   feet at 0, height 1; models/README.md) turned so its y is up and its z the front, scaled by the quad's height,
   stood on the midpoint of the quad's bottom edge, in world space; a `DrawCall` copied from the quad's (view,

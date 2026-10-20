@@ -15,8 +15,11 @@
 // consecutive pair, degenerate joins skipped, or a list's pair), and each quad is replaced by the model's figures:
 //   - the quad's corners in world space (its own world matrix applied); "up" from the corners of its lower v to
 //     those of its higher v, or the reverse, whichever points to world +y, its length the quad's height; "right" from
-//     its lower u to its higher u, made square to up; front = up x right (task 102 checked the sign on the pit marshal:
-//     it gives +x, the way the survey found the figures facing);
+//     its lower u to its higher u, made square to up; front = up x right (D-025's rule), turned round when it points
+//     away from the viewer (the eye of the draw's view matrix). Task 102 checked the rule on the pit marshal: it
+//     gives +x for draws 149-151, but the game draws 152-154 with u reversed (the same sprite mirrored, which a cut-out
+//     drawn without culling shows as a front view from either side), so for them it gives -x and the model would
+//     show its back to the race; the viewer's side is what the PSP shows, a front, and +x for all six from the race;
 //   - the model (models/README.md: y up, front +z, feet at 0, height 1) is turned so its y is up and its z the front
 //     (its x is then up x front), scaled uniformly by the quad's height and stood on the midpoint of the quad's bottom
 //     edge; with figures=N, N of them side by side across the quad's width;
@@ -467,6 +470,10 @@ private:
         draw.world = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
         draw.indices = model.indices;
         draw.vertices.clear();
+        // The viewer: the eye of the view matrix (world to eye, column-major), -R^T t.
+        const std::array<float, 16> &v = call.view;
+        const Vec3 eye{-(v[0] * v[12] + v[1] * v[13] + v[2] * v[14]), -(v[4] * v[12] + v[5] * v[13] + v[6] * v[14]),
+                       -(v[8] * v[12] + v[9] * v[13] + v[10] * v[14])};
         std::uint64_t drawn = 0u;
         for (const auto &quad : quads) {
             std::array<Corner, 4> corners{};
@@ -482,6 +489,7 @@ private:
             Vec3 base, up_axis, right_axis, front;
             float height = 0.0f, width = 0.0f;
             if (!place(corners, base, up_axis, right_axis, front, height, width)) continue;
+            if (dot(front, sub(eye, base)) < 0.0f) front = scale(front, -1.0f);  // the viewer's side
             // The model's x, y, z in world space: x = up x front (= -right), y = up, z = front.
             const Vec3 x_axis = cross(up_axis, front);
             for (std::uint32_t f = 0; f < figure.figures; ++f) {
