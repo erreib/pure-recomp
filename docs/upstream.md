@@ -32,6 +32,7 @@ it uses.
 | 0027-window-size-switch | yes (tried in task 084 with `git apply --check` on a clean checkout of the pin) | nothing | nothing |
 | 0028-vulkan-orthographic-fit | no | 0010 and 0020 (the transform and summary lines, the `orthographic` flag it moves; read from the code in task 085, not tried patch by patch) | 0010 (`viewport_into_clip` in the transform and the summary) |
 | 0029-windows-file-url | yes (every Windows port's folder buttons are dead without it; a shared `file_url` would be the upstream shape) | none | none |
+| 0033-zim-textures | yes (tried in task 099 with `git apply --check` on the pin's `host/gpu/texture_pack.cpp`) | nothing | zstd's decoder: `zstd.h` and its library, here from the port (`cmake/Zstd.cmake`, linked into PureNative) |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -209,6 +210,18 @@ The sink keeps a late producer's content and rebuilds its lead by slowing the de
 inserting 46 ms of silence (task 098, D-023). It completes 0024's counter and shares its case: any port whose guest
 dips below real time for a moment clicks the same way. Offer the two together.
 
+### 0033-zim-textures: candidate, with the zstd download
+The texture pack loader decodes ZIM images, PPSSPP's own container, beside PNG (task 099, D-024): `decode`
+dispatches on the file's first four bytes, and `decode_zim` reads the header, formats 0 to 2 (to RGBA8 rows), raw,
+zlib (stb's inflate, already in the file) and zstd payloads, and level 0 of a mip chain. Any port whose players
+use PPSSPP HD packs meets ZIM: PPSSPP's own tools save it, and the Wipeout Pure pack this was written for holds
+nothing else. The request needs a zstd decoder in the framework's build; ours is `cmake/Zstd.cmake` in this
+repository (zstd 1.5.7 downloaded with its SHA-256, `lib/common` and `lib/decompress` as a static library,
+`ZSTD_DISABLE_ASM=1`), which upstream would carry beside `cmake/FFmpeg.cmake`, link into the game target and
+`portablekit_host_check` (which compiles texture_pack.cpp too), and list in its SOURCE_PROVENANCE table; or
+offer the zstd path behind a CMake option, with ZIM's raw and zlib cases built either way. The two log lines it
+writes as one string each (two loader threads interleaved them) are a fix of their own.
+
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); comments that cite this repo's tasks, fidelity differences and old patch
 numbers. If a future patch is ours only (a test hook, a seam only our profile uses), it stays a patch of its own so
@@ -218,4 +231,4 @@ that this list stays true.
 0001; 0006; the kernel part of 0005; 0002; the standalone renderer fixes of 0003 (exact target, alpha test numbers,
 shutdown order); 0008; the rules of 0009; the stencil, shadow volume and dual-source part of 0003; 0007's no-key
 mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list, 0016, 0017, 0019, 0020 and 0021
-after them; the depth write-back of 0003 behind a profile switch.
+after them; the depth write-back of 0003 behind a profile switch; 0033 with the zstd download in the framework's CMake.

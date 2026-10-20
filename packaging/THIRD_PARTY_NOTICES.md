@@ -64,6 +64,40 @@ dedication as stb_truetype above. <https://github.com/nothings/stb>
 Hashes textures for texture packs. Copyright (c) 2012-2021 Yann Collet. BSD 2-Clause License: `xxHash-LICENSE.txt`.
 <https://github.com/Cyan4973/xxHash>
 
+### Zstandard 1.5.7 (the decoder)
+
+Decompresses the ZIM images of texture packs. Only the decoder is compiled in: the unmodified `lib/common/*.c` and
+`lib/decompress/*.c` of the release below, built with `ZSTD_DISABLE_ASM=1` by pure-recomp's `cmake/Zstd.cmake`,
+which pins the version and checksum. Zstandard is dual-licensed, BSD or GPLv2; it is used here under the BSD
+License, whose text follows. <https://github.com/facebook/zstd>
+
+- Source: <https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz> (SHA-256
+  `eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3`)
+
+> BSD License
+>
+> For Zstandard software
+>
+> Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+>
+> Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+> following conditions are met:
+>
+> - Redistributions of source code must retain the above copyright notice, this list of conditions and the
+>   following disclaimer.
+> - Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+>   following disclaimer in the documentation and/or other materials provided with the distribution.
+> - Neither the name Facebook, nor Meta, nor the names of its contributors may be used to endorse or promote
+>   products derived from this software without specific prior written permission.
+>
+> THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+> WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+> PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+> INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+> SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+> THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+> ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 ## Shipped as separate libraries
 
 These are dynamically linked shared libraries in `Wipeout Pure.app/Contents/Frameworks/`. They are unmodified builds
@@ -138,7 +172,8 @@ Copyright 2014-2021 Adobe (<http://www.adobe.com/>), with Reserved Font Name 'So
 
 `Wipeout Pure.exe` holds the same program with PortableKit's Vulkan renderer and window instead of the Metal ones
 (the Metal backend and window, Dear ImGui's Metal renderer backend and the font above are not in it: Windows supplies
-the Japanese fallback font). PortableKit, Dear ImGui, tiny-AES-c, stb and xxHash are compiled in as above, and so is
+the Japanese fallback font). PortableKit, Dear ImGui, tiny-AES-c, stb, xxHash and Zstandard's decoder are compiled in
+as above (Zstandard's licence is quoted in its section), and so is
 Microsoft's C and C++ runtime (the static runtime of Visual Studio 2022's MSVC 14.39), so no runtime has to be
 installed. The licence texts are in the folder's `licenses/`: `PortableKit-LICENSE.txt`, `DearImGui-LICENSE.txt`,
 `tiny-AES-c-UNLICENSE.txt`, `xxHash-LICENSE.txt`, `SDL3-LICENSE.txt`, `FFmpeg-LICENSE.txt` and `FFmpeg-SOURCE.txt`.

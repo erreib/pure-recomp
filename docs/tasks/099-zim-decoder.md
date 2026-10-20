@@ -141,7 +141,141 @@ front and uncovered during the run (docs/approach.md rule 4). Run the headless p
 - The check needs a game-data file in the repository, or a capture of the pack's art in docs/: it must not.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+Changed:
+- `cmake/Zstd.cmake` (new): downloads zstd 1.5.7 into `build/<preset>/_deps/downloads` the first time only. It writes a
+  `.part` file, uses `TLS_VERIFY ON`, checks the SHA-256 `eb33e51f...6fa3`, then renames. It extracts only `LICENSE`,
+  `COPYING` and `lib/` into `_deps/zstd`, behind a `pure.stamp` holding the version and SHA-256. It builds
+  `lib/common/*.c` and `lib/decompress/*.c` as the static `pure_zstd_decoder`, with `ZSTD_DISABLE_ASM=1`,
+  `XXH_NAMESPACE=ZSTD_` and warnings off (`-w`, or `/w` under MSVC/clang-cl). `zstd.h` is a PUBLIC SYSTEM include.
+- `CMakeLists.txt`: `include(cmake/Zstd.cmake)` and `target_link_libraries(PureNative PRIVATE pure_zstd_decoder)`
+  after `portablekit_add_game()`. No framework CMake was changed.
+- `patches/0033-zim-textures.patch` (host/gpu/texture_pack.cpp only; it applies to the pin alone, tried with
+  `git apply --check`):
+  - `decode` now dispatches on the file's first four bytes: `ZIMG` goes to the new `decode_zim`, anything else to
+    stb_image as before.
+  - `decode_zim` covers the 16-byte header, formats 0, 1 and 2 to RGBA8 (anything else gives "not a ZIM format the
+    loader reads (format N)"), and raw, zlib (`stbi_zlib_decode_malloc_guesssize_headerflag`) or zstd
+    (`ZSTD_decompress`) payloads. With HAS_MIPS it keeps level 0 of the chain. It applies `kMaxImageSide`.
+  - Its errors are "short header", "too large", "zstd: <name>", "zlib: ...", "short payload" and "payload longer
+    than the image".
+  - A ZIM's rows move into the replacement without the padding copy when no `[hashranges]` applies.
+  - The `cannot use` and `decoded` lines are now each written as one string. In the probe's log, two loader threads
+    had run these lines together. Their shape is unchanged.
+- `tools/sprite_pack.sh` (`--pack`):
+  - The "named files missing" rule is now a count of distinct named files, with the first three names. It is a FAIL
+    only when every named file is missing.
+  - The check prints per route the keys found, images decoded and uploaded (`.png` or `.zim`), draws replaced, the
+    peak of the budget line, and the missing files.
+  - It FAILs when a route draws no replacement, or when a `cannot use` line names a file the pack holds. A missing
+    file is counted, not a rule.
+  - The rule "reduced capture within the reference limit" stays a rule only for a pack of the game's own art (every
+    entry is `<key> = <key>.png`, what the build writes). For new art it is printed and does not decide the result.
+    Without this, the HD pack would FAIL here: race_hud's reduced capture is 0.1955 against a limit of 0.1.
+  - The header documents all of this.
+- `patches/README.md`: the row and the section. Also `docs/upstream.md` (a dependency row, a candidate section and
+  its place in the order), `docs/vendor-map.md`, `docs/developing.md` (the sprite_pack row) and `docs/release.md`
+  ("Other packs": ZIM accepted, the HD pack named with its address, derived art imported by the player).
+- `packaging/THIRD_PARTY_NOTICES.md`: a Zstandard 1.5.7 section with the URL, the SHA-256 and the BSD licence text
+  quoted in full, and the Windows paragraph names it. The two read-mes name "Zstandard's decoder" next to Dear ImGui.
+- This task file. Commits ad8cd90, 19aaeee, efed827, af6352d, aaa184c and the Result commit.
+
+Verify output (last 20 lines; the headless parts first, then the one window run; `tools/verify_task.sh` was not run
+because it would open the window a second time):
+- `tools/build.sh profile`: builds. The first configure printed `pure: downloading ...zstd-1.5.7.tar.gz`, and the
+  archive's `shasum -a 256` matches the pin. `tools/build.sh configure` run again downloaded nothing (no
+  "downloading" line; the stamp and archive times were unchanged). After deleting `_deps/zstd`, it re-extracted from
+  the cached archive without downloading.
+- `tools/patches.sh check`: `ok: 32 patch(es) reproduce vendor/portablekit at 8b0c3fe`. That is 32 files numbered up
+  to 0033, because 0025 was removed in task 095.
+- `tools/docs_check.py`: `docs_check: 39 files, 0 findings: PASS`.
+- `tools/release_check.sh` (not part of Verify): `keys PASS` (the new SHA-256s are allowed) and every check except
+  `home` passes. `home FAIL` comes from 6 findings that are already on batch/m2 and not from this task:
+  patches/0029-windows-file-url.patch lines 10, 33 and 56, and patches/README.md lines 78, 612 and 613, all in 0029's
+  `C:/Users/...` examples.
+- `tools/sprite_pack.sh --pack ~/Downloads/WipEout-Pure-HD-Texture-Pack --out out/099/check` (Vulkan window, one
+  run, 3 min 29 s):
+```
+  run main_menu: run_boot exit 0, frame 4730 reached: yes, 49 s, paced from flip 4400
+  run main_menu+single_race: run_boot exit 0, frame 6046 reached: yes, 54 s, paced from flip 5716
+the Vulkan window, pack on (tools/frame_regress.sh --out .../out/099/check/check/on) ...
+  run main_menu: run_boot exit 0, frame 4730 reached: yes, 48 s, paced from flip 4400
+  run main_menu+single_race: run_boot exit 0, frame 6046 reached: yes, 55 s, paced from flip 5716
+the pack: 4170 keys (at least 40), hash xxh64, 3876 files named, 2546 of them missing (main_menu/menu/unlock_background.zim, main_menu/previews/ships/02_auricom/frame1.zim, main_menu/previews/ships/02_auricom/frame2.zim), new art: PASS
+opened by the Vulkan renderer, route main_menu.txt: 4170 textures from .../out/099/check/check/data/textures/UCUS98612: PASS
+opened by the Vulkan renderer, route main_menu.txt+single_race.txt: 4170 textures from .../out/099/check/check/data/textures/UCUS98612: PASS
+  route main_menu.txt: 11 keys found in the pack, 11 images decoded, 11 uploaded, 49974 draws replaced, peak 11 images on the GPU (267 MB), 0 named files missing or unreadable
+  route main_menu.txt+single_race.txt: 182 keys found in the pack, 127 images decoded, 127 uploaded, 209469 draws replaced, peak 124 images on the GPU (599 MB), 54 named files missing or unreadable
+drawn: 127 distinct images of the pack uploaded for draws (at least 10), 127 decoded, 259443 draws replaced in the traced 60-frame windows (some on each route): PASS
+refused: 0 lines for images the pack holds; 54 files the ini names missing or unreadable (counted, not a rule: in_game/adverts/00_others/01_vineta_k/fx300_text.zim, in_game/adverts/00_others/01_vineta_k/staten_park.zim, in_game/adverts/01_vineta_k/ag_systems_landscape.zim): PASS
+
+each scene in the Vulkan window: the capture with the pack against the one without at tol 24 (at least 1%), both reduced to 480x272 by their blocks' centre pixels against the scene's reference at the scene's tol and limit (tools/frame_regress.sh), and the race HUD (tools/hud_check.py):
+scene           size on vs off  off red.  on red.  limit  tol  HUD  result
+main_menu    960x544    0.0275    0.0401   0.0485   0.05   24    -  PASS
+race_hud     960x544    0.2350    0.0650   0.1955    0.1   32  yes  PASS
+
+sprite pack check: 2/2 scenes pass, 4170 keys, 127 drawn (3m 29s)
+sprite_pack: PASS
+```
+(".../" stands for this worktree's path.)
+
+Measurement (logs: out/099/check/check/{on,off}/*.log; `PURE_TRACE_TEXTURE_PACK=1` on the "on" runs):
+- Main-menu route (main_menu.txt): the pack opened with 4170 keys. 367 lookups found 11 keys in the pack. 11 images
+  were decoded and uploaded: intro/sce copyright 2048x256 and presents 4096x512, main_menu_elements 2048x1024, the
+  ocra_s12 font 4096x2048, the fx300_s12 font 4096x4096, and 6 more. 49974 draws were replaced in the traced
+  windows. Budget peak: `frame 4680: 1320 draws replaced in 60 frames, 11 images on the GPU (267 MB)`. No `cannot
+  use` line.
+- Race route (main_menu.txt+single_race.txt, Vineta K): the pack opened with 4170 keys. 623 lookups found 182 keys.
+  127 distinct images were decoded and uploaded, 102 of them `in_game/`, uploaded between frames 5708 and 6011 as
+  draws first sampled them. 209469 draws were replaced. Budget peak: `frame 6000: 28564 draws replaced in 60 frames,
+  124 images on the GPU (599 MB)`, under the 1024 MB default. 54 `cannot use NAME: missing or unreadable` lines, all
+  for files the ini names that the reupload lacks. No `cannot use` line for a ZIM the pack holds (the probe had 126
+  `unknown image type`).
+- Load time of the first race, with the pack against without: the route has no `[load]` line in the race's load and
+  no `[perf]` line, because the check sets no `PURE_PERF`. The figure available is the run's wall time to the race
+  HUD (unpaced to flip 5716, paced after it): 54 s without the pack, 55 s with it, and `run_boot exit 0 after 54.6s`
+  for both. Main menu: 49 s without, 48 s with. Decoding runs on the loader threads, and no stall shows at this
+  resolution.
+- Decoder throughput (a throwaway program in the session's scratch directory, not committed, linking the built
+  `libpure_zstd_decoder.a`): all 1331 ZIMs of the pack decode at width x height x 4. That is 1422.3 Mpx in 1405 ms
+  of `ZSTD_decompress` on one thread of this Mac.
+- Captures (looked at: out/099/check/check/{on,off}/shots/*.png):
+  - main_menu with the pack: the menu font (SINGLE PLAYER, MULTIPLAYER, ...), the header bars, the WIPEOUT katakana,
+    the logo and the footer (W:P, V5.0, //2197) are clearly the pack's: crisp edges where the originals are soft,
+    and the header's small text can be read. The background is white with and without the pack, and none of the 155
+    1920x1080 images was looked up on either route. So the brief's "1920x1080 menu background" was not seen in these
+    scenes; the main menu draws no textured background for the pack to replace.
+  - race_hud with the pack: the track surface (sharper grid squares with red and white markings), the chevrons on
+    the right-hand barrier, the crowd, the sky and the KM/H gauge's label are the pack's. The HUD was found by
+    hud_check, and its digits look much the same.
+  - One opponent ship on the left is red with the pack and blue without. I did not find out whether this is the
+    pack's livery or a different grid.
+- Clean-up: the check copies the pack into out/099/check/check/data/textures (868 MB, git-ignored). I deleted that
+  copy after the run. No file of the pack, and no image made from it, is in a commit; the captures stay in out/.
+
+Open questions:
+- D-024 asks for a row in the framework's SOURCE_PROVENANCE table. That file is under vendor/ and listed as Must not
+  touch, so it was not written. docs/upstream.md's 0033 section says an upstream request would carry the row, the
+  download in the framework's CMake and the link into `portablekit_host_check`. That target also compiles
+  texture_pack.cpp, but only with `PSPRECOMP_BUILD_TESTS`, which is off here.
+- The bundles ship no `zstd-LICENSE.txt`, so the BSD text is quoted in THIRD_PARTY_NOTICES.md, which both bundles
+  ship. tools/bundle.sh could pass `--license zstd=<build>/_deps/zstd/zstd-1.5.7/LICENSE` to the packer, and
+  tools/bundle_windows.sh could copy it the same way. Both scripts are outside May touch.
+- The rig (win-x64, clang-cl) has not been built. From the guards in the sources: `ZSTD_ASM_SUPPORTED` needs
+  `__GNUC__`, which clang-cl does not define, and `ZSTD_DISABLE_ASM=1` turns the BMI2 assembly off anyway, so
+  `huf_decompress_amd64.S` is never referenced. The doubt is DYNAMIC_BMI2's `__attribute__((target))` paths under
+  clang-cl. zstd's CI builds with ClangCL, so I expect them to build. The rig's first configure also downloads the
+  archive from GitHub.
+- The check's reference rule now applies only to own-art packs (see Changed). The brief's acceptance list leaves that
+  rule out for `--pack` with the HD pack, but the planning session should confirm the change.
+- Counts that differ from the brief: the brief says 4172 keys, while the ini's [hashes], case-folded, hold 4170
+  distinct keys, which is what the loader and the check count. The brief says 2549 missing named files; the check
+  counts 2546 distinct missing files out of 3876 named. The brief says 33 patches; `patches.sh check` reports 32,
+  because 0025 is gone.
+- Window checks this change still needs: the same `tools/sprite_pack.sh --pack DIR` on the rig with the pack copied
+  there (Vulkan on Windows). A menu route deeper into Single Race (track or ship select) would show the 1920x1080
+  backgrounds. The Metal loader is task 100.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

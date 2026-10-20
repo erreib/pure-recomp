@@ -30,6 +30,11 @@ portablekit_add_game(PureNative
             src/host/pure_main.cpp src/tools/ge_replay.cpp src/tools/record_backend.cpp
             ${platform_sources})
 
+# Zstandard's decoder for the ZIM images of HD texture packs (D-024, task 099): the framework compiles
+# host/gpu/texture_pack.cpp into PureNative itself, so linking the library here gives it zstd.h and the symbols.
+include(cmake/Zstd.cmake)
+target_link_libraries(PureNative PRIVATE pure_zstd_decoder)
+
 # The Windows release (task 061, docs/release.md "Windows"): the windows subsystem, so a player who starts the program
 # from Explorer gets no console window; the entry stays the C runtime's main(). The developer build keeps the console
 # subsystem, whose stdout every tool reads.

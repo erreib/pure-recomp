@@ -42,6 +42,8 @@ recompile), the interpreter, the kernel, the HLE, the GE parser and texture deco
 - 0029-windows-file-url: the folder buttons on Windows
 - 0030-vblank-period: `Kernel::set_vblank_period_us` (E8)
 - 0031-audio-sink-late-writes: the sink keeps a late producer's content, `kRecoveryRatio` (D-023)
+- 0033-zim-textures: texture packs of ZIM images (`decode_zim` in host/gpu/texture_pack.cpp, D-024); zstd's decoder
+  is ours, `cmake/Zstd.cmake` (`pure_zstd_decoder`, linked into PureNative after `portablekit_add_game`)
 
 ## Replaced
 - The GE backend: `src/gpu/` registers `metal` (`BackendRegistration`), the macOS default (D-008;
