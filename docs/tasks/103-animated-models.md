@@ -128,7 +128,67 @@ Headless throughout; no window run.
   pose cache.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+Changed:
+- tools/model_import.py: when the mesh's node has a skin, the importer writes version 2. It keeps the joints in `skins[0].joints` order and takes parents from the node tree; a root's non-joint parents' world matrix is folded into the root. Each vertex gets four joints and weights: every JOINTS_n/WEIGHTS_n set is merged, the four largest kept and normalised, an unweighted vertex binds to joint 0, and the counts are reported. Every animation becomes a clip, sampled at the union of its key times (STEP held, LINEAR lerped, rotations slerped, CUBICSPLINE's values taken linearly). The rest-pose normalisation N = T(o) S(s) is applied consistently. Every joint translation is scaled by s, a root's also gets o. The inverse bind becomes S(s) IBM M^-1 S(1/s) T(-o), where M is the mesh node's world matrix (it is baked into the rest positions and glTF's skinning ignores it). `--static` writes version 1. The importer prints the joint, clip and key counts, then skins each clip's first and last key and prints the bind error and the loop seam.
+- src/gpu/models_backend.cpp:
+  - `read_model` reads version 2 (and version 1 as before), with bounds checks on every field and a parents-first evaluation order. `Model` gains joints, order, per-vertex joints and weights, and clips; `Figure` gains `clip`.
+  - models.ini takes `clip=NAME`. A name the file lacks is reported and the first clip plays. The table line also lists joints, clips and keys.
+  - Clock: steady_clock at each `begin_frame`, each frame's step capped at 100 ms. `PURE_MODELS_CLOCK=frames` uses `shown_frame_ / 60` instead, and `PURE_MODELS_SYNC=1` sets every phase to 0. Each figure's phase is a splitmix64 hash of `quantise(base) * 64 + f`.
+  - Skinning (`positions_of`) feeds the existing placement loop unchanged. A static model takes the old path.
+  - The trace line gains `; clip NAME t=SECONDS (animated), skinned in N us`, appended after `(captured)` so models_check's regex still matches.
+- models/pitguy.pmdl: rebuilt as version 2 from the rigged GLB, 172419 bytes. models/models.ini: `clip=Wave_On` on the six lines, and the header explains `clip`.
+- tools/models_check.sh:
+  - Run 2 is new. It runs tt_hud's route through tools/run_boot.py with shots at 5890 and 5950, Models on, 4x, `PURE_MODELS_CLOCK=frames`, `PURE_MODELS_SYNC=1`. It PASSes when at least 40 pixels at tol 24 differ in `WAVE_BOX = (112, 124, 48, 22)` (the left booth's three marshals) and at most 0 in `DECK_BOX = (112, 146, 48, 6)` (the deck under their feet). Both boxes are constants with their origin in a comment.
+  - Runs 0 and 1 now also set the frames clock and sync, so their pose is reproducible. Their criteria are unchanged.
+- models/README.md: version 2's layout, the animation section (what is kept, `clip=`, time, the switches, Blender notes), the rigged section updated, and the stale "static only" paragraph replaced. docs/developing.md: `PURE_MODELS_CLOCK` and `PURE_MODELS_SYNC` rows, the trace row, and the models_check and model_import rows. docs/ge-backend.md section 9: the skinning, the time rule, the trace and the check. docs/controls.md: "waving (task 103; ...)".
+
+Python check (an independent reader of out/103/pitguy.pmdl, not the importer's code; it skins with the backend's interpolation):
+```
+version 2, 2232 vertices, 20 joints, clip Wave_On 4.000 s 97 keys, 172419 bytes, read to the end
+t=0 against the rest positions: max 8.99e-07 (PASS at 1e-4)
+t=4 against t=0: max 0.00e+00 (PASS at 1e-4)
+t=0.9: largest move 0.450 (height 1), the feet (y<0.05, 96 vertices) 8.99e-07, top y 1.000
+t=1.4: largest move 0.565 (height 1), the feet (y<0.05, 96 vertices) 8.99e-07, top y 1.001
+```
+- `--static` output is byte-identical to the previous models/pitguy.pmdl (`cmp`, 47644 bytes).
+- Skinning cost from the trace: 33 to 39 us a frame for the six marshals, far under 1 ms.
+
+The 4x capture (out/103/x4/shots/wave_a.png, frame 5890, trace `clip Wave_On t=2.15`; the side-by-side crop with frame 5950 is out/103/x4/crop.png): I looked at it with the Read tool. All three marshals on the left booth have their right forearm raised, hand up beside the head, and stand on the deck behind the railing. At 5950 (t=3.15) the same three hold the arm out and lowered. The booth, railing and deck are unchanged; only the HUD and sky overlays differ.
+
+Verify output (last 20 lines):
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 22s)
+verify 103: PASS
+```
+Also in that run: `tt_hud 1 against 0: 182 pixels differ at tol 24 (at least 150): PASS`, `tt_hud wave (Wave_On t=2.15 and Wave_On t=3.15): 339 pixels differ in the marshals' box (112, 124, 48, 22) (at least 40), 0 in the deck (112, 146, 48, 6) (at most 0): PASS`, `models_check: PASS`; `docs_check: 39 files, 0 findings: PASS`. `tools/release_check.sh`: 6 of 7 checks PASS (binaries: 4, the known three and models/*.pmdl). `home` FAILs on the same 6 findings as task 102 (patches/0029-windows-file-url.patch:10,33,56 and patches/README.md:78,613,614), which this task does not touch.
+
+Open questions:
+1. Escalation clause, 1x: at 1x only 20 pixels differ in the marshals' box (2 of them are the scene's own change), under 40. Run 2 therefore captures at `PURE_INTERNAL_SCALE=4`: 339 pixels with Models on, 11 with Models off on the same two frames, 0 in the deck either way.
+2. On the frames clock the capture frame is not the clip's t=0. 5890 / 60 mod 4 is t=2.15 (the shown frame at `begin_frame` is 5889), so the brief's "the rest pose at t=0 is the static picture" does not hold literally. Task 102's rows pass anyway with the arm raised (182 pixels against 150). I put runs 0 and 1 on the frames clock for reproducibility; on wall time they gave 179 to 180. Say if you would rather they stayed on wall time.
+3. The marshal's version 2 file is 172 KB, not about 130 KB: the per-vertex joints and weights add 2232 x 20 = 44.6 KB, which the brief's estimate left out.
+4. The backend interpolates linearly between two keys of the dense table, so a STEP channel's jump is spread over one key interval (1/24 s here). The marshal's STEP channels are its constant ones, so nothing shows. A file with a real STEP jump between sparse keys would show a short blend.
+5. tools/model_pitguy_rig.py's docstring has no "static only" note, so I left it alone. The stale text is in strings it writes (line 299, the Blender text block; line 309, rig-info.json's `runtime_support`), which a docstring-only edit may not change. out/pitguy-rigged/README.md and rig-info.json (read only) say the same.
+6. Window checks this change needs (none were run): tt_hud with Models in the Metal window and in the Vulkan window (`tools/frame_regress.sh --shell metal --backend metal --only tt_hud --env PURE_GE_BACKEND=models --env PURE_GE_MODELS_INNER=metal --env PURE_CROWD_MODELS=1`, and the Vulkan equivalent with `PURE_GE_MODELS_INNER=vulkan`). Also the marshals waving at real pace with the frame interpolation on, since the model draws' vertices now change every frame.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
