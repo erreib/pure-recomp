@@ -59,6 +59,7 @@ commit. For vendor changes: `tools/patches.sh export NNNN-slug`, then add the ro
 
 ## Conventions
 C++20. Log lines carry a tag: `[guest]` game stdout, `[pure]` our profile, `[hle-stub]` unimplemented import,
-`[io]` `[kernel]` `[mpeg]` `[render]` `[pacing]` framework traces. There is no tests/ directory: the checks are the tools under tools/ (docs/verification.md lists them).
+`[io]` `[kernel]` `[mpeg]` `[render]` `[pacing]` framework traces, `[mark]` a listener's key in a traced run (patch
+0032-trace-marks). There is no tests/ directory: the checks are the tools under tools/ (docs/verification.md lists them).
 
 Task numbers: the Mac takes 092 to 499, the rig 500 and up (docs/approach.md, "Working rules").

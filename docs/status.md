@@ -43,7 +43,7 @@ a 100 Hz display).
 |---|---|
 | Toolchain | Mac: `tools/check_env.sh` (arm64 cmake and ninja, SDL3, MoltenVK, Ghidra 12.1.4, PPSSPP); the rig: clang-cl on the `win-x64` preset, Git Bash (docs/setup.md) |
 | Disc and game | `tools/iso_extract.py` verifies CRC 4502C588 and extracts `disc/`; `tools/setup_game.sh` lays out `game/` |
-| Vendor | PortableKit at 8b0c3fe with 30 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
+| Vendor | PortableKit at 8b0c3fe with 31 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
 | Corpus | `tools/regen.sh` (85 s): 144 units on the Mac, 145 on the rig, inlined on both since patch 0026-corpus-inlining; `PSPRECOMP_NO_INTERPRETER=1` runs clean |
 | The game | the whole single-player game: every mode, class, league and circuit; the movies, the music and the sound with the SAS reverb; saves in the PSP's format with the save list, import, export and backups; the twelve US download packs |
 | Mac, Metal (the default) | the Metal shell and backend (D-008): the drawable at the display's pixels, internal scale Auto, Fill, texture detail, the flashes smoothed, the 30-fps modes at 60, the race at 119.40 Hz on the 120 Hz display (E8), the performance overlay (F3) |
@@ -116,10 +116,14 @@ The enhancements:
 - The audio sink keeps a late producer's content and rebuilds its lead by slowing the device 1% (task 098, patch
   0031-audio-sink-late-writes, D-023); on the Mac a no-op by measurement (nothing runs late at 119.4 Hz); on the rig
   (task 500) it took the early-race dip two ways, clean or 0.45 s of silence in 84 pieces when the lead drained to
-  zero, until task 501 armed the recovery from the full 2048-frame lead (five runs clean after the load); what is
-  left is the race load's own snap (one or two, the load's stalls, counted apart) and Erik's ear
+  zero, until task 501 armed the recovery from the full 2048-frame lead (five runs clean after the load); Erik's
+  first marked race (2026-10-20) then showed a deficit under the 2048-frame stall floor playing 1.4 s of silence
+  after a two-second dip at the race start, so task 503 lowered the floor to 256 frames (a dip of milliseconds
+  keeps its content, anything larger is one click); what is left is the race load's own snap (one or two, the
+  load's stalls, counted apart), the clicks of the seconds a played race runs under speed (7 of 167: the start,
+  two effects-heavy stretches, the Esc menu's resume), and Erik's ear on the next race
   ([098](tasks/098-audio-sink-late-writes.md), [500](tasks/500-rig-batch.md) reading 1,
-  [501](tasks/501-audio-sink-early-arming.md)).
+  [501](tasks/501-audio-sink-early-arming.md), [503](tasks/503-audio-sink-late-limit.md)).
 - The `[audio]` line's `dropped=` in the tools' windowed runs is their unpaced menus (the producer three times
   ahead of real time, the ring trimming): 0 on every paced line and in a run paced from the start, so not a
   player's condition ([501](tasks/501-audio-sink-early-arming.md), "The gate"; [097](tasks/097-screen-batch.md),
@@ -204,10 +208,15 @@ after a change that moves or renames a file, a tool or a patch.
   are counted apart and the machine is quiet. Task 501 (the same day, merged) armed the sink's recovery from the
   full lead, and the probe now counts the race load's snaps apart; `dropped=` turned out to be the harness's unpaced
   menus. batch/m2 is ready for `main` when Erik says so. Next: Erik's ear on a played race at Display with the trace
-  (docs/windows.md, "Open on the rig"; `tools/audio_hiccups.py` reads it), which also says whether a played race
-  keeps real time at 100 Hz with a gamepad; under 95% the pacer call (Open calls) is the next design, near 100 the
-  storms verdict is the harness's. The Mac's probe on both shells at this merge (planning session, expected
-  unchanged).
+  (docs/windows.md, "Open on the rig"; F8 or a stick click marks the log as a hiccup is heard, patch 0032-trace-marks
+  of task 502; `tools/audio_hiccups.py` reads it). His first marked race (2026-10-20) answered the speed
+  question (a played race keeps real time: 7 of 167 seconds under 95%, so the storms verdict is the harness's)
+  and found the late rule's hole, closed by task 503 (the stall floor 2048 to 256 frames). His second race on it:
+  "almost perfect", one tiny stutter at the intro camera (the race's one second under 95%: three clicks, 48 ms,
+  at 80% speed), nothing else in 160 seconds, two short Esc menus clean. What is left for the sound at 100 Hz is
+  the pacer's question (Open calls): the seconds the race cannot keep real time. Next: a long Esc menu's resume
+  traced on this sink (the first race's 2.6 s menu snapped twice on resume), then the merge. The Mac's probe on
+  both shells at this merge (planning session, expected unchanged).
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal

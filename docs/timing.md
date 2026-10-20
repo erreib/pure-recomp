@@ -275,7 +275,13 @@ The rig (RTX 3080, an i5-8600K, a 100 Hz display) runs the race at Display at 10
   Task 501 (the same day) arms the recovery from a 2048-frame lead instead of 512, so the race load's landing starts
   it while a lead is left: on the rig the lead's minimum over the race's first ten seconds reads 1091 to 1707 frames
   across the runs, no silence after the load's second, and the dip at race second 4 passes under an already-armed
-  ratio (docs/tasks/501-audio-sink-early-arming.md, Result). The race load itself snaps the producers it stopped
+  ratio (docs/tasks/501-audio-sink-early-arming.md, Result). Erik's played race (2026-10-20, marked with patch
+  0032-trace-marks) then showed the late rule's hole: a two-second dip to 90% at the race start left a deficit under
+  the 2048-frame stall floor, and the device played 1.4 s of silence after the dip, so task 503 lowered the floor
+  to 256 frames (a dip of a few milliseconds keeps its content, anything larger is one click), and measured that
+  the played race itself keeps real time: speed median 100%, 7 of 167 seconds under 95% (the start, two
+  effects-heavy stretches, the Esc menu's resume), so the storms route's 85 to 90% is the harness's live-file
+  steering. The race load itself snaps the producers it stopped
   once or twice when they resume (one or two `resyncs=` in the load's second, by how the load's stalls fall), so
   since task 501 the probe counts the load's snaps (the `[audio]` lines before `[pure] paced from frame`) apart and
   bounds the paced race at none. Also notable: this route held full speed at 100 Hz where task

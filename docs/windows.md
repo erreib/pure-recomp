@@ -104,10 +104,10 @@ Each update's checklist, with the rig's figures (2026-10-11 to 2026-10-15):
 - E8 at the rig's 100 Hz: the sound skipped early in the race at either margin until task 501 (docs/timing.md, "On
   the rig's 100 Hz display"); what is left is Erik's ear (task 500, step 9): a race at Display played from Git Bash
   in the checkout with `PURE_TRACE_AUDIO=1 PURE_PERF=log build/win-x64/bin/PureNative.exe > out/ear/run.log 2>&1`
-  (`mkdir -p out/ear` first; quit through the Esc menu so the log is flushed), each hiccup heard noted with its
-  minute and second after start-up, then `python3 tools/audio_hiccups.py out/ear/run.log`, which names each
-  `[audio]` second's event with the host's second beside it; the same race once more with `PURE_AUDIO_SNAP=1` for
-  the old rule. Speed near 100% on the `[perf]` lines says the race keeps real time with a gamepad (the harness's
+  (`mkdir -p out/ear` first; quit through the Esc menu so the log is flushed), F8 or one stick clicked alone pressed
+  at each hiccup heard (a `[mark] N` line in the log, patch 0032-trace-marks), then `python3 tools/audio_hiccups.py
+  out/ear/run.log`, which lists the marks among the `[audio]` seconds' events with the host's second beside each;
+  the same race once more with `PURE_AUDIO_SNAP=1` for the old rule. Speed near 100% on the `[perf]` lines says the race keeps real time with a gamepad (the harness's
   90% is its live-file steering); under 95% says the game cannot, and the pacer call (docs/status.md, "Open calls")
   is next. Original (60 fps) is the smooth setting on this machine until then.
 - The upscaled-art texture pack is not wanted here (Erik, 2026-10-12: do not install it); `tools/sprite_pack.sh --check

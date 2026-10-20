@@ -1,0 +1,41 @@
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index ed6b500..788284b 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -197,6 +197,18 @@ void Layer::begin_binding_capture() {
+ 
+ std::optional<std::uint16_t> Layer::take_captured_binding() { return std::exchange(captured_binding_, std::nullopt); }
+ 
++namespace {
++// A listener's mark in a traced run (<PREFIX>_TRACE_AUDIO or <PREFIX>_PERF set): `[mark] N` on stdout, flushed, so
++// the key or stick click lands in step with the `[audio]` and `[perf]` lines and what was heard can be matched to
++// them (a tool reads the marks beside those lines). Nothing is printed in an untraced run.
++void mark() {
++    static const bool traced = portablekit::env("TRACE_AUDIO") != nullptr || portablekit::env("PERF") != nullptr;
++    static unsigned count = 0u;
++    if (!traced) return;
++    std::cout << "[mark] " << ++count << std::endl;
++}
++} // namespace
++
+ bool Layer::handle_event(const SDL_Event &event) {
+     const Clock::time_point now = Clock::now();
+     // Presses go to the binding being captured. Releases still reach ImGui,
+@@ -238,6 +250,8 @@ bool Layer::handle_event(const SDL_Event &event) {
+             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) escape_pending_ = now;
+             return true;
+         }
++        // F8 marks the log (above); the key still reaches the game through the keyboard snapshot if it is bound.
++        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F8) mark();
+         if (event.type == SDL_EVENT_KEY_DOWN) device_ = InputDevice::Keyboard;
+         break;
+     case SDL_EVENT_MOUSE_BUTTON_DOWN:
+@@ -255,6 +269,8 @@ bool Layer::handle_event(const SDL_Event &event) {
+             const SDL_GamepadButton other = button == SDL_GAMEPAD_BUTTON_LEFT_STICK ? SDL_GAMEPAD_BUTTON_RIGHT_STICK
+                                                                                      : SDL_GAMEPAD_BUTTON_LEFT_STICK;
+             if (pad != nullptr && SDL_GetGamepadButton(pad, other)) menu_toggle_ = true;
++            // One stick clicked alone marks the log (above); the first of a both-sticks menu toggle marks too.
++            else mark();
+         }
+         break;
+     }
