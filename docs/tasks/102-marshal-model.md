@@ -170,7 +170,71 @@ booked for them).
   keep the differ-from-Original rule.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE
+
+Changed:
+- src/gpu/models_backend.cpp, src/gpu/models_backend.hpp (new): the `models` backend. It wraps `PURE_GE_MODELS_INNER`'s backend (refuses `models`) and forwards every call. With the row at Models it keys each candidate draw's texture once per texture and frame (the pack's rule), splits strips and lists into quads, and submits one placed model draw per figure, built as the Deliverable lists. Culling is off. It prints `[pure] crowd models: off|on (game.crowd_models), drawn by NAME` and, with `PURE_TRACE_MODELS=1`, the `[models] frame F: ...` line every 60 frames and for each captured frame (ending in `(captured)`). `WrappingBackend::inner()` is in the header.
+- CMakeLists.txt: the source line, built on every platform.
+- src/host/pure_main.cpp: `PURE_GE_BACKEND` defaults to `models` on every platform. `PURE_GE_MODELS_INNER` defaults to metal, or vulkan under the Vulkan shell, and to vulkan elsewhere (`_putenv_s` on Windows). The record backend's inner default is unchanged.
+- src/host/metal_shell.mm: the texture pack host lookup tries the running backend, then `WrappingBackend::inner()`.
+- src/profile/enhancements.cpp: the `crowd_models` row, "Crowds and people", Original/Models, default 0, Video tab, worded as the brief asks.
+- tools/model_placeholder.py, tools/model_import.py, tools/models_check.sh (new). models/README.md, models/models.ini (the six pitguy keys, one comment each naming the texture, the track and the pack's ini line), models/pitguy.pmdl (6256 bytes, from the placeholder).
+- tools/bundle.sh and tools/bundle_windows.sh: models/models.ini and models/*.pmdl go into Contents/Resources/models and into the Windows folder's models/, which is also added to the expected file list. tools/release_check.sh: `KNOWN_BINARY_PATTERNS = ("models/*.pmdl",)`, the binaries rule's pattern only (with its messages). tools/menu_check.sh: the new row in both shells' lists. The check now runs through the models backend over the shell's own (`--backend models --env PURE_GE_MODELS_INNER=<shell>`, and internal scale 1 kept for Metal), so the Metal window run proves the shell's pack host lookup through `inner()`.
+- docs/developing.md: the source row; `PURE_CROWD_MODELS`, `PURE_GE_MODELS_INNER` and `PURE_TRACE_MODELS`; the three tools; `models` in the `PURE_GE_BACKEND` and `--backend` rows; the pure_main row.
+- docs/ge-backend.md: the models row in sections 3 and 5, and a new section 9, "The models backend".
+- docs/controls.md (the row, six rows now, the env lock, `game.crowd_models`), docs/release.md (the `Resources/models/` row and the Windows `models/` row), README.md (one enhancement bullet, and the row in the Esc menu text).
+
+Verify output (last 20 lines):
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 22s)
+verify 102: PASS
+```
+The models check inside the same Verify run:
+```
+tt_hud      0 frame 5890: 0 replaced, 0 model draws, 0 quads  0.0112       -   32 PASS
+tt_hud      1 frame 5890: 6 replaced, 6 model draws, 6 quads  0.0128    0.14   32 PASS
+race_hud    1 frame 6016: 6 replaced, 6 model draws, 6 quads  0.0148    0.12   32 PASS
+tt_hud 1 against 0: 218 pixels differ at tol 24 (at least 150): PASS
+run 1: [texpack] no texture pack folder at .../out/data/frame_regress/textures/UCUS98612
+models_check: PASS
+```
+- The importer: on the placeholder, `228 vertices, 1296 indices (432 triangles), 6256 bytes; bounds x -0.247..0.247 y 0.000..1.000 z -0.097..0.097`. On the same figure without COLOR_0 (`model_placeholder.py --no-colour`) it exits 2, and with `--colour 808080` it runs. It also reads a real Blender 5.0.1 GLB export: a scaled, translated sphere with a byte colour attribute came out height 1 with the right colours and node transform.
+- The wrapper at Original changes nothing: the 18-scene suite run through it (`--env PURE_GE_BACKEND=models --env PURE_GE_MODELS_INNER=metal --env PURE_INTERNAL_SCALE=1 --env PURE_CROWD_MODELS=0`) matched the plain metal run's 18 shots at tol 0 with 0 pixels different.
+- The texture pack under the wrapper: headless prints `[texpack] no texture pack folder at .../textures/UCUS98612` as before. In the Metal window, menu_check under the wrapper lists the Texture pack row and its rows, so the shell finds the host through `inner()`.
+- Window runs, once each: `tools/menu_check.sh`, Video ok (19), all tabs, `menu_check: PASS`. `tools/menu_check.sh --shell vulkan`, Video ok (22), `menu_check: PASS`.
+- release_check: paths, names, size, binaries (`4 binary files`, the known three and models/pitguy.pmdl), keys and tokens PASS. `home` FAILs on patches/0029-windows-file-url.patch:10,33,56 and patches/README.md:78,613,614 (`C:/Users/...`, `/Users/...`). This task touches no file under patches/, so the failure was there before.
+
+What the capture showed (4x headless tt_hud, Models, out/102/x4/shots/tt_hud.png, crop out/102/x4/marshals_crop.png): three small figures stand on the booth at the left of the straight. They are upright, their feet on the booth's deck with the legs behind its railing, in the placeholder's colours: grey legs, orange body and arms, a white head. All three show their yellow visor to the camera, so they face +x. The other three quads are replaced too (6 quads) but are off screen in this frame.
+
+The first capture had the middle figure showing the back of its white helmet. The cause: D-025's rule (front = up x right) gives +x for draws 149-151 but -x for 152-154. The game draws those three with u reversed, the same sprite mirrored; a cut-out drawn without culling shows a front from either side. No single sign makes all six face +x, so flipping the rule would only swap which three face away. The backend now keeps the rule for the axis and turns each quad's front toward the viewer, the eye of the draw's view matrix. That is the side the PSP shows, and +x for all six from the race. One more fact on the rule: from +x the camera sees 149-151 with u increasing to its left.
+
+Open questions:
+1. The front rule (above) is my choice and needs review. Its cost: a figure turns round when the camera crosses its plane, at the moment it is edge-on, as the ship passes the booths. Two alternatives would keep the figures fixed: remember each quad's first-seen side (keyed by its position), or a static rule such as facing the road. D-025 may want amending either way.
+2. The Vulkan renderer drawing the model draws is untested; no window run with the row at Models was booked. Window checks this change needs: tt_hud with Models in the Vulkan window (`tools/frame_regress.sh --shell vulkan --backend vulkan --only tt_hud --env PURE_GE_BACKEND=models --env PURE_GE_MODELS_INNER=vulkan --env PURE_CROWD_MODELS=1`) and the same in the Metal window. The model draws carry `vertex_address` 0 as the brief says. The Vulkan renderer's frame interpolation recognises draws across frames by these fields, so the figures with interpolation on are unverified.
+3. tools/purelib/port.py's `ENHANCEMENTS_OFF` does not pin `PURE_CROWD_MODELS` (the file is not under May touch). The default is Original, so tool runs are unaffected unless a data directory's settings.ini says otherwise. When the default becomes Models, it belongs there.
+4. D-025 counts the option's draws in the perf line's enhanced draws. Not done: the counts are in the `[models]` trace only.
+5. menu_check now runs through the models backend, a change of that check's backend: deliberate, see Changed.
+6. The Windows side is not built here: pure_main's `_putenv_s` branch and bundle_windows.sh's models/ copy and list need the rig.
+7. models_check's differ threshold is 150 pixels at tol 24 (the placeholder moves 218). A model of Erik's that looks much like the cut-out could fall under it.
+8. race_hud with Models scores 0.0148 against its measured 0.0149. Its six marshals are replaced but barely change the picture, likely off screen or hidden in that frame. Not inspected.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
