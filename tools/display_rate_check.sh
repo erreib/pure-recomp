@@ -74,13 +74,16 @@
 # (task 091 found a browser window covering the game's in most runs; tools/winwatch.m says what covers it). The run
 # itself is judged the same way at its race load and FAILs as `the window was not on screen` when it was not: the
 # window guard of tools/purelib/logs.py (SCREEN_HELD, window_guard), which tools/stutter_check.sh shares. From the
-# race load's `[pure] display rate` line to the run's end: PASS when the `[audio]` lines count at most MAX_RESYNCS
-# resync (the race load's, as at the PSP's rate; the channel restarts are counted and printed apart, not bounded: the
-# rig's race has one at its 8th second in every run, task 500), no `[perf]` second after the first AUDIO_SKIP (the load, and the
-# unpaced flips to AUDIO_FROM) is under MIN_SPEED% speed (a freeze-sized loss), and the run reached its last flip. The
+# race load's `[pure] display rate` line to the run's end: PASS when the `[audio]` lines from `[pure] paced from frame`
+# (AUDIO_FROM) on count at most MAX_RESYNCS resyncs (0: a snap in the paced race is a click; the race load's, on the
+# lines before that, are counted and printed apart, not bounded: the load stops the producers and its stalls snap them
+# once or twice when they resume, none or one on the Mac, one or two on the rig, task 501; the channel restarts are printed
+# apart too: the rig's race has one at its 8th second in every run, task 500), no `[perf]` second after the first
+# AUDIO_SKIP (the load, and the unpaced flips to AUDIO_FROM) is under MIN_SPEED% speed (a freeze-sized loss), and the run
+# reached its last flip. The
 # goal is the sound: a second under SLIP_SPEED% (a frame or two that missed the display's refresh) is a slip the audio's
 # lead and the margin's catch-up absorb, counted and printed, not bounded (the review's call, 2026-10-15). Printed: the
-# resyncs and the restarts and the audio seconds they fell in, the seconds under SLIP_SPEED% and their speeds, the medians of the
+# resyncs, the load's and the restarts and the audio seconds they fell in, the seconds under SLIP_SPEED% and their speeds, the medians of the
 # presents and the game's flips a second, the unpaced presents that judged the window, the display, the margin, the
 # game's rate and the period in force, the wall time. About 2.5 minutes.
 # Waits up to 600 s while another PureNative runs (one game at a time). Prints `display_rate_check: PASS ...` or
@@ -122,7 +125,7 @@ AUDIO_FROM=5900    # --audio: paced from this flip (the race load from 5700, the
 AUDIO_HOLD=20000   # the race's Cross hold (single_race.txt's 3000 lengthened past the run's end)
 AUDIO_SECONDS=75   # the race's seconds from AUDIO_FROM
 AUDIO_SKIP=3       # the race's first [perf] seconds, not bounded: the load and the unpaced flips to AUDIO_FROM
-MAX_RESYNCS=1      # the race load's, as at the PSP's rate
+MAX_RESYNCS=0      # in the paced race (from AUDIO_FROM); the race load's, before it, are printed, not bounded (task 501)
 MIN_SPEED=95       # a [perf] second's speed, at least (%): under it the game froze for a twentieth of a second or more
 SLIP_SPEED=99      # seconds under this are counted and printed, not bounded: slips the audio's lead absorbs
 PROBE_FLIPS=600    # the probe's unpaced boot
@@ -244,12 +247,12 @@ EOF
     $SLIP_SPEED <<'EOF' | tee "$OUT/summary.txt"
 import statistics, sys
 sys.path.insert(0, "tools")
-from purelib.logs import DISPLAY_RACE_RE, audio_restart, audio_resyncs, perf as perf_of, window_guard  # the readers
+from purelib.logs import DISPLAY_RACE_RE, PACED, audio_restart, audio_resyncs, perf as perf_of, window_guard  # the readers
 
 log, shell, end, margin_arg = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 skip, max_resyncs, min_speed, seconds = int(sys.argv[5]), int(sys.argv[6]), float(sys.argv[7]), sys.argv[8]
 slip_speed = float(sys.argv[9])
-race, resyncs, restarts, perf, reached = None, [], [], [], False
+race, resyncs, loads, restarts, perf, reached, paced = None, [], [], [], [], False, False
 with open(log, errors="replace") as f:
     for line in f:
         line = line.rstrip("\n")
@@ -260,9 +263,12 @@ with open(log, errors="replace") as f:
             if m:
                 race = (int(m[1]), float(m[2]), m[3], int(m[4]))
             continue
+        if line.startswith(PACED):
+            paced = True
         a = audio_resyncs(line)
         if a and a[1]:
-            (restarts if audio_restart(line) else resyncs).append(a)
+            # The race load's snaps (before the race is paced) are the load's stalls, not the sink's: printed apart.
+            (restarts if audio_restart(line) else resyncs if paced else loads).append(a)
             continue
         p = perf_of(line)
         if p:
@@ -296,14 +302,16 @@ if total > max_resyncs:
 if freezes:
     fails.append(f"{len(freezes)} second{'' if len(freezes) == 1 else 's'} under {min_speed:g}% speed")
 where = ", ".join(f"{s}s" + (f" x{k}" if k > 1 else "") for s, k in resyncs) or "none"
+loaded = sum(k for _, k in loads)
+where_loads = ", ".join(f"{s}s" + (f" x{k}" if k > 1 else "") for s, k in loads) or "none"
 restarted = sum(k for _, k in restarts)
 where_restarts = ", ".join(f"{s}s" + (f" x{k}" if k > 1 else "") for s, k in restarts) or "none"
 slip_text = ", ".join(f"race second {n} {s}%" for n, s in slips[:12]) + (", ..." if len(slips) > 12 else "")
 print(f"{shell}: {hz} Hz display, margin {margin}, the game at {rate:.2f} Hz ({period} us a vblank); the window on "
       f"screen: {'yes' if shown else 'no'} (unpaced presents a second: the menus' median "
       f"{menus_fps if menus_fps is not None else '-'}, the race load's {load or '-'}); race seconds "
-      f"{len(perf)} ({len(counted)} after the first {skip}); resyncs {total} (audio seconds: {where}); channel restarts "
-      f"{restarted} (audio seconds: {where_restarts}); seconds under "
+      f"{len(perf)} ({len(counted)} after the first {skip}); resyncs {total} (audio seconds: {where}); the race load's "
+      f"{loaded} (audio seconds: {where_loads}); channel restarts {restarted} (audio seconds: {where_restarts}); seconds under "
       f"{slip_speed:g}% speed {len(slips)}{' (' + slip_text + ')' if slips else ''}, under {min_speed:g}% "
       f"{len(freezes)}; medians {fps if fps is not None else '-'} presents and {game if game is not None else '-'} game "
       f"flips a second; flip {end} reached: {'yes' if reached else 'no'}; {seconds} s")

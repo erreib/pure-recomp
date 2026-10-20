@@ -101,8 +101,15 @@ Each update's checklist, with the rig's figures (2026-10-11 to 2026-10-15):
   race and 30 in the menus; what the Frame rate row offers).
 - The twelve US download packs copied from the Mac (`$HOME/dlc-packs`, 62 MB; outside the checkout), then
   `tools/dlc_check.sh --packs DIR`.
-- E8 at the rig's 100 Hz: the sound skips early in the race at either margin (docs/timing.md, "On the rig's 100 Hz
-  display"); Original (60 fps) is the smooth setting on this machine.
+- E8 at the rig's 100 Hz: the sound skipped early in the race at either margin until task 501 (docs/timing.md, "On
+  the rig's 100 Hz display"); what is left is Erik's ear (task 500, step 9): a race at Display played from Git Bash
+  in the checkout with `PURE_TRACE_AUDIO=1 PURE_PERF=log build/win-x64/bin/PureNative.exe > out/ear/run.log 2>&1`
+  (`mkdir -p out/ear` first; quit through the Esc menu so the log is flushed), each hiccup heard noted with its
+  minute and second after start-up, then `python3 tools/audio_hiccups.py out/ear/run.log`, which names each
+  `[audio]` second's event with the host's second beside it; the same race once more with `PURE_AUDIO_SNAP=1` for
+  the old rule. Speed near 100% on the `[perf]` lines says the race keeps real time with a gamepad (the harness's
+  90% is its live-file steering); under 95% says the game cannot, and the pacer call (docs/status.md, "Open calls")
+  is next. Original (60 fps) is the smooth setting on this machine until then.
 - The upscaled-art texture pack is not wanted here (Erik, 2026-10-12: do not install it); `tools/sprite_pack.sh --check
   --pack DIR` is worth one run when a texture pack is next wanted.
 

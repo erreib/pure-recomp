@@ -82,7 +82,10 @@ if [ "$mode" = open ]; then
     git -C "$vendor" worktree add --quiet -b "$branch" "$dir" "$pin"
     for p in "${series[@]}"; do
         n=$(basename "$p" .patch)
-        git -C "$dir" apply --index "$root/$p" || { echo "does not apply: $p (the worktree is left at $dir)" >&2; exit 1; }
+        # Applied to the working tree and then staged, not `apply --index`: on Windows (core.autocrlf true) the
+        # worktree holds CRLF where the index holds LF and --index refuses every patch (task 501); `add` normalises.
+        git -C "$dir" apply "$root/$p" || { echo "does not apply: $p (the worktree is left at $dir)" >&2; exit 1; }
+        git -C "$dir" add -A
         git -C "$dir" -c user.name=patches.sh -c user.email=patches.sh@localhost commit --quiet --no-verify -m "$n"
     done
     echo "opened $dir on branch $branch: ${#series[@]} commit(s) on ${pin:0:7}"

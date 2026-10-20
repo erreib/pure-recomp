@@ -68,3 +68,11 @@ the probe PASSes at 100 Hz under the new rule once channel restarts are counted 
 (1 resync, the load's; 1 restart; no second under 95%). The dip at race second 4 took two shapes across the runs:
 clean when the load's late writes armed the ratio early (the 512-frame threshold, open question 1 here), or 19961
 frames of silence in 84 pieces when the lead drained to zero first. Open questions 1 and 2 are the next sink task.
+
+## Task 501 (2026-10-19): the arming threshold
+Open question 1 closed the other way. Task 500 showed the 512-frame arming was the part of the rule that worked on
+the rig (a producer at real time cannot close a deficit by itself, so a lead that reaches zero costs silence on
+every write until the ratio has eaten the deficit), so task 501 raised the threshold to `kPrebufferFrames`, with a
+device present only, and gated it off under `PURE_AUDIO_SNAP=1`. `lates=` now counts every write under that lead.
+Open question 2 (the pair 1% for 4.6 s) stands and was not needed: with the rebuild started while a lead is left,
+the rig's early-race drain never reached zero in five runs. Question 3 (a reader for `lates=`) stands.
