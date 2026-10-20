@@ -1,0 +1,288 @@
+diff --git a/host/gpu/texture_pack_host.hpp b/host/gpu/texture_pack_host.hpp
+new file mode 100644
+index 0000000..d56d2ea
+--- /dev/null
++++ b/host/gpu/texture_pack_host.hpp
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include <string>
++
++namespace portablekit::gpu {
++
++// What the menu's Texture pack row and the import screen ask of whatever
++// draws texture packs (texture_pack.hpp): the Vulkan renderer, or a GE
++// backend of a port's own shell, which the shell registers
++// (set_active_texture_pack_host(), hle_common.hpp).
++class TexturePackHost {
++public:
++    virtual ~TexturePackHost() = default;
++    // Draws an installed HD texture pack's images instead of the game's own
++    // textures. Takes effect from the next frame; off draws exactly what no
++    // pack would.
++    virtual void set_texture_pack(bool enabled) = 0;
++    // For the menu: "Off", "Not installed", or how many textures the pack has
++    // and how many of them are on the GPU.
++    [[nodiscard]] virtual std::string texture_pack_status() const = 0;
++    // Opens the pack again from the next frame, e.g. after an import.
++    virtual void reload_texture_pack() = 0;
++    // While held, no pack is open, so an import can move its folder; true
++    // from texture_pack_held() once the pack has been closed.
++    virtual void hold_texture_pack(bool hold) = 0;
++    [[nodiscard]] virtual bool texture_pack_held() const = 0;
++    // The folder the pack is read from (texture_pack_import.hpp): the
++    // installed one, textures/<disc id> in the data directory, or the one the
++    // player uses in place or <prefix>_TEXTURE_PACK names.
++    [[nodiscard]] virtual std::string texture_pack_folder() const = 0;
++};
++
++} // namespace portablekit::gpu
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index 62f08be..3acea80 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -3,6 +3,7 @@
+ #include "../profile.hpp"
+ #include "ge_backend.hpp"
+ #include "ge_state.hpp"
++#include "texture_pack_host.hpp"
+ 
+ #include <array>
+ #include <chrono>
+@@ -50,7 +51,7 @@ struct RendererConfig {
+ // under Fill, at the window's shape: then each PSP pixel is wider (or taller)
+ // than square, the game draws a view of that shape (GameProfile::view_aspect_frame),
+ // and the 2D interface is drawn at its own proportions.
+-class VulkanRenderer {
++class VulkanRenderer : public TexturePackHost {
+ public:
+     VulkanRenderer();
+     ~VulkanRenderer();
+@@ -189,20 +190,20 @@ public:
+     // Draws an installed HD texture pack's images instead of the game's own
+     // textures (texture_pack.hpp). Takes effect from the next frame; off
+     // draws exactly what no pack would.
+-    void set_texture_pack(bool enabled);
++    void set_texture_pack(bool enabled) override;
+     // For the menu: "Off", "Not installed", or how many textures the pack has
+     // and how many of them are on the GPU.
+-    [[nodiscard]] std::string texture_pack_status() const;
++    [[nodiscard]] std::string texture_pack_status() const override;
+     // Opens the pack again from the next frame, e.g. after an import.
+-    void reload_texture_pack();
++    void reload_texture_pack() override;
+     // While held, no pack is open, so an import can move its folder; true
+     // from texture_pack_held() once the pack has been closed.
+-    void hold_texture_pack(bool hold);
+-    [[nodiscard]] bool texture_pack_held() const;
++    void hold_texture_pack(bool hold) override;
++    [[nodiscard]] bool texture_pack_held() const override;
+     // The folder the pack is read from (texture_pack_import.hpp): the
+     // installed one, textures/<disc id> in the data directory, or the one the
+     // player uses in place or <prefix>_TEXTURE_PACK names.
+-    [[nodiscard]] std::string texture_pack_folder() const;
++    [[nodiscard]] std::string texture_pack_folder() const override;
+     // textures/ in the data directory.
+     [[nodiscard]] static std::filesystem::path textures_root();
+     void set_perf_overlay(bool visible);
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index 5b0127c..2640428 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -103,9 +103,14 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
+ void register_adhoc(HleRegistrar &hle);
+ 
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+-namespace gpu { class VulkanRenderer; }
++namespace gpu { class VulkanRenderer; class TexturePackHost; }
+ // The renderer owns the window, so HLE that needs host input goes through it.
+ [[nodiscard]] gpu::VulkanRenderer *active_renderer();
++// What draws texture packs, for the menu's Texture pack rows and the import
++// screen (gpu/texture_pack_host.hpp): the renderer when there is one, else
++// the host a shell registered for its own GE backend; null when neither.
++[[nodiscard]] gpu::TexturePackHost *active_texture_pack_host();
++void set_active_texture_pack_host(gpu::TexturePackHost *host);
+ // Creates the renderer, with the window and the interface on it, the first
+ // time it is needed: by the setup screens before the game starts, otherwise
+ // when the game registers its media imports. Null without a window.
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index ddd9c42..6d4e443 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -21,6 +21,7 @@
+ #include "audio/audio_sink.hpp"
+ #include "gpu/frame_pacing.hpp"
+ #include "gpu/ge_backend.hpp"
++#include "gpu/texture_pack_host.hpp"
+ #include "gpu/vulkan_renderer.hpp"
+ #include "hle/hle_common.hpp"
+ #include "profile.hpp"
+@@ -211,9 +212,12 @@ private:
+     bool confirm_dialog();
+ 
+     host::Shell &shell() { return Layer::get().shell(); }
+-    // The rows that are the Vulkan renderer's own (the texture filter,
+-    // texture packs) need it; under another shell they are left out.
++    // The rows that are the Vulkan renderer's own (the texture filter) need
++    // it; under another shell they are left out.
+     gpu::VulkanRenderer *renderer() { return active_renderer(); }
++    // The texture pack rows need what draws packs: the renderer, or the host
++    // another shell registered; with neither they are left out.
++    static gpu::TexturePackHost *pack_host() { return active_texture_pack_host(); }
+     // The GE backend whose internal scale the Resolution row changes: the
+     // one drawing, when it can change its scale while it runs; else null and
+     // the row is left out.
+@@ -459,15 +463,15 @@ void Menu::video() {
+         renderer()->set_sharp_textures(s.sharp_textures);
+         settings::save();
+     }
+-    if (renderer() != nullptr) {
++    if (pack_host() != nullptr) {
+         RowOptions o = options_for("video.texture_pack",
+                                    std::string("Draws an HD texture pack in PPSSPP's format from textures/") +
+                                        portablekit::game().disc_id + " in the data folder instead of the game's textures.");
+         // The footer shows the note under the description: what is loaded,
+         // or where the pack was looked for.
+         if (o.note.empty()) {
+-            const std::string status = renderer()->texture_pack_status();
+-            o.note = status == "Not installed" ? "No pack in " + renderer()->texture_pack_folder() : status;
++            const std::string status = pack_host()->texture_pack_status();
++            o.note = status == "Not installed" ? "No pack in " + pack_host()->texture_pack_folder() : status;
+             // A pack used in place that has moved: its path is on the "Pack
+             // used from" row below; the footer has room for its name only.
+             if (status.rfind("Folder missing: ", 0) == 0)
+@@ -476,11 +480,11 @@ void Menu::video() {
+         }
+         if (choice_row("Texture pack", s.texture_pack ? "On" : "Off", o)) {
+             s.texture_pack = !s.texture_pack;
+-            renderer()->set_texture_pack(s.texture_pack);
++            pack_host()->set_texture_pack(s.texture_pack);
+             settings::save();
+         }
+     }
+-    if (renderer() != nullptr) {
++    if (pack_host() != nullptr) {
+         dump_row("[texture pack rows]");
+         texture_pack_rows();
+     }
+@@ -614,7 +618,7 @@ void Menu::video() {
+         restore("video.aspect", s.aspect, d.aspect);
+         restore("video.sharp_screen", s.sharp_screen, d.sharp_screen);
+         if (renderer() != nullptr) restore("video.sharp_textures", s.sharp_textures, d.sharp_textures);
+-        if (renderer() != nullptr) restore("video.texture_pack", s.texture_pack, d.texture_pack);
++        if (pack_host() != nullptr) restore("video.texture_pack", s.texture_pack, d.texture_pack);
+         restore("video.present_mode", s.present_mode, d.present_mode);
+         if (interpolation) restore("video.frame_rate", s.frame_rate, d.frame_rate);
+         if (interpolation) restore("video.frame_rate_auto", s.frame_rate_auto, d.frame_rate_auto);
+@@ -627,7 +631,7 @@ void Menu::video() {
+         shell().set_aspect(s.aspect);
+         shell().set_sharp_screen(s.sharp_screen);
+         if (renderer() != nullptr) renderer()->set_sharp_textures(s.sharp_textures);
+-        if (renderer() != nullptr) renderer()->set_texture_pack(s.texture_pack);
++        if (pack_host() != nullptr) pack_host()->set_texture_pack(s.texture_pack);
+         shell().set_present_mode(s.present_mode);
+         shell().set_frame_rate(s.frame_rate);
+         shell().set_frame_rate_auto(s.frame_rate_auto);
+diff --git a/host/ui/texture_pack_screen.cpp b/host/ui/texture_pack_screen.cpp
+index 37f18a2..80f906e 100644
+--- a/host/ui/texture_pack_screen.cpp
++++ b/host/ui/texture_pack_screen.cpp
+@@ -5,6 +5,7 @@
+ #include "ui/save_screen.hpp"
+ #include "ui/widgets.hpp"
+ 
++#include "gpu/texture_pack_host.hpp"
+ #include "gpu/texture_pack_import.hpp"
+ #include "gpu/vulkan_renderer.hpp"
+ #include "hle/hle_common.hpp"
+@@ -79,9 +80,10 @@ float px(float value) { return std::round(value * Layer::get().scale()); }
+ 
+ std::string utf8(const fs::path &path) { return install::path_to_utf8(path); }
+ 
+-// The texture pack is the Vulkan renderer's own: the menu offers these rows
+-// and this screen only under the Vulkan shell (active_renderer() not null).
+-gpu::VulkanRenderer &renderer() { return *active_renderer(); }
++// What draws the pack, the Vulkan renderer or the host another shell
++// registered: the menu offers these rows and this screen only when there is
++// one (active_texture_pack_host() not null).
++gpu::TexturePackHost &pack_host() { return *active_texture_pack_host(); }
+ 
+ fs::path textures_root() { return gpu::VulkanRenderer::textures_root(); }
+ 
+@@ -243,7 +245,7 @@ std::string describe_current(const Review &r) {
+ void enable_pack(settings::Settings &settings) {
+     if (!settings::overridden_by("video.texture_pack").empty()) return;
+     settings.texture_pack = true;
+-    renderer().set_texture_pack(true);
++    pack_host().set_texture_pack(true);
+ }
+ 
+ void finish(Outcome outcome) {
+@@ -260,7 +262,7 @@ void use_in_place() {
+     settings.texture_pack_folder = is_installed ? std::string{} : utf8(s.review.check.folder);
+     enable_pack(settings);
+     settings::save();
+-    renderer().reload_texture_pack();
++    pack_host().reload_texture_pack();
+     std::cout << "[texpack] using the pack in place: " << utf8(s.review.check.folder) << std::endl;
+     Outcome outcome;
+     outcome.ok = true;
+@@ -415,7 +417,7 @@ void result_screen(bool back) {
+         info_row("Installed", count(o.keys, "texture", "textures") + (o.in_place ? ", used where it is" : ""));
+         info_row(o.in_place ? "Used from" : "Installed in", utf8(o.folder));
+         if (!o.backup.empty()) info_row("Replaced pack", "Kept in " + utf8(o.backup));
+-        const std::string status = renderer().texture_pack_status();
++        const std::string status = pack_host().texture_pack_status();
+         info_row("Texture pack", status);
+         indented("The pack is on and applies at once: textures already on screen change within a frame or two.");
+     } else if (o.cancelled) {
+@@ -460,9 +462,9 @@ void tick() {
+     // The renderer closes the pack at its next frame; the folder moves after.
+     if (!s.installing) {
+         s.installing = true;
+-        renderer().hold_texture_pack(true);
++        pack_host().hold_texture_pack(true);
+     }
+-    if (!renderer().texture_pack_held()) return;
++    if (!pack_host().texture_pack_held()) return;
+     Outcome outcome;
+     std::string error;
+     const fs::path backup_dir = gpu::texture_pack_backup_directory(textures_root(), std::chrono::system_clock::now());
+@@ -482,8 +484,8 @@ void tick() {
+         outcome.error = error;
+         std::cout << "[texpack] import failed: " << error << std::endl;
+     }
+-    renderer().hold_texture_pack(false);
+-    renderer().reload_texture_pack();
++    pack_host().hold_texture_pack(false);
++    pack_host().reload_texture_pack();
+     s.installing = false;
+     finish(std::move(outcome));
+ }
+@@ -515,7 +517,7 @@ void texture_pack_rows() {
+                     "alone."})) {
+         settings.texture_pack_folder.clear();
+         settings::save();
+-        renderer().reload_texture_pack();
++        pack_host().reload_texture_pack();
+     }
+ }
+ 
+@@ -539,3 +541,17 @@ bool texture_pack_screen(bool back) {
+ void texture_pack_import_tick() { tick(); }
+ 
+ } // namespace portablekit::ui
++
++namespace portablekit {
++namespace {
++gpu::TexturePackHost *registered_pack_host = nullptr;
++} // namespace
++
++gpu::TexturePackHost *active_texture_pack_host() {
++    if (gpu::VulkanRenderer *renderer = active_renderer()) return renderer;
++    return registered_pack_host;
++}
++
++void set_active_texture_pack_host(gpu::TexturePackHost *host) { registered_pack_host = host; }
++
++} // namespace portablekit

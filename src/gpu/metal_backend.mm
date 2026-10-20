@@ -323,10 +323,12 @@ void MetalGeBackend::shutdown() {
 // After each flip: a scale the menu changed while the frame was drawn (the menu over the running game), or Auto's
 // when the drawable's height crossed a multiple of 272 (a resize, full screen and back), takes effect here.
 // The Text and sprites and Texture detail rows are read here too (tasks 073 and 075), so a change in the menu applies
-// from the next frame.
+// from the next frame, and the texture pack is opened or closed as the menu asks (task 100, metal_texture_pack.mm).
 void MetalGeBackend::begin_frame() {
     apply_scale();
-    if (ready_) read_game_options(false);
+    if (!ready_) return;
+    read_game_options(false);
+    texture_pack_frame();
 }
 
 // The menu's Resolution row (task 067). Between two frames, with nothing drawn since the flip (the paused menu runs
@@ -348,7 +350,9 @@ void MetalGeBackend::submit(const DrawCall &call, const GuestMemory &memory) {
     if (!ready_) return;
     const TraceClock clock(trace_.file != nullptr, trace_.times.submit);
     @autoreleasepool {
+        drawing_ = &call;  // the texture pack's 512-tall rule reads its vertices (task 100)
         draw(call, memory);
+        drawing_ = nullptr;
     }
 }
 

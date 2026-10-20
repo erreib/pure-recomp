@@ -69,7 +69,7 @@ to 30 ms after). Before task 066 the line read `drawing with Apple M4 Pro at 480
 ## Files
 
 The backend is split by concern (task 049, 2026-10-07): one class, `MetalGeBackend : portablekit::gpu::GeBackend`,
-declared in a header and defined in seven Objective-C++ files (ARC), each opening with a comment that says what it
+declared in a header and defined in eight Objective-C++ files (ARC; the eighth, metal_texture_pack.mm, since task 100), each opening with a comment that says what it
 owns. Before task 049 it was all `metal_backend.mm` (2975 lines) with the shaders as a string in `metal_shaders.h`;
 the split moved code without changing it (`tools/refactor_check.sh` below). Task 062 (2026-10-09) then simplified
 it the same way, checked by the same script: one blit into a buffer, one byte span per target, `draw()` in parts,
@@ -81,6 +81,7 @@ and the switches, the trace and the pre-warm each in a struct of their own.
 | `src/gpu/metal_backend.hpp` | the class: its members grouped under a heading per concern that names the file defining them, its data members (50, among them one struct each for the switches, the trace and the pre-warm: `switches_`, `trace_`, `prewarm_`), and the eight helpers more than one file uses (`unpack_color`, `not_emulated`, `to_compare`, `stored_reference`, `stencil_alpha`, `alpha_follows_stencil`, `format_name`, `texture_bits`), each with the file that defines it |
 | `src/gpu/metal_types.hpp` | the shared types: the sizes (`kWidth`, the guest's 480x272, `kMaxScale`, `kChunkBytes`, `kMaxTextures`, `kFramesInFlight`), `GpuVertex` and the uniform blocks (`VertexUniforms`, `Light`, `LightingUniforms`, `FragmentUniforms`) with their `static_assert`s against `shaders/ge.metal`, `TargetKey` and `Target` (with `bytes()` and `contains(address)`, the guest memory a target covers, which every scan of the targets uses, and since task 066 its internal `scale`, `width()` and `height()`, and since task 086 its width under Fill, `columns`, and `scale_x()`), `RenderKey`, `DepthStencilKey` and `PipelineKey`, `TextureIdentity` and `CachedTexture`, `ChunkPool`, `GuestWrites` and `Stats`, `FrameTimes`, `TraceClock` and `TraceRow`, `Prewarm`; and the three structs the class holds once each (task 062): `Switches` (`switches_`, filled by `initialize`), `TraceState` (`trace_`, metal_trace.mm's) and `PrewarmState` (`prewarm_`, metal_pipelines.mm's) |
 | `src/gpu/metal_targets.mm` | "Targets" and "Guest memory": the target cache (`target_for`, `latest_target_at`, the guest-word snapshot), a texture bind found in a target (`find_framebuffer_texture`, the rule of task 009) and the copy a draw samples of the target it draws into; `block_transfer`, `read_back_framebuffer`, `write_back_frame`, `write_back_depth` and the stores into guest memory; `upload_frame` |
+| `src/gpu/metal_texture_pack.mm` | "The pack loader (task 100)": the texture pack opened and closed once a frame (`apply_texture_pack`), a decoded texture's replacement (`find_replacement`, the 512-tall rule) and the texture a draw samples (`pack_texture`), the upload with mips (`replacement_texture`, `upload_replacement`), the budget (`evict_replacements`), the menu's `TexturePackHost` methods |
 | `src/gpu/metal_textures.mm` | "Textures" and "Mipmaps", from guest memory: the levels a draw samples (`mip_levels`), the content key and its hashes, `decoded_texture` and the cache, the GE's level rule; the sprite upscale's dump and its texture pack (`dump_sprite`, "Sprite upscale"); the game options the backend reads itself, at start and once a frame (`read_game_options`: Text and sprites, Texture detail) |
 | `src/gpu/metal_pipelines.mm` | "The pipeline key" and "The pre-warm list": the fragment-function variants, `render_pipeline` and `depth_state` (made on first use or taken from the pre-warm), the GE-to-Metal compare and stencil tables, the list's text form and parser, `start_prewarm`, the pipelines' exit line and `PURE_METAL_PIPELINES_OUT`; the pre-warm's state and the keys the draws used are `prewarm_` (`PrewarmState`) |
 | `src/gpu/metal_effects.mm` | "The stencil and the alpha": what a draw leaves in its target's alpha, `resolve_stencil_alpha`, the blend checks for dual-source blending and for that copy; the blend of a 16-bit target in the shader (task 040). The bloom chain has no code of its own: targets drawn into and sampled ("The bloom chain") |
@@ -760,6 +761,74 @@ empty memory stick, `PURE_PACED_FROM=6000`, to flip 9850, `PURE_METAL_TRACE`, re
 cost" above): 3601 frames in 60.1 s, mean 16.68 ms, 99th percentile 18.57 ms, longest 20.88 ms, none over 25 ms; on
 the screen 3601 pictures, interval mean 16.68 ms, longest 25.00 ms, none over. The race holds 60 fps; 51 textures
 were upscaled over the run, in 219 ms in all.
+
+### The pack loader (task 100)
+
+D-024 point 3 (2026-10-20): the Metal backend draws a texture pack itself, a sprite pack `tools/sprite_pack.sh` built
+or a PPSSPP pack such as NR74W's HD pack (PNG or ZIM, task 099). The framework's pack class is backend-neutral
+(`host/gpu/texture_pack.hpp`: textures.ini, the keys, the loader threads that decode the images, the 256 MB decode
+window); `src/gpu/metal_texture_pack.mm` is the Metal side of what the Vulkan renderer's
+`host/gpu/replacement_textures.cpp` does.
+
+- **Opening and closing.** `apply_texture_pack`, from `begin_frame` once a frame, or at once when the menu asks
+  between two frames (nothing drawn since the flip: the paused menu runs there, as for the Resolution row), so that
+  the import's hold takes effect with the game paused. `video.texture_pack` (on by default; `PURE_TEXTURE_PACK=0|1`)
+  is read at the first frame; the folder is `texture_pack_location(<data>/textures, UCUS98612,
+  video.texture_pack_folder)` (`PURE_TEXTURE_PACK` naming a folder wins); `TexturePack::open` prints `[texpack] N
+  textures from FOLDER`, or the reason it found none. The menu's status strings are the Vulkan renderer's: "Off",
+  "Updating" (held for an import), "Loading", "N textures, M on the GPU (K MB)", "Not installed", "Not loaded: ...",
+  "Folder missing: ...". Opening or closing a pack drops the texture cache, so the next draws decode the originals
+  again and look them up; with no pack before or after, the cache is kept: a run without a pack draws, decodes and
+  counts as before.
+- **The lookup.** In `decoded_texture`, after the cache's own lookup: a texture is looked up once, when it is decoded
+  (`find`: the pack's key over the texels and the palette, with the pack's own options), never per draw, and the
+  result kept in its cache entry (`CachedTexture::replacement`). The format's 512-tall rule is the Vulkan renderer's
+  14 file-local lines written again (`drawn_max_v`, `update_max_seen_v`): a texture 512 texels tall drawn in through
+  mode is hashed down to the lowest row read (the first draw at least 272 rows, a deeper one the whole texture),
+  looked up again when a draw reads deeper; `submit` keeps the draw (`drawing_`) for its vertices. An upscaled
+  texture's entry (task 073) finds the same replacement, which supersedes the upscale once on the GPU.
+- **The upload.** The first draw that samples a replacement queues it for the loader threads (`request`) and draws the
+  original; once it is Decoded, a draw uploads it: a private RGBA8 texture with the full chain (`bit_width(max(w,
+  h))` levels; the pack's images have none), a staging buffer, the copy into level 0 and `generateMipmapsForTexture`
+  in a blit encoder of a command buffer of its own, committed at once on the queue the frame's commands are
+  committed on later, so Metal's hazard tracking runs it before the draws that sample it; then `consumed` frees the
+  pixels. At most 32 MB a frame past the first image (`kUploadBytesPerFrame`; a later frame takes the rest, the
+  original drawn meanwhile) and 4096 images (`kMaxResident`), the Vulkan renderer's constants. An image Metal
+  cannot make is Failed for good (`[texpack] cannot upload NAME (WxH); the original is drawn`), its pixels freed
+  too, so the decode window never fills with images nobody takes.
+- **Residency.** `resident_`, keyed by `Replacement *`: the texture, its bytes with the mips, the frame it was last
+  drawn. Over the budget (`PURE_TEXTURE_PACK_MEMORY` MB, default 1024, at least 64) or the count, the least recently
+  drawn images not drawn in the last 4 frames (`kKeepFrames`) go, down to 7/8 of the budget, and their replacements
+  are Unloaded again (a later draw loads the file again); said once when the images drawn right now need more. A
+  command buffer in flight keeps a dropped texture alive (ARC), so a drop is a map erase with no fence.
+- **The lines.** With `PURE_TRACE_TEXTURE_PACK=1` the pack class's lookups and `[texpack] decoded NAME WxH`, and the
+  backend's `[texpack] frame F: uploaded NAME (K KiB with mips)` and, every 60 frames, `[texpack] frame F: N draws
+  replaced in 60 frames, M images on the GPU (K MB)`: the Vulkan renderer's shapes, which `tools/sprite_pack.sh`
+  reads.
+- **The menu.** The backend is a `TexturePackHost` (patch 0034-texture-pack-host); the Metal shell registers it at its
+  first picture and unregisters it at shutdown, so the Video tab's Texture pack row, Import texture pack…, Open the
+  textures folder and the import screen are offered under the Metal shell as under Vulkan. No Texture filter row: the
+  backend samples with the GE's filters.
+
+What differs from the Vulkan renderer:
+
+| Part | Vulkan renderer | Metal backend |
+|---|---|---|
+| The sampler | its own for replacements: linear with mips (nearest under Texture filter Sharp), the level the GPU picks from the replacement's size; a replaced draw counts one level | the draw's own (metal_draw.mm, unchanged): the GE's filter bits (linear for an upscalable 2D draw with Text and sprites at Upscaled); for a texture with levels the GE's level rule and Texture detail as for the original, which sample the replacement's generated chain from its finer level 0 (clamped to the original's level count); for a texture of one level the replacement's level 0 alone (the sampler has no mip filter), so an image four times the original's size drawn at internal scale 1 is minified 4:1 without levels |
+| The upload | a staging buffer and a command buffer with a fence; a drop waits for it | a command buffer an image, no fence (ARC) |
+| Opening | at start and at `begin_frame` | at the first `begin_frame`, then at each, or at once between frames from the menu |
+| The cache drop | at every open and close | only when a pack was open or opens |
+
+The checks are `tools/sprite_pack.sh --check --shell metal` and `--pack DIR --shell metal`, in the Metal window at
+internal scale 2 (960x544 targets; the window's 1920x1088 drawable captured and reduced by the centre of each 4 x 4
+block). On 2026-10-20 (the task's build): the Mac-built sprite pack (48 keys) opened on both routes, 33 images
+uploaded (11 on the main menu route, peak 42 MB; the race route's peak 25 images, 88 MB), 129987 draws replaced in the
+traced windows; main_menu 0.0359 against the run without, reduced 0.0452 of its 0.05 (0.0401 without), race_hud
+0.0148 and 0.0647 of 0.10, the HUD found. NR74W's HD pack (4170 keys): 11 images on the main menu route (peak 265 MB),
+127 on the race route (peak 124 images, 594 MB), 259098 draws replaced, within 0.2% of the Vulkan renderer's counts
+(task 099: 127 images, 599 MB, 259443 draws); main_menu reduced 0.0491 (0.05), race_hud 0.2146 (new art: printed, not
+a rule), the HUD found. The race's paced seconds held 60 fps with the pack as without it (`PURE_PERF=log`: frame mean
+16.6 to 16.7 ms both ways, longest 18.9 ms against 18.6).
 
 ## Texture detail (task 075)
 

@@ -161,19 +161,20 @@ from their own disc, on a Mac, since the scaler is the Metal backend's.
   Upscaled (`DIR/pack` collects the art of every screen played), but that was not tried with the app.
 - **Installing it**: the folder goes into the data directory as `textures/UCUS98612`
   (`~/Library/Application Support/pure-recomp/PureNative/textures/UCUS98612/`, on Windows
-  `%APPDATA%\pure-recomp\PureNative\textures\UCUS98612\`), or in the game under the Vulkan shell: Esc, Video, Import
-  texture pack…, and the folder chosen; the screen finds the pack in it, checks it and copies it there, keeping a pack
+  `%APPDATA%\pure-recomp\PureNative\textures\UCUS98612\`), or in the game under either shell (the Metal shell since
+  task 100): Esc, Video, Import texture pack…, and the folder chosen; the screen finds the pack in it, checks it and copies it there, keeping a pack
   it replaces in `textures/.backup/`. Open the textures folder (the same tab) shows where packs go.
 - **Using it**: the Video tab's Texture pack row (`video.texture_pack`, on by default) turns it on and off and notes
   what is loaded (`48 textures, ...`). The Text and sprites row does nothing under the Vulkan renderer (its help says
-  so); the Texture pack row is the switch there. Under the Metal shell neither the Texture pack row nor the import is
-  offered: the Metal backend upscales by itself and draws no pack.
+  so); the Texture pack row is the switch there. Since task 100 the Metal backend draws packs too (its own loader:
+  docs/metal-backend.md "The pack loader"), and the Metal shell offers the Texture pack row and the import as the
+  Vulkan shell does; a pack's image supersedes the upscale of the same texture.
 - **Other packs** (task 099, D-024): the loader reads PPSSPP's ZIM images as well as PNG (raw, zlib or zstd, the
   last through Zstandard's decoder, which the build downloads and compiles in: `cmake/Zstd.cmake`), so a pack made
   for PPSSPP installs the same way. NR74W's HD texture pack (<https://github.com/0xf0xx0/WipEout-Pure-HD-Texture-Pack>,
   1331 ZIM images for 4172 keys, every edition) is the one checked (`tools/sprite_pack.sh --pack DIR`). It is
   derived art, imported by the player: never in the app, the zip, the Windows folder or this repository. The Vulkan
-  renderer draws it; the Metal backend's loader is task 100.
+  renderer and, since task 100, the Metal backend draw it (`tools/sprite_pack.sh --pack DIR --shell metal`).
 
 ## Download packs (task 077)
 

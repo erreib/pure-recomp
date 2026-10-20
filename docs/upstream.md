@@ -33,6 +33,7 @@ it uses.
 | 0028-vulkan-orthographic-fit | no | 0010 and 0020 (the transform and summary lines, the `orthographic` flag it moves; read from the code in task 085, not tried patch by patch) | 0010 (`viewport_into_clip` in the transform and the summary) |
 | 0029-windows-file-url | yes (every Windows port's folder buttons are dead without it; a shared `file_url` would be the upstream shape) | none | none |
 | 0033-zim-textures | yes (tried in task 099 with `git apply --check` on the pin's `host/gpu/texture_pack.cpp`) | nothing | zstd's decoder: `zstd.h` and its library, here from the port (`cmake/Zstd.cmake`, linked into PureNative) |
+| 0034-texture-pack-host | no | 0016 (the menu's `renderer()` rows and `dump_row("[texture pack rows]")` it edits) and 0004 (the hle_common.hpp and texture_pack_screen.cpp lines beside it); read from the code in task 100, not tried patch by patch | 0016 (`dump_row`, the rows by capability) |
 
 The patches as they were before task 052, one per task, are in this repo's history (`patches/` at commit 743623f, the
 brief of task 052) and give the finer steps that several pull requests below would be cut along.
@@ -222,6 +223,14 @@ repository (zstd 1.5.7 downloaded with its SHA-256, `lib/common` and `lib/decomp
 offer the zstd path behind a CMake option, with ZIM's raw and zlib cases built either way. The two log lines it
 writes as one string each (two loader threads interleaved them) are a fix of their own.
 
+### 0034-texture-pack-host: candidate, with 0016
+The menu's Texture pack row, the rows under it and the import screen ask an abstract `gpu::TexturePackHost` (six
+calls) instead of `gpu::VulkanRenderer`, which implements it; `active_texture_pack_host()` is the Vulkan renderer when
+there is one, else the host a shell registered (task 100). Any port with a second GE backend that loads packs (a
+Metal or a D3D one) needs it to offer the rows; under the Vulkan shell nothing changes. It sits on 0016's rows by
+capability; offer it after 0016, with the remark that the import screen still finds textures/ through the static
+`VulkanRenderer::textures_root()`, which a shared free function would replace.
+
 ## Ours only
 No patch is ours only. Inside them, what would not go upstream: the VFPU test mode (0009); comments that cite this repo's tasks, fidelity differences and old patch
 numbers. If a future patch is ours only (a test hook, a seam only our profile uses), it stays a patch of its own so
@@ -231,4 +240,5 @@ that this list stays true.
 0001; 0006; the kernel part of 0005; 0002; the standalone renderer fixes of 0003 (exact target, alpha test numbers,
 shutdown order); 0008; the rules of 0009; the stencil, shadow volume and dual-source part of 0003; 0007's no-key
 mode; the seams of 0004, after the issue; the pacing part of 0005, 0007's save list, 0016, 0017, 0019, 0020 and 0021
-after them; the depth write-back of 0003 behind a profile switch; 0033 with the zstd download in the framework's CMake.
+after them; the depth write-back of 0003 behind a profile switch; 0033 with the zstd download in the framework's CMake; 0034 after
+0016.

@@ -215,7 +215,10 @@ sends the stick to the two bytes after the PSP's own, which the game never reads
 gone; no mouse camera, so Mouse, Mouse sensitivity and the two mouse invert rows are gone (the pointer is still
 captured by `input.mouse`, and the mouse's buttons bind as before); no ad hoc play, so the Network tab and the System
 tab's "Pause during multiplayer" are gone and opening the menu turns `network.adhoc` off. The Metal shell has no
-touch controls, so the Touch screen section is gone there (the Vulkan shell keeps it). Since task 090 the Metal shell
+touch controls, so the Touch screen section is gone there (the Vulkan shell keeps it). Since task 100 the Metal
+backend draws texture packs, so the Texture pack row, Import texture pack… and Open the textures folder are in both
+shells (patch 0034-texture-pack-host); the Texture filter row, the Vulkan renderer's sampler, is still the Vulkan
+shell's alone. Since task 090 the Metal shell
 draws the performance overlay, so the Video tab's Performance row and the Controls tab's F3 line are in both shells
 (before, the Metal shell left them out). The Video tab's Aspect ratio row offers Original, Stretch and Fill in both shells: Fill needs a game
 that widens its own view, which this one does since task 084 (D-020), and the Metal shell draws it since task 086

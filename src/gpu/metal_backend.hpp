@@ -5,6 +5,8 @@
 
 #include "metal_types.hpp"
 
+#include "gpu/texture_pack_host.hpp"
+
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
@@ -31,7 +33,7 @@ std::uint32_t stored_reference(const DrawCall &call);                         //
 int stencil_alpha(const DrawCall &call);                                      // metal_effects.mm
 bool alpha_follows_stencil(const DrawCall &call, bool depth_can_fail);        // metal_effects.mm
 
-class MetalGeBackend final : public pk::GeBackend {
+class MetalGeBackend final : public pk::GeBackend, public pk::TexturePackHost {
 public:
     ~MetalGeBackend() override { shutdown(); }
 
@@ -61,6 +63,16 @@ public:
     bool supports_internal_scale() const noexcept override { return true; }
     void set_internal_scale(std::uint32_t setting) override;
     std::array<std::uint32_t, 2> target_size() const noexcept override { return {columns_, kHeight * scale_}; }
+
+    // The menu's Texture pack row and the import screen (patch 0034-texture-pack-host, task 100; the shell registers
+    // the backend): as the Vulkan renderer's, the change applied at the next frame, or now between two frames
+    // (metal_texture_pack.mm).
+    void set_texture_pack(bool enabled) override;
+    std::string texture_pack_status() const override;
+    void reload_texture_pack() override;
+    void hold_texture_pack(bool hold) override;
+    bool texture_pack_held() const override;
+    std::string texture_pack_folder() const override;
 
 private:
     // The frame flow: start, shutdown, submit, the flip, captures; command buffers, passes, space (metal_backend.mm)
@@ -117,6 +129,17 @@ private:
                                    bool upscale);
     void dump_sprite(const GuestMemory &memory, std::uint64_t key, const TextureState &state);
     static void set_level_rule(const TextureState &state, std::uint32_t levels, FragmentUniforms &fragment);
+
+    // The texture pack (task 100): its opening and closing, the lookup, the upload and the budget
+    // (metal_texture_pack.mm)
+    void start_texture_pack();
+    void apply_texture_pack();
+    void texture_pack_frame();
+    void find_replacement(const GuestMemory &memory, const TextureState &state, CachedTexture &cached);
+    id<MTLTexture> pack_texture(const GuestMemory &memory, const TextureState &state, CachedTexture &cached);
+    id<MTLTexture> replacement_texture(pk::Replacement &replacement);
+    bool upload_replacement(const pk::Replacement &replacement, ResidentImage &image);
+    void evict_replacements();
 
     // Pipelines: fragment-function variants, render and depth-stencil states, the pre-warm list (metal_pipelines.mm)
     id<MTLFunction> fragment_function(std::uint32_t variant, NSError **failure = nullptr);
@@ -266,6 +289,26 @@ private:
     std::set<std::uint64_t> sprites_dumped_;
     std::set<std::string> pack_keys_;
     bool pack_ready_{};
+    // The texture pack (task 100, metal_texture_pack.mm): video.texture_pack read at the first frame, what the menu
+    // asked for (wanted, held, reload) and what apply_texture_pack() did; the pack, null while closed or not
+    // installed, and its status for the menu; its images on the GPU by their replacement, their bytes, the budget
+    // (PURE_TEXTURE_PACK_MEMORY), the bytes uploaded this frame, the draws replaced since the last trace line, and the
+    // draw submit() is drawing (the 512-tall rule reads its vertices).
+    bool pack_started_{};
+    bool pack_wanted_{};
+    bool pack_applied_{};
+    bool pack_held_{};
+    bool pack_reload_{};
+    std::unique_ptr<pk::TexturePack> pack_;
+    std::string pack_status_;
+    std::unordered_map<pk::Replacement *, ResidentImage> resident_;
+    std::uint64_t resident_bytes_{};
+    std::uint64_t pack_budget_{};
+    std::uint64_t uploaded_this_frame_{};
+    std::uint64_t replaced_draws_{};
+    std::uint64_t pack_line_frame_{};
+    bool pack_budget_said_{};
+    const DrawCall *drawing_{};
     std::vector<GpuVertex> vertices_;
     std::vector<GpuVertex> sprite_sources_;
     std::size_t sprite_corners_{};  // of a transformed sprite draw: vertices_ holds its sources after them

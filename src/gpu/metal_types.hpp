@@ -6,6 +6,7 @@
 
 #include "gpu/ge_backend.hpp"
 #include "gpu/ge_state.hpp"
+#include "gpu/texture_pack.hpp"
 
 #import <Metal/Metal.h>
 
@@ -255,6 +256,17 @@ struct TextureIdentity {
 
 struct CachedTexture {
     id<MTLTexture> texture;
+    std::uint64_t last_used{};
+    // With a texture pack open (task 100, metal_texture_pack.mm): the pack's image for these texels, or null, and the
+    // rows a through-mode draw has read of a 512-tall texture (the pack's 512-tall rule; 0 for any other).
+    std::shared_ptr<pk::Replacement> replacement;
+    std::uint16_t max_seen_v{};
+};
+
+// A texture pack's image on the GPU (task 100): RGBA8 with its full mip chain, its bytes, the frame it was last drawn.
+struct ResidentImage {
+    id<MTLTexture> texture;
+    std::uint64_t bytes{};
     std::uint64_t last_used{};
 };
 
