@@ -8,21 +8,40 @@
 // PURE_SHELL says). Under the Vulkan shell (PURE_SHELL vulkan or empty, PURE_NO_RENDER unset) the backend left unset
 // is vulkan: that shell shows only the Vulkan backend's pictures (task 093), so PURE_SHELL=vulkan alone is the Vulkan
 // path. A replay names its backends on its command line and is left alone.
+// Since task 102 (D-025) the backend left unset is `models` on every platform, which wraps the one above: it draws
+// the figures as models when the Video tab's Crowds and people row says so and hands every other call over unchanged
+// (src/gpu/models_backend.cpp). The backend it wraps is PURE_GE_MODELS_INNER, set here when unset to what
+// PURE_GE_BACKEND would have been: metal, or vulkan under the Vulkan shell, and vulkan elsewhere. A tool that names a
+// backend (PURE_GE_BACKEND=metal, vulkan, null or record) runs without the wrapper.
 #include "../tools/ge_replay.hpp"
 
 #include <cstdlib>
 #include <string_view>
+
+namespace {
+// Sets `name` to `value` unless the environment already has it (an empty value counts as set).
+void set_default(const char *name, const char *value) {
+#if defined(_WIN32)
+    if (std::getenv(name) == nullptr) _putenv_s(name, value);
+#else
+    setenv(name, value, 0);
+#endif
+}
+} // namespace
 
 int portablekit_main(int argc, char **argv);
 
 int main(int argc, char **argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--replay") return pure::replay::run(argc, argv);
 #if defined(__APPLE__)
-    setenv("PURE_SHELL", "metal", 0);
+    set_default("PURE_SHELL", "metal");
     const char *shell = std::getenv("PURE_SHELL");
     const bool vulkan_shell =
         std::getenv("PURE_NO_RENDER") == nullptr && (*shell == '\0' || std::string_view(shell) == "vulkan");
-    setenv("PURE_GE_BACKEND", vulkan_shell ? "vulkan" : "metal", 0);
+    set_default("PURE_GE_MODELS_INNER", vulkan_shell ? "vulkan" : "metal");
+#else
+    set_default("PURE_GE_MODELS_INNER", "vulkan");
 #endif
+    set_default("PURE_GE_BACKEND", "models");
     return portablekit_main(argc, argv);
 }

@@ -43,6 +43,7 @@
 // resources, so the shell's sampling comes after every draw of the frame, and the next frame's draws after the
 // sampling. (On a queue of the shell's own nothing ordered them, and the window dropped the race HUD: task 031.)
 #include "../gpu/metal_device.hpp"
+#include "../gpu/models_backend.hpp"
 #include "../helpers.hpp"
 #include "shell/sdl_pad.hpp"
 #include "shell/shell.hpp"
@@ -387,9 +388,13 @@ public:
             last_game_ = game;
             ++flips_;
             // The Metal backend draws texture packs (task 100): from its first picture the menu's Texture pack rows
-            // and the import screen ask it (patch 0034-texture-pack-host); unregistered at shutdown.
+            // and the import screen ask it (patch 0034-texture-pack-host); unregistered at shutdown. The running
+            // backend, or the one it wraps (the models backend, the default since task 102: models_backend.hpp).
             if (pack_host_ == nullptr && image.api == pk::gpu::ImageApi::Metal) {
-                pack_host_ = dynamic_cast<pk::gpu::TexturePackHost *>(pk::gpu::running_backend());
+                pk::gpu::GeBackend *running = pk::gpu::running_backend();
+                pack_host_ = dynamic_cast<pk::gpu::TexturePackHost *>(running);
+                if (auto *wrapper = dynamic_cast<pure::models::WrappingBackend *>(running); pack_host_ == nullptr && wrapper)
+                    pack_host_ = dynamic_cast<pk::gpu::TexturePackHost *>(wrapper->inner());
                 if (pack_host_ != nullptr) pk::set_active_texture_pack_host(pack_host_);
             }
             const Clock::time_point now = Clock::now();

@@ -22,13 +22,15 @@ endif()
 # (both git-ignored), as docs/PROFILE_GUIDE.md in the framework lays out.
 # Our own main() (src/host/pure_main.cpp) runs ge_replay for `--replay` and the framework's main, compiled as
 # portablekit_main, otherwise (task 022). The record backend (PURE_GE_BACKEND=record, which writes what ge_replay
-# reads) is built on every platform, as the framework built it before task 095 moved it here.
+# reads) is built on every platform, as the framework built it before task 095 moved it here, and so is the models
+# backend (PURE_GE_BACKEND=models, the default since task 102: figures drawn as models, src/gpu/models_backend.cpp).
 portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
     SOURCES src/profile/pure_profile.cpp src/profile/enhancements.cpp src/profile/test_hooks.cpp
             src/profile/aspect.cpp src/hle/audio_capture.cpp
             src/host/pure_main.cpp src/tools/ge_replay.cpp src/tools/ge_extract.cpp src/tools/record_backend.cpp
+            src/gpu/models_backend.cpp
             ${platform_sources})
 
 # Zstandard's decoder for the ZIM images of HD texture packs (D-024, task 099): the framework compiles
