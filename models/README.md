@@ -36,6 +36,26 @@ python3 tools/model_import.py ~/Desktop/pitguy.glb models/pitguy.pmdl
 The importer prints the counts and the bounds. Then run the game with the row at Models (or
 `PURE_CROWD_MODELS=1`), or `tools/models_check.sh`.
 
+## Rigged pit marshal draft
+
+`tools/model_pitguy.py` builds the editable static draft. `tools/model_pitguy_rig.py` rigs that Blender file and
+exports one skinned, vertex-coloured GLB with a 20-bone skeleton and a four-second `Wave_On` action. The right arm
+signals approaching vehicles through with two forearm sweeps, then returns to rest. The root and feet stay fixed.
+
+```
+Blender --background --python-exit-code 1 --python tools/model_pitguy.py -- out/pitguy-v2
+Blender --background --python-exit-code 1 --python tools/model_pitguy_rig.py -- out/pitguy-v2/pitguy.blend out/pitguy-rigged --render
+```
+
+Open `out/pitguy-rigged/pitguy-rigged.blend` and press Space to play frames 1–96 at 24 fps. The exported
+`pitguy-wave.glb` includes the identical closing pose at frame 97, with clip times 0–4 seconds. The builder checks
+weights, fixed feet and loop continuity, then reimports the GLB to compare deformed positions at eight times.
+`--render` also writes a 12-fps PNG sequence under `preview-frames/` for encoding a preview video.
+
+**The current PMDL v1 importer and renderer are static only.** They do not preserve skins or animation from this
+GLB. Runtime playback needs an animation-capable importer and renderer (or a baked vertex-animation path); the
+rigged draft does not change `models/pitguy.pmdl`. Keep normalization based on the rest pose when adding playback.
+
 ## The .pmdl format
 
 Little-endian: the magic `PMDL`, u32 version (1), u32 vertex count, u32 index count, then the float3 positions (the
