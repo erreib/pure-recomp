@@ -442,6 +442,13 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
             texture = decoded_texture(memory, state, levels, upscale);
             sampler = (linear_mag || upscale ? 1u : 0u) | (linear_min || upscale ? 2u : 0u) |
                       (state.wrap_s != 0u ? 4u : 0u) | (state.wrap_t != 0u ? 8u : 0u);
+            // A texture pack's image in place of a texture of one level (task 100): larger than the original by
+            // the pack's scale and uploaded with a full mip chain, it is sampled linear through its levels at the
+            // GPU's own level (the shader's plain sample() when no level rule is set, u.level.x 0), anisotropically,
+            // so that drawn smaller than its texels it is minified smoothly rather than aliased, as the Vulkan
+            // renderer samples its replacements. The GE's filters were for one texel a pixel.
+            if (levels == 1u && texture != white_ && texture.mipmapLevelCount > 1u)
+                sampler |= 3u | kMipLinear | kAnisotropic;
             if (levels > 1u && texture != white_) {
                 // min_filter bit 1: linear between the two levels around D, else the nearest one.
                 sampler |= (state.min_filter & 2u) != 0u ? kMipLinear : kMipNearest;
