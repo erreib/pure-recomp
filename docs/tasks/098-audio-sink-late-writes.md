@@ -83,4 +83,4 @@ the rig's early-race drain never reached zero in five runs. Question 3 (a reader
 race, the load's 0, 1 channel restart (at 193 s, the results screen), 0 seconds under 95% (Vulkan: one at 98%),
 medians 119.4 presents and 119.4 game flips a second. The sink's totals over 126 s: `lates=0 late=0` on both, 10
 resyncs (the menus' channel restarts, counted apart since task 500), `dropped=` 6.16 M frames (49 k a second: the
-open finding of task 097, unchanged). Nothing on the Mac runs late at 119.4 Hz, as before. Logs: out/pull-probe/.
+harness's unpaced menus, task 501's answer to 097's finding 4; the paced race drops nothing). Nothing on the Mac runs late at 119.4 Hz, as before. Logs: out/pull-probe/.
