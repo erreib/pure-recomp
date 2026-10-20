@@ -110,3 +110,70 @@ Module `WO_Game` v1.01. 33 libraries, **278 imported functions**: ThreadManForUs
 
 Takeaways: base on Yakumo's framework; lift `kernel/`, `hle/` (threadman, sysmem, io, system, atrac, mpeg, savedata, minus MH hooks), `audio/`, `movie/`, `save_data/`, `gpu/ge_state.*`, `gpu/texture_decode.*`; replace `vulkan_renderer.cpp` by a backend interface with Metal (ours) and Vulkan (theirs, split from SDL/ImGui) implementations. Check PortableKit first: it may already be the split. Wipeout's 2.35 MB `.text` ≈ 590k instructions → expect ~20 min full codegen+build on the M4 Pro, so keep `include/psprecomp/` stable and give Opus tasks incremental build targets.
 
+
+## The crowd, surveyed (task 101, 2026-10-20)
+
+For the 3D crowd and people models (docs/status.md, Next). Read from `PureNative --replay ... --extract` (docs/ge-backend.md,
+section 7) of out/gerec/race.gerec frame 6016 (the `race_hud` scene of tools/frame_regress.sh, Vineta K, 906 draws)
+and of a Time Trial recording, frames 5889-5891 of main_menu.txt+time_trial.txt (frame 5890, the `tt_hud` scene, 603
+draws). Texture names come from matching the frame's keys against the HD pack's textures.ini (121 of the race
+frame's 141 keys are in it, which also confirms the dumper keys as the pack does). The outputs stay under out/101/.
+
+- **Coordinates.** The camera's view (view 1 of 6 in the race frame, 759 of its 895 transformed draws; the first
+  transformed draws belong to the billboards' render-to-texture rounds) is a rotation of about 90 degrees about y and
+  a translation; the scenery draws share one world matrix, a uniform scale of 2293.69 with no rotation or
+  translation (s16 positions, vertex type 0x13F: float UVs, 8888 colour, s8 normal, s16 position). y is up: the sky
+  cube's top face lies at y 90.05, its sides from -9.3 to 90.05 around the camera, the road at y 31.8 to 33.4 on the
+  start straight. The start straight runs along x; its road (surface_pit, surface_base and surface_1a, draws 202 to
+  208) spans z -127.1 to -85.9: **41 units wide**. The Feisar is 10.5 units long.
+- **The crowd's texture.** One key on Vineta K, `00000000062cb021471694d4` (textures.ini line 2739, the first of the
+  nine keys of `in_game/tracks/00_shared/crowd.zim`): CLUT4, **64x64**, 4 mip levels, at 0x041BB440, alpha 0 or 255
+  only (1650 of 4096 texels transparent). Four rows of 16 texels, each a line of full-length standing people,
+  front-facing, in casual clothes (photographs, by the HD version), **about 56 figures** (about 17, 15, 11 and 13 by
+  row), each about 4 texels wide; stored upside down (heads towards v = 1). The HD pack's crowd.zim is 256x256
+  RGBA8888 (zstd, flags 5120), the same layout at four times the size.
+- **The crowd's draws.** 4 per frame (race frame draws 471, 472, 615, 616; Time Trial 340, 341, 466, 467), triangle
+  strips without indices of **368, 147, 381 and 113 vertices**, 1001 strip triangles of which 411 are not degenerate
+  (about 205 quads joined by degenerate triangles). Each quad samples one row of figures (v span 0.25, u span 0.5 or
+  1, running past 1 with the wrap) and is **2.24 to 2.52 units tall** and 5.3 to 12.9 wide (median about 6.6, so a
+  figure is about 0.85 units wide). **Static quads, not billboards**: the scenery's world matrix, the billboard guess
+  false, no triangle within 5 degrees of facing the camera, and the same world-space positions in frames 6008
+  (race_warm.gerec) and 6016 while the draw order changes. The quads stand vertical (normals horizontal) and face the
+  track, turned up to about 30 degrees with the stands' curve.
+- **Where they stand.** Two grandstands facing each other across the start straight. Stand A (471, 472): x 32.3 to
+  178.1, y 38.2 to 47.1, z -164.2 to -133.3, 6.2 units beyond the road's edge at -127.1. Stand B (615, 616): x 33.7 to
+  178.7, y 38.4 to 46.9, z -81.2 to -54.3, 4.7 units beyond the edge at -85.9. Each runs **146 units along the track
+  (3.6 track widths)**, its rows of quads rising 9 units from 5 units above the road.
+- **The stands around them, in draw order.** Stand A: 469-470 and again 475-476 a 4x4 CLUT4 texture not in the pack
+  (`000000002c9b9d934249a820`, over the stand at y 50.6 to 66.4; alpha test GREATER 0x10, then ALWAYS), 471-472 the
+  crowd, 473-474 `effect_04`, 477 `unsorted/texture_e2`, **478 `crowd_background`** (key `00000000b8da6d727d4e9d6b`,
+  CLUT4 64x64: a speckled crowd seen from afar on the stand's tiers, sloped about 30 degrees, alpha
+  test ALWAYS), 479-480 `grandstand_exterior`, 481 `texture_e1`, 483 `texture_r`, 484 `grandstand_small`, 487-490
+  `grandstand_big_arch`. Stand B: 612-613 the 4x4 texture, 614 `grid_1` (alpha test GREATER 0x7F), 615-616 the crowd,
+  617-618 the 4x4 texture, 620 `grandstand_exterior`, 621 `marble_wall/wall_4`, 622-625 `grandstand_small`; its
+  `crowd_background` is drawn much earlier (276, among 270-280: `cloud`, `effect_05`, `effect_04`, an advert,
+  `texture_e2`, `vineta_tower`, `grandstand_exterior`). The pack's ini maps the background's key to
+  `in_game/tracks/01_vineta_k/environment/crowd_background.zim`, a file the pack does not hold, so it draws as the
+  original.
+- **The GE features the crowd draws use** (what a hook has to reproduce or replace): alpha test **GREATER 0x7F** (the
+  cut-out), **no blending**, texture function **modulate** with the texture's alpha, mipmapped (min filter 7, mag 1),
+  UVs (map mode 0), **fog on**, lighting off, a vertex colour (white on stand A, 0xFFB7B0A8 on stand B: a shade),
+  **depth test GREATER with depth writes** (the GE's larger-is-nearer), culling on (counter-clockwise), the stencil
+  ALWAYS with reference 0x04 (the bloom mask, docs/ge-effects.md), alpha writes not masked. They are in the opaque
+  part of the frame.
+- **Camera flashes.** Draw 864 binds `effect/camera_flash.zim` (CLUT4 64x64): one quad, its own world matrix (the
+  scenery's scale, translated to (119.6, 43.8, -139.9), inside stand A), additive (add(SA, FIX 0xFFFFFF)), alpha test
+  GREATER 0x00, depth test without writes, in the translucent part. A spectator's flash.
+- **The person figure** (Time Trial frame 5890, and the same draws in the race frame, 169-174): `pitguy.zim`, key
+  `00000000d5085be1dbd7e4c3` (textures.ini line 2752, one of its six), CLUT4 **32x64**, 3 mip levels, 743 of 2048
+  texels opaque: one figure in a dark armoured suit and a helmet with a yellow visor, standing, front view, upside down
+  as the crowd's. Six draws (149-154), **one quad each** (a strip of 4 vertices): a flat cut-out, not a model and not a
+  sprite primitive. **2.03 units tall**, about 1 wide; x 19.8 to 25.5 with their feet at y 39.41, on top of the start
+  line's structure (`startline_rail`, draws 144-148, up to y 40.4) 6.4 units above the road: three at z -84.6 to
+  -86.0, three at -127.3 to -130.3, beside the two edges of the start straight. Fixed, facing +x within about 37
+  degrees (the way the race comes), not billboards. The same GE state as the crowd (alpha GREATER 0x7F, no blending,
+  modulate, fog, depth GREATER with writes), vertex colour 0xFFDFD9D3 (one 0xFF6C6A65). The HD pack's pitguy.zim is
+  128x256. The tt_hud frame holds no other human figure besides the crowd: its 126 textures are the pack's names but 23, and
+  those 23 (looked at) are solid colours, palettes, render targets, fonts and the HUD.
+- **Scale.** A spectator 2.24 to 2.52 units, a pit marshal 2.03, the road 41 wide, a ship 10.5 long: a 3D figure
+  of about 2.2 units stands in place of each crowd figure, about 0.85 apart.

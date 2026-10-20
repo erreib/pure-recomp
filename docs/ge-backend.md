@@ -189,6 +189,7 @@ to the framework's main, which `CMakeLists.txt` compiles as `portablekit_main` (
 ```
 build/arm64/bin/PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--compare] [--tol T] [--max-frac F]
                                               [--frames A[-B]] [--cut N] [--a NAME --b NAME [--first-diff]] [--quiet]
+build/arm64/bin/PureNative --replay FILE.gerec --extract FRAME --out DIR [--keys K1,K2,...]
 ```
 
 | Option | Meaning |
@@ -202,6 +203,8 @@ build/arm64/bin/PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--c
 | `--cut N` | (task 025) the last frame replayed (B of `--frames`, or the recording's last) only up to and including its Nth draw, counted from 1 as `--first-diff` counts, then flipped and captured; earlier frames whole. With `--out` the pictures stay (`DIR/a/frame_B.bmp` and `DIR/b/frame_B.bmp` with `--a`/`--b`), and with `--a`/`--b` or `--compare` they are compared as a whole frame would be (against the recorded image, which shows the whole frame, a cut frame mostly fails). The frame's line says `cut after draw N (R records)`; an N past its last draw replays it whole. `--first-diff` on a cut frame bisects within its first N draws |
 | `--first-diff` | with `--a`/`--b`: bisect the first failing frame to the first draw after which the two pictures differ |
 | `--quiet` | only failures and the summary |
+| `--extract FRAME` | (task 101, `src/tools/ge_extract.cpp`) with `--out DIR`, alone of the other options: replay into a null lane up to frame FRAME and write its draws as a scene, below |
+| `--keys K1,K2,...` | with `--extract`: frame.obj keeps only the draws whose texture key is listed; the JSON and the textures stay the whole frame's |
 
 Per frame it prints `[replay] frame N: D draws, R records, X ms`, then, when comparing,
 `diff F (tol T, P/N px at WxH) PASS|FAIL`. R counts the frame's records without its FrameEnd, the count the FrameEnd
@@ -224,6 +227,27 @@ buffer, texture (address, format, size, swizzle, palette, function, filters, wra
 mode with its flags, depth test and write masks. The search assumes that a prefix that differs stays different with
 more draws, which holds when a backend gets a draw wrong. When the pictures agree after the frame's last draw, it says
 the difference comes from the records after it.
+
+`--extract FRAME --out DIR` (task 101) is for the substitution work (3D crowds, skies): it replays every frame before
+FRAME into a null lane, which draws nothing but keeps the guest memory the Memory records fill, then hands each Draw of
+FRAME to `src/tools/ge_extract.cpp` with that memory as the draw saw it, and writes `DIR/frame.obj` and `frame.mtl`
+(one `o draw_NNNN_<key>` per transformed draw, NNNN from 1 as `--cut` counts, `usemtl <key>`, the MTL mapping each key
+to `textures/<key>.png`), `DIR/textures/<key>.png` (every texture the frame binds, decoded by the framework's
+`decode_texture` and written by its `TextureDumper` under `compute_texture_pack_key` with the HD pack's options, so
+the names are the pack's keys) and `DIR/frame.json` (the camera's view, the view most draws use, and the projection;
+every distinct view matrix with the draw ranges it covers; the most frequent world matrix; per draw its key,
+primitive, vertex and index counts, through mode, texture, world-space bounds, blend, alpha test, depth, stencil,
+lighting, fog, culling and a billboard guess). The vertices are in world space: the world matrix applied, the view
+left out, so the frame's scene stands in the track's frame. The matrices are the GE's as `ge_state.cpp` holds them:
+4x4 column-major, element (row, column) at `[column * 4 + row]`, applied as M * v, the translation in 12 to 14
+(`ge.vert`'s `push.transform * vec4(position, 1)`). Texture coordinates are the vertices' UVs times the texture scale
+plus its offset, v flipped for OBJ. Sprites are expanded as the Vulkan renderer expands them, in object space, which
+matches the GE only where the draw's rotation is the camera's: the GE spans a transformed sprite in screen space, so a
+sprite is always screen-aligned. Through-mode draws are in the JSON only; lines and points are skipped and counted.
+The billboard guess is true when a draw's world matrix is not the frame's usual one and the rotation of view x world
+is the identity within 0.02 (a screen-facing quad); `facing_view` is the fraction of a draw's triangles whose eye-space
+normal lies within 5 degrees of the view axis. Exit 0 written, 2 for a frame the recording does not hold. What it
+writes is derived from the game and stays under out/. The existing modes are unchanged by it.
 
 ### What the replay guarantees
 

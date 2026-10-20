@@ -6,12 +6,17 @@
 //
 //   PureNative --replay FILE.gerec [--backend NAME] [--out DIR] [--compare] [--tol T] [--max-frac F]
 //                                  [--frames A[-B]] [--cut N] [--a NAME --b NAME [--first-diff]] [--quiet]
+//   PureNative --replay FILE.gerec --extract FRAME --out DIR [--keys K1,K2,...]
+//
+// --extract (task 101, ge_extract.cpp) writes one frame's draws as an OBJ scene, its textures by pack key and a JSON
+// of its draws, from a null lane: no backend draws.
 //
 // It lives in the game's executable because the host layer is compiled into it and nowhere else (there is no host
 // library to link a tool against). The comparison is tools/imgdiff.py's, so the numbers agree with it.
 #include "ge_replay.hpp"
 
 #include "../gpu/ge_names.hpp"
+#include "ge_extract.hpp"
 #include "../helpers.hpp"
 #include "ge_record_format.hpp"
 
@@ -598,6 +603,8 @@ struct Options {
     std::string b;
     bool first_diff{};
     bool quiet{};
+    std::optional<std::uint32_t> extract;  // --extract FRAME
+    std::vector<std::string> keys;         // --keys: the draws frame.obj keeps
 };
 
 const char *const kUsage =
@@ -614,6 +621,10 @@ const char *const kUsage =
     "  --a, --b NAME   replay into two backends at once and compare their pictures per frame\n"
     "  --first-diff    with --a/--b: bisect the first failing frame to the first draw whose pictures differ\n"
     "  --quiet         print only failures and the summary\n"
+    "  --extract FRAME with --out DIR: replay into null up to frame FRAME and write its draws as DIR/frame.obj and\n"
+    "                  frame.mtl (world space), its textures as DIR/textures/<key>.png (the HD pack's keys) and\n"
+    "                  DIR/frame.json (every draw's state in short)\n"
+    "  --keys K1,...   with --extract: frame.obj keeps only the draws whose texture key is listed\n"
     "exit 0: every compared frame passed (or nothing was compared); 1: a frame failed; 2: bad arguments, a bad file\n"
     "or a backend that cannot run\n";
 
@@ -689,6 +700,15 @@ int parse(int argc, char **argv, Options &options) {
             options.first_diff = true;
         } else if (arg == "--quiet") {
             options.quiet = true;
+        } else if (arg == "--extract") {
+            if (!value(text) || text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
+                return usage_error("--extract takes a frame number");
+            options.extract = static_cast<std::uint32_t>(std::strtoul(text.c_str(), nullptr, 10));
+        } else if (arg == "--keys") {
+            if (!value(text) || text.empty()) return usage_error("--keys takes texture keys, separated by commas");
+            std::stringstream list(text);
+            for (std::string key; std::getline(list, key, ',');)
+                if (!key.empty()) options.keys.push_back(key);
         } else if (!arg.empty() && arg[0] == '-') {
             return usage_error("unknown option " + arg);
         } else if (options.file.empty()) {
@@ -701,6 +721,13 @@ int parse(int argc, char **argv, Options &options) {
     if (options.a.empty() != options.b.empty()) return usage_error("--a and --b go together");
     if (!options.a.empty() && options.backend_given) return usage_error("--backend or --a/--b, not both");
     if (options.first_diff && options.a.empty()) return usage_error("--first-diff needs --a and --b");
+    if (!options.keys.empty() && !options.extract) return usage_error("--keys needs --extract");
+    if (options.extract) {
+        if (options.out.empty()) return usage_error("--extract needs --out DIR");
+        if (!options.a.empty() || options.compare || options.cut != 0u || options.first_diff ||
+            (options.backend_given && options.backend != "null"))
+            return usage_error("--extract replays into null alone: no --backend, --compare, --cut or --a/--b");
+    }
     return 0;
 }
 
@@ -740,6 +767,7 @@ public:
 
     int run() {
         scale_ = recorded_scale(file_);
+        if (options_.extract) return extract(*options_.extract);
         const bool pair = !options_.a.empty();
         std::vector<std::unique_ptr<Lane>> owned;
         std::vector<Lane *> lanes;
@@ -915,6 +943,52 @@ public:
     }
 
 private:
+    // --extract: every frame before `number` replayed into a null lane, then that frame's records, each Draw handed to
+    // the extractor with the lane's memory as the draw saw it.
+    int extract(std::uint32_t number) {
+        std::size_t f = 0u;
+        while (f < file_.frames.size() && file_.frames[f].number != number) ++f;
+        if (f == file_.frames.size()) {
+            std::cerr << "[replay] frame " << number << " is not in " << options_.file << " (frames "
+                      << file_.frames.front().number << "-" << file_.frames.back().number << ")\n";
+            return 2;
+        }
+        Lane lane("null");
+        std::string error;
+        if (!lane.open("null", scale_, error)) {
+            std::cerr << "[replay] backend null cannot run: " << error << "\n";
+            return 2;
+        }
+        pure::extract::FrameExtract out(options_.out, number, options_.keys);
+        if (!out.open(error)) {
+            std::cerr << "[replay] " << error << "\n";
+            return 2;
+        }
+        const std::vector<Lane *> lanes{&lane};
+        for (std::size_t g = 0; g < f; ++g) {
+            const Frame &frame = file_.frames[g];
+            for (std::size_t r = frame.first; r < frame.end; ++r) apply(r, file_.records[r], lanes);
+            lane.flip(frame.display, {});
+        }
+        const Frame &frame = file_.frames[f];
+        for (std::size_t r = frame.first; r < frame.end; ++r) {
+            apply(r, file_.records[r], lanes);
+            if (file_.records[r].kind != Kind::Draw) continue;
+            gerec::RecordedDraw draw;
+            gerec::Reader in(file_.records[r].payload, file_.records[r].size);
+            in.get(draw);
+            out.draw(r, draw.call, *lane.memory);
+        }
+        lane.flip(frame.display, {});
+        std::string summary;
+        if (!out.finish(summary, error)) {
+            std::cerr << "[replay] " << error << "\n";
+            return 2;
+        }
+        std::cout << summary << "\n" << std::flush;
+        return 0;
+    }
+
     // Where frame `f`'s records end: its FrameEnd, or with --cut, for the last frame replayed, the record after its
     // Nth Draw.
     std::size_t records_end(std::size_t f) const {
