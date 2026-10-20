@@ -266,7 +266,9 @@ after a change that moves or renames a file, a tool or a patch.
   review's rule), on both renderers in the window and headless. Now: Erik models the marshal in Blender (y up,
   front +z, feet at the origin, a colour attribute, glTF with vertex colours; models/README.md) and
   `tools/model_import.py` writes models/pitguy.pmdl from it; then the crowd (a figure set, N figures per quad,
-  levels of detail by the triangle budget) and the row's default to Models. A "record now" key for recordings at a played
+  levels of detail by the triangle budget) and the row's default to Models. Later, Erik's
+  2026-10-20 notes: the figures animated (a pose cycle in the model file, played on the frame count), and a
+  figure that turns to follow the player's ship (the facing rule stays static until then: the side first seen). A "record now" key for recordings at a played
   moment is a small task when wanted (101, Open questions).
 - Photo mode during races (Erik, 2026-10-20; not scheduled): pause a race (the Esc menu already holds the guest),
   move a free camera around the frozen scene, hide the HUD, and save a capture at a chosen resolution. Nothing
