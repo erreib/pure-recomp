@@ -1,14 +1,20 @@
 diff --git a/host/audio/audio_sink.cpp b/host/audio/audio_sink.cpp
-index cac7873..32aa1c9 100644
+index cac7873..19878bb 100644
 --- a/host/audio/audio_sink.cpp
 +++ b/host/audio/audio_sink.cpp
-@@ -26,6 +26,13 @@ namespace {
+@@ -26,6 +26,19 @@ namespace {
  constexpr std::size_t kRingFrames = 8192u;
  // The device is kept two guest buffers ahead of the write cursor.
  constexpr std::size_t kPrebufferFrames = 2048u;
-+// A producer whose cursor is this far behind the device has stalled or restarted, not merely run late (a channel
-+// that keeps real time is never more than a buffer or two behind): it is snapped forward as before, a resync.
-+constexpr std::uint64_t kLateLimit = kPrebufferFrames;
++// A producer whose cursor is more than this far behind the device is snapped forward as before, a resync. Less
++// behind, it keeps its content and loses only the frames already played; but a producer at real time never
++// catches up by itself, so a deficit D costs D frames of silence on every write until the ratio has closed it
++// (441 frames a second), a cost that grows with the square of D and is total once D exceeds one write (about 750
++// frames: the whole write lands behind, the channel is mute for seconds). A snap costs one gap of kPrebufferFrames.
++// The two meet near 200 frames: the late rule is for a dip of a few milliseconds, which it was made for, and
++// anything larger is a click once (task 503: a played race's start at 90% speed for two seconds gave 1.4 s of
++// silence under a limit of 2048; under this one it gives three or four clicks).
++constexpr std::uint64_t kLateLimit = 256u;
 +// While a lead is rebuilt the device consumes the ring this much slower (about 17 cents of pitch), for as many
 +// device frames as it takes to regain kPrebufferFrames at that rate: 2048 / 0.01, about 4.6 s.
 +constexpr float kRecoveryRatio = 0.99f;
@@ -16,7 +22,7 @@ index cac7873..32aa1c9 100644
  
  [[nodiscard]] std::int16_t saturate(std::int32_t value) noexcept {
      return static_cast<std::int16_t>(std::clamp(value, -32768, 32767));
-@@ -101,6 +108,7 @@ struct AudioSink::Impl {
+@@ -101,6 +114,7 @@ struct AudioSink::Impl {
      bool closed{};
      bool enabled{true};
      bool trace{};
@@ -24,7 +30,7 @@ index cac7873..32aa1c9 100644
  
      WavWriter dump;
      std::vector<std::int16_t> scratch;
-@@ -114,6 +122,11 @@ struct AudioSink::Impl {
+@@ -114,6 +128,11 @@ struct AudioSink::Impl {
      // dry, so `silent` misses it).
      std::uint64_t window_resyncs{};
      std::uint64_t window_resynced{};
@@ -36,7 +42,7 @@ index cac7873..32aa1c9 100644
      std::int32_t window_peak{};
      double window_energy{};
      std::uint64_t total_frames{};
-@@ -121,7 +134,14 @@ struct AudioSink::Impl {
+@@ -121,7 +140,14 @@ struct AudioSink::Impl {
      std::uint64_t total_dropped{};
      std::uint64_t total_resyncs{};
      std::uint64_t total_resynced{};
@@ -51,7 +57,7 @@ index cac7873..32aa1c9 100644
  
      float gain{1.0f};
  #if defined(PORTABLEKIT_HAS_SDL_AUDIO)
-@@ -169,14 +189,16 @@ struct AudioSink::Impl {
+@@ -169,14 +195,16 @@ struct AudioSink::Impl {
          if (trace) {
              const std::uint64_t lead = write_end > read_position ? write_end - read_position : 0u;
              std::printf("[audio] %llus frames=%llu peak=%d rms=%.1f silent=%llu dropped=%llu resyncs=%llu "
@@ -70,7 +76,7 @@ index cac7873..32aa1c9 100644
              std::fflush(stdout);
          }
          window_frames = 0u;
-@@ -184,6 +206,8 @@ struct AudioSink::Impl {
+@@ -184,6 +212,8 @@ struct AudioSink::Impl {
          window_dropped = 0u;
          window_resyncs = 0u;
          window_resynced = 0u;
@@ -79,7 +85,7 @@ index cac7873..32aa1c9 100644
          window_peak = 0;
          window_energy = 0.0;
      }
-@@ -219,6 +243,7 @@ void AudioSink::initialize() {
+@@ -219,6 +249,7 @@ void AudioSink::initialize() {
      if (impl.started) return;
      impl.started = true;
      impl.trace = portablekit::env("TRACE_AUDIO") != nullptr;
@@ -87,7 +93,7 @@ index cac7873..32aa1c9 100644
      impl.enabled = portablekit::env("NO_AUDIO") == nullptr;
      const settings::Settings &player = settings::current();
      impl.gain = player.mute ? 0.0f : static_cast<float>(player.volume) / 100.0f;
-@@ -269,12 +294,15 @@ void AudioSink::shutdown() {
+@@ -269,12 +300,15 @@ void AudioSink::shutdown() {
      std::lock_guard<std::mutex> guard(impl.lock);
      if (impl.dump.active()) impl.dump.close();
      if (impl.trace) {
@@ -105,7 +111,7 @@ index cac7873..32aa1c9 100644
          std::fflush(stdout);
      }
  }
-@@ -313,6 +341,14 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+@@ -313,6 +347,14 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
                      std::uint32_t left_volume, std::uint32_t right_volume) {
      if (count == 0u) return;
      Impl &impl = *impl_;
@@ -120,7 +126,7 @@ index cac7873..32aa1c9 100644
      std::lock_guard<std::mutex> guard(impl.lock);
  
      // A buffer larger than the whole ring would overwrite its own start; only
-@@ -324,16 +360,47 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+@@ -324,16 +366,47 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
          count = kRingFrames;
      }
  
@@ -172,7 +178,7 @@ index cac7873..32aa1c9 100644
      }
  
      // The ring cannot hold what a runaway producer wants to write. Retire the
-@@ -369,6 +436,13 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+@@ -369,6 +442,13 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
          impl.scratch.resize(ready * kChannels);
          impl.retire(ready, impl.scratch.data(), true);
      }

@@ -681,3 +681,13 @@ because the race load's landing happened to arm the recovery while 777 to 2595 f
 arming threshold moved from a quarter of `kPrebufferFrames` to the whole of it, with a device present only (the
 no-device ring sits at exactly that lead): the rebuild starts while a lead is left and the deficit never forms. The
 ratio and the recovery length stand; a cursor more than `kLateLimit` behind still snaps.
+
+**2026-10-20, task 503.** Erik's played race (marked with patch 0032-trace-marks) showed the stall floor's cost: the
+race start ran at 87 to 91% for two seconds, the lead drained in half a second, and the deficit that formed, about
+1500 frames and so under the floor, stayed: every write landed entirely behind the device and was dropped whole,
+and the device played 1.4 s of silence after the dip had ended, until the ratio had closed the deficit at 441
+frames a second. The arithmetic: a deficit D costs D frames of silence per write until closed, a cost that grows
+with D squared and is total past one write; a snap costs one 2048-frame gap; they meet near 200 frames. So
+`kLateLimit` is 256: the late rule keeps content for the dip of a few milliseconds it was made for, and anything
+larger snaps once, as the old rule did. Nothing in the sink can do better for a producer below real time: at 88%
+speed, 12% of each second's sound does not exist (task 503).
