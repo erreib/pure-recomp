@@ -44,6 +44,10 @@ recompile), the interpreter, the kernel, the HLE, the GE parser and texture deco
 - 0031-audio-sink-late-writes: the sink keeps a late producer's content, `kRecoveryRatio` (D-023)
 - 0033-zim-textures: texture packs of ZIM images (`decode_zim` in host/gpu/texture_pack.cpp, D-024); zstd's decoder
   is ours, `cmake/Zstd.cmake` (`pure_zstd_decoder`, linked into PureNative after `portablekit_add_game`)
+- 0034-texture-pack-host: `gpu::TexturePackHost` (host/gpu/texture_pack_host.hpp, the six calls of the menu's Texture
+  pack row and the import screen), `VulkanRenderer` implements it; `active_texture_pack_host()` and
+  `set_active_texture_pack_host()` (hle_common.hpp, defined in texture_pack_screen.cpp); our Metal shell registers the
+  Metal backend (task 100)
 
 ## Replaced
 - The GE backend: `src/gpu/` registers `metal` (`BackendRegistration`), the macOS default (D-008;

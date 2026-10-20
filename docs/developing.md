@@ -70,7 +70,7 @@ merge waits on them. The table as it stood before task 092, with each tool's det
 | `tools/winwatch.m` | macOS diagnostic, built by hand: what covers the game's window during a window check | beside a check |
 | `tools/sprite_check.sh` | E7 with it on: seven scenes at internal scale 4 | about 40 s |
 | `tools/sprite_proto_check.py` | the sprite upscale against its prototype on `PURE_SPRITE_DUMP`'s textures | seconds |
-| `tools/sprite_pack.sh` | the upscaled art as a texture pack for the Vulkan renderer; `--check` it in the window; `--pack DIR` checks any pack folder, of PNG or ZIM images (task 099: the HD pack of D-024), with the keys, images decoded, draws replaced and GPU peak per route | about 8 minutes; `--check` 1 to 4 |
+| `tools/sprite_pack.sh` | the upscaled art as a texture pack for the Vulkan renderer; `--check` it in the window; `--pack DIR` checks any pack folder, of PNG or ZIM images (task 099: the HD pack of D-024), with the keys, images decoded, draws replaced and GPU peak per route; `--shell metal` checks in the Metal window, the Metal backend's loader (task 100; default `vulkan`), at internal scale 2 | about 8 minutes; `--check` 1 to 4 |
 | `tools/texture_check.sh` | E5 with it on: four race scenes at internal scale 4 | about 40 s; `--shell vulkan` 2 to 5 minutes |
 | `tools/aspect_check.sh` | E2: the view and the 2D fit under Fill in a 21:9 window; waits for another game (`frame_regress.sh --wait`) | about 4 minutes; `--shell metal` 30 s |
 | `tools/overlay_check.sh` | the performance overlay on the Metal shell; waits for another game (`frame_regress.sh --wait`) | about 25 s |
