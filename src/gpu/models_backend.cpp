@@ -16,11 +16,16 @@
 // consecutive pair, degenerate joins skipped, or a list's pair), and each quad is replaced by the model's figures:
 //   - the quad's corners in world space (its own world matrix applied); "up" from the corners of its lower v to
 //     those of its higher v, or the reverse, whichever points to world +y, its length the quad's height; "right" from
-//     its lower u to its higher u, made square to up; front = up x right (D-025's rule), turned round when it points
-//     away from the viewer (the eye of the draw's view matrix). Task 102 checked the rule on the pit marshal: it
-//     gives +x for draws 149-151, but the game draws 152-154 with u reversed (the same sprite mirrored, which a cut-out
-//     drawn without culling shows as a front view from either side), so for them it gives -x and the model would
-//     show its back to the race; the viewer's side is what the PSP shows, a front, and +x for all six from the race;
+//     its lower u to its higher u, made square to up; the front the winding normal of the quad's first triangle as
+//     the GE orders it (cross(B - A, C - A) of its corners 0, 1, 2; a strip's odd triangle has its first two
+//     swapped), made square to up, with no turn toward the viewer (task 104, D-025 as amended): measured on the
+//     extracted frames it is +x for all six pit marshals (toward the oncoming race) and toward the road for both
+//     grandstands, whatever the UVs' direction or the mirrored u of draws 152-154. The rules before it (the UV rule
+//     up x right; the viewer's side; the side first seen) gave some marshals their back: the intro camera of a Time
+//     Trial sees the booths from the far side first;
+//   - a set's figures (below) stand on world +y instead, the rise of the quad's v edge their height: some of the
+//     grandstands' quads are parallelograms whose v edges slant along the tier, 3.6 to 7.1 units long for a rise of
+//     2.3 to 2.4, and a figure stood along the slant would lie on the tier;
 //   - the model (models/README.md: y up, front +z, feet at 0, height 1) is turned so its y is up and its z the front
 //     (its x is then up x front), scaled uniformly by the quad's height and stood on the midpoint of the quad's bottom
 //     edge; with figures=N, N of them side by side across the quad's width;
@@ -662,6 +667,8 @@ private:
         const Clip *clip{};      // the first animated figure's clip and time
         double clip_time{};
         double skin_seconds{};  // the frame's skinning
+        double replace_seconds{};  // the frame's replace() calls, the inner backend's submits of their draws included
+        double submit_seconds{};   // those submits
     };
 
     // The clips' clock, once a frame: wall time, each step capped at kLargestStep, or the shown frame / 60.
@@ -710,7 +717,6 @@ private:
     // The row, once a frame (never per draw): the table read whenever it turns to Models.
     void read_option(bool at_start) {
         const bool on = portablekit::settings::game_option("crowd_models") == 1u;
-        if (on != on_) sides_.clear();  // a fresh first sight after a switch; the map is otherwise a few hundred places
         if (on && !on_) {
             table_ = read_table();
             std::cout << "[pure] crowd models: on (game.crowd_models), drawn by " << inner_name_ << "\n";
@@ -727,6 +733,9 @@ private:
         if (shown_.clip != nullptr)
             std::cout << "; clip " << shown_.clip->name << " t=" << shown_.clip_time << " (animated), skinned in "
                       << static_cast<long>(shown_.skin_seconds * 1e6) << " us";
+        if (shown_.replaced != 0u)
+            std::cout << "; replaced in " << static_cast<long>(shown_.replace_seconds * 1e6) << " us, "
+                      << static_cast<long>(shown_.submit_seconds * 1e6) << " of them the inner backend's";
         std::cout << "\n";
     }
 
@@ -782,7 +791,9 @@ private:
                 const std::uint32_t a = vertex_at(call, n), b = vertex_at(call, n + 1u), c = vertex_at(call, n + 2u),
                                     d = vertex_at(call, n + 3u);
                 if (!degenerate(call, a, b, c) && !degenerate(call, b, c, d)) {
-                    quads.push_back({a, b, c, d});
+                    // Corners 0 to 2 are the first triangle as the GE winds it: an odd one of a strip is (n+1, n, n+2).
+                    if (n % 2u == 0u) quads.push_back({a, b, c, d});
+                    else quads.push_back({b, a, c, d});
                     n += 2u;
                 } else {
                     n += 1u;
@@ -809,6 +820,7 @@ private:
 
     // Draws the figures for each of the draw's quads, batched; false (and nothing drawn) when no quad is placed.
     bool replace(const DrawCall &call, const Figure &figure, const GuestMemory &memory) {
+        const auto started = std::chrono::steady_clock::now();
         const std::vector<std::array<std::uint32_t, 4>> quads = quads_of(call);
         if (quads.empty()) return false;
         const bool is_set = !figure.set.empty();
@@ -843,7 +855,10 @@ private:
             if (draw.indices.empty()) return;
             draw.primitive_count = static_cast<std::uint32_t>(draw.indices.size() / 3u);
             counts_.vertices += draw.vertices.size();
+            const auto submitted = std::chrono::steady_clock::now();
             inner_->submit(draw, memory);
+            counts_.submit_seconds +=
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - submitted).count();
             ++drawn;
             draw.indices.clear();
             draw.vertices.clear();
@@ -862,16 +877,8 @@ private:
             if (!figure.tint) tint = 0xFFFFFFFFu;
             Vec3 base, up_axis, right_axis, front;
             float height = 0.0f, width = 0.0f;
-            if (!place(corners, base, up_axis, right_axis, front, height, width)) continue;
-            // The side a quad shows is the one the camera saw it from first, remembered by the quad's place (the
-            // review of task 102, D-025 as amended): the PSP draws a cut-out from both sides and the game mirrors u
-            // on half of the marshals, so neither the UV rule alone nor the viewer's side each frame gives a figure
-            // that both faces the race and stands still; a figure that turned round as the ship passed its plane
-            // would be seen doing it. The first sight is from the race's side for everything by the track.
+            if (!place(corners, is_set, base, up_axis, right_axis, front, height, width)) continue;
             const std::uint64_t place_key = quantise(base);
-            auto side = sides_.find(place_key);
-            if (side == sides_.end()) side = sides_.emplace(place_key, dot(front, sub(eye, base)) < 0.0f).first;
-            if (side->second) front = scale(front, -1.0f);
             // The model's x, y, z in world space: x = up x front (= -right), y = up, z = front.
             const Vec3 x_axis = cross(up_axis, front);
             // How many stand on the quad, and which of them the distance keeps: all under near, every second from
@@ -928,6 +935,7 @@ private:
             ++counts_.quads;
         }
         flush();
+        counts_.replace_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         if (placed == 0u) return false;
         ++counts_.replaced;
         if (is_set) ++counts_.set_replaced;
@@ -935,14 +943,15 @@ private:
         return true;
     }
 
-    // A quad's placement from its corners (D-025): false when its UVs or shape say nothing.
-    // A quad's place as a map key: its base to a tenth of a unit on each axis (the booths' quads are a unit apart).
+    // A quad's place for the hashes: its base to a tenth of a unit on each axis (the booths' quads are a unit apart).
     static std::uint64_t quantise(const Vec3 &p) {
         const auto q = [](float v) { return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::lround(v * 10.0f)) & 0x1FFFFF); };
         return q(p[0]) << 42 | q(p[1]) << 21 | q(p[2]);
     }
-    static bool place(const std::array<Corner, 4> &corners, Vec3 &base, Vec3 &up, Vec3 &right, Vec3 &front,
-                      float &height, float &width) {
+    // A quad's placement from its corners (D-025): false when its UVs or shape say nothing. `upright` (a set's):
+    // up is world +y and the height the v edge's rise.
+    static bool place(const std::array<Corner, 4> &corners, bool upright, Vec3 &base, Vec3 &up, Vec3 &right,
+                      Vec3 &front, float &height, float &width) {
         float u_low = corners[0].u, u_high = u_low, v_low = corners[0].v, v_high = v_low;
         for (const Corner &c : corners) {
             u_low = std::min(u_low, c.u), u_high = std::max(u_high, c.u);
@@ -964,15 +973,20 @@ private:
         Vec3 along_v = sub(v_hi, v_lo);
         Vec3 bottom = v_lo;
         if (along_v[1] < 0.0f) along_v = scale(along_v, -1.0f), bottom = v_hi;
-        height = length(along_v);
+        height = upright ? along_v[1] : length(along_v);
         if (height <= 1e-6f) return false;
-        up = scale(along_v, 1.0f / height);
+        up = upright ? Vec3{0.0f, 1.0f, 0.0f} : scale(along_v, 1.0f / height);
         Vec3 along_u = sub(u_hi, u_lo);
         along_u = sub(along_u, scale(up, dot(along_u, up)));
         width = length(along_u);
         if (width <= 1e-6f) return false;
         right = scale(along_u, 1.0f / width);
-        front = cross(up, right);
+        // The front: the first triangle's winding normal, square to up.
+        front = cross(sub(corners[1].world, corners[0].world), sub(corners[2].world, corners[0].world));
+        front = sub(front, scale(up, dot(front, up)));
+        const float facing = length(front);
+        if (facing <= 1e-9f) return false;
+        front = scale(front, 1.0f / facing);
         base = bottom;
         return true;
     }
@@ -983,7 +997,6 @@ private:
     bool trace_{};
     bool on_{};
     std::unordered_map<std::string, Figure> table_;
-    std::unordered_map<std::uint64_t, bool> sides_;  // a quad's place -> its front turned round (first sight)
     // This frame's lookups: (address, palette address, palette word, format and size) -> figure or null.
     std::map<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>, const Figure *> seen_;
     Counts counts_{};
