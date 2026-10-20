@@ -72,13 +72,25 @@ vulkan: 100 Hz display, margin 0.005, the game at 99.49 Hz (10051 us a vblank); 
 display_rate_check: PASS (audio, vulkan, margin 0.005, 10051 us a vblank: 0 resyncs, 0 seconds under 95% and 1 under 99% (reported), medians 99.5 presents and 99.5 game flips a second)
 ```
 
+Erik's second marked race (`out/ear/run2.log`, the same day, right after): "Seemed almost perfect this time. I just
+noticed one tiny tiny stutter in the intro camera sequence." One mark, at host second 20, race second 2, and the log
+under it:
+
+| Audio second | `resyncs=` | `resynced=` | `silent=` | `lead=` | the host's second |
+|---|---|---|---|---|---|
+| 20s | 2 | 5789 | 1693 (38 ms) | 91 | race second 2: speed 80%, worst frame 44 ms |
+| 21s | 1 | 2498 | 450 (10 ms) | 4137 | race second 3: 100% |
+
+Three clicks and 48 ms of silence across the race's slow start (the intro camera, the one second of the race under
+95%: 80%), where the first race had 1.4 s of silence; then nothing for 160 race seconds: `late=0 silent=0
+resyncs=0` on every line, the speed median 100%, and the Esc menu opened and closed twice mid-race (0.7 s and 0.6 s)
+with the lead holding at 5400 to 6500 and no event on either side, where the first race's 2.6 s menu had two snaps
+and 15000 late frames on resume. The reader names the start's snaps `a dip ate the lead (80% speed)` (its wording
+changed with this run: under a 256-frame floor a jump under 4096 frames is a dip's, the old rule's or not).
+
 Open questions:
-- Erik's ear on the same race with the marks: the race start should now be three or four clicks across its two slow
-  seconds instead of 1.4 s of silence, and effects-heavy seconds clicks rather than a mix; `tools/audio_hiccups.py`
-  will name each mark's second.
-- The Esc menu's resume (two snaps and 15000 to 21000 late frames in the second after each close, in the first
-  marked race) is a case of its own: the device is paused with the game (the lead holds at 7400 through the menu),
-  so what runs late on resume is worth a trace of its own before a rule is written for it.
-- The seconds a played race runs under speed (7 of 167) are the pacer's question (docs/status.md, "Open calls"),
-  not the sink's: at 88% speed 12% of the second's sound does not exist, and the sink can only choose the shape of
-  its absence.
+- The intro camera's second runs at 80% on this machine (worst frame 44 ms): the pacer's question (docs/status.md,
+  "Open calls"), not the sink's; at 80% speed a fifth of that second's sound does not exist, and 48 ms of it in three
+  pieces is the sink's best shape for it short of a pitch drop to match.
+- The Esc menu's resume was clean twice here (short menus) and not once in the first race (a 2.6 s menu, before this
+  floor): a trace of a long menu on this sink before anything is written for it.

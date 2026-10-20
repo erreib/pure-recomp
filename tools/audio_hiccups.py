@@ -7,10 +7,11 @@ event was, so a hiccup heard at a wall-clock time can be matched to its cause:
   restart   a channel that sat idle and restarted (a jump over a second of audio, purelib.logs.RESTART_FRAMES):
             nothing that was playing skipped
   snap      a producer jumped forward (`resyncs=`): a click. Named by the jump and the host's seconds around it:
-            `the old rule at a dip` when the jump is under OLD_RULE_JUMP frames (PURE_AUDIO_SNAP=1's snap of a
-            producer that was not behind the device by the sink's late limit), else `a host stall` when the worst
-            frame of the `[perf]` second before or after is over STALL_MS (the machine, or the race load), `the race
-            under speed` when either ran under SLOW_SPEED% (the game cannot keep real time), else `unexplained`
+            `a dip ate the lead` when the jump is under DIP_JUMP frames (the producer was at most a few buffers
+            behind: the sink's floor, 256 frames since task 503, or PURE_AUDIO_SNAP=1's old rule, which snaps at a
+            lead under 512), else `a host stall` when the worst frame of the `[perf]` second before or after is over
+            STALL_MS (the machine, or the race load), `the race under speed` when either ran under SLOW_SPEED% (the
+            game cannot keep real time), else `unexplained`
   late      the sink's rule (patch 0031-audio-sink-late-writes): writes under the lead (`lates=`), with the
             frames already played dropped (`late=`) and the silence the device played (`silent=`); the 1% rebuild
             follows. With `late=0` and `silent=0` it is the rule arming, nothing audible
@@ -32,7 +33,7 @@ from purelib.logs import PACED, RESTART_FRAMES, perf  # noqa: E402
 
 STALL_MS = 50          # a worst frame over this in a host second beside the event: a stall (five vblanks at 100 Hz)
 SLOW_SPEED = 95        # a host second under this speed: the race not keeping real time
-OLD_RULE_JUMP = 4096   # the sink snaps a cursor over 2048 behind to 2048 ahead: a mean jump under this is the old rule's
+DIP_JUMP = 4096        # a snap lands 2048 ahead: a mean jump under this came from a cursor under 2048 behind, a dip's
 AUDIO_FIELDS_RE = re.compile(r"^\[audio\] (\d+)s frames=(\d+) .*silent=(\d+) .*resyncs=(\d+) resynced=(\d+) "
                              r"lead=(\d+) lates=(\d+) late=(\d+) ratio=([\d.]+)")
 MARK_RE = re.compile(r"^\[mark\] (\d+)")
@@ -46,8 +47,8 @@ def name(a, hosts):
     if resyncs and resynced // resyncs > RESTART_FRAMES:
         return f"restart: {resyncs} channel{'s' if resyncs > 1 else ''} restarted ({resynced} frames), no skip"
     if resyncs:
-        if resynced // resyncs < OLD_RULE_JUMP:
-            why = "the old rule at a dip (PURE_AUDIO_SNAP)"
+        if resynced // resyncs < DIP_JUMP:
+            why = "a dip ate the lead" + (f" ({slowest}% speed)" if slowest < SLOW_SPEED else "")
         elif worst > STALL_MS:
             why = f"a host stall ({worst:.0f} ms worst frame)"
         elif slowest < SLOW_SPEED:
