@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on Vulkan: D-024, task 099 merged, task 100 briefed). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers: D-024, tasks 099 and 100 merged). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -31,7 +31,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | DLC | the US download packs (D-005) | done 2026-10-12 (tasks 077-download-packs, 078-download-packs-menu) |
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
-| HD pack | NR74W's HD texture pack (D-024) | task 099 merged 2026-10-20: the pack draws on the Vulkan renderer (127 images on the race route, 11 on the menus), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR` the check; task 100 (the Metal loader) briefed |
+| HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
 | Crowd | 3D crowd and people models in place of the track-side sprites | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
@@ -45,7 +45,7 @@ a 100 Hz display).
 |---|---|
 | Toolchain | Mac: `tools/check_env.sh` (arm64 cmake and ninja, SDL3, MoltenVK, Ghidra 12.1.4, PPSSPP); the rig: clang-cl on the `win-x64` preset, Git Bash (docs/setup.md) |
 | Disc and game | `tools/iso_extract.py` verifies CRC 4502C588 and extracts `disc/`; `tools/setup_game.sh` lays out `game/` |
-| Vendor | PortableKit at 8b0c3fe with 32 patches by topic (numbered to 0033; 0025 removed) (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
+| Vendor | PortableKit at 8b0c3fe with 33 patches by topic (numbered to 0034; 0025 removed) (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
 | Corpus | `tools/regen.sh` (85 s): 144 units on the Mac, 145 on the rig, inlined on both since patch 0026-corpus-inlining; `PSPRECOMP_NO_INTERPRETER=1` runs clean |
 | The game | the whole single-player game: every mode, class, league and circuit; the movies, the music and the sound with the SAS reverb; saves in the PSP's format with the save list, import, export and backups; the twelve US download packs |
 | Mac, Metal (the default) | the Metal shell and backend (D-008): the drawable at the display's pixels, internal scale Auto, Fill, texture detail, the flashes smoothed, the 30-fps modes at 60, the race at 119.40 Hz on the 120 Hz display (E8), the performance overlay (F3) |
@@ -224,16 +224,19 @@ after a change that moves or renames a file, a tool or a patch.
   (the first race's 2.6 s menu snapped twice on resume). The Mac's probe on both shells at the merge (2026-10-20):
   PASS, unchanged, 0 resyncs and 0 seconds under 95% on each, `lates=0` (098, "The Mac's probe at the merge").
 - Menu refinements: Erik's to name.
-- The HD texture pack (Erik, 2026-10-14; picked 2026-10-20, D-024): task 099 merged 2026-10-20. The build
-  downloads zstd 1.5.7 once (cmake/Zstd.cmake, the SHA-256 pinned) and compiles its decoder; patch
-  0033-zim-textures reads ZIM images in the loader's `decode` (raw, zlib or zstd; level 0 of a mip chain);
-  `tools/sprite_pack.sh --pack DIR` is the texture pack check and PASSes on the HD pack in the Vulkan window (the
-  race route: 182 keys found, 127 images uploaded, 599 MB on the GPU at the peak; the menus: 11; 54 files the ini
-  names are not in the reupload). Next: task 100, the Metal backend's pack loader (briefed), then the rig's build
-  with the decoder and the same check with the pack copied there (Vulkan on Windows). Both bundles ship
-  `licenses/Zstandard-LICENSE.txt` since 2026-10-20 (the macOS app repacked and looked at; the Windows copy line is
-  the rig's to prove at its next pack). Follow-up: the framework's SOURCE_PROVENANCE row with the upstream request. The pack is derived art: never in this repository
-  or an archive; a player imports it through the menu.
+- The HD texture pack (Erik, 2026-10-14; picked 2026-10-20, D-024): tasks 099 and 100 merged 2026-10-20. The
+  build downloads zstd 1.5.7 once (cmake/Zstd.cmake, the SHA-256 pinned) and compiles its decoder; patch
+  0033-zim-textures reads ZIM images in the loader's `decode`; patch 0034-texture-pack-host lets the menu's pack
+  rows and the import screen ask whatever draws packs, and src/gpu/metal_texture_pack.mm is the Metal backend's
+  loader (upload with mips, a 1 GB budget, the Vulkan renderer's trace lines). `tools/sprite_pack.sh --pack DIR`
+  PASSes on the HD pack in both windows (the race route: 182 keys found, 127 images uploaded, 594 to 599 MB on
+  the GPU at the peak; the menus: 11; 54 files the ini names are not in the reupload); the race holds 60 fps on
+  Metal with the pack. The README tells a player how to fetch and import it. Owed: Erik's eye on the import screen
+  under Metal (the row should read "4170 textures") and on the deeper menus; the rig's build with the decoder and
+  the same check with the pack copied there (Vulkan on Windows). Both bundles ship `licenses/Zstandard-LICENSE.txt`
+  (the macOS app repacked and looked at; the Windows copy line is the rig's to prove). Follow-up: the framework's
+  SOURCE_PROVENANCE row with the upstream request. The pack is derived art: never in this repository or an
+  archive; a player imports it through the menu.
   Then, Erik's call of 2026-10-20: once the pack's menus draw on both renderers and look better than the sprite
   upscale (he expects they do), retire E7's upscale: the Text and sprites row, src/gpu/sprite_upscale.*, the
   upscale path in metal_textures.mm, `PURE_SPRITE_UPSCALE` and `PURE_SPRITE_DUMP`, tools/sprite_check.sh, the pack

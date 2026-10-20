@@ -814,7 +814,7 @@ What differs from the Vulkan renderer:
 
 | Part | Vulkan renderer | Metal backend |
 |---|---|---|
-| The sampler | its own for replacements: linear with mips (nearest under Texture filter Sharp), the level the GPU picks from the replacement's size; a replaced draw counts one level | the draw's own (metal_draw.mm, unchanged): the GE's filter bits (linear for an upscalable 2D draw with Text and sprites at Upscaled); for a texture with levels the GE's level rule and Texture detail as for the original, which sample the replacement's generated chain from its finer level 0 (clamped to the original's level count); for a texture of one level the replacement's level 0 alone (the sampler has no mip filter), so an image four times the original's size drawn at internal scale 1 is minified 4:1 without levels |
+| The sampler | its own for replacements: linear with mips (nearest under Texture filter Sharp), the level the GPU picks from the replacement's size; a replaced draw counts one level | the draw's own index with, for a one-level original replaced (the review of task 100, metal_draw.mm), linear filters, linear between the levels and anisotropic: the shader's plain `sample()` (no level rule set) takes the GPU's own level, so the larger image is minified through its mips as on Vulkan; a mipmapped original keeps the GE's level rule over the replacement's chain |
 | The upload | a staging buffer and a command buffer with a fence; a drop waits for it | a command buffer an image, no fence (ARC) |
 | Opening | at start and at `begin_frame` | at the first `begin_frame`, then at each, or at once between frames from the menu |
 | The cache drop | at every open and close | only when a pack was open or opens |

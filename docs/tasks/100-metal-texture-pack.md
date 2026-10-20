@@ -298,4 +298,22 @@ Open questions:
   runs print.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge and one change of its own): `tools/patches.sh check`
+ok (33), `tools/docs_check.py` PASS, `tools/menu_check.sh --shell vulkan` PASS (the owed window check: the Vulkan
+rows unchanged), and `tools/sprite_pack.sh --pack ~/Downloads/WipEout-Pure-HD-Texture-Pack --shell metal --out
+out/100/review` PASS in 3 min 28 s: 11 keys on the menu route, 182 found and 127 uploaded on the race route, 594 MB
+at the peak, 0 refused, main_menu reduced 0.0484 and race_hud 0.2146, the HUD found; the 1920x1088 race capture
+looked at: the track, the crowd, the stands and the HUD are the pack's, crisp.
+Spot-read: patch 0034 is the seam the brief asked for and nothing more (the Texture filter row stays the
+renderer's); the loader's states, the per-frame cap, the eviction (not drawn in 4 frames, down to 7/8 of the
+budget, the replacement set back to Unloaded) and the upload (a private texture, a staging buffer, generateMipmaps
+in a command buffer of its own on the frame's queue) read right; `drawing_` in `submit` and the CMake line were the
+two lines outside May touch, both needed. The open question on sampling was real and is fixed in the review:
+a one-level original's replacement was sampled from level 0 alone (no mip filter on the draw's sampler); the
+replaced draw now takes linear filters, linear between levels and anisotropy, and the shader's plain `sample()` picks
+the GPU's own level (252edc5, six lines in metal_draw.mm; the check's main_menu figure moved from 0.0491 to 0.0484).
+Merged: 9a9c6e8 into batch/m2.
+Notes: still owed to Erik's eye: the import screen under Metal (import the pack from the Esc menu into the real data
+directory and read "4170 textures" on the row), and whether the pack's menus look better than E7's upscale (status,
+Next: the retirement of the upscale waits on it). The double open after an import (hold off, then reload) is
+wasteful and harmless; left. The counts the brief got wrong by a few are the Result's.

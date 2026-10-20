@@ -47,7 +47,8 @@ The read-me inside each archive has the details.
     on a 120 Hz display);
   - the full-screen flashes smoothed;
   - sharper textures at distance (mipmap detail at the internal resolution);
-  - the menu art upscaled (off by default).
+  - the menu art upscaled (off by default);
+  - an HD texture pack, if you download one: the menus, fonts and race art drawn from it on both renderers (below).
 - **Controls**: keyboard with two layouts, PlayStation and Xbox gamepads as themselves, and every key rebindable.
 - **Faithful by default.** The reference is the PSP's own output: the port's checks compare its frames with PPSSPP
   captures, and the behaviour differences found along the way are fixed or explained in
@@ -79,8 +80,9 @@ back. The game pauses while it is open, unless you tell the System tab otherwise
 - **Video.** Resolution (Auto follows the window; or a multiple of the PSP's 480x272), Display and Window size,
   Aspect ratio (Original keeps the PSP's shape with bars, Stretch fills the window, Fill draws the view at the
   window's shape: the ultrawide option), Scaling filter, Vsync, Game speed and Fast loading, **Performance** (the
-  frame rate and frame times in the top-left corner; F3 shows or hides it), and on Windows the
-  Frame rate row (frame interpolation) and texture filtering and packs. At the end of the tab, the game's own
+  frame rate and frame times in the top-left corner; F3 shows or hides it), **Texture pack** with Import texture
+  pack… and Open the textures folder (below), and on Windows the Frame rate row (frame interpolation) and texture
+  filtering. At the end of the tab, the game's own
   enhancements: **30 fps modes** (60 fps, or the PSP's 30), **Flashes** (smoothed, or the original), **Text and
   sprites** (original, or upscaled), **Texture detail** (enhanced, or the original), **Display rate** (the races at
   your display's refresh, or the PSP's 60).
@@ -90,6 +92,21 @@ back. The game pauses while it is open, unless you tell the System tab otherwise
 - **System.** Resume, pausing, open the data folder, set up the game data again (another disc image), quit; your
   profiles with import, export and backups; the download packs, how many are installed and a button to install
   more; and what build you are running.
+
+## The HD texture pack
+
+The port draws texture packs in PPSSPP's format, PNG or ZIM images. The one it is checked with is NR74W's WipEout
+Pure HD texture pack, kept at <https://github.com/0xf0xx0/WipEout-Pure-HD-Texture-Pack>: about 870 MB, 1331 images
+of the menus, the fonts, the intro cards and the race art. It is someone else's work on the game's art, so it is not
+in this download; you fetch it yourself.
+
+1. On that page, Code, then Download ZIP, and unpack the zip anywhere.
+2. In the game: Esc, Video, Import texture pack…, and choose the unpacked folder (the one that holds `textures.ini`).
+   The port copies it into its data folder, next to your saves, and keeps a pack it replaces in a backup folder.
+3. The Texture pack row on the same tab turns it on and off and says how many textures it holds.
+
+The art replaces as the game first draws it. Some screens keep the original art: the pack's list names files its
+upload does not hold. With a pack installed, Text and sprites does nothing more and can stay at Original.
 
 ## Known issues
 
