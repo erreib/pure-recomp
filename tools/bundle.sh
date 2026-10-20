@@ -134,6 +134,12 @@ pack() {
   mkdir -p "$BUILD/bin/$RESOURCES"
   cp "config/$LIST" "$BUILD/bin/$RESOURCES/" || exit 1
   echo "== $BUILD/bin/$RESOURCES/$LIST for Contents/Resources: $(list_counts "config/$LIST")"
+  # Zstandard's licence (task 099, D-024: the decoder is compiled from the pinned source cmake/Zstd.cmake downloads
+  # into $BUILD/_deps/zstd): shipped as licenses/Zstandard-LICENSE.txt beside the others the packer collects.
+  local zstd_license
+  zstd_license=$(ls $BUILD/_deps/zstd/zstd-*/LICENSE 2>/dev/null | head -1)
+  [ -n "$zstd_license" ] || { echo "bundle: no Zstandard licence under $BUILD/_deps/zstd (cmake/Zstd.cmake)"; exit 1; }
+  packer_args+=(--license "Zstandard=$zstd_license")
   echo "== packing $NAME $version: release_macos.sh --game . ${packer_args[*]} $BUILD"
   # The packer is not executable at the pin (mode 100644), so bash runs it.
   bash vendor/portablekit/scripts/release_macos.sh --game . --version "$version" "${packer_args[@]}" $BUILD || {

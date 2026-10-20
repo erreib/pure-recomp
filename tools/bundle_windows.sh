@@ -14,7 +14,7 @@
 #   LICENSE.txt          ours (GPL-2.0-or-later); README.txt from packaging/windows/README.txt
 #   BUILDINFO.txt        the version, the commit, the toolchain and the pins
 #   licenses/            FFmpeg-LICENSE.txt and FFmpeg-SOURCE.txt (the build's), PortableKit's, SDL3's, Dear ImGui's,
-#                        tiny-AES-c's and xxHash's licences, and packaging/THIRD_PARTY_NOTICES.md
+#                        tiny-AES-c's, xxHash's and Zstandard's licences, and packaging/THIRD_PARTY_NOTICES.md
 # The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty]; at a release, HEAD exactly at
 # the tag v<project version> with no uncommitted change, the version alone, 0.1.0 (task 087). A v-tag at HEAD that is
 # not v<project version> stops the pack. BUILDINFO.txt names the commit either way (docs/release.md, "Publishing").
@@ -70,7 +70,7 @@ FOLDER="$ROOT/$STAGE/$NAME"
 EXE="$FOLDER/$NAME.exe"
 DLLS="SDL3.dll avcodec-61.dll avutil-59.dll swresample-5.dll"
 LICENSES="FFmpeg-LICENSE.txt FFmpeg-SOURCE.txt PortableKit-LICENSE.txt SDL3-LICENSE.txt DearImGui-LICENSE.txt
-tiny-AES-c-UNLICENSE.txt xxHash-LICENSE.txt THIRD_PARTY_NOTICES.md"
+tiny-AES-c-UNLICENSE.txt xxHash-LICENSE.txt Zstandard-LICENSE.txt THIRD_PARTY_NOTICES.md"
 DOCS="README.txt licenses/THIRD_PARTY_NOTICES.md"   # our own texts for the player (the content check lists their hits)
 # Where the source lives (task 087): README.txt names it. The GitHub account in it is the user's name, which the
 # machine check looks for, so the check reads DOCS without this address.
@@ -154,6 +154,10 @@ stage() {
   cp vendor/portablekit/third_party/imgui/LICENSE.txt "$FOLDER/licenses/DearImGui-LICENSE.txt"
   cp vendor/portablekit/third_party/tiny_aes/UNLICENSE "$FOLDER/licenses/tiny-AES-c-UNLICENSE.txt"
   cp vendor/portablekit/third_party/xxhash/LICENSE "$FOLDER/licenses/xxHash-LICENSE.txt"
+  # Zstandard's (task 099, D-024): the decoder's pinned source, downloaded by cmake/Zstd.cmake into the build directory.
+  zstd_license=$(ls $BUILD/_deps/zstd/zstd-*/LICENSE 2>/dev/null | head -1)
+  [ -n "$zstd_license" ] || { echo "bundle_windows: no Zstandard licence under $BUILD/_deps/zstd (cmake/Zstd.cmake)"; exit 1; }
+  cp "$zstd_license" "$FOLDER/licenses/Zstandard-LICENSE.txt"
   cp packaging/THIRD_PARTY_NOTICES.md "$FOLDER/licenses/"
   {
     printf '%s %s for Windows x64\r\n' "$NAME" "$v"

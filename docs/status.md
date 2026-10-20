@@ -229,9 +229,9 @@ after a change that moves or renames a file, a tool or a patch.
   `tools/sprite_pack.sh --pack DIR` is the texture pack check and PASSes on the HD pack in the Vulkan window (the
   race route: 182 keys found, 127 images uploaded, 599 MB on the GPU at the peak; the menus: 11; 54 files the ini
   names are not in the reupload). Next: task 100, the Metal backend's pack loader (briefed), then the rig's build
-  with the decoder and the same check with the pack copied there (Vulkan on Windows). Follow-ups: the bundles
-  ship no zstd LICENSE file (the notices quote it; a `--license` line in tools/bundle.sh and bundle_windows.sh), the
-  framework's SOURCE_PROVENANCE row with the upstream request. The pack is derived art: never in this repository
+  with the decoder and the same check with the pack copied there (Vulkan on Windows). Both bundles ship
+  `licenses/Zstandard-LICENSE.txt` since 2026-10-20 (the macOS app repacked and looked at; the Windows copy line is
+  the rig's to prove at its next pack). Follow-up: the framework's SOURCE_PROVENANCE row with the upstream request. The pack is derived art: never in this repository
   or an archive; a player imports it through the menu.
   Then, Erik's call of 2026-10-20: once the pack's menus draw on both renderers and look better than the sprite
   upscale (he expects they do), retire E7's upscale: the Text and sprites row, src/gpu/sprite_upscale.*, the
