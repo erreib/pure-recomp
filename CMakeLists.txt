@@ -28,7 +28,7 @@ portablekit_add_game(PureNative
     HOST_MAIN_NAME portablekit_main
     SOURCES src/profile/pure_profile.cpp src/profile/enhancements.cpp src/profile/test_hooks.cpp
             src/profile/aspect.cpp src/hle/audio_capture.cpp
-            src/host/pure_main.cpp src/tools/ge_replay.cpp src/tools/record_backend.cpp
+            src/host/pure_main.cpp src/tools/ge_replay.cpp src/tools/ge_extract.cpp src/tools/record_backend.cpp
             ${platform_sources})
 
 # Zstandard's decoder for the ZIM images of HD texture packs (D-024, task 099): the framework compiles
