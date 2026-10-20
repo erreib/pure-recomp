@@ -214,9 +214,14 @@ after a change that moves or renames a file, a tool or a patch.
   and found the late rule's hole, closed by task 503 (the stall floor 2048 to 256 frames). His second race on it:
   "almost perfect", one tiny stutter at the intro camera (the race's one second under 95%: three clicks, 48 ms,
   at 80% speed), nothing else in 160 seconds, two short Esc menus clean. What is left for the sound at 100 Hz is
-  the pacer's question (Open calls): the seconds the race cannot keep real time. Next: a long Esc menu's resume
-  traced on this sink (the first race's 2.6 s menu snapped twice on resume), then the merge. The Mac's probe on
-  both shells at this merge (planning session, expected unchanged).
+  the pacer's question (Open calls): the seconds the race cannot keep real time. His third start, traced
+  (503, "The intro camera's second, traced"): one 22 ms snap he did not hear; the second is three costs, the
+  game's own track streaming in 30 to 47 ms frames (the kernel does not preempt), one 32 ms first-use render
+  frame, and GPU fence waits at 3440x1440. Next, in order: task 504 (a lead switch, Erik's ear at 93 ms, then a
+  prewarm of the first-use uploads at the load; briefed in 503), a long Esc menu's resume traced on this sink
+  (the first race's 2.6 s menu snapped twice on resume), the Mac's probe on both shells at the merge (planning
+  session, expected unchanged: `tools/display_rate_check.sh --audio` and `--audio --shell vulkan` now bound the
+  paced race at no resync and print the load's apart).
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal

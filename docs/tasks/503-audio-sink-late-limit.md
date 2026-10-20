@@ -94,3 +94,30 @@ Open questions:
   pieces is the sink's best shape for it short of a pitch drop to match.
 - The Esc menu's resume was clean twice here (short menus) and not once in the first race (a 2.6 s menu, before this
   floor): a trace of a long menu on this sink before anything is written for it.
+
+## The intro camera's second, traced (2026-10-20, Erik's third race)
+
+Erik's A/B by ear: at a lower Resolution the start's click is "definitely less noticeable" but still there, and the
+overlay's frame graph goes irregular for an instant. Then one race start at his settings (3440x1440, Display) with
+`PURE_TRACE_STALLS=1 PURE_TRACE_STALLS_MS=12 PURE_TRACE_AUDIO=1 PURE_PERF=log` (`out/ear/run3.log`): this start had
+one snap (`resynced=3005`, `silent=957`, 22 ms) and he did not notice it; the second race's had three (48 ms). The
+`[slow-frame]` lines of race second 1 (speed 93%, worst frame 123 ms) are three different costs:
+
+| Frames | What the line says | Cost |
+|---|---|---|
+| 550 | `pacing 108 ms`: the pacer holding the game after the load | not audible |
+| 553, 554, 555 | `guest 30.5`, `47.1`, `36.4 ms`: three frames of the game's own work, where the `[io]` lines open the track, the billboards and every ship | 114 ms in a row |
+| 558 | `render 32.3 ms`: one frame of the renderer's CPU time, first-use uploads (`copy x2`, `decode 1.1`) | 32 ms |
+| 559, 585, 599 | `fence 8.3`, `8.6`, `14.2 ms`: waiting on the GPU, the flyby at 3440x1440 (`gpu(prev)` 4 ms, second 2's `[stalls]` fence max 14.16) | the resolution-dependent part |
+
+The guest spikes are the game streaming the track during the flyby, as on the PSP, where the kernel preempts the
+game thread and the audio thread keeps writing; the port's kernel switches threads at the game's yields, so 47 ms of
+game work is 47 ms with nothing written, against the sink's 46 ms lead (`kPrebufferFrames` 2048). The render frame
+is once a race and would move to the load screen with a prewarm. The fence waits are pixels.
+
+Task 504, briefed from this: (1) a test switch for the sink's lead (`PURE_AUDIO_LEAD=N` frames) and Erik's ear at
+4096 (93 ms): a silent-free start says the cushion is enough, and the question becomes the 46 ms of added sound
+latency in play (his ear; if felt, a race-start-only lead trimmed back at a ratio of 1.01 over the next 20 s);
+(2) if not enough, the first-use uploads prewarmed at the race load; (3) the guest spikes are the kernel's
+preemption question, the pacer-sized design in docs/status.md's "Open calls", not this task's. Not urgent: the
+third start was not heard.
