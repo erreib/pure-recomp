@@ -68,7 +68,10 @@ The Wipeout Pure column holds only what a run showed: the game's controls screen
 routes in `config/pad_scripts/` (Start at the title and over the intro movie, `dpdown` and `dpup` in the menus, the
 sweep's steering). A key the stick actions press pushes the stick fully (127 from the centre); two opposite keys
 cancel out. Outside the bindings, Esc opens the menu and F3 toggles the performance overlay (in both shells, the
-Metal shell's since task 090); neither can be bound.
+Metal shell's since task 090); neither can be bound. In a traced run (`PURE_TRACE_AUDIO=1` or `PURE_PERF=log`) F8,
+or one stick clicked alone, prints a `[mark] N` line into the log in step with the trace lines (patch
+0032-trace-marks, task 502: a listener marks a hiccup as it is heard; `tools/audio_hiccups.py` shows the marks beside
+the sound's events); an untraced run prints nothing, and F8 still reaches the game if it is bound.
 
 ## The mouse
 
