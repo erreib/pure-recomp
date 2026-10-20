@@ -32,6 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack | on the roadmap, not scheduled (Next) |
+| Crowd | 3D crowd and people models in place of the track-side sprites | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
 
 ## Works
@@ -226,5 +227,12 @@ after a change that moves or renames a file, a tool or a patch.
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
   backend; each with a check counting replacements on the race and menu routes. The pack is derived art: never in this
   repository or an archive ([the roadmap entry](history/sessions.md#the-arcs-2026-10-08-to-2026-10-15)).
+- 3D crowd and people models (Erik, 2026-10-20; not scheduled): the track-side spectators and figures the game
+  draws as flat sprites, drawn as models instead. Nothing looked at yet. The first task is a survey, not a change:
+  how the game draws them (which draws, textures and lists on the race routes; `PURE_TRACE_GE` and a .gerec), what a
+  substitution hook in the two renderers would key on (the texture or the draw's signature), and where the models
+  would come from (made for this port, never the game's or another game's bytes). Then one renderer, then the other,
+  each with a check counting substituted draws on the race route, and an Esc-menu row with Original one choice away,
+  like every enhancement.
 - E1, the controls; the VR spike (task 088, on the rig); the candidates named after E7: the frontend at 60 fps and the
   menu-XML spike (new in-game options).
