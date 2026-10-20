@@ -694,7 +694,8 @@ its header (ZLIB_COMPRESSED 256, stb_image's `stbi_zlib_decode_malloc_guesssize_
 0, each half the last, `floor(log2(min side)) + 1` of them at most 12, and only level 0 is kept, the loader's rule for
 PNG packs too. The other flags (GEN_MIPS, DITHER, CLAMP, the ETC1 quality bits) are hints and ignored. Failures print
 `[texpack] cannot use NAME: REASON` as before ("short header", "too large", "zstd: <zstd's error name>", "zlib:
-...", "short payload"); `[texpack] decoded NAME WxH` keeps its shape. A ZIM's RGBA8 rows move into the replacement
+...", "short payload"); `[texpack] decoded NAME WxH` keeps its shape; both lines are now written as one string each, since two loader threads'
+`cannot use` lines ran into each other in the probe's log. A ZIM's RGBA8 rows move into the replacement
 without the copy a PNG gets when no `[hashranges]` padding applies (a 4096x4096 image is 64 MB). Every one of the
 pack's 1331 files is format 0 with flags 5120 (zstd plus ETC1_MEDIUM) and no mips, so the 4444, 565, zlib, raw and
 mip paths are written from the format and not exercised by it.
