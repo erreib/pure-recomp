@@ -82,7 +82,7 @@ merge waits on them. The table as it stood before task 092, with each tool's det
 | `tools/gerec/metal_check.sh` | the Metal backend against the Vulkan renderer on one recording | minutes; 10 more to record |
 | `tools/frame_times.py` | the summary of a `PURE_METAL_TRACE` file: frame times and their causes | seconds |
 | `tools/wavstats.py` | loudness, silences and clipping of a captured WAV | seconds |
-| `tools/audio_hiccups.py` | names each hiccup in a run's sound from its `[audio]` and `[perf]` lines (a snap after a host stall or under speed, the sink's late writes, a dry ring, a channel restart), with the host's second beside it: a play session with `PURE_TRACE_AUDIO=1 PURE_PERF=log`, or the sound probe's run.log (task 501) | seconds |
+| `tools/audio_hiccups.py` | names each hiccup in a run's sound from its `[audio]` and `[perf]` lines (a snap after a host stall or under speed, the sink's late writes, a dry ring, a channel restart), with the host's second beside it and the listener's `[mark]` lines (F8 or a stick click, patch 0032-trace-marks) in their place: a play session with `PURE_TRACE_AUDIO=1 PURE_PERF=log`, or the sound probe's run.log (tasks 501, 502) | seconds |
 | `tools/audio_compare.py` | reference, not a gate: two WAVs side by side, `--locate` one in the other | seconds |
 | `tools/sas_reverb_check.sh` | reference, not a gate: the reverb's tail at a pause against PPSSPP's; waits up to 600 s for another game instead of refusing | about 20 s |
 | `tools/save_roundtrip.sh` | the profile saves: runs 1 to 3 (new, load, beside a DLC folder) headless, runs 4 and 5 (two profiles through the save list) in the window; `--headless` runs 1 to 3 only | about 3 minutes; `--headless` 8 s |
