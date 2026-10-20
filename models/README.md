@@ -7,10 +7,10 @@ it three levels above the executable.
 
 - `models.ini` maps a texture's HD pack key to a model (`[figures]`, `<key> = <name>.pmdl figures=N`; the file says
   how). The six pitguy keys are the pit marshal's texture on six tracks.
-- `pitguy.pmdl` is the pit marshal. Today it is the **placeholder** figure `tools/model_placeholder.py` builds (a
+- `pitguy.pmdl` is the pit marshal: the rigged draft below, version 2, waving (task 103). Task 102 first shipped the **placeholder** figure `tools/model_placeholder.py` builds (a
   432-triangle outline: grey legs, an orange body and arms, a white head with a yellow visor on its front), made by
   `python3 tools/model_placeholder.py out/102/placeholder.gltf` and
-  `python3 tools/model_import.py out/102/placeholder.gltf models/pitguy.pmdl`. Erik's model replaces it by name.
+  `python3 tools/model_import.py out/102/placeholder.gltf models/pitguy.pmdl`; a model replaces another by its file name.
 
 ## Making a model (Blender)
 
@@ -52,12 +52,54 @@ Open `out/pitguy-rigged/pitguy-rigged.blend` and press Space to play frames 1–
 weights, fixed feet and loop continuity, then reimports the GLB to compare deformed positions at eight times.
 `--render` also writes a 12-fps PNG sequence under `preview-frames/` for encoding a preview video.
 
-**The current PMDL v1 importer and renderer are static only.** They do not preserve skins or animation from this
-GLB. Runtime playback needs an animation-capable importer and renderer (or a baked vertex-animation path); the
-rigged draft does not change `models/pitguy.pmdl`. Keep normalization based on the rest pose when adding playback.
+`models/pitguy.pmdl` is this GLB imported as version 2 (task 103): the importer keeps the skin and the clip, and the
+backend plays it, each marshal at its own phase:
+
+```
+python3 tools/model_import.py out/pitguy-rigged/pitguy-wave.glb models/pitguy.pmdl
+```
+
+It prints `20 joints`, `1 clip`, `Wave_On: 97 keys, 4.000 s`, and checks the file: the clip's first key skinned is
+within about 1e-6 of the rest positions (the bind pose is the rest pose) and its last key equals its first (the
+loop). `--static` writes the rest pose as version 1 (byte for byte the static marshal of before). The importer
+normalises by the rest pose only and applies the same scale and offset to the joints and the inverse bind matrices,
+so no pose resizes the figure or slides its feet.
+
+## Animation (version 2)
+
+- **What is kept.** One skin (`skins[0]` of the mesh's node, its joints in that order, at most 255), up to four
+  weights a vertex (more are reported and the four largest kept; weights not summing to 1 are reported and
+  normalised; a vertex without weights binds to joint 0), every animation as a clip: translation, rotation and scale
+  channels of the joints (morph weights are not read), sampled at the union of the clip's key times (STEP held,
+  LINEAR interpolated, rotations slerped, CUBICSPLINE's values taken linearly), a joint without a channel at its
+  rest transform. The light stays baked on the rest pose's normals: the colours do not change with the pose.
+- **Which clip.** The first in the file, or `clip=NAME` on the figure's line of models.ini
+  (`<key> = pitguy.pmdl figures=1 clip=Wave_On`). A name the file lacks is reported and the first clip plays.
+- **Time.** The clips loop on wall time (steady_clock, each frame's step capped at 100 ms: a pause or the Esc menu
+  does not skip a clip ahead), each figure offset by a hash of its place. `PURE_MODELS_CLOCK=frames` runs them on the
+  shown frame / 60 s and `PURE_MODELS_SYNC=1` puts every figure at phase 0, for a reproducible capture
+  (`tools/models_check.sh` uses both; docs/developing.md).
+- **Blender.** An Armature modifier, named vertex groups, actions on the armature; export with Animation on and the
+  skinning's "Include All Bone Influences" off (four at most). Keep the root and the feet still unless the figure
+  should walk: the backend stands every figure where its quad was.
 
 ## The .pmdl format
 
-Little-endian: the magic `PMDL`, u32 version (1), u32 vertex count, u32 index count, then the float3 positions (the
-model's frame above, height 1), the u32 colours as the GE's ABGR words (red in the low byte, the light baked in) and
-the u16 indices, three a triangle. The backend draws the triangles without culling, so the winding does not matter.
+Little-endian: the magic `PMDL`, u32 version (1 or 2), u32 vertex count, u32 index count, then the float3 positions
+(the model's frame above, height 1), the u32 colours as the GE's ABGR words (red in the low byte, the light baked in)
+and the u16 indices, three a triangle. The backend draws the triangles without culling, so the winding does not
+matter. That is all of version 1.
+
+Version 2 (task 103) goes on after the indices, everything in the same normalised frame:
+
+- u32 joint count J (0: a static model, nothing follows, read as version 1);
+- per joint, 106 bytes: u16 parent (an earlier or later joint's number, 0xFFFF for a root), float3 rest translation,
+  float4 rest rotation (x, y, z, w), float3 rest scale, 16 floats inverse bind matrix (column-major);
+- per vertex, 20 bytes: 4 x u8 joint numbers, 4 x float weights (summing to 1, unused ones 0);
+- u32 clip count, then per clip: u32 name length and the UTF-8 name, float duration (seconds), u32 key count K,
+  K float times (sorted, the first 0), then per joint, per key, 40 bytes: float3 translation, float4 rotation,
+  float3 scale (the joint's local transform at that key).
+
+A joint's local matrix is translation x rotation x scale, its global its parent's global times its local (a root's
+is its local), and a vertex at time t is the weighted sum of (global x inverse bind) applied to its rest position.
+The marshal: 2232 vertices, 20 joints, one clip of 97 keys, 172419 bytes.

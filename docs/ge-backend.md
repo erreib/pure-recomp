@@ -468,11 +468,28 @@ the Metal backend through the wrapper.
   culling off (the importer cannot promise a Blender mesh's winding; depth sorts the faces), `vertex_address` 0 and
   `primitive_count` the triangle count. Both backends draw it from `vertices`, as any decoded draw. The quad is not
   drawn.
+- **Skinning (task 103).** A version 2 model (joints, weights, clips; models/README.md) is skinned on the CPU for
+  each figure before the placement above, so the model draw stays an ordinary draw (no GE bone matrices, no renderer
+  change): the figure's clip (the first in the file, or `clip=NAME` on its models.ini line) at the figure's time, each
+  joint's local transform interpolated between the two keys around that time (the importer samples every channel at
+  the union of the key times, so the backend only ever interpolates a dense table: translation and scale linearly,
+  the rotation normalised-linearly), its global matrix the parent's times its own, a skin matrix the global times the
+  inverse bind, a vertex the weighted sum of its (up to four) skin matrices applied to its rest position. The colours
+  stay the rest pose's baked light. Six marshals skin in about 35 us a frame on this Mac.
+- **The time rule.** The clips run on wall time, not the frame count (the game runs at 60, 120 or the menus' 30):
+  `std::chrono::steady_clock` read at each `begin_frame()`, the clock advanced by the difference capped at 100 ms, so a
+  pause, a stall or the Esc menu (no frames) does not skip a clip ahead. A figure's time is the clock plus its phase
+  (a hash of its quad's place, the key that remembers its side, times the clip's duration), modulo the duration, so
+  the marshals do not wave in unison. `PURE_MODELS_CLOCK=frames` makes the clock the shown frame / 60 s and
+  `PURE_MODELS_SYNC=1` every phase 0: a headless capture of frame N then shows the same pose every run.
 - **Trace.** `PURE_TRACE_MODELS=1`: `[models] frame F: N draws replaced by M model draws, K quads` every 60 frames and
-  for each captured frame (`(captured)`). The tt_hud and race_hud frames replace 6 draws (6 quads); only the three at
-  the left of the straight are on screen in tt_hud.
+  for each captured frame (`(captured)`), then, when a figure was skinned, `; clip NAME t=SECONDS (animated), skinned
+  in N us` (the frame's first animated figure, the frame's skinning time). The tt_hud and race_hud frames replace 6
+  draws (6 quads); only the three at the left of the straight are on screen in tt_hud.
 - **The check.** `tools/models_check.sh` (docs/developing.md): headless on Metal, the row off and on, the counts,
-  the picture changed and within each scene's limit plus 0.02 of its reference.
+  the picture changed and within each scene's limit plus 0.02 of its reference; and the wave: tt_hud at 4x at frames
+  5890 and 5950 on the frames clock (the clip at 2.15 s and 3.15 s), the marshals' box changed, the deck under their
+  feet not.
 - **Models.** `models/` (models/README.md): `models.ini`, the `.pmdl` files `tools/model_import.py` makes from a glTF
   with vertex colours (the light baked in, the height normalised), shipped in the app's `Contents/Resources/models`
   and beside the Windows executable; a checkout finds them three levels above the executable.
