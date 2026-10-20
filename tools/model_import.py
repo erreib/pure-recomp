@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""A glTF model to the models backend's .pmdl (task 102, D-025).
+"""A glTF model to the models backend's .pmdl (task 102, D-025; skinned and animated: task 103).
 
-    python3 tools/model_import.py IN.gltf|IN.glb OUT.pmdl [--light X,Y,Z] [--height H] [--colour RRGGBB]
+    python3 tools/model_import.py IN.gltf|IN.glb OUT.pmdl [--light X,Y,Z] [--height H] [--colour RRGGBB] [--static]
 
 Reads the first mesh of IN (a .gltf with its buffers beside it or in data: URIs, or one .glb): every triangle
 primitive (mode 4) of it, placed by the first node that uses the mesh (its TRS or matrix and its parents'). Each
@@ -15,6 +15,16 @@ else each vertex gets the mean of its faces' normals. Then:
     and z centred on the bounding box of its feet (the vertices within 5% of the height above the lowest);
   - OUT is written, little-endian: the magic PMDL, u32 version 1, u32 vertex count, u32 index count, then the
     float3 positions, the u32 colours as the GE's ABGR words (red in the low byte, alpha 0xFF) and the u16 indices.
+A skinned mesh (its node has a skin; task 103) is written as version 2 (models/README.md): the same header and
+arrays, then the skin's joints in the order of skins[0].joints (parents from the node tree; a root's parents' world
+matrix folded into it), each vertex's four joints and weights (JOINTS_0/WEIGHTS_0 and any further sets: the four
+largest kept, normalised to sum 1, an unweighted vertex bound to joint 0) and every animation as a clip, sampled at
+the union of its channels' key times (STEP held, LINEAR interpolated, rotations slerped; a joint without a channel
+keeps its rest transform). The rest pose is normalised as above, and the same normalisation is applied to the joints
+(every translation scaled, the roots' offset) and to the inverse bind matrices (the mesh node's world matrix, which
+glTF's skinning ignores, folded in), so a pose never resizes or slides the figure. --static writes version 1 (the
+rest pose) from a skinned file. The importer skins each clip's first key and prints its largest distance from the
+rest positions (the bind pose is the rest pose when it is about 0) and the clip's seam (first key against last).
 Prints the counts and the bounds. Exit 2 when the mesh has no COLOR_0 (a flat grey is not wanted silently:
 --colour RRGGBB gives such a mesh one sRGB colour, lit as above), when it has no triangles, or when it has more than
 65535 vertices. The export convention (models/README.md): y up, the front toward +z, the feet at the origin.
@@ -30,7 +40,7 @@ import struct
 import sys
 
 MAGIC = b"PMDL"
-VERSION = 1
+VERSION = 1                  # static; 2 adds the skin and the clips (task 103)
 FLOOR, SPAN = 0.55, 0.45     # the bake: floor + span x max(0, n . l)
 FEET_BAND = 0.05             # the feet: within this share of the height above the lowest vertex
 
@@ -109,9 +119,13 @@ def matrix_of(node):
     """A node's local matrix, column-major 4x4 as glTF writes it."""
     if "matrix" in node:
         return list(node["matrix"])
-    t = node.get("translation", [0.0, 0.0, 0.0])
-    x, y, z, w = node.get("rotation", [0.0, 0.0, 0.0, 1.0])
-    s = node.get("scale", [1.0, 1.0, 1.0])
+    return trs_matrix(node.get("translation", [0.0, 0.0, 0.0]), node.get("rotation", [0.0, 0.0, 0.0, 1.0]),
+                      node.get("scale", [1.0, 1.0, 1.0]))
+
+
+def trs_matrix(t, q, s):
+    """translation x rotation (x, y, z, w) x scale, column-major."""
+    x, y, z, w = q
     r = [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w),
          2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w),
          2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)]
@@ -123,6 +137,105 @@ def matrix_of(node):
 
 def multiply(a, b):
     return [sum(a[k * 4 + r] * b[c * 4 + k] for k in range(4)) for c in range(4) for r in range(4)]
+
+
+IDENTITY = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+
+def affine(scale=1.0, offset=(0.0, 0.0, 0.0)):
+    """T(offset) x S(scale), column-major."""
+    return [scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0, offset[0], offset[1], offset[2], 1.0]
+
+
+def inverse(m):
+    """The inverse of an affine column-major 4x4."""
+    rows = normal_matrix(m)  # the inverse transpose of the 3x3, as rows: its [r][c] is the inverse's [c][r]
+    out = [0.0] * 16
+    for c in range(3):
+        for r in range(3):
+            out[c * 4 + r] = rows[c][r]
+    for r in range(3):
+        out[12 + r] = -sum(out[c * 4 + r] * m[12 + c] for c in range(3))
+    out[15] = 1.0
+    return out
+
+
+def apply(m, p):
+    return [sum(m[c * 4 + r] * (p[c] if c < 3 else 1.0) for c in range(4)) for r in range(3)]
+
+
+def decompose(m):
+    """A similarity's translation, rotation (x, y, z, w) and scale."""
+    t = [m[12], m[13], m[14]]
+    s = [math.sqrt(sum(m[c * 4 + r] ** 2 for r in range(3))) for c in range(3)]
+    a = [[m[c * 4 + r] / s[c] for c in range(3)] for r in range(3)]   # a[r][c]
+    trace = a[0][0] + a[1][1] + a[2][2]
+    if trace > 0:
+        k = 2 * math.sqrt(1 + trace)
+        q = [(a[2][1] - a[1][2]) / k, (a[0][2] - a[2][0]) / k, (a[1][0] - a[0][1]) / k, k / 4]
+    elif a[0][0] >= a[1][1] and a[0][0] >= a[2][2]:
+        k = 2 * math.sqrt(1 + a[0][0] - a[1][1] - a[2][2])
+        q = [k / 4, (a[0][1] + a[1][0]) / k, (a[0][2] + a[2][0]) / k, (a[2][1] - a[1][2]) / k]
+    elif a[1][1] >= a[2][2]:
+        k = 2 * math.sqrt(1 + a[1][1] - a[0][0] - a[2][2])
+        q = [(a[0][1] + a[1][0]) / k, k / 4, (a[1][2] + a[2][1]) / k, (a[0][2] - a[2][0]) / k]
+    else:
+        k = 2 * math.sqrt(1 + a[2][2] - a[0][0] - a[1][1])
+        q = [(a[0][2] + a[2][0]) / k, (a[1][2] + a[2][1]) / k, k / 4, (a[1][0] - a[0][1]) / k]
+    return t, normalise_q(q), s
+
+
+def normalise_q(q):
+    length = math.sqrt(sum(x * x for x in q))
+    return [x / length for x in q] if length > 0 else [0.0, 0.0, 0.0, 1.0]
+
+
+def slerp(a, b, f):
+    d = sum(x * y for x, y in zip(a, b))
+    if d < 0:
+        b, d = [-x for x in b], -d
+    if d > 0.9995:
+        return normalise_q([x + (y - x) * f for x, y in zip(a, b)])
+    theta = math.acos(min(1.0, d))
+    wa, wb = math.sin((1 - f) * theta) / math.sin(theta), math.sin(f * theta) / math.sin(theta)
+    return normalise_q([wa * x + wb * y for x, y in zip(a, b)])
+
+
+def sample(times, values, interpolation, t, rotation):
+    """A channel at time t: held before its first key and after its last."""
+    if t <= times[0]:
+        return list(values[0])
+    if t >= times[-1]:
+        return list(values[-1])
+    k = max(i for i in range(len(times) - 1) if times[i] <= t)
+    if interpolation == "STEP":
+        return list(values[k])
+    f = (t - times[k]) / (times[k + 1] - times[k])
+    if rotation:
+        return slerp(values[k], values[k + 1], f)
+    return [x + (y - x) * f for x, y in zip(values[k], values[k + 1])]
+
+
+def skin_positions(rest, influences, joints, pose):
+    """The rest positions skinned by a pose (one (t, r, s) per joint): what the backend computes."""
+    world = [None] * len(joints)
+
+    def global_of(j):
+        if world[j] is None:
+            local = trs_matrix(*pose[j])
+            parent = joints[j]["parent"]
+            world[j] = local if parent is None else multiply(global_of(parent), local)
+        return world[j]
+
+    skins = [multiply(global_of(j), joints[j]["ibm"]) for j in range(len(joints))]
+    out = []
+    for p, influence in zip(rest, influences):
+        acc = [0.0, 0.0, 0.0]
+        for j, w in influence:
+            q = apply(skins[j], p)
+            acc = [acc[k] + w * q[k] for k in range(3)]
+        out.append(acc)
+    return out
 
 
 def mesh_matrix(doc, mesh_index):
@@ -175,6 +288,144 @@ def parse_vector(text):
     return normalise(v)
 
 
+def skin_block(doc, buffers, skin_node, mesh_world, scale, offset, rest, influences):
+    """Version 2's joints, weights and clips (models/README.md) as bytes, and the lines to print."""
+    nodes = doc["nodes"]
+    skin = doc["skins"][skin_node["skin"]]
+    order = skin["joints"]
+    if len(order) > 255:
+        fail(f"{len(order)} joints, over the 255 a u8 joint index reaches")
+    slot = {n: j for j, n in enumerate(order)}
+    parent_node = {c: n for n, node in enumerate(nodes) for c in node.get("children", [])}
+    ibms = (read_accessor(doc, buffers, skin["inverseBindMatrices"]) if "inverseBindMatrices" in skin
+            else [tuple(IDENTITY)] * len(order))
+    # The normalisation N = T(offset) S(scale): a joint's global G' = N G S(1/scale), so every local translation is
+    # scaled and a root's local gains N's offset (its parents' world A folded in: T(offset) S(scale) A L S(1/scale)),
+    # and the inverse bind IBM' = S(scale) IBM M^-1 S(1/scale) T(-offset), M the mesh node's world matrix (the rest
+    # positions carry it; glTF's skinning ignores it), so G' IBM' = N G IBM M^-1 N^-1 skins the stored positions.
+    inv_m = inverse(mesh_world)
+    unoffset = affine(1.0, [-x for x in offset])
+    joints = []
+    for j, n in enumerate(order):
+        p = parent_node.get(n)
+        parent = slot.get(p) if p is not None else None
+        a = None
+        if parent is None:
+            a, at = IDENTITY, p
+            while at is not None:
+                a = multiply(matrix_of(nodes[at]), a)
+                at = parent_node.get(at)
+            a = multiply(affine(scale, offset), a)
+            if all(abs(x - y) < 1e-9 for x, y in zip(a, affine(scale, offset))):
+                a = "plain"
+        ibm = multiply(multiply(multiply(affine(scale), list(ibms[j])), inv_m), multiply(affine(1.0 / scale), unoffset))
+        joints.append({"node": n, "parent": parent, "root": a, "ibm": ibm})
+
+    def placed_trs(j, t, r, s):
+        a = joints[j]["root"]
+        if a is None:
+            return [x * scale for x in t], normalise_q(r), list(s)
+        if a == "plain":
+            return [o + x * scale for o, x in zip(offset, t)], normalise_q(r), list(s)
+        return decompose(multiply(multiply(a, trs_matrix(t, r, s)), affine(1.0 / scale)))
+
+    rest_trs = []
+    for joint in joints:
+        node = nodes[joint["node"]]
+        if "matrix" in node:
+            rest_trs.append(decompose(node["matrix"]))
+        else:
+            rest_trs.append((node.get("translation", [0.0] * 3), node.get("rotation", [0.0, 0.0, 0.0, 1.0]),
+                             node.get("scale", [1.0] * 3)))
+
+    # The weights: the four largest, normalised.
+    binds, many, off, bare = [], 0, 0, 0
+    for influence in influences:
+        merged = {}
+        for j, w in influence:
+            merged[j] = merged.get(j, 0.0) + w
+        top = sorted(merged.items(), key=lambda jw: -jw[1])
+        many += len(top) > 4
+        top = top[:4]
+        total = sum(w for _, w in top)
+        if total <= 1e-8:
+            bare += 1
+            top, total = [(0, 1.0)], 1.0
+        elif abs(sum(merged.values()) - 1.0) > 1e-3:
+            off += 1
+        if any(j >= len(order) for j, _ in top):
+            fail(f"a vertex names joint {max(j for j, _ in top)} of {len(order)}")
+        binds.append([(j, w / total) for j, w in top])
+
+    out = bytearray(struct.pack("<I", len(joints)))
+    for j, joint in enumerate(joints):
+        t, r, s = placed_trs(j, *rest_trs[j])
+        out += struct.pack("<H3f4f3f16f", 0xFFFF if joint["parent"] is None else joint["parent"], *t, *r, *s,
+                           *joint["ibm"])
+    for bind in binds:
+        padded = bind + [(0, 0.0)] * (4 - len(bind))
+        out += struct.pack("<4B4f", *(j for j, _ in padded), *(w for _, w in padded))
+
+    animations = doc.get("animations", [])
+    out += struct.pack("<I", len(animations))
+    lines = [f"model_import: skin: {len(joints)} joints, {len(binds)} vertices bound"
+             + (f"; {many} with more than four weights (the four largest kept)" if many else "")
+             + (f"; {off} with weights not summing to 1 (normalised)" if off else "")
+             + (f"; {bare} without weights (bound to joint 0)" if bare else "")
+             + f"; {len(animations)} clip{'' if len(animations) == 1 else 's'}"]
+    for number, animation in enumerate(animations):
+        name = animation.get("name") or f"clip{number}"
+        channels = {}
+        times = set()
+        for channel in animation["channels"]:
+            target = channel["target"]
+            if target.get("node") not in slot or target["path"] not in ("translation", "rotation", "scale"):
+                continue
+            sampler = animation["samplers"][channel["sampler"]]
+            keys = [k[0] for k in read_accessor(doc, buffers, sampler["input"])]
+            values = read_accessor(doc, buffers, sampler["output"])
+            interpolation = sampler.get("interpolation", "LINEAR")
+            if interpolation == "CUBICSPLINE":   # in-tangent, value, out-tangent per key: the values, linearly
+                values, interpolation = values[1::3], "LINEAR"
+            channels[(slot[target["node"]], target["path"])] = (keys, values, interpolation)
+            times.update(keys)
+        keys = []
+        for t in sorted(times):
+            if not keys or t - keys[-1] > 1e-6:
+                keys.append(t)
+        if not keys or keys[0] > 1e-6:
+            keys.insert(0, 0.0)
+        keys[0] = 0.0
+        poses = []
+        for t in keys:
+            pose = []
+            for j in range(len(joints)):
+                trs = []
+                for which, path in enumerate(("translation", "rotation", "scale")):
+                    if (j, path) in channels:
+                        k, v, interpolation = channels[(j, path)]
+                        trs.append(sample(k, v, interpolation, t, path == "rotation"))
+                    else:
+                        trs.append(list(rest_trs[j][which]))
+                pose.append(placed_trs(j, *trs))
+            poses.append(pose)
+        encoded = name.encode("utf-8")
+        out += struct.pack("<I", len(encoded)) + encoded + struct.pack("<fI", keys[-1], len(keys))
+        out += struct.pack(f"<{len(keys)}f", *keys)
+        for j in range(len(joints)):
+            for pose in poses:
+                t, r, s = pose[j]
+                out += struct.pack("<3f4f3f", *t, *r, *s)
+        first = skin_positions(rest, binds, joints, poses[0])
+        last = skin_positions(rest, binds, joints, poses[-1])
+        bind_error = max(math.dist(a, b) for a, b in zip(first, rest))
+        seam = max(math.dist(a, b) for a, b in zip(first, last))
+        lines.append(f"model_import: clip {name}: {len(keys)} keys, {keys[-1]:.3f} s, {len(channels)} channels; its "
+                     f"first key skinned is within {bind_error:.2e} of the rest positions, its last within {seam:.2e} "
+                     f"of its first")
+    return bytes(out), "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description="A glTF model to the models backend's .pmdl (task 102).")
     parser.add_argument("input", help="IN.gltf or IN.glb")
@@ -182,6 +433,7 @@ def main():
     parser.add_argument("--light", default="0.3,0.8,0.5", help="toward the key light, X,Y,Z in the model's frame")
     parser.add_argument("--height", type=float, default=1.0, help="the height to normalise to (default 1)")
     parser.add_argument("--colour", help="RRGGBB (sRGB) for a mesh without COLOR_0")
+    parser.add_argument("--static", action="store_true", help="version 1 (the rest pose) even from a skinned mesh")
     opts = parser.parse_args()
     light = parse_vector(opts.light)
     flat = None
@@ -200,6 +452,9 @@ def main():
     m = mesh_matrix(doc, 0)
     nm = normal_matrix(m)
     positions, normals, colours, indices = [], [], [], []
+    influences = []              # per vertex: (joint, weight) pairs, all the file's sets
+    skin_node = next((n for n in doc.get("nodes", []) if n.get("mesh") == 0 and "skin" in n), None)
+    skinned = skin_node is not None and not opts.static
     skipped = 0
     for primitive in meshes[0]["primitives"]:
         if primitive.get("mode", 4) != 4:
@@ -218,6 +473,12 @@ def main():
             fail(f"{opts.input}: the mesh has no vertex colours (COLOR_0): export with a colour attribute and "
                  f"\"Vertex Colors\" on, or give --colour RRGGBB for one flat colour")
         nor = read_accessor(doc, buffers, attributes["NORMAL"]) if "NORMAL" in attributes else None
+        if skinned:
+            sets = [(read_accessor(doc, buffers, attributes[f"JOINTS_{k}"]),
+                     read_accessor(doc, buffers, attributes[f"WEIGHTS_{k}"]))
+                    for k in range(8) if f"JOINTS_{k}" in attributes and f"WEIGHTS_{k}" in attributes]
+            for i in range(len(pos)):
+                influences.append([(int(j[i][c]), w[i][c]) for j, w in sets for c in range(4) if w[i][c] > 0])
         for i, p in enumerate(pos):
             positions.append([sum(m[c * 4 + r] * (p[c] if c < 3 else 1.0) for c in range(4)) for r in range(3)])
             colours.append(col[i])
@@ -259,6 +520,9 @@ def main():
     cz = (min(p[2] for p in feet) + max(p[2] for p in feet)) / 2
     placed = [((p[0] - cx) * scale, (p[1] - low) * scale, (p[2] - cz) * scale) for p in positions]
 
+    extra, notes = (skin_block(doc, buffers, skin_node, m, scale, (-cx * scale, -low * scale, -cz * scale),
+                               placed, influences) if skinned else (b"", ""))
+
     words = []
     for colour, n in zip(colours, normals):
         lit = FLOOR + SPAN * max(0.0, sum(n[k] * light[k] for k in range(3)))
@@ -266,11 +530,12 @@ def main():
         words.append(0xFF000000 | (b << 16) | (g << 8) | r)
 
     out = bytearray(MAGIC)
-    out += struct.pack("<III", VERSION, len(placed), len(indices))
+    out += struct.pack("<III", 2 if skinned else VERSION, len(placed), len(indices))
     for p in placed:
         out += struct.pack("<3f", *p)
     out += struct.pack(f"<{len(words)}I", *words)
     out += struct.pack(f"<{len(indices)}H", *indices)
+    out += extra
     os.makedirs(os.path.dirname(os.path.abspath(opts.output)), exist_ok=True)
     with open(opts.output, "wb") as f:
         f.write(out)
@@ -280,7 +545,10 @@ def main():
           f"triangles), {len(out)} bytes; bounds x {lo[0]:.3f}..{hi[0]:.3f} y {lo[1]:.3f}..{hi[1]:.3f} "
           f"z {lo[2]:.3f}..{hi[2]:.3f}; scale {scale:.4g}, light {light[0]:.2f},{light[1]:.2f},{light[2]:.2f}"
           + (f"; {skipped} primitive(s) not triangles, left out" if skipped else "")
-          + ("; colour " + opts.colour if flat is not None and "COLOR_0" not in str(meshes[0]) else ""))
+          + ("; colour " + opts.colour if flat is not None and "COLOR_0" not in str(meshes[0]) else "")
+          + ("; version 2" if skinned else "; version 1" + (" (--static: the skin left out)" if skin_node else "")))
+    if notes:
+        print(notes)
 
 
 if __name__ == "__main__":
