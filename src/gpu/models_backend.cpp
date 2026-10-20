@@ -29,6 +29,19 @@
 //     colour white and culling off (a Blender mesh's winding is not promised; depth sorts the faces).
 // The quad itself is not drawn. A draw with no quad (a lone triangle) goes through.
 //
+// A version 2 model (task 103: joints, weights, clips) is skinned on the CPU for each figure before the placement:
+// its clip (the first in the file, or models.ini's clip=NAME) sampled at the figure's time, every joint's local
+// transform interpolated between the clip's two keys around it (translation and scale linearly, the rotation
+// normalised-linearly), its global the parent's times its own, a vertex the weighted sum of its joints' global x
+// inverse bind applied to its rest position. The clip runs on wall time: std::chrono::steady_clock read at each
+// begin_frame, the clock advanced by the difference capped at 100 ms (a pause, a stall or the Esc menu does not skip
+// it ahead). Each figure's phase is offset by a hash of its quad's place, so the marshals do not wave in unison.
+//   <prefix>_MODELS_CLOCK=frames        the clip time is the shown frame / 60 seconds instead (a capture of frame N
+//                                       shows the same pose every run)
+//   <prefix>_MODELS_SYNC=1              every figure's phase offset 0
+// The trace line then ends in `; clip NAME t=SECONDS (animated), skinned in N us` (the first animated figure of the
+// frame, the frame's skinning time).
+//
 // The table is read at start when the row is at Models and again each time the row is set to Models, so a model
 // imported again shows at the next switch. models/ is found in the app's Resources (Contents/Resources/models),
 // beside the executable (the Windows folder), three levels above it (build/<preset>/bin in a checkout) or under the
@@ -42,6 +55,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -75,6 +89,7 @@ constexpr const char *kPlatformInner = "vulkan";
 #endif
 constexpr std::uint32_t kLargestFigureTexture = 256u;  // texels a side: larger textures are not looked up
 constexpr std::uint64_t kTraceEvery = 60u;
+constexpr double kLargestStep = 0.1;  // seconds: the most the clips' wall clock moves in one frame
 // The model draws' vertex type: float positions, 8888 colours, u16 indices, nothing else (no weights to skin).
 constexpr std::uint32_t kModelVertexType = (3u << 7) | (7u << 2) | (2u << 11);
 
@@ -93,18 +108,108 @@ Vec3 transform(const std::array<float, 16> &m, const std::array<float, 4> &p) {
             m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]};
 }
 
-// One .pmdl (models/README.md): positions in the model's frame, ABGR colours, triangles.
+using Mat4 = std::array<float, 16>;  // column-major
+
+// A joint's local transform: translation, rotation (x, y, z, w), scale.
+struct Trs {
+    Vec3 t;
+    std::array<float, 4> r;
+    Vec3 s;
+};
+
+struct Joint {
+    std::uint16_t parent;  // 0xFFFF for a root
+    Trs rest;
+    Mat4 inverse_bind;
+};
+
+struct Clip {
+    std::string name;
+    float duration{};
+    std::vector<float> times;  // sorted, the first 0
+    std::vector<Trs> keys;     // joint j's key k at j * times.size() + k
+};
+
+// One .pmdl (models/README.md): positions in the model's frame, ABGR colours, triangles; version 2 adds the skin.
 struct Model {
     std::vector<Vec3> positions;
     std::vector<std::uint32_t> colors;
     std::vector<std::uint16_t> indices;
+    std::vector<Joint> joints;                           // empty for a static model
+    std::vector<std::uint16_t> order;                    // the joints, parents first
+    std::vector<std::array<std::uint8_t, 4>> joint_of;  // per vertex
+    std::vector<std::array<float, 4>> weights;          // per vertex, summing to 1
+    std::vector<Clip> clips;
 };
 
 struct Figure {
     std::shared_ptr<const Model> model;
     std::string file;
     std::uint32_t figures{1u};
+    std::size_t clip{0u};  // the clip it plays (models.ini's clip=NAME; the first by default)
 };
+
+Mat4 multiply(const Mat4 &a, const Mat4 &b) {
+    Mat4 out{};
+    for (std::size_t c = 0; c < 4u; ++c)
+        for (std::size_t r = 0; r < 4u; ++r)
+            out[c * 4u + r] = a[r] * b[c * 4u] + a[4u + r] * b[c * 4u + 1u] + a[8u + r] * b[c * 4u + 2u] +
+                              a[12u + r] * b[c * 4u + 3u];
+    return out;
+}
+
+// translation x rotation x scale (glTF's order).
+Mat4 matrix_of(const Trs &p) {
+    const auto [x, y, z, w] = p.r;
+    const float r[9] = {1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w),
+                        2 * (x * y - z * w),     1 - 2 * (x * x + z * z), 2 * (y * z + x * w),
+                        2 * (x * z + y * w),     2 * (y * z - x * w),     1 - 2 * (x * x + y * y)};
+    return {r[0] * p.s[0], r[1] * p.s[0], r[2] * p.s[0], 0.0f, r[3] * p.s[1], r[4] * p.s[1], r[5] * p.s[1], 0.0f,
+            r[6] * p.s[2], r[7] * p.s[2], r[8] * p.s[2], 0.0f, p.t[0],        p.t[1],        p.t[2],        1.0f};
+}
+
+// Between two keys: translation and scale linearly, the rotation normalised-linearly on the short way round.
+Trs mix(const Trs &a, const Trs &b, float f) {
+    Trs out{};
+    float d = 0.0f;
+    for (std::size_t i = 0; i < 4u; ++i) d += a.r[i] * b.r[i];
+    const float sign = d < 0.0f ? -1.0f : 1.0f;
+    float norm = 0.0f;
+    for (std::size_t i = 0; i < 4u; ++i) {
+        out.r[i] = a.r[i] + (sign * b.r[i] - a.r[i]) * f;
+        norm += out.r[i] * out.r[i];
+    }
+    norm = norm > 0.0f ? 1.0f / std::sqrt(norm) : 0.0f;
+    for (float &x : out.r) x *= norm;
+    for (std::size_t i = 0; i < 3u; ++i) {
+        out.t[i] = a.t[i] + (b.t[i] - a.t[i]) * f;
+        out.s[i] = a.s[i] + (b.s[i] - a.s[i]) * f;
+    }
+    return out;
+}
+
+// The skin matrices (global x inverse bind, one per joint) of the clip at `t` seconds into it.
+void pose(const Model &model, const Clip &clip, float t, std::vector<Mat4> &world, std::vector<Mat4> &skin) {
+    const std::size_t joints = model.joints.size(), keys = clip.times.size();
+    std::size_t k = 0u;
+    float f = 0.0f;
+    if (keys > 1u) {
+        t = std::clamp(t, 0.0f, clip.times.back());
+        k = static_cast<std::size_t>(std::upper_bound(clip.times.begin(), clip.times.end(), t) - clip.times.begin());
+        k = std::min(k == 0u ? 0u : k - 1u, keys - 2u);
+        const float span = clip.times[k + 1u] - clip.times[k];
+        f = span > 0.0f ? std::clamp((t - clip.times[k]) / span, 0.0f, 1.0f) : 0.0f;
+    }
+    world.resize(joints);
+    skin.resize(joints);
+    for (const std::uint16_t j : model.order) {
+        const Trs &a = clip.keys[j * keys + k];
+        const Mat4 local = matrix_of(keys > 1u ? mix(a, clip.keys[j * keys + k + 1u], f) : a);
+        const std::uint16_t parent = model.joints[j].parent;
+        world[j] = parent == 0xFFFFu ? local : multiply(world[parent], local);
+        skin[j] = multiply(world[j], model.joints[j].inverse_bind);
+    }
+}
 
 bool read_model(const std::filesystem::path &path, Model &model, std::string &error) {
     std::ifstream in(path, std::ios::binary);
@@ -121,7 +226,7 @@ bool read_model(const std::filesystem::path &path, Model &model, std::string &er
     std::memcpy(header, bytes.data() + 4, sizeof header);
     const auto [version, vertices, indices] = std::tuple(header[0], header[1], header[2]);
     const std::size_t want = 16u + static_cast<std::size_t>(vertices) * 16u + static_cast<std::size_t>(indices) * 2u;
-    if (version != 1u || vertices == 0u || vertices > 65535u || indices == 0u || indices % 3u != 0u ||
+    if ((version != 1u && version != 2u) || vertices == 0u || vertices > 65535u || indices == 0u || indices % 3u != 0u ||
         bytes.size() < want) {
         error = "version " + std::to_string(version) + ", " + std::to_string(vertices) + " vertices, " +
                 std::to_string(indices) + " indices in " + std::to_string(bytes.size()) + " bytes: not a model";
@@ -141,6 +246,68 @@ bool read_model(const std::filesystem::path &path, Model &model, std::string &er
             error = "an index past the vertices";
             return false;
         }
+    if (version == 1u) return true;
+    // Version 2: the joints, each vertex's weights, the clips (models/README.md).
+    std::size_t offset = want;
+    const auto take = [&](void *out, std::size_t size) {
+        if (offset + size > bytes.size()) return false;
+        std::memcpy(out, bytes.data() + offset, size);
+        offset += size;
+        return true;
+    };
+    const auto bad = [&](const std::string &what) {
+        error = "version 2: " + what;
+        model.joints.clear();
+        return false;
+    };
+    std::uint32_t joints = 0u, clips = 0u;
+    if (!take(&joints, 4u)) return bad("no joint count");
+    if (joints == 0u) return true;  // static: as version 1
+    if (joints > 255u) return bad(std::to_string(joints) + " joints, over 255");
+    model.joints.resize(joints);
+    for (Joint &joint : model.joints) {
+        if (!take(&joint.parent, 2u) || !take(joint.rest.t.data(), 12u) || !take(joint.rest.r.data(), 16u) ||
+            !take(joint.rest.s.data(), 12u) || !take(joint.inverse_bind.data(), 64u))
+            return bad("cut short in the joints");
+        if (joint.parent != 0xFFFFu && joint.parent >= joints) return bad("a joint's parent past the joints");
+    }
+    model.joint_of.resize(vertices);
+    model.weights.resize(vertices);
+    for (std::uint32_t i = 0; i < vertices; ++i) {
+        if (!take(model.joint_of[i].data(), 4u) || !take(model.weights[i].data(), 16u))
+            return bad("cut short in the weights");
+        for (std::size_t c = 0; c < 4u; ++c)
+            if (model.weights[i][c] != 0.0f && model.joint_of[i][c] >= joints) return bad("a weight's joint past the joints");
+    }
+    if (!take(&clips, 4u) || clips > 1024u) return bad("no clip count");
+    model.clips.resize(clips);
+    for (Clip &clip : model.clips) {
+        std::uint32_t name = 0u, keys = 0u;
+        if (!take(&name, 4u) || name > 1024u) return bad("cut short in a clip's name");
+        clip.name.resize(name);
+        if (!take(clip.name.data(), name) || !take(&clip.duration, 4u) || !take(&keys, 4u) || keys == 0u ||
+            keys > 1000000u)
+            return bad("cut short in clip " + clip.name);
+        clip.times.resize(keys);
+        clip.keys.resize(static_cast<std::size_t>(joints) * keys);
+        if (!take(clip.times.data(), keys * 4u)) return bad("cut short in clip " + clip.name + "'s times");
+        for (Trs &key : clip.keys)
+            if (!take(key.t.data(), 12u) || !take(key.r.data(), 16u) || !take(key.s.data(), 12u))
+                return bad("cut short in clip " + clip.name + "'s keys");
+        if (clip.times.front() != 0.0f || !std::is_sorted(clip.times.begin(), clip.times.end()) ||
+            !(clip.duration > 0.0f))
+            return bad("clip " + clip.name + "'s times are not sorted from 0 or its duration is not above 0");
+    }
+    // The order the globals are computed in: parents first.
+    std::vector<bool> done(joints);
+    while (model.order.size() < joints) {
+        const std::size_t before = model.order.size();
+        for (std::uint16_t j = 0; j < joints; ++j) {
+            const std::uint16_t parent = model.joints[j].parent;
+            if (!done[j] && (parent == 0xFFFFu || done[parent])) model.order.push_back(j), done[j] = true;
+        }
+        if (model.order.size() == before) return bad("the joints' parents form a loop");
+    }
     return true;
 }
 
@@ -203,12 +370,14 @@ std::unordered_map<std::string, Figure> read_table() {
         std::string file, word;
         words >> file;
         std::uint32_t figures = 1u;
+        std::string clip;
         while (words >> word)
             if (word.rfind("figures=", 0) == 0) figures = static_cast<std::uint32_t>(std::strtoul(word.c_str() + 8, nullptr, 10));
+            else if (word.rfind("clip=", 0) == 0) clip = word.substr(5u);
         if (key.size() != 24u || key.find_first_not_of("0123456789abcdef") != std::string::npos || file.empty() ||
             figures == 0u || figures > 64u) {
             std::cout << "[models] " << ini.string() << ":" << number << ": not `<24 hex digits> = <file>.pmdl "
-                      << "[figures=1..64]`; left out\n";
+                      << "[figures=1..64] [clip=NAME]`; left out\n";
             ++problems;
             continue;
         }
@@ -223,7 +392,21 @@ std::unordered_map<std::string, Figure> read_table() {
             }
             found = models.emplace(file, std::move(model)).first;
         }
-        if (found->second) table[key] = Figure{found->second, file, figures};
+        if (!found->second) continue;
+        std::size_t chosen = 0u;
+        if (!clip.empty()) {
+            const std::vector<Clip> &clips = found->second->clips;
+            const auto named = std::find_if(clips.begin(), clips.end(), [&](const Clip &c) { return c.name == clip; });
+            if (named != clips.end()) {
+                chosen = static_cast<std::size_t>(named - clips.begin());
+            } else {
+                std::cout << "[models] " << ini.string() << ":" << number << ": " << file << " has no clip " << clip
+                          << (clips.empty() ? " (it has none: it stands still)" : "; it plays " + clips.front().name)
+                          << "\n";
+                ++problems;
+            }
+        }
+        table[key] = Figure{found->second, file, figures, chosen};
     }
     std::cout << "[models] " << ini.string() << ": " << table.size() << " keys, " << models.size() << " model"
               << (models.size() == 1u ? "" : "s");
@@ -232,6 +415,12 @@ std::unordered_map<std::string, Figure> read_table() {
         if (!model) continue;
         std::cout << separator << file << ": " << model->positions.size() << " vertices, " << model->indices.size() / 3u
                   << " triangles";
+        if (!model->joints.empty()) {
+            std::cout << ", " << model->joints.size() << " joints, " << model->clips.size() << " clip"
+                      << (model->clips.size() == 1u ? "" : "s");
+            for (const Clip &clip : model->clips)
+                std::cout << " " << clip.name << " (" << clip.duration << " s, " << clip.times.size() << " keys)";
+        }
         separator = "; ";
     }
     std::cout << (*separator == ';' ? ")" : "") << (problems != 0 ? ", with problems above" : "") << "\n";
@@ -279,6 +468,14 @@ public:
         if (!inner_->initialize(config, error)) return false;
         initialized_ = true;
         trace_ = portablekit::env("TRACE_MODELS") != nullptr;
+        const char *clock = portablekit::env("MODELS_CLOCK");
+        const char *sync = portablekit::env("MODELS_SYNC");
+        clock_frames_ = clock != nullptr && std::strcmp(clock, "frames") == 0;
+        sync_ = sync != nullptr && *sync != '\0' && std::strcmp(sync, "0") != 0;
+        if (clock_frames_)
+            std::cout << "[models] " << portablekit::env_name("MODELS_CLOCK")
+                      << "=frames: the clips run on the shown frame / 60 s, not wall time\n";
+        if (sync_) std::cout << "[models] " << portablekit::env_name("MODELS_SYNC") << "=1: every figure's phase 0\n";
         read_option(true);
         return true;
     }
@@ -292,6 +489,7 @@ public:
     void begin_frame() override {
         read_option(false);
         seen_.clear();
+        advance_clock();
         inner_->begin_frame();
     }
 
@@ -347,7 +545,58 @@ public:
 private:
     struct Counts {
         std::uint64_t replaced{}, model_draws{}, quads{};
+        const Clip *clip{};      // the first animated figure's clip and time
+        double clip_time{};
+        double skin_seconds{};  // the frame's skinning
     };
+
+    // The clips' clock, once a frame: wall time, each step capped at kLargestStep, or the shown frame / 60.
+    void advance_clock() {
+        if (clock_frames_) {
+            clock_seconds_ = static_cast<double>(shown_frame_) / 60.0;
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (ticking_)
+            clock_seconds_ += std::min(std::chrono::duration<double>(now - last_tick_).count(), kLargestStep);
+        last_tick_ = now;
+        ticking_ = true;
+    }
+
+    // A figure's phase, 0 to 1, from its place (splitmix64 of the key): 0 for all with MODELS_SYNC.
+    double phase_of(std::uint64_t key) const {
+        if (sync_) return 0.0;
+        key += 0x9E3779B97F4A7C15ull;
+        key = (key ^ (key >> 30)) * 0xBF58476D1CE4E5B9ull;
+        key = (key ^ (key >> 27)) * 0x94D049BB133111EBull;
+        key ^= key >> 31;
+        return static_cast<double>(key >> 11) * 0x1.0p-53;
+    }
+
+    // The model's positions skinned for this figure (into skinned_), or its rest positions when it is static.
+    const std::vector<Vec3> &positions_of(const Figure &figure, std::uint64_t place) {
+        const Model &model = *figure.model;
+        if (model.joints.empty() || model.clips.empty()) return model.positions;
+        const auto start = std::chrono::steady_clock::now();
+        const Clip &clip = model.clips[std::min(figure.clip, model.clips.size() - 1u)];
+        const double duration = static_cast<double>(clip.duration);
+        const float t = static_cast<float>(std::fmod(clock_seconds_ + phase_of(place) * duration, duration));
+        pose(model, clip, t, world_, skin_);
+        skinned_.resize(model.positions.size());
+        for (std::size_t i = 0; i < model.positions.size(); ++i) {
+            const Vec3 &p = model.positions[i];
+            const std::array<float, 4> rest{p[0], p[1], p[2], 1.0f};
+            Vec3 sum{};
+            for (std::size_t c = 0; c < 4u; ++c) {
+                const float w = model.weights[i][c];
+                if (w != 0.0f) sum = add(sum, scale(transform(skin_[model.joint_of[i][c]], rest), w));
+            }
+            skinned_[i] = sum;
+        }
+        if (counts_.clip == nullptr) counts_.clip = &clip, counts_.clip_time = t;
+        counts_.skin_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        return skinned_;
+    }
 
     // The row, once a frame (never per draw): the table read whenever it turns to Models.
     void read_option(bool at_start) {
@@ -364,7 +613,11 @@ private:
 
     void report(const char *what) const {
         std::cout << "[models] frame " << shown_frame_ << ": " << shown_.replaced << " draws replaced by "
-                  << shown_.model_draws << " model draws, " << shown_.quads << " quads" << what << "\n";
+                  << shown_.model_draws << " model draws, " << shown_.quads << " quads" << what;
+        if (shown_.clip != nullptr)
+            std::cout << "; clip " << shown_.clip->name << " t=" << shown_.clip_time << " (animated), skinned in "
+                      << static_cast<long>(shown_.skin_seconds * 1e6) << " us";
+        std::cout << "\n";
     }
 
     static bool candidate(const DrawCall &call) {
@@ -504,9 +757,10 @@ private:
             for (std::uint32_t f = 0; f < figure.figures; ++f) {
                 const float across = (static_cast<float>(f) + 0.5f) / static_cast<float>(figure.figures) - 0.5f;
                 const Vec3 foot = add(base, scale(right_axis, across * width));
-                draw.vertices.resize(model.positions.size());
-                for (std::size_t i = 0; i < model.positions.size(); ++i) {
-                    const Vec3 &p = model.positions[i];
+                const std::vector<Vec3> &positions = positions_of(figure, place_key * 64u + f);
+                draw.vertices.resize(positions.size());
+                for (std::size_t i = 0; i < positions.size(); ++i) {
+                    const Vec3 &p = positions[i];
                     const Vec3 at = add(foot, add(scale(x_axis, p[0] * height),
                                                   add(scale(up_axis, p[1] * height), scale(front, p[2] * height))));
                     gpu::Vertex &out = draw.vertices[i];
@@ -580,6 +834,14 @@ private:
     Counts counts_{};
     Counts shown_{};
     std::uint64_t shown_frame_{};
+    // The clips' clock (advance_clock) and the skinning's scratch.
+    bool clock_frames_{};
+    bool sync_{};
+    bool ticking_{};
+    double clock_seconds_{};
+    std::chrono::steady_clock::time_point last_tick_{};
+    std::vector<Mat4> world_, skin_;
+    std::vector<Vec3> skinned_;
 };
 
 std::unique_ptr<GeBackend> make_models_backend() {

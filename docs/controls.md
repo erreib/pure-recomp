@@ -189,7 +189,7 @@ race runs a fraction under the display's rate (0.5%: 119.4 on a 120 Hz display, 
 that misses the display's refresh can be won back and the sound stays continuous; the help says so. The menus keep
 the PSP's pace, and on a 60 Hz display nothing changes. Original keeps the PSP's 59.94 Hz everywhere (E8,
 D-022; docs/timing.md, "E8"). Crowds and people (since task 102, D-025): Models draws the figures by the track as 3D
-models where the port has one, the start line's pit marshals today (`models/`, docs/ge-backend.md "The models
+models where the port has one, the start line's pit marshals today, waving (task 103; `models/`, docs/ge-backend.md "The models
 backend"), on both renderers; Original (the default until the crowd's models exist) draws the PSP's flat cut-outs.
 "Restore video defaults" puts all six back to their defaults; `PURE_SIXTY_FPS`, `PURE_SMOOTH_FLASHES`,
 `PURE_SPRITE_UPSCALE`, `PURE_TEXTURE_DETAIL`, `PURE_DISPLAY_RATE` and `PURE_CROWD_MODELS` lock them for a run ("Set

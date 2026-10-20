@@ -3,9 +3,13 @@
 # models backend (PURE_GE_BACKEND=models, PURE_GE_MODELS_INNER=metal, PURE_INTERNAL_SCALE=1, PURE_TRACE_MODELS=1; no
 # window), the frame regression suite's scenes (tools/frame_regress.sh --only) run twice:
 #   0  tt_hud with PURE_CROWD_MODELS=0 (Original: every draw goes through);
-#   1  tt_hud and race_hud with PURE_CROWD_MODELS=1 (Models: the pit marshals' six quads drawn as models/pitguy.pmdl).
+#   1  tt_hud and race_hud with PURE_CROWD_MODELS=1 (Models: the pit marshals' six quads drawn as models/pitguy.pmdl);
+#   2  (task 103) tt_hud's route on its own (tools/run_boot.py --script --shots) with two shots a second apart, frames
+#      5890 and 5950, Models on at PURE_INTERNAL_SCALE=4, PURE_MODELS_CLOCK=frames and PURE_MODELS_SYNC=1 (the
+#      clip at 2.15 s and 3.15 s: the arm raised, then lowered).
 #   tools/models_check.sh [--out DIR] [--wait SECONDS]
 #   --out   default out/models_check: DIR/0 and DIR/1 hold each run's captures and logs (tools/frame_regress.sh --out),
+#           DIR/2 run 2's (shots/wave_a.png and wave_b.png, tt_hud.log),
 #           DIR/<scene>.diff.png the differing pixels of a scene over its allowance, DIR/summary.txt the table
 #   --wait  how long the runs wait for another game to end before they start (tools/frame_regress.sh --wait; default
 #           600, 0 gives up at once)
@@ -16,7 +20,9 @@
 #   - the 0 run's `[models] frame F: ... (captured)` line for tt_hud says 0 draws replaced, and the 1 run's says 6
 #     for each scene (the six booths' quads are in both frames);
 #   - each 1 capture is within its scene's limit plus SLACK (0.02) of its PPSSPP reference at the scene's tol, both
-#     read from tools/frame_regress.sh's table.
+#     read from tools/frame_regress.sh's table;
+#   - run 2's two shots differ in at least MIN_WAVE (40) pixels at tol 24 inside WAVE_BOX (the left booth's marshals)
+#     and in at most MAX_DECK (0) inside DECK_BOX (the deck under their feet): the arms move, the feet stay planted.
 # The 1 run's `[texpack]` line is quoted: the Metal backend under the wrapper still looks for its texture pack.
 # About a minute. Prints PASS or FAIL last; exit 0 only on PASS.
 set -u
@@ -42,7 +48,7 @@ done
 need_game
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-rm -rf "$OUT/0" "$OUT/1"
+rm -rf "$OUT/0" "$OUT/1" "$OUT/2"
 rm -f "$OUT"/*.diff.png "$OUT/summary.txt" "$OUT"/frame_regress.*.stdout
 START=$SECONDS
 
@@ -52,7 +58,8 @@ capture() {
   echo "models_check: run $name (PURE_CROWD_MODELS=$v): $scenes ..."
   tools/frame_regress.sh --wait "$WAIT" --out "$OUT/$name" --only "$scenes" \
     --env PURE_GE_BACKEND=models --env PURE_GE_MODELS_INNER=metal --env PURE_INTERNAL_SCALE=1 \
-    --env PURE_TRACE_MODELS=1 --env "PURE_CROWD_MODELS=$v" > "$OUT/frame_regress.$name.stdout" 2>&1
+    --env PURE_TRACE_MODELS=1 --env PURE_MODELS_CLOCK=frames --env PURE_MODELS_SYNC=1 --env "PURE_CROWD_MODELS=$v" \
+    > "$OUT/frame_regress.$name.stdout" 2>&1
   if ! grep -q '^frame regression: ' "$OUT/frame_regress.$name.stdout"; then
     cat "$OUT/frame_regress.$name.stdout"
     echo "models_check: tools/frame_regress.sh could not run"
@@ -63,6 +70,29 @@ capture() {
 capture 0 0 tt_hud
 capture 1 1 tt_hud,race_hud
 
+# Run 2 (task 103): tt_hud's route (frame_regress.sh's table: main_menu.txt+time_trial.txt, its shot steps dropped)
+# with two shots a second apart, wave_a at the scene's frame and wave_b WAVE_GAP flips later, Models on, the clips on
+# the frame count with every phase 0 (PURE_MODELS_CLOCK=frames, PURE_MODELS_SYNC=1): the same two poses every run.
+WAVE_A=5890 WAVE_GAP=60 WAVE_SCALE=4   # at 1x the arms move 20 pixels in the box (the marshals are 18 tall)
+capture_wave() {
+  local dir="$OUT/2"
+  local script="$dir/route.txt"
+  mkdir -p "$dir"
+  echo "models_check: run 2 (PURE_CROWD_MODELS=1, the frames clock): tt_hud at $WAVE_A and $((WAVE_A + WAVE_GAP)) ..."
+  wait_game models_check "$WAIT" || exit 2
+  printf '%s:shot wave_a\n%s:shot wave_b\n' "$WAVE_A" "$((WAVE_A + WAVE_GAP))" > "$script"
+  for part in main_menu.txt time_trial.txt; do
+    grep -Ev '^[[:space:]]*[0-9]+:[[:space:]]*shot([[:space:]]|$)' "config/pad_scripts/$part" >> "$script"
+  done
+  fresh_stick "$dir/game"
+  python3 tools/run_boot.py --shell headless --script "$script" --shots "$dir/shots" \
+    --frames $((WAVE_A + WAVE_GAP + 30)) --data-dir out/data/frame_regress --env PURE_GAME_DIR="$dir/game" \
+    --env PURE_GE_BACKEND=models --env PURE_GE_MODELS_INNER=metal --env "PURE_INTERNAL_SCALE=$WAVE_SCALE" \
+    --env PURE_TRACE_MODELS=1 --env PURE_CROWD_MODELS=1 --env PURE_MODELS_CLOCK=frames --env PURE_MODELS_SYNC=1 \
+    "$dir/tt_hud.log" > "$dir/run_boot.stdout" 2>&1
+}
+capture_wave
+
 python3 - "$OUT" "$((SECONDS - START))" <<'EOF'
 import glob, os, re, sys
 sys.path.insert(0, "tools")
@@ -72,6 +102,13 @@ out, seconds = sys.argv[1], sys.argv[2]
 DIFF_TOL, MIN_PIXELS = 24, 150       # the 1 capture against the 0 one: the figures' pixels (213 with the placeholder)
 SLACK = 0.02                         # over the scene's own limit: the figures are not in the PPSSPP reference
 WANT = 6                             # the pit marshal's quads in both frames (task 101)
+# Run 2's boxes, (x, y, w, h) on the 480x272 screen: the left booth's marshals and the deck under their feet, found
+# once from a 4x headless capture of tt_hud (task 103, out/103/x4; Models off, the same two frames differ in 11 and 0
+# pixels there, the scene's own change): MIN_WAVE pixels at least must differ in the first, at the capture's 4x pixels,
+# MAX_DECK at most in the second (the feet stay planted, the camera still).
+WAVE_BOX = (112, 124, 48, 22)     # x 112-159, y 124-145: the three marshals of the left booth, arms to feet
+DECK_BOX = (112, 146, 48, 6)      # y 146-151: the booth's deck under their feet
+MIN_WAVE, MAX_DECK = 40, 0
 LINE = re.compile(r"^\[models\] frame (\d+): (\d+) draws replaced by (\d+) model draws, (\d+) quads \(captured\)")
 lines = []
 
@@ -116,8 +153,8 @@ def first_line(run, route, prefix):
 
 table = scene_table()
 failed = []
-note(f"models check: tt_hud and race_hud headless on Metal through the models backend, PURE_CROWD_MODELS 0 and 1 "
-     f"({seconds} s)")
+note(f"models check: tt_hud and race_hud headless on Metal through the models backend, PURE_CROWD_MODELS 0 and 1, "
+     f"and the wave at 4x ({seconds} s)")
 note(f"{'scene':<9} {'run':>3} {'models line':<46} {'vs ref':>7} {'allowed':>7} {'tol':>4} result")
 for run, scenes in (("0", ["tt_hud"]), ("1", ["tt_hud", "race_hud"])):
     for scene in scenes:
@@ -165,6 +202,26 @@ if os.path.isfile(a) and os.path.isfile(b):
 else:
     note("tt_hud 1 against 0: a capture is missing: FAIL")
     failed.append("tt_hud 1 against 0")
+# The wave (run 2): the arm moves between the two frames inside the marshals' box, the deck below their feet does not.
+wa, wb = os.path.join(out, "2", "shots", "wave_a.png"), os.path.join(out, "2", "shots", "wave_b.png")
+times = []
+try:
+    with open(os.path.join(out, "2", "tt_hud.log"), encoding="utf-8", errors="replace") as f:
+        times = [m.group(1) for m in map(re.compile(r"^\[models\] .*\(captured\); clip (\S+ t=\S+)").match, f) if m]
+except OSError:
+    pass
+if os.path.isfile(wa) and os.path.isfile(wb):
+    arm = imgdiff.compare_files(wa, wb, DIFF_TOL, 1.0, region=WAVE_BOX)["differing"]
+    deck = imgdiff.compare_files(wa, wb, DIFF_TOL, 1.0, region=DECK_BOX)["differing"]
+    ok = arm >= MIN_WAVE and deck <= MAX_DECK
+    note(f"tt_hud wave ({' and '.join(times) or 'no clip in the trace'}): {arm} pixels differ in the marshals' box "
+         f"{WAVE_BOX} (at least {MIN_WAVE}), {deck} in the deck {DECK_BOX} (at most {MAX_DECK}): "
+         f"{'PASS' if ok else 'FAIL'}")
+    if not ok:
+        failed.append("tt_hud wave")
+else:
+    note("tt_hud wave: a capture is missing (run 2): FAIL")
+    failed.append("tt_hud wave")
 on = first_line("1", table["tt_hud"][0], "[pure] crowd models:")
 off = first_line("0", table["tt_hud"][0], "[pure] crowd models:")
 pack = first_line("1", table["tt_hud"][0], "[texpack]")
