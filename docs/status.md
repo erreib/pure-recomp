@@ -31,7 +31,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | DLC | the US download packs (D-005) | done 2026-10-12 (tasks 077-download-packs, 078-download-packs-menu) |
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
-| HD pack | NR74W's HD texture pack (D-024) | picked 2026-10-20: the survey done (every image zstd-compressed RGBA8 ZIM), task 099 (the decoder, Vulkan) briefed; task 100 (the Metal loader) follows |
+| HD pack | NR74W's HD texture pack (D-024) | picked 2026-10-20: the survey done (every image zstd-compressed RGBA8 ZIM), task 099 (the decoder, Vulkan) dispatched, task 100 (the Metal loader) briefed for after its merge |
 | Crowd | 3D crowd and people models in place of the track-side sprites | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
 
@@ -227,7 +227,7 @@ after a change that moves or renames a file, a tool or a patch.
   (cloned to ~/Downloads, outside the checkout: 1331 ZIM files, all RGBA8 and zstd-compressed, 4172 xxh64 keys in
   the framework's own key shape). Task 099 (briefed, undispatched) adds Zstandard's decoder as a pinned source
   download and a ZIM path in the loader's `decode` (a vendor patch), and makes `tools/sprite_pack.sh --pack
-  DIR` the check that counts the pack's replacements on the race and menu routes; task 100 is the Metal backend's
+  DIR` the check that counts the pack's replacements on the race and menu routes; task 100 (briefed) is the Metal backend's
   pack loader on the framework's backend-neutral keys. The pack is derived art: never in this repository or an
   archive; a player imports it through the menu.
 - 3D crowd and people models (Erik, 2026-10-20; not scheduled): the track-side spectators and figures the game
