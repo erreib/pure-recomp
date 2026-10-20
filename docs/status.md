@@ -43,7 +43,7 @@ a 100 Hz display).
 |---|---|
 | Toolchain | Mac: `tools/check_env.sh` (arm64 cmake and ninja, SDL3, MoltenVK, Ghidra 12.1.4, PPSSPP); the rig: clang-cl on the `win-x64` preset, Git Bash (docs/setup.md) |
 | Disc and game | `tools/iso_extract.py` verifies CRC 4502C588 and extracts `disc/`; `tools/setup_game.sh` lays out `game/` |
-| Vendor | PortableKit at 8b0c3fe with 30 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
+| Vendor | PortableKit at 8b0c3fe with 31 patches by topic (`tools/patches.sh check`; patches/README.md, docs/upstream.md, docs/vendor-map.md) |
 | Corpus | `tools/regen.sh` (85 s): 144 units on the Mac, 145 on the rig, inlined on both since patch 0026-corpus-inlining; `PSPRECOMP_NO_INTERPRETER=1` runs clean |
 | The game | the whole single-player game: every mode, class, league and circuit; the movies, the music and the sound with the SAS reverb; saves in the PSP's format with the save list, import, export and backups; the twelve US download packs |
 | Mac, Metal (the default) | the Metal shell and backend (D-008): the drawable at the display's pixels, internal scale Auto, Fill, texture detail, the flashes smoothed, the 30-fps modes at 60, the race at 119.40 Hz on the 120 Hz display (E8), the performance overlay (F3) |
@@ -204,7 +204,8 @@ after a change that moves or renames a file, a tool or a patch.
   are counted apart and the machine is quiet. Task 501 (the same day, merged) armed the sink's recovery from the
   full lead, and the probe now counts the race load's snaps apart; `dropped=` turned out to be the harness's unpaced
   menus. batch/m2 is ready for `main` when Erik says so. Next: Erik's ear on a played race at Display with the trace
-  (docs/windows.md, "Open on the rig"; `tools/audio_hiccups.py` reads it), which also says whether a played race
+  (docs/windows.md, "Open on the rig"; F8 or a stick click marks the log as a hiccup is heard, patch 0032-trace-marks
+  of task 502; `tools/audio_hiccups.py` reads it), which also says whether a played race
   keeps real time at 100 Hz with a gamepad; under 95% the pacer call (Open calls) is the next design, near 100 the
   storms verdict is the harness's. The Mac's probe on both shells at this merge (planning session, expected
   unchanged).
