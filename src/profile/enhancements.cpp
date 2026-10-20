@@ -80,6 +80,14 @@ const char *const kTextureDetailChoices[] = {"Original", "Enhanced"};
 // and ran at twice the speed at 120 (task 089's measurement, docs/timing.md "E8"; the decision's review, 2026-10-14).
 const char *const kDisplayRateChoices[] = {"Original", "Display"};
 
+// --- Crowds and people (D-025, task 102) -----------------------------------------------------------------------------
+// The crowd on the grandstands and the pit marshals on the start line's booths are flat cut-out quads on the PSP
+// (docs/research.md, "The crowd, surveyed"). Models has the models GE backend (src/gpu/models_backend.cpp, the default
+// backend since task 102, wrapping the platform's) draw each quad of a texture models/models.ini names as a 3D model
+// of ours instead: the marshal today. The backend reads the option itself, once a frame, so there is no hook here.
+// Original until the crowd's models exist (D-025, point 4).
+const char *const kCrowdModelChoices[] = {"Original", "Models"};
+
 const GameOption kOptions[] = {
     {.key = "sixty_fps",
      .label = "30 fps modes",
@@ -125,6 +133,13 @@ const GameOption kOptions[] = {
                     "stays continuous. The menus keep the PSP's pace. The race's speed is the same either way (it "
                     "measures time).",
      .default_choice = 1u,
+     .tab = MenuTab::Video},
+    {.key = "crowd_models",
+     .label = "Crowds and people",
+     .choices = kCrowdModelChoices,
+     .description = "The crowd and the figures by the track are flat pictures on the PSP. Models draws them as 3D "
+                    "figures where the port has a model for them: the start line's marshals today. Both renderers.",
+     .default_choice = 0u,
      .tab = MenuTab::Video},
 };
 

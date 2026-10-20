@@ -65,6 +65,7 @@ interpolation (it works on presented images and stays in the shell), fast-forwar
 | `vulkan` | `host/gpu/vulkan_ge_backend.cpp` (built with the renderer) | `VulkanGeBackend`, a thin adapter over `VulkanRenderer`'s draw path; it needs the Vulkan shell, whose renderer is `BackendConfig::vulkan_shell`. The renderer still begins its frame lazily at the first draw, upload or present and ends it in the shell's present, which also does the frame write-back's copy, frame interpolation and the swapchain, so `begin_frame()` does nothing and `present_image()` only names the target (`VulkanRenderer::display_image`). Every other method forwards to the renderer method the HLE called before the seam |
 | `null` | `host/gpu/null_backend.cpp` (system layer: built without Vulkan) | counts draws, block transfers and uploads, presents a black 480x272 Cpu image and writes it for `capture_frame`; prints `[render] null backend: frame N, D draws submitted (K in the last 600 frames, F fps)` every 600 frames and a total at exit. It needs no window or GPU, so with `<prefix>_NO_RENDER` set it runs headless |
 | `record` | `src/tools/record_backend.cpp`, `src/tools/ge_record_format.hpp` (this repository's since task 095, namespace `pure::gerec`; built on every platform and registered through `BackendRegistration` as the Metal backend is; forwards the internal scale calls) | wraps another backend (`<prefix>_GE_RECORD_INNER`, default vulkan) and writes the calls it sees with the guest memory each read, and each frame's presented image, to a `.gerec` file (section 6) |
+| `models` | ours: `src/gpu/models_backend.{hpp,cpp}` (task 102, D-025; built on every platform) | the default on every platform since task 102: a wrapper over `PURE_GE_MODELS_INNER`'s backend that draws the figures as models at the Crowds and people row's Models (section 9) |
 | `metal` | ours: `src/gpu/` | the native backend, the default on macOS (D-008): docs/metal-backend.md. MSL compiled at run time (no Xcode), `Depth32Float_Stencil8` targets with the same stencil copy rule, `present_image` returns the target's `MTLTexture` for the Metal shell to draw (or hands a read-back to the Vulkan shell's window). Registered from our sources with a `BackendRegistration` |
 
 The registry (`register_backend`, `make_backend`, `backend_names`, `backend_description`, `BackendRegistration`)
@@ -90,6 +91,9 @@ first): the backend `<prefix>_GE_BACKEND` names is made first (it is asked `need
 `<prefix>_SHELL` names (`headless` whenever `<prefix>_NO_RENDER` is set, with any value, also empty), then the backend
 is initialised with `BackendConfig::vulkan_shell` set when the shell is the Vulkan one. Both default to `vulkan` in
 the framework; on macOS our entry point (`src/host/pure_main.cpp`) sets both to `metal` when they are unset (D-008).
+Since task 102 it sets the backend to `models` instead, on every platform, with `PURE_GE_MODELS_INNER` set to what the
+backend was before (metal, vulkan under the Vulkan shell, vulkan elsewhere): the table's rows for metal and vulkan are
+the models backend's over them.
 An unknown name prints the registered ones and falls back to vulkan; an empty value means vulkan.
 
 | `GE_BACKEND` | `SHELL` `vulkan`, `NO_RENDER` unset | `SHELL` `metal` | `NO_RENDER` set, or `SHELL=headless` |
@@ -98,6 +102,7 @@ An unknown name prints the registered ones and falls back to vulkan; an empty va
 | metal | the Metal backend draws; nothing reaches the Vulkan window; `PURE_SHELL=vulkan` alone takes the vulkan backend (task 093) | the Metal shell shows the backend's texture: no Vulkan or MoltenVK in the process | headless shell: no window, every draw reaches the backend, which still draws on the GPU |
 | null | Vulkan shell; the null backend's black Cpu image uploaded into the display target and shown; scripted input through the virtual gamepad | the black Cpu image | headless shell: no window, no GPU, every draw reaches the backend, the pad from the script |
 | record | as its inner backend | as its inner backend | as its inner backend |
+| models | as its inner backend | as its inner backend | as its inner backend |
 
 When the Vulkan shell cannot be made ("Renderer: unavailable (...); running headless"), a backend that needs no
 window runs in the headless shell. The kernel's clock is paced to real time when the shell has a window and unpaced
@@ -427,6 +432,50 @@ about 19 frames a second. Patch 0005-kernel-host-waits-and-pacing (Fable, after 
 `real_time` flag that only the adhoc network waits set, so the sleep covers waits on the outside world alone, and
 `Kernel::set_paced(bool)`, which the HLE sets from the shell (`has_window()`): a headless shell runs unpaced, a
 window paced. The headless frontend route reaches frame 2200 in about 1 s.
+
+## 9. The models backend (task 102, D-025)
+
+`src/gpu/models_backend.cpp`, registered as `models`, `PURE_GE_BACKEND`'s default since task 102. It makes the
+backend `PURE_GE_MODELS_INNER` names (`models` refused) and forwards every `GeBackend` call to it, as the record
+backend does; `WrappingBackend::inner()` (`models_backend.hpp`) hands that backend out, and the Metal shell asks for
+it when the running backend is not the texture pack host itself (`src/host/metal_shell.mm`), so the pack rows find
+the Metal backend through the wrapper.
+
+- **The row.** The Video tab's Crowds and people (`game.crowd_models`, `PURE_CROWD_MODELS`), read once a frame at
+  `begin_frame()`. At Original (the default) `submit()` hands every draw over unchanged. When it turns to Models, at
+  start or later, `models/models.ini` is read again (`[models] .../models.ini: N keys, M models (...)`) and
+  `[pure] crowd models: on (game.crowd_models), drawn by NAME` printed.
+- **Which draws.** Transformed (not through mode), not a clear, textured, a triangle strip or list with decoded
+  vertices (not the Vulkan renderer's raw vertices), the texture at most 256 texels a side: the texture's HD pack
+  key (`compute_texture_pack_key`, xxh64, the address and the mip levels ignored: the pack's own keys) is computed
+  once per texture (address, palette, format, size) and frame and looked up in the table's `[figures]`
+  (`<key> = <file>.pmdl figures=N`). The pit marshal's six keys are `pitguy.zim` on six tracks.
+- **Quads.** A strip's consecutive pair of non-degenerate triangles (the corners n to n+3; the crowd's degenerate
+  joins are skipped), a list's pair that shares an edge. Each quad's corners in world space: up from the low-v side
+  to the high-v side, or back, whichever points to world +y, its length the quad's height; right from low u to high
+  u, made square to up; front = up x right (D-025's rule), turned round when it points away from the viewer (the eye
+  of the draw's view matrix). On the pit marshal the rule gives +x for draws 149 to 151, but the game draws 152 to 154
+  with u reversed (the same sprite mirrored: a cut-out drawn without culling shows a front view from either side), so
+  for those it gives -x and the model showed the race its back (task 102's first 4x capture: a white helmet where the
+  visor should be). The viewer's side is what the PSP shows, a front, and +x for all six from the race. The cost: a
+  figure turns round when the camera crosses its plane (edge-on, as the ship passes the booths).
+- **The model draw.** For each quad (N figures side by side across it for `figures=N`): the model (y up, front +z,
+  feet at 0, height 1; models/README.md) turned so its y is up and its z the front, scaled by the quad's height,
+  stood on the midpoint of the quad's bottom edge, in world space; a `DrawCall` copied from the quad's (view,
+  projection, viewport, target, blend, depth, stencil, alpha test, fog, masks) with `Triangles`, the model's vertices
+  and u16 indices, the world matrix the identity, `texture.enabled` false, `has_vertex_color` true with the model's
+  colours times the quad's tint (the mean of its vertex colours), `lighting_enabled` false, `material_color` white,
+  culling off (the importer cannot promise a Blender mesh's winding; depth sorts the faces), `vertex_address` 0 and
+  `primitive_count` the triangle count. Both backends draw it from `vertices`, as any decoded draw. The quad is not
+  drawn.
+- **Trace.** `PURE_TRACE_MODELS=1`: `[models] frame F: N draws replaced by M model draws, K quads` every 60 frames and
+  for each captured frame (`(captured)`). The tt_hud and race_hud frames replace 6 draws (6 quads); only the three at
+  the left of the straight are on screen in tt_hud.
+- **The check.** `tools/models_check.sh` (docs/developing.md): headless on Metal, the row off and on, the counts,
+  the picture changed and within each scene's limit plus 0.02 of its reference.
+- **Models.** `models/` (models/README.md): `models.ini`, the `.pmdl` files `tools/model_import.py` makes from a glTF
+  with vertex colours (the light baked in, the height normalised), shipped in the app's `Contents/Resources/models`
+  and beside the Windows executable; a checkout finds them three levels above the executable.
 
 ## History
 

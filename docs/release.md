@@ -58,6 +58,7 @@ asks to be offered beside the binaries, `SHA256SUMS` and `BUILDINFO.txt`. Withou
 | `Resources/Wipeout Pure.icns` | the icon (`packaging/make_icon.py`: a rounded square with W and P, no game art) |
 | `Resources/fonts/NotoSansCJKjp-Regular.otf` | the framework's fallback font for Japanese text in the menu |
 | `Resources/metal_pipelines.txt` | (task 042) the Metal backend's pre-warm list, a copy of `config/metal_pipelines.txt` made at packing: the render pipelines and depth-stencil states made at start, the pipelines asynchronously, so no draw compiles one on first use, not even on a machine's first start with a cold shader cache (docs/metal-backend.md, "The pre-warm list"). The backend looks for it here first, and the app's signature seals it. `PURE_METAL_PIPELINES=FILE` or `0` still overrides it |
+| `Resources/models/` | (task 102) the models backend's figures: `models/models.ini` and `models/*.pmdl` copied at packing (not `models/README.md`), which the backend looks for there first; ours, made with `tools/model_import.py` (the pit marshal, a placeholder until Erik's model replaces it) |
 | `Resources/licenses/` | `Wipeout Pure-LICENSE.txt` (GPL v2; ours is GPL-2.0-or-later, D-006), PortableKit's, SDL3's, FFmpeg's, the loader's, MoltenVK's, Dear ImGui's, tiny-AES-c's, xxHash's, Zstandard's, the font's, and `THIRD_PARTY_NOTICES.md` |
 | `Info.plist`, `PkgInfo`, `_CodeSignature/` | id `com.erikreiblein.pure-recomp`, name, version, `LSMinimumSystemVersion` 13.0, category racing games; the ad hoc seal |
 
@@ -253,6 +254,7 @@ developer build's downloaded zip into the release directory first.
 | `LICENSE.txt`, `README.txt` | ours (GPL-2.0-or-later) and `packaging/windows/README.txt` |
 | `BUILDINFO.txt` | the version (`0.1.0-<commit>[-dirty]`, or `0.1.0` at the tag `v0.1.0`: [Publishing](#publishing)), the full commit, PortableKit's pin and patches, the toolchain, the shipped DLLs |
 | `licenses/` | FFmpeg's licence and source note (the build's), PortableKit's, SDL3's, Dear ImGui's, tiny-AES-c's, xxHash's and Zstandard's licences, and `THIRD_PARTY_NOTICES.md` |
+| `models/` | (task 102) `models.ini` and the `.pmdl` files of `models/`, the models backend's figures, which it looks for beside the executable |
 
 The folder is 146 MB, the zip 49 MB. `vulkan-1.dll` is not shipped: the graphics driver installs it in System32.
 The data directory is `%APPDATA%\pure-recomp\PureNative\` (SDL's preference folder), or `PURE_DATA_DIR`, with the
