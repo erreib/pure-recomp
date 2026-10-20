@@ -819,6 +819,17 @@ What differs from the Vulkan renderer:
 | Opening | at start and at `begin_frame` | at the first `begin_frame`, then at each, or at once between frames from the menu |
 | The cache drop | at every open and close | only when a pack was open or opens |
 
+The checks are `tools/sprite_pack.sh --check --shell metal` and `--pack DIR --shell metal`, in the Metal window at
+internal scale 2 (960x544 targets; the window's 1920x1088 drawable captured and reduced by the centre of each 4 x 4
+block). On 2026-10-20 (the task's build): the Mac-built sprite pack (48 keys) opened on both routes, 33 images
+uploaded (11 on the main menu route, peak 42 MB; the race route's peak 25 images, 88 MB), 129987 draws replaced in the
+traced windows; main_menu 0.0359 against the run without, reduced 0.0452 of its 0.05 (0.0401 without), race_hud
+0.0148 and 0.0647 of 0.10, the HUD found. NR74W's HD pack (4170 keys): 11 images on the main menu route (peak 265 MB),
+127 on the race route (peak 124 images, 594 MB), 259098 draws replaced, within 0.2% of the Vulkan renderer's counts
+(task 099: 127 images, 599 MB, 259443 draws); main_menu reduced 0.0491 (0.05), race_hud 0.2146 (new art: printed, not
+a rule), the HUD found. The race's paced seconds held 60 fps with the pack as without it (`PURE_PERF=log`: frame mean
+16.6 to 16.7 ms both ways, longest 18.9 ms against 18.6).
+
 ## Texture detail (task 075)
 
 Task 075 (E5, D-019, 2026-10-12): the backend picks a mipmapped draw's level as the GE does for the PSP's 480x272
