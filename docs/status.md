@@ -33,6 +33,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack (D-024) | task 099 merged 2026-10-20: the pack draws on the Vulkan renderer (127 images on the race route, 11 on the menus), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR` the check; task 100 (the Metal loader) briefed |
 | Crowd | 3D crowd and people models in place of the track-side sprites | on the roadmap, not scheduled (Next); nothing looked at yet |
+| Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
 
 ## Works
@@ -247,5 +248,16 @@ after a change that moves or renames a file, a tool or a patch.
   would come from (made for this port, never the game's or another game's bytes). Then one renderer, then the other,
   each with a check counting substituted draws on the race route, and an Esc-menu row with Original one choice away,
   like every enhancement.
+- Photo mode during races (Erik, 2026-10-20; not scheduled): pause a race (the Esc menu already holds the guest),
+  move a free camera around the frozen scene, hide the HUD, and save a capture at a chosen resolution. Nothing
+  looked at yet. The shape it would take in this port: the game's frame is a GE display list the backends already
+  record and replay (docs/ge-backend.md, the record backend and `ge_replay`), and the PSP keeps the view matrix
+  apart from the model and projection matrices in GE state, so the last list can be drawn again with the view
+  replaced and the through-mode (2D, HUD) draws left out, at the internal scale of the player's choice, through the
+  existing capture path. The first task is a spike on the Metal backend: replay the paused frame's list with a
+  substituted view matrix and no HUD, and say what breaks (objects the game culled from the original camera are
+  simply absent; the bloom and billboard passes read targets drawn with the old view; the sky). Then the camera's
+  controls in the Esc menu's shape, the capture row, and the Vulkan path. A capture is the player's own, never in
+  this repository.
 - E1, the controls; the VR spike (task 088, on the rig); the candidates named after E7: the frontend at 60 fps and the
   menu-XML spike (new in-game options).
