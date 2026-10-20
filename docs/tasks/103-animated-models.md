@@ -191,4 +191,20 @@ Open questions:
 6. Window checks this change needs (none were run): tt_hud with Models in the Metal window and in the Vulkan window (`tools/frame_regress.sh --shell metal --backend metal --only tt_hud --env PURE_GE_BACKEND=models --env PURE_GE_MODELS_INNER=metal --env PURE_CROWD_MODELS=1`, and the Vulkan equivalent with `PURE_GE_MODELS_INNER=vulkan`). Also the marshals waving at real pace with the frame interpolation on, since the model draws' vertices now change every frame.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge): `tools/models_check.sh` PASS (the wave row: 339
+pixels differ in the marshals' box between t=2.15 and t=3.15, 0 in the deck; task 102's rows as before), and the
+owed window runs, tt_hud with Models through the models backend in the Vulkan window (0.0512, PASS; the trace:
+`clip Wave_On t=0.92 (animated), skinned in 69 us`) and the Metal window (0.0500, PASS; `t=0.70`, 129 us). The
+worker's 4x side-by-side crop looked at: three marshals on the left booth, right forearm raised beside the head at
+t=2.15, the arm out and lowered at t=3.15, feet on the deck behind the railing both times.
+Spot-read: the importer's handling of the mesh node's transform and the rest-pose normalisation is the right
+algebra (its own t=0 check against the rest mesh at 9e-7 says so); the dense key table makes the backend a lerp;
+the clock rule is as briefed; the trace extension keeps the check's regex. Open question 2 is fine: the frames
+clock puts frame 5890 at t=2.15, not 0, and the static rows still pass; runs 0 and 1 stay on the frames clock for
+reproducibility. Open question 4 (a STEP jump blended over one key interval) is a known shape of the dense table,
+harmless for this rig. The stale "static only" strings in tools/model_pitguy_rig.py's outputs are Astra's to
+refresh at the next build of the asset.
+Merged: 6f79a62 into batch/m2.
+Notes: Erik's eye owed on the wave at real pace (the dev build, the row at Models, a Time Trial on Vineta K) and
+with the Vulkan shell's frame interpolation on, since the model draws' vertices now change every frame. Astra's
+eight crowd figures (tools/model_crowd.py, out/crowd-starter) are the crowd task's input.

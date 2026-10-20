@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey and the marshal as a model, tasks 101 and 102). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, the marshal as a model and its wave, tasks 101 to 103). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
-| Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | task 102 merged 2026-10-20: the `models` GE backend wraps the platform's on every run, the Video tab's "Crowds and people" row (Original by default) draws the six pit marshals as a vertex-coloured model on both renderers, `tools/models_check.sh` headless; models/pitguy.pmdl is the pit marshal built by Astra's Blender scripts (tools/model_pitguy.py, 1986 triangles, vertex colours; its rig and Wave_On clip in tools/model_pitguy_rig.py wait for an animated model format); the crowd follows once a figure set exists |
+| Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | tasks 102 and 103 merged 2026-10-20: the `models` GE backend, the "Crowds and people" row (Original by default), the pit marshal as Astra's 1986-triangle model waving (a `.pmdl` version 2 with 20 joints and the Wave_On clip, skinned on the CPU, both renderers); eight crowd figures built (tools/model_crowd.py), not yet placed; next the crowd task |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
@@ -266,9 +266,15 @@ after a change that moves or renames a file, a tool or a patch.
   review's rule), on both renderers in the window and headless. The marshal model arrived 2026-10-20 from Astra's
   Blender scripts (tools/model_pitguy.py builds the figure, 1986 triangles, a dark quilted suit, helmet and amber
   visor; tools/model_pitguy_rig.py rigs it with 20 bones and a four-second Wave_On clip, out/pitguy-rigged/); its
-  rest pose is models/pitguy.pmdl through `tools/model_import.py`, seen on the booths at 4x. Next: a `.pmdl`
-  version 2 with joints, weights and clips, CPU-skinned in the models backend on the frame count (the rig's
-  Wave_On first), then the crowd (a figure set, N figures per quad,
+  rest pose is models/pitguy.pmdl through `tools/model_import.py`, seen on the booths at 4x. Task 103 (merged 2026-10-20): `.pmdl` version 2 carries joints,
+  weights and clips, the importer writes it from the rigged GLB, and the models backend skins each figure on the
+  CPU (about 70 to 130 us a frame for six) on wall time with a phase per figure (`PURE_MODELS_CLOCK=frames` and
+  `PURE_MODELS_SYNC=1` for captures); the marshals wave on both renderers, the check sees the arm move and the
+  feet stay. Astra's tools/model_crowd.py built eight casual spectators (337 to 349 triangles each,
+  out/crowd-starter). Next, the crowd task: models.ini's crowd keys mapped to the figure set, N figures per quad
+  along its width, picked by a hash of the place, the triangle budget measured (205 quads x figures x 340), a
+  level of detail or fewer figures if it costs frames, the models check on the race route, then the row's default
+  to Models. Owed to Erik's eye: the wave at real pace and under the Vulkan shell's frame interpolation; then the crowd (a figure set, N figures per quad,
   levels of detail by the triangle budget) and the row's default to Models. Later, Erik's
   2026-10-20 notes: the figures animated (a pose cycle in the model file, played on the frame count), and a
   figure that turns to follow the player's ship (the facing rule stays static until then: the side first seen). A "record now" key for recordings at a played
