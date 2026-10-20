@@ -274,7 +274,8 @@ after a change that moves or renames a file, a tool or a patch.
   out/crowd-starter). Next, the crowd task: models.ini's crowd keys mapped to the figure set, N figures per quad
   along its width, picked by a hash of the place, the triangle budget measured (205 quads x figures x 340), a
   level of detail or fewer figures if it costs frames, the models check on the race route, then the row's default
-  to Models. Owed to Erik's eye: the wave at real pace and under the Vulkan shell's frame interpolation; then the crowd (a figure set, N figures per quad,
+  to Models. Erik's eye (2026-10-20): the placement and the wave at real pace look as expected, the groundwork is right;
+  the art is for later. Then the crowd (a figure set, N figures per quad,
   levels of detail by the triangle budget) and the row's default to Models. Later, Erik's
   2026-10-20 notes: the figures animated (a pose cycle in the model file, played on the frame count), and a
   figure that turns to follow the player's ship (the facing rule stays static until then: the side first seen). A "record now" key for recordings at a played
