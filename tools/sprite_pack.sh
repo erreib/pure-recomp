@@ -16,8 +16,9 @@
 #            of PNG or ZIM images (task 099: the HD pack of D-024, given by its folder, never copied into the repository).
 #   --shell  the window the check draws in, with its own GE backend: vulkan (the default; the Vulkan renderer's loader,
 #            host/gpu/replacement_textures.cpp) or metal (macOS: the Metal backend's, src/gpu/metal_texture_pack.mm,
-#            task 100), each run at internal scale 2 (PURE_INTERNAL_SCALE=2, 960x544 captures: what Auto gives in the
-#            default window, and what the Vulkan window draws), where run_boot.py would pin the Metal backend to 1.
+#            task 100), its runs at internal scale 2 (PURE_INTERNAL_SCALE=2: 960x544 targets, what Auto gives in the
+#            default window and what the Vulkan window draws), where run_boot.py would pin the Metal backend to 1. The
+#            Metal window captures its drawable, 1920x1088 on a 2x display (S 4 below); the Vulkan window 960x544.
 #   --wait   how long to wait for other games to end before each run (tools/frame_regress.sh --wait, and
 #            tools/lib.sh's wait_game before a sweep; default 600, 0 gives up at once).
 # The build (macOS), headless on the Metal backend with PURE_SPRITE_UPSCALE=1 and PURE_SPRITE_DUMP=DIR/dump (the
@@ -53,7 +54,7 @@
 #     capture with the pack, reduced to 480x272 by the centre pixel of each S x S block (S its width over 480: the
 #     Vulkan window's captures are the window's pixels, 960x544 in the default window, S 2), is within the scene's
 #     limit of its reference at the scene's tol, both read from tools/frame_regress.sh's table (the capture without the
-#     pack reduced the same way is printed beside it; the Metal window's captures are 960x544 too, S 2); for any other pack (new art, such as the HD pack) the figure is
+#     pack reduced the same way is printed beside it; the Metal window's are its 1920x1088 drawable, S 4); for any other pack (new art, such as the HD pack) the figure is
 #     printed and is not a rule;
 #   - race_hud's capture with the pack passes tools/hud_check.py (the HUD found).
 # Prints the table and `sprite_pack: PASS` or `FAIL` last. Exit 0 PASS (or a build without --check that made a pack),
