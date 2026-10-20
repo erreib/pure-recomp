@@ -56,6 +56,26 @@ weights, fixed feet and loop continuity, then reimports the GLB to compare defor
 GLB. Runtime playback needs an animation-capable importer and renderer (or a baked vertex-animation path); the
 rigged draft does not change `models/pitguy.pmdl`. Keep normalization based on the rest pose when adding playback.
 
+## Crowd starter assets
+
+`tools/model_crowd.py` builds eight casual spectators inspired by the crowd atlas, using the pit marshal's
+two-unit authoring height, feet at the origin and front toward Blender -Y. They have varied outfits, skin/hair
+colors and static poses (relaxed, folded arms, hands on hips, clapping and cheering), at 337–349 triangles each.
+
+```
+Blender --background --python-exit-code 1 --python tools/model_crowd.py -- out/crowd-starter
+```
+
+`out/crowd-starter/crowd-starter.blend` is the editable lineup. Each figure also has an individual GLB and PMDL,
+an individual preview, and a manifest entry. The GLBs are exported at the origin before the review lineup is
+arranged. They have vertex colors and named anatomical part groups, but no armatures or animation clips yet.
+The script checks geometry and converts every GLB with the existing importer. A scale-comparison render uses
+`out/pitguy-v2/pitguy.blend` if present (`--scale-reference` overrides that source).
+
+These are asset drafts: no crowd mapping is added to `models.ini`. Stand placement, deterministic selection of
+different figures, density/LOD decisions and per-track checks remain future integration work. The Vineta K quad
+survey in `docs/tasks/101-crowd-survey.md` provides the first placement measurements.
+
 ## The .pmdl format
 
 Little-endian: the magic `PMDL`, u32 version (1), u32 vertex count, u32 index count, then the float3 positions (the
