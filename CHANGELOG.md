@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0 (2026-10-20)
+
+The races at your display's refresh rate, and the sound that keeps up with it.
+
+- **Display rate**, a new row at the end of the Video tab's game section, on by default: when the display runs
+  above 60 Hz, Single Race and Tournament draw at its rate (120 frames a second on a 120 Hz display, 100 on a 100 Hz
+  one), and Time Trial, Free Play and Zone too with the 30 fps modes row at 60 fps. The game's speed is unchanged;
+  the race runs half a percent under the display's rate so that a missed refresh is won back without a hitch in the
+  sound. The menus keep the PSP's pace. Original keeps the PSP's 60 everywhere, as before.
+- **Performance** (the frame rate and frame times in the top-left corner, F3) now works on the Mac too, so you can
+  see 120 against 60.
+- **Sound at high refresh rates.** A sound channel that falls a few milliseconds behind keeps its content and
+  regains its lead over the next seconds instead of skipping; the early-race skips heard on a 100 Hz display are
+  gone. `PURE_AUDIO_SNAP=1` restores the previous behaviour for comparison.
+- **Windows:** the Esc menu's folder buttons (the data folder, the download packs) open Explorer; before, Windows
+  refused the address.
+- The README is written for players; the developer reference moved to docs/.
+- Not in this release, as in 0.1.0: ad hoc multiplayer and the in-game browser (shown as unavailable); download
+  packs from the EU and JP editions; notarized or signed builds.
+
 ## 0.1.0 (2026-10-13, the first public release)
 
 The whole single-player game on Apple Silicon Macs (Metal) and 64-bit Windows (Vulkan), from the player's own US

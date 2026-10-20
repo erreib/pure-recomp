@@ -1,7 +1,7 @@
 # Status
 
 Last updated: 2026-10-20 (the Mac's sound probe on both shells after tasks 501 to 503 merged: PASS, unchanged). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
-download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13. Now: the cleanup the audit of 2026-10-19
+download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) tagged 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
 
@@ -29,7 +29,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | E7 | the frontend's resolution (D-018) | done 2026-10-11 (tasks 073, 074); Original by default since 2026-10-12 |
 | E8 | the display rate (D-022) | done 2026-10-15 (tasks 089, 091-display-rate-margin); the rig's 100 Hz sound probe PASSes since 2026-10-19 (task 500), the sink's early-race shape fixed the same day (task 501); Erik's ear on a played race owed |
 | DLC | the US download packs (D-005) | done 2026-10-12 (tasks 077-download-packs, 078-download-packs-menu) |
-| R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087) |
+| R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 tagged 2026-10-20 (E8, the sink's late rule, patch 0029-windows-file-url) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack | on the roadmap, not scheduled (Next) |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |

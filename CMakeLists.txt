@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(PureRecomp VERSION 0.1.0 LANGUAGES C CXX)
+project(PureRecomp VERSION 0.2.0 LANGUAGES C CXX)
 
 # The framework (TeamGDB/PortableKit, MIT) is vendored at the commit in vendor/PIN by tools/vendor_setup.sh.
 set(PSPRECOMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
