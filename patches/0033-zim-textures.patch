@@ -1,5 +1,5 @@
 diff --git a/host/gpu/texture_pack.cpp b/host/gpu/texture_pack.cpp
-index 28628eb..c059ff3 100644
+index 28628eb..e4a1910 100644
 --- a/host/gpu/texture_pack.cpp
 +++ b/host/gpu/texture_pack.cpp
 @@ -29,6 +29,9 @@
@@ -104,7 +104,7 @@ index 28628eb..c059ff3 100644
  } // namespace
  
  std::string format_texture_pack_key(const TexturePackKey &key) {
-@@ -602,16 +690,24 @@ void TexturePack::decode(Replacement &replacement) {
+@@ -602,16 +690,25 @@ void TexturePack::decode(Replacement &replacement) {
          }
          if (!folded.empty()) bytes = read_file(folded);
      }
@@ -134,11 +134,12 @@ index 28628eb..c059ff3 100644
 +        else if (width <= 0 || height <= 0 || width > kMaxImageSide || height > kMaxImageSide) error = "too large";
 +    }
 +    if (!error.empty()) {
-+        std::cerr << "[texpack] cannot use " << replacement.name << ": " << error << "\n";
++        // One write a line: two loader threads report at once.
++        std::cerr << ("[texpack] cannot use " + replacement.name + ": " + error + "\n");
          if (image != nullptr) stbi_image_free(image);
          replacement.state.store(Replacement::State::Failed, std::memory_order_release);
          return;
-@@ -626,12 +722,18 @@ void TexturePack::decode(Replacement &replacement) {
+@@ -626,12 +723,18 @@ void TexturePack::decode(Replacement &replacement) {
          full_height = full_height * replacement.texture_height / replacement.covered_height;
      full_width = std::min<std::uint32_t>(full_width, kMaxImageSide);
      full_height = std::min<std::uint32_t>(full_height, kMaxImageSide);
@@ -163,3 +164,13 @@ index 28628eb..c059ff3 100644
  
      replacement.width = full_width;
      replacement.height = full_height;
+@@ -641,7 +744,8 @@ void TexturePack::decode(Replacement &replacement) {
+     }
+     replacement.pixels = std::move(pixels);
+     if (texture_pack_trace())
+-        std::cout << "[texpack] decoded " << replacement.name << " " << full_width << "x" << full_height << "\n";
++        std::cout << ("[texpack] decoded " + replacement.name + " " + std::to_string(full_width) + "x" +
++                      std::to_string(full_height) + "\n");
+     replacement.state.store(Replacement::State::Decoded, std::memory_order_release);
+ }
+ 
