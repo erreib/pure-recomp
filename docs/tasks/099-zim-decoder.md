@@ -278,4 +278,24 @@ Open questions:
   backgrounds. The Metal loader is task 100.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge, the main checkout rebuilt with the decoder: the
+first configure downloaded zstd-1.5.7.tar.gz once): `tools/patches.sh check` ok (32 files, numbered to 0033),
+`tools/docs_check.py` PASS, `tools/release_check.sh` every rule but home (the six `C:/Users/...` placeholder lines of
+patch 0029, known), and `tools/sprite_pack.sh --pack ~/Downloads/WipEout-Pure-HD-Texture-Pack --out out/099/review`
+PASS in 3 min 30 s: 11 keys found, decoded and uploaded on the menu route (267 MB on the GPU), 182 found, 126
+decoded, 127 uploaded on the race route (peak 599 MB), 0 refused, 54 named files missing, main_menu 0.0485 and
+race_hud 0.1955 reduced (printed, not a rule for new art), the HUD found.
+Spot-read: the patch's header parse, the mip arithmetic (`bit_width` is floor(log2) + 1, `<bit>` already included),
+the 4444 and 565 unpacking (R in the high bits, as GL names them) and the three payload paths are as D-024 states;
+the error strings are the loader's own shape; the decode's cerr and cout lines are now single writes, which the
+probe's interleaved lines asked for. cmake/Zstd.cmake verifies the SHA-256 of the `.part` before the rename,
+extracts only LICENSE, COPYING and lib/, stamps the version and hash, and tells a machine without network where to
+put the archive. The check's new rules read right: the reference figure decides only for a pack of the game's own
+art, since new art cannot match a reference captured without it. Looked at the review run's captures: the race's
+track grid, the barrier chevrons, the crowd and the stands are the pack's, the menu's text and bars crisp.
+Merged: f3188f9 into batch/m2.
+Notes: the open questions stand as follow-ups: the framework's SOURCE_PROVENANCE row goes with the upstream
+request; the bundles quote zstd's licence in the notices and ship no LICENSE file of its own (a `--license` line in
+the two bundle scripts, the planning session's); the rig has not built the decoder (its next pull: the configure
+downloads the archive, clang-cl compiles the C sources with the assembly off). The counts the brief got wrong by a
+few (4170 keys, 2546 missing files, 32 patch files) are the Result's.
