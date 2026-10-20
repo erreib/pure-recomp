@@ -1,0 +1,165 @@
+diff --git a/host/gpu/texture_pack.cpp b/host/gpu/texture_pack.cpp
+index 28628eb..c059ff3 100644
+--- a/host/gpu/texture_pack.cpp
++++ b/host/gpu/texture_pack.cpp
+@@ -29,6 +29,9 @@
+ #define STB_IMAGE_WRITE_IMPLEMENTATION
+ #include "stb_image_write.h"
+ 
++// Zstandard's decoder, for ZIM images; the port links it (zstd.h on its include path).
++#include <zstd.h>
++
+ namespace portablekit::gpu {
+ namespace {
+ 
+@@ -155,6 +158,91 @@ std::vector<std::uint8_t> read_file(const std::filesystem::path &path) {
+     return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+ }
+ 
++// A ZIM image, PPSSPP's own container (its format facts; no code of it): "ZIMG", then width, height and flags as
++// little-endian 32-bit words, then the pixels, raw, as a zlib stream or as zstd frames. The flags' low four bits are
++// the format: 0 RGBA8888 (bytes R, G, B, A), 1 RGBA4444 and 2 RGB565 (16-bit words, red in the high bits). With
++// HAS_MIPS the smaller levels follow level 0, each half the last, floor(log2(min side)) + 1 levels, at most 12;
++// level 0 alone is used, as for PNG (the renderer makes the mips). The other flags are hints. Sets `pixels` to
++// width x height RGBA8 rows, or `error`.
++bool decode_zim(const std::vector<std::uint8_t> &bytes, int &width, int &height, std::vector<std::uint8_t> &pixels,
++                std::string &error) {
++    constexpr std::uint32_t kFormatMask = 15u, kHasMips = 16u, kZlib = 256u, kZstd = 4096u;
++    if (bytes.size() < 16u) {
++        error = "short header";
++        return false;
++    }
++    const auto word = [&](std::size_t at) {
++        return static_cast<std::uint32_t>(bytes[at]) | static_cast<std::uint32_t>(bytes[at + 1u]) << 8 |
++               static_cast<std::uint32_t>(bytes[at + 2u]) << 16 | static_cast<std::uint32_t>(bytes[at + 3u]) << 24;
++    };
++    const std::uint32_t w = word(4u), h = word(8u), flags = word(12u), format = flags & kFormatMask;
++    if (format > 2u) {
++        error = "not a ZIM format the loader reads (format " + std::to_string(format) + ")";
++        return false;
++    }
++    if (w == 0u || h == 0u || w > static_cast<std::uint32_t>(kMaxImageSide) ||
++        h > static_cast<std::uint32_t>(kMaxImageSide)) {
++        error = w == 0u || h == 0u ? "no pixels" : "too large";
++        return false;
++    }
++    const std::size_t texel = format == 0u ? 4u : 2u;
++    const std::size_t level0 = static_cast<std::size_t>(w) * h * texel;
++    std::size_t total = level0;
++    if ((flags & kHasMips) != 0u) {
++        const int levels = std::min(static_cast<int>(std::bit_width(std::min(w, h))), 12);
++        for (int level = 1; level < levels; ++level) total += static_cast<std::size_t>(w >> level) * (h >> level) * texel;
++    }
++    const std::uint8_t *payload = bytes.data() + 16;
++    const std::size_t payload_size = bytes.size() - 16u;
++    std::vector<std::uint8_t> data;
++    if ((flags & kZstd) != 0u) {
++        data.resize(total);
++        const std::size_t size = ZSTD_decompress(data.data(), total, payload, payload_size);
++        if (ZSTD_isError(size) != 0u) error = std::string("zstd: ") + ZSTD_getErrorName(size);
++        else if (size < level0) error = "short payload";
++    } else if ((flags & kZlib) != 0u) {
++        int size = 0;
++        char *out = stbi_zlib_decode_malloc_guesssize_headerflag(reinterpret_cast<const char *>(payload),
++                                                                 static_cast<int>(payload_size),
++                                                                 static_cast<int>(total), &size, 1);
++        if (out == nullptr) error = std::string("zlib: ") + stbi_failure_reason();
++        else if (static_cast<std::size_t>(size) < level0) error = "short payload";
++        else data.assign(out, out + level0);
++        stbi_image_free(out);
++    } else if (payload_size != total) {
++        error = payload_size < total ? "short payload" : "payload longer than the image";
++    } else {
++        data.assign(payload, payload + level0);
++    }
++    if (!error.empty()) return false;
++    width = static_cast<int>(w);
++    height = static_cast<int>(h);
++    if (format == 0u) {
++        data.resize(level0);
++        data.shrink_to_fit();
++        pixels = std::move(data);
++        return true;
++    }
++    pixels.resize(static_cast<std::size_t>(w) * h * 4u);
++    for (std::size_t i = 0u; i < static_cast<std::size_t>(w) * h; ++i) {
++        const unsigned v = data[2u * i] | static_cast<unsigned>(data[2u * i + 1u]) << 8;
++        std::uint8_t *p = pixels.data() + 4u * i;
++        if (format == 1u) {
++            p[0] = static_cast<std::uint8_t>((v >> 12 & 15u) * 17u);
++            p[1] = static_cast<std::uint8_t>((v >> 8 & 15u) * 17u);
++            p[2] = static_cast<std::uint8_t>((v >> 4 & 15u) * 17u);
++            p[3] = static_cast<std::uint8_t>((v & 15u) * 17u);
++        } else {
++            const unsigned r = v >> 11, g = v >> 5 & 63u, b = v & 31u;
++            p[0] = static_cast<std::uint8_t>(r << 3 | r >> 2);
++            p[1] = static_cast<std::uint8_t>(g << 2 | g >> 4);
++            p[2] = static_cast<std::uint8_t>(b << 3 | b >> 2);
++            p[3] = 255u;
++        }
++    }
++    return true;
++}
++
+ } // namespace
+ 
+ std::string format_texture_pack_key(const TexturePackKey &key) {
+@@ -602,16 +690,24 @@ void TexturePack::decode(Replacement &replacement) {
+         }
+         if (!folded.empty()) bytes = read_file(folded);
+     }
++    // By the file's first bytes, not its name: a ZIM image, else whatever stb_image reads (PNG).
+     int width = 0, height = 0, channels = 0;
+-    stbi_uc *image = bytes.empty() ? nullptr
+-                                   : stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &width,
+-                                                           &height, &channels, 4);
+-    if (image == nullptr || width <= 0 || height <= 0 || width > kMaxImageSide || height > kMaxImageSide) {
+-        std::cerr << "[texpack] cannot use " << replacement.name << ": "
+-                  << (bytes.empty() ? "missing or unreadable"
+-                      : image == nullptr ? stbi_failure_reason()
+-                                         : "too large")
+-                  << "\n";
++    std::vector<std::uint8_t> zim;
++    stbi_uc *image = nullptr;
++    const std::uint8_t *rgba = nullptr;
++    std::string error;
++    if (bytes.empty()) {
++        error = "missing or unreadable";
++    } else if (bytes.size() >= 4u && std::memcmp(bytes.data(), "ZIMG", 4u) == 0) {
++        if (decode_zim(bytes, width, height, zim, error)) rgba = zim.data();
++    } else {
++        image = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &width, &height, &channels, 4);
++        rgba = image;
++        if (image == nullptr) error = stbi_failure_reason();
++        else if (width <= 0 || height <= 0 || width > kMaxImageSide || height > kMaxImageSide) error = "too large";
++    }
++    if (!error.empty()) {
++        std::cerr << "[texpack] cannot use " << replacement.name << ": " << error << "\n";
+         if (image != nullptr) stbi_image_free(image);
+         replacement.state.store(Replacement::State::Failed, std::memory_order_release);
+         return;
+@@ -626,12 +722,18 @@ void TexturePack::decode(Replacement &replacement) {
+         full_height = full_height * replacement.texture_height / replacement.covered_height;
+     full_width = std::min<std::uint32_t>(full_width, kMaxImageSide);
+     full_height = std::min<std::uint32_t>(full_height, kMaxImageSide);
+-    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(full_width) * full_height * 4u, 0u);
+-    for (int row = 0; row < height && static_cast<std::uint32_t>(row) < full_height; ++row)
+-        std::memcpy(pixels.data() + static_cast<std::size_t>(row) * full_width * 4u,
+-                    image + static_cast<std::size_t>(row) * static_cast<std::size_t>(width) * 4u,
+-                    static_cast<std::size_t>(std::min<std::uint32_t>(static_cast<std::uint32_t>(width), full_width)) * 4u);
+-    stbi_image_free(image);
++    std::vector<std::uint8_t> pixels;
++    if (!zim.empty() && full_width == static_cast<std::uint32_t>(width) &&
++        full_height == static_cast<std::uint32_t>(height)) {
++        pixels = std::move(zim);  // already the rows the renderer takes
++    } else {
++        pixels.assign(static_cast<std::size_t>(full_width) * full_height * 4u, 0u);
++        for (int row = 0; row < height && static_cast<std::uint32_t>(row) < full_height; ++row)
++            std::memcpy(pixels.data() + static_cast<std::size_t>(row) * full_width * 4u,
++                        rgba + static_cast<std::size_t>(row) * static_cast<std::size_t>(width) * 4u,
++                        static_cast<std::size_t>(std::min<std::uint32_t>(static_cast<std::uint32_t>(width), full_width)) * 4u);
++    }
++    if (image != nullptr) stbi_image_free(image);
+ 
+     replacement.width = full_width;
+     replacement.height = full_height;

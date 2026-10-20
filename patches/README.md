@@ -79,6 +79,7 @@ Kinds: Layout constant, Bug, Missing feature, Tooling, Speed, Behaviour, Fidelit
 | 0030-vblank-period | (task 089) | Behaviour | candidate | The kernel's vblank period a runtime value: `Kernel::vblank_period_us()` and `set_vblank_period_us()` (default `kVBlankPeriodUs`, the PSP's 16683 us; a new period applies from the next vblank, which stays where it was due, and the count of vblanks stands), read by the tick (`process_timers`), `last_vblank_us()` (now the vblank's own time, kept at the tick), the media HLE's frame grid (`frame_start_us`'s step), vblank duration, hcount and vblank flag, and frame interpolation's game frame (read from the kernel through `pacing::set_vblank_period_source`; `game_frame_us()` and `game_rate()` follow it, 60 at the PSP's period as before, 120 for a game at 60 whose vblank runs at 120 Hz, and a present clock follows a change at its next flip). Nothing moves at the default period |
 | 0031-audio-sink-late-writes | (task 098, the planning session, 2026-10-19) | Behaviour | candidate (with 0024) | The sink's stalled-producer jump fired on any cursor under the device's read position plus 512 frames and snapped it 2048 ahead: 46 ms of silence in that channel, the click heard after every dip. Now only a cursor more than `kLateLimit` behind (256 frames since task 503; 2048 before it, which let a deficit of up to one write persist as seconds of silence, since a producer at real time never catches up by itself) is a stall and snaps as before (`resyncs=`); a cursor less behind drops just the frames already played (`late=`), writes the rest where it belongs, and any write under the sink's 2048-frame lead (`lates=` events; task 501 widened this from 512 frames, with a device present only) arms a lead rebuild: the SDL stream's frequency ratio goes to 0.99 (`SDL_SetAudioStreamFrequencyRatio`, about 17 cents) until the device has read `kRecoveryFrames` (2048 / 0.01, about 4.6 s), by when every channel keeping real time has 2048 frames of lead again (`ratio=` on the trace line). The stream call is made outside the sink's lock, because the device callback holds the stream's lock while it takes the sink's. `<PREFIX>_AUDIO_SNAP=1` restores the old rule for A/B. A producer below real time for longer than the limit still snaps: the deficit must surface somewhere (task 081's analysis). |
 | 0032-trace-marks | (task 502, the planning session, 2026-10-20) | Tooling | candidate | A listener's mark in a traced run: with `<PREFIX>_TRACE_AUDIO` or `<PREFIX>_PERF` set, F8 or one stick clicked alone prints `[mark] N` on stdout, flushed, in step with the `[audio]` and `[perf]` lines (`ui/layer.cpp`'s event handler, which both shells call), so a hiccup heard while playing can be matched to what the sink and the host did that second (`tools/audio_hiccups.py` lists the marks among the events). An untraced run prints nothing; F8 still reaches the game through the keyboard snapshot if it is bound; the first click of a both-sticks menu toggle marks too. |
+| 0033-zim-textures | (task 099, D-024) | Missing feature | candidate (every port with a PPSSPP HD pack) | The texture pack loader decodes ZIM images, PPSSPP's own container, beside PNG: `TexturePack::decode` dispatches on the file's first four bytes (`ZIMG` to the new `decode_zim`, anything else to stb_image as before); formats RGBA8888, RGBA4444 and RGB565 to RGBA8 rows, raw, zlib (stb's inflate) or zstd (`ZSTD_decompress`) payloads, level 0 of a mip chain; the same size rule and `[texpack] cannot use` lines. Needs zstd.h and libzstd's decoder from the port (our `cmake/Zstd.cmake`) |
 
 ## What each patch does
 The paragraphs are the rows the old patches had, edited only where they named each other.
@@ -678,3 +679,28 @@ an input script (`key F8`, `pad leftstick`, `pad rightstick`): four marks in ord
 it. F8 is not consumed (the game reads the keyboard snapshot, so a binding to F8 still works); a both-sticks menu
 toggle marks once on its first click, which the reader shows beside a menu open. Upstream: a candidate on its own, a
 few lines any port's listener can use.
+
+### 0033-zim-textures
+Task 099 (D-024, 2026-10-20). NR74W's HD texture pack for Wipeout Pure (4172 keys, 1331 images) is a PPSSPP pack
+whose images are all ZIM files, PPSSPP's own container, and the loader read PNG only, so every key it found ended in
+`[texpack] cannot use NAME.zim: unknown image type`. `TexturePack::decode` (host/gpu/texture_pack.cpp) now looks at
+the file's first four bytes: `ZIMG` goes to `decode_zim`, anything else to stb_image as before, so a pack's file names
+do not matter. `decode_zim`, written from the format's facts (PPSSPP's ZIMLoad read, no code taken): a 16-byte header
+(`ZIMG`, width, height, flags as little-endian 32-bit words), the format in the flags' low four bits (0 RGBA8888 as
+bytes R, G, B, A; 1 RGBA4444 and 2 RGB565 as 16-bit words in GL's order, red high, unpacked to 8 bits a channel; any
+other refused, "not a ZIM format the loader reads"), the payload raw (exactly the image's size), a zlib stream with
+its header (ZLIB_COMPRESSED 256, stb_image's `stbi_zlib_decode_malloc_guesssize_headerflag`) or zstd frames
+(ZSTD_COMPRESSED 4096, `ZSTD_decompress` into the size the header gives); with HAS_MIPS (16) the levels follow level
+0, each half the last, `floor(log2(min side)) + 1` of them at most 12, and only level 0 is kept, the loader's rule for
+PNG packs too. The other flags (GEN_MIPS, DITHER, CLAMP, the ETC1 quality bits) are hints and ignored. Failures print
+`[texpack] cannot use NAME: REASON` as before ("short header", "too large", "zstd: <zstd's error name>", "zlib:
+...", "short payload"); `[texpack] decoded NAME WxH` keeps its shape. A ZIM's RGBA8 rows move into the replacement
+without the copy a PNG gets when no `[hashranges]` padding applies (a 4096x4096 image is 64 MB). Every one of the
+pack's 1331 files is format 0 with flags 5120 (zstd plus ETC1_MEDIUM) and no mips, so the 4444, 565, zlib, raw and
+mip paths are written from the format and not exercised by it.
+The decoder library is the port's: the framework compiles texture_pack.cpp straight into the game's executable
+(`portablekit_add_game`), and this repo's `cmake/Zstd.cmake` downloads zstd 1.5.7 (SHA-256 checked, a stamp) and
+links `pure_zstd_decoder` into PureNative after `portablekit_add_game()`. Upstream would want the download in the
+framework's own CMake beside FFmpeg's, linked into the game target and `portablekit_host_check` (which compiles
+texture_pack.cpp too, only with `PSPRECOMP_BUILD_TESTS`, off here), and a SOURCE_PROVENANCE row. Upstream: a
+candidate; any port that loads PPSSPP HD packs meets ZIM, the format PPSSPP's own tools save.
