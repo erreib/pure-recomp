@@ -7,6 +7,16 @@ it three levels above the executable.
 
 - `models.ini` maps a texture's HD pack key to a model (`[figures]`, `<key> = <name>.pmdl figures=N`; the file says
   how). The six pitguy keys are the pit marshal's texture on six tracks.
+- A crowd maps a key to a set (task 104): `<key> = set=crowd spacing=0.85 [near=120 far=300] [tint=0|1]`, with a
+  `[set crowd]` section listing its files, one a line (`crowd/01_graphite_tee.pmdl` ...). A quad then stands
+  `max(1, round(width / spacing))` figures across its width, figure f of a quad the set's file `hash(place, f) % size`
+  with a yaw jitter of up to 12 degrees and a height jitter of up to 6% from the same hash (the same people in the
+  same spots every frame), thinned with the eye's distance d to the quad's base: all of them under `near`, every
+  second one from `near` to `far`, every fourth beyond `far` (the ones kept chosen by the hash, so a figure does not
+  swap when the camera crosses a boundary). `tint=1`, the default, multiplies their colours by the quad's tint as for
+  the marshal. The reader reports a set with no files, a missing file and a line with neither `figures=` nor
+  `spacing=`. The nine crowd keys are the grandstands' sheet (`crowd.zim`) on nine tracks.
+- `crowd/` holds the set: Astra's eight spectators (below), each imported by `tools/model_import.py` from its GLB.
 - `pitguy.pmdl` is the pit marshal: the rigged draft below, version 2, waving (task 103). Task 102 first shipped the **placeholder** figure `tools/model_placeholder.py` builds (a
   432-triangle outline: grey legs, an orange body and arms, a white head with a yellow visor on its front), made by
   `python3 tools/model_placeholder.py out/102/placeholder.gltf` and
@@ -99,9 +109,10 @@ arranged. They have vertex colors and named anatomical part groups, but no armat
 The script checks geometry and converts every GLB with the existing importer. A scale-comparison render uses
 `out/pitguy-v2/pitguy.blend` if present (`--scale-reference` overrides that source).
 
-These are asset drafts: no crowd mapping is added to `models.ini`. Stand placement, deterministic selection of
-different figures, density/LOD decisions and per-track checks remain future integration work. The Vineta K quad
-survey in `docs/tasks/101-crowd-survey.md` provides the first placement measurements.
+Task 104 imported the eight GLBs into `crowd/` (`python3 tools/model_import.py out/crowd-starter/01_graphite_tee.glb
+models/crowd/01_graphite_tee.pmdl`, and so on: 297 to 315 vertices, 337 to 349 triangles, version 1, about 7 KB
+each) and maps the crowd's nine keys to them as the set `crowd` (above). A figure's fault is fixed in
+`tools/model_crowd.py` and imported again under the same name.
 
 ## The .pmdl format
 
