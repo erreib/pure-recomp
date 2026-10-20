@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers: D-024, tasks 099 and 100 merged). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, task 101). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
-| Crowd | 3D crowd and people models in place of the track-side sprites | picked 2026-10-20: the survey, task 101 (the crowd's textures, draws and stands extracted from a race frame as an OBJ scene, the Time Trial figure), dispatched |
+| Crowd | 3D crowd and people models in place of the track-side sprites | the survey done 2026-10-20 (task 101, merged): the crowd is 4 fixed strip draws a frame on two grandstands, about 205 quads 2.2 to 2.5 units tall sampling a 64x64 CLUT4 sheet of 56 figures (the HD pack's 256x256), alpha-tested cut-outs in the opaque pass; the Time Trial figure is the pit marshal, 6 quads 2 units tall on the start line's booths; `PureNative --replay FILE.gerec --extract FRAME` writes a frame as an OBJ scene with its textures (out/101/). Next: Erik's model style and scale from the OBJ, then the substitution design (a decision) |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
@@ -245,14 +245,23 @@ after a change that moves or renames a file, a tool or a patch.
   docs/metal-backend.md and the fidelity rows; D-018 superseded. Conditions before the task is briefed: the pack
   covers the menus a player sees (the 2549 files its ini names but lacks leave some at the original art), and a
   player without a pack keeps the original art, as the row's default already gives since 2026-10-12.
-- 3D crowd and people models (Erik, 2026-10-20; picked the same day: task 101, the survey, dispatched; the
-  extraction tool it builds, `PureNative --replay FILE.gerec --extract FRAME`, serves the skies too): the track-side spectators and figures the game
-  draws as flat sprites, drawn as models instead. Nothing looked at yet. The first task is a survey, not a change:
-  how the game draws them (which draws, textures and lists on the race routes; `PURE_TRACE_GE` and a .gerec), what a
-  substitution hook in the two renderers would key on (the texture or the draw's signature), and where the models
-  would come from (made for this port, never the game's or another game's bytes). Then one renderer, then the other,
-  each with a check counting substituted draws on the race route, and an Esc-menu row with Original one choice away,
-  like every enhancement.
+- 3D crowd and people models (Erik, 2026-10-20; picked the same day). The survey (task 101, merged 2026-10-20;
+  docs/research.md "The crowd, surveyed") found: the crowd is four triangle-strip draws a frame, about 205 vertical
+  quads 2.2 to 2.5 units tall (the road is 41 units wide, a ship 10.5 long) standing on two 146-unit grandstands
+  either side of the start straight, each quad one row of a 64x64 4-bit sheet of about 56 figures (the HD pack's
+  crowd.zim: the same figures as photographs at 256x256); fixed in the world, not billboards; alpha test GREATER
+  0x7F, no blending, fog on, depth written, in the opaque pass; a 64x64 `crowd_background` on the tiers behind
+  (no HD file in the reupload); a `camera_flash` quad blended additively in the translucent pass. The Time Trial
+  figure is the pit marshal: six single quads 2 units tall on the start line's booths, facing the oncoming race,
+  32x64 (HD 128x256). The tool: `PureNative --replay FILE.gerec --extract FRAME --out DIR [--keys K,...]` writes
+  the frame as an OBJ scene in the track's frame (y up, one world scale) with a material per draw, the textures
+  as PNGs named by the pack's keys and a JSON of every draw's state and bounds; `tools/zim_to_png.py` shows a
+  pack's image. Erik opens out/101/ (the race scene, the crowd alone, the marshal, the images) to settle the model
+  style and scale; then a decision on the substitution: a hook keyed by the texture's pack key that draws a model
+  set (instanced figures at each quad's base, facing the quad's normal, lit as the quad was, writing the same
+  depth, behind the alpha-tested quad or in its place) on both backends, an Esc-menu row with Original one choice
+  away, and a check counting substituted draws on the race route. A "record now" key for recordings at a played
+  moment is a small task when wanted (101, Open questions).
 - Photo mode during races (Erik, 2026-10-20; not scheduled): pause a race (the Esc menu already holds the guest),
   move a free camera around the frozen scene, hide the HUD, and save a capture at a chosen resolution. Nothing
   looked at yet. The shape it would take in this port: the game's frame is a GE display list the backends already

@@ -402,4 +402,19 @@ Open questions:
   now runs it through `python3`. Setting the bit would be a one-line mode change outside this task's "May touch".
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge, the main checkout rebuilt): `--extract 6015` of
+out/gerec/race.gerec writes 905 draws, 894 objects, 61692 faces, 140 textures and 140 PNGs, the OBJ's indices all
+in range, `tools/docs_check.py` PASS. The worker's out/101 copied to the main checkout (54 MB, git-ignored) before
+its worktree went; the images looked at: the 64x64 crowd is four rows of about 56 small figures, the HD one the
+same figures as photographs at 256x256, the pit marshal a 32x64 armoured figure with a yellow visor.
+Spot-read: the extractor's column-major convention is the one ge_state.cpp stores and ge.vert reads; the billboard
+guess measures the world's rotation against the inverse view's, a fair test; the dumper is recreated every 128
+textures because its queue drops past 256, a workaround worth a note upstream rather than a patch; the replay
+tool's existing modes are untouched (the branch to `extract()` comes before a lane is made). The survey's numbers
+are consistent across the race and Time Trial frames (the same four crowd draws, the same six marshal quads).
+Merged: e1f199c into batch/m2; tools/gerec/gerec_dump.py made executable in the review (the Verify line's
+workaround stays correct either way).
+Notes: the figure Erik described is most likely the pit marshal (six quads on the start line's booths, 2 units
+tall, facing the oncoming race); if it is another, the Result's played-session recipe stands. The "record now" key
+is a small task when wanted (patch 0032's key path plus 30 lines in record_backend.cpp). The crowd background's HD
+file is absent from the reupload, so that texture stays original under the pack.
