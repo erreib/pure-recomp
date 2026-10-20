@@ -335,6 +335,15 @@ bool FrameExtract::finish(std::string &summary, std::string &error) {
         if (!list.empty() && list.back().second + 1u == draw.index) list.back().second = draw.index;
         else list.emplace_back(draw.index, draw.index);
     }
+    // The camera: the view most draws use (the first transformed draw may be a render-to-texture pass's).
+    std::vector<std::size_t> view_draws(views.size(), 0u);
+    const Draw *main_first = nullptr;
+    for (std::size_t i = 0; i < x.draws.size(); ++i)
+        if (!x.draws[i].call.through) ++view_draws[view_of[i]];
+    const std::size_t main_view =
+        views.empty() ? 0u : std::max_element(view_draws.begin(), view_draws.end()) - view_draws.begin();
+    for (std::size_t i = 0; i < x.draws.size() && main_first == nullptr; ++i)
+        if (!x.draws[i].call.through && view_of[i] == main_view) main_first = &x.draws[i];
     Matrix usual{};
     std::size_t usual_count = 0u;
     for (const auto &[world, count] : worlds)
@@ -394,10 +403,14 @@ bool FrameExtract::finish(std::string &summary, std::string &error) {
     }
     json << "],\n  \"matrices\": \"4x4 column-major, element (row, column) at [column * 4 + row], applied as M * v\",\n";
     json << "  \"view\": " << (first ? matrix_json(first->call.view) : "null") << ",\n  \"projection\": "
-         << (first ? matrix_json(first->call.projection) : "null") << ",\n  \"usual_world\": " << matrix_json(usual)
+         << (first ? matrix_json(first->call.projection) : "null") << ",\n  \"main_view\": " << main_view
+         << ",\n  \"main_view_matrix\": " << (main_first ? matrix_json(main_first->call.view) : "null")
+         << ",\n  \"main_projection\": " << (main_first ? matrix_json(main_first->call.projection) : "null")
+         << ",\n  \"usual_world\": " << matrix_json(usual)
          << ",\n  \"views\": [\n";
     for (std::size_t v = 0; v < views.size(); ++v) {
-        json << "    {\"view\": " << v << ", \"matrix\": " << matrix_json(views[v]) << ", \"draws\": [";
+        json << "    {\"view\": " << v << ", \"draw_count\": " << view_draws[v] << ", \"matrix\": " << matrix_json(views[v])
+             << ", \"draws\": [";
         for (std::size_t r = 0; r < ranges[v].size(); ++r)
             json << (r != 0u ? "," : "") << "[" << ranges[v][r].first << "," << ranges[v][r].second << "]";
         json << "]}" << (v + 1u < views.size() ? "," : "") << "\n";
