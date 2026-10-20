@@ -691,3 +691,50 @@ with D squared and is total past one write; a snap costs one 2048-frame gap; the
 `kLateLimit` is 256: the late rule keeps content for the dip of a few milliseconds it was made for, and anything
 larger snaps once, as the old rule did. Nothing in the sink can do better for a producer below real time: at 88%
 speed, 12% of each second's sound does not exist (task 503).
+
+## D-024  2026-10-20  The HD texture pack: a ZIM decoder with zstd, the pack as the test subject
+
+**Context.** Erik picked the HD texture pack from the roadmap (status, Next; the roadmap entry of 2026-10-14 in
+docs/history/sessions.md). The pack (NR74W's, kept at github.com/0xf0xx0/WipEout-Pure-HD-Texture-Pack, 872 MB
+cloned, 1331 ZIM files, a `textures.ini` of 4172 xxh64 keys with `ignoreAddress` and `ignoreMipmap`, every edition
+listed; no licence file, the readme's copyright card names Sony's rights and disclaims endorsement) is derived art:
+never in this repository, an archive or a task's outputs; a player imports it through the Esc menu. The framework's
+loader (host/gpu/texture_pack.cpp, written for the framework from PPSSPP's format facts) parses the ini and decodes
+PNG with stb_image; the import screen already accepts `.zim`. The survey of 2026-10-20 read every header: all 1331
+are RGBA8888 (format 0), no mip chains, and every payload is **zstd**, not zlib (flags 5120 = ZSTD_COMPRESSED 4096 +
+ETC1_MEDIUM 1024, the latter meaningless for format 0); sizes from 128x128 to 4096x4096, 1422 Mpx in all. The
+format, from PPSSPP's ZIMLoad source read for its facts: a 16-byte header `ZIMG`, width, height, flags as
+little-endian 32-bit words, then the payload; with HAS_MIPS (16) the levels follow largest first, contiguous; the
+decompressed size is width x height x bytes per pixel summed over the levels, not stored. stb_image's inflate does
+zlib, so the pack's compression is the one thing the build cannot read today.
+
+**Decision.** (1) Zstandard's decoder joins the build as a pinned source download in the shape of FFmpeg's
+(`cmake/FFmpeg.cmake`'s `file(DOWNLOAD)` with the SHA-256 checked): zstd 1.5.7, BSD-3-Clause (dual GPLv2),
+https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz, SHA-256
+eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3, 2.4 MB; only `lib/common/*.c` and
+`lib/decompress/*.c` (340 KB of C) compiled into the host library with `ZSTD_DISABLE_ASM=1` (no assembler step on
+clang-cl), no programs, no shared library, no legacy formats; the notice in packaging/THIRD_PARTY_NOTICES.md and
+the framework's SOURCE_PROVENANCE row like SDL's and FFmpeg's. Not chosen: libzstd from Homebrew (nothing on the
+rig, and the release bundles must not depend on the machine); the single-file `zstddeclib.c` amalgamation vendored
+through a patch (a 400 KB patch nobody can review); converting the pack to PNG at import (the same decoder is
+needed to convert, and 1.4 Gpx of PNG is slower to load than zstd is to inflate); a zstd decoder of our own (a
+format with a reference implementation and a licence we can use is not "write it yourself" territory).
+(2) The ZIM decoder is a vendor patch to host/gpu/texture_pack.cpp's `decode`: by the file's first four bytes, not
+its extension (`ZIMG` goes to the ZIM path, anything else to stb_image as today); formats 0, 1 and 2 to RGBA8 rows
+(4444 and 565 unpacked from little-endian 16-bit words in GL's bit order, R high); zlib payloads through stb's
+`stbi_zlib_decode_malloc_guesssize_headerflag`, zstd through `ZSTD_decompress` with the computed size, raw as is;
+HAS_MIPS takes level 0 only (the loader's rule for PNG packs too: a pack's own mips are not used); the same size
+and failure rules as PNG (`[texpack] cannot use ...`). (3) The pack is the test subject on the Vulkan renderer first,
+on this Mac (MoltenVK) and the rig; the Metal backend's pack loader is the second task, using the framework's
+backend-neutral `compute_texture_pack_key`, `TexturePack::find` and the `Replacement` states, with its own upload in
+src/gpu/metal_textures.mm beside the sprite upscale. (4) A check counts replacements on the race and menu routes
+(the shape of `tools/sprite_pack.sh --check --pack DIR`, which already reads the `[texpack]` lines), with the pack's
+folder given on the command line, never found in the repository. Task 099 is the decoder; the Metal loader is 100.
+
+**Consequences.** The build downloads one more pinned archive the first time it configures (the rig too: its
+network reaches GitHub); `tools/release_check.sh`'s notices and the read-mes name zstd. With a pack installed the
+Text and sprites upscale is redundant on Vulkan (its row already says it does nothing there) and Texture detail
+applies to the pack's own levels, which have none: the renderer's mip generation for replacements is the Vulkan
+path's existing behaviour. The pack's 1.4 Gpx decode to 5.7 GB of RGBA8 if every image were resident; the loader's
+256 MB decode window and the renderer's 1 GB GPU budget (`PURE_TEXTURE_PACK_MEMORY`) bound it, and the task measures
+a race's and the menus' resident set.

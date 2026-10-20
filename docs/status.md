@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-20 (the Mac's sound probe on both shells after tasks 501 to 503 merged: PASS, unchanged). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-20 (0.2.0 released; the HD texture pack picked: D-024, task 099 briefed). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -31,7 +31,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | DLC | the US download packs (D-005) | done 2026-10-12 (tasks 077-download-packs, 078-download-packs-menu) |
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
-| HD pack | NR74W's HD texture pack | on the roadmap, not scheduled (Next) |
+| HD pack | NR74W's HD texture pack (D-024) | picked 2026-10-20: the survey done (every image zstd-compressed RGBA8 ZIM), task 099 (the decoder, Vulkan) briefed; task 100 (the Metal loader) follows |
 | Crowd | 3D crowd and people models in place of the track-side sprites | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
 
@@ -223,10 +223,13 @@ after a change that moves or renames a file, a tool or a patch.
   (the first race's 2.6 s menu snapped twice on resume). The Mac's probe on both shells at the merge (2026-10-20):
   PASS, unchanged, 0 resyncs and 0 seconds under 95% on each, `lates=0` (098, "The Mac's probe at the merge").
 - Menu refinements: Erik's to name.
-- The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
-  at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
-  backend; each with a check counting replacements on the race and menu routes. The pack is derived art: never in this
-  repository or an archive ([the roadmap entry](history/sessions.md#the-arcs-2026-10-08-to-2026-10-15)).
+- The HD texture pack (Erik, 2026-10-14; picked 2026-10-20, D-024): the survey read every header of the pack
+  (cloned to ~/Downloads, outside the checkout: 1331 ZIM files, all RGBA8 and zstd-compressed, 4172 xxh64 keys in
+  the framework's own key shape). Task 099 (briefed, undispatched) adds Zstandard's decoder as a pinned source
+  download and a ZIM path in the loader's `decode` (a vendor patch), and makes `tools/sprite_pack.sh --pack
+  DIR` the check that counts the pack's replacements on the race and menu routes; task 100 is the Metal backend's
+  pack loader on the framework's backend-neutral keys. The pack is derived art: never in this repository or an
+  archive; a player imports it through the menu.
 - 3D crowd and people models (Erik, 2026-10-20; not scheduled): the track-side spectators and figures the game
   draws as flat sprites, drawn as models instead. Nothing looked at yet. The first task is a survey, not a change:
   how the game draws them (which draws, textures and lists on the race routes; `PURE_TRACE_GE` and a .gerec), what a
