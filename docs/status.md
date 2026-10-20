@@ -26,7 +26,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | E4 | Time Trial, Free Play and Zone at 60 fps (D-017) | done 2026-10-11 (task 072) |
 | E5 | texture detail (D-019) | done 2026-10-12, both renderers (tasks 075, 076) |
 | E6 | a steady frame rate through the flashes (D-016) | done 2026-10-11 (task 070) |
-| E7 | the frontend's resolution (D-018) | done 2026-10-11 (tasks 073, 074); Original by default since 2026-10-12 |
+| E7 | the frontend's resolution (D-018) | done 2026-10-11 (tasks 073, 074); Original by default since 2026-10-12; to be retired once the HD pack's menus draw on both renderers (Erik, 2026-10-20; Next) |
 | E8 | the display rate (D-022) | done 2026-10-15 (tasks 089, 091-display-rate-margin); the rig's 100 Hz sound probe PASSes since 2026-10-19 (task 500), the sink's early-race shape fixed the same day (task 501); Erik's ear on a played race owed |
 | DLC | the US download packs (D-005) | done 2026-10-12 (tasks 077-download-packs, 078-download-packs-menu) |
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
@@ -230,6 +230,13 @@ after a change that moves or renames a file, a tool or a patch.
   DIR` the check that counts the pack's replacements on the race and menu routes; task 100 (briefed) is the Metal backend's
   pack loader on the framework's backend-neutral keys. The pack is derived art: never in this repository or an
   archive; a player imports it through the menu.
+  Then, Erik's call of 2026-10-20: once the pack's menus draw on both renderers and look better than the sprite
+  upscale (he expects they do), retire E7's upscale: the Text and sprites row, src/gpu/sprite_upscale.*, the
+  upscale path in metal_textures.mm, `PURE_SPRITE_UPSCALE` and `PURE_SPRITE_DUMP`, tools/sprite_check.sh, the pack
+  build of tools/sprite_pack.sh (its `--pack DIR` check stays as the texture pack check, renamed), the sections of
+  docs/metal-backend.md and the fidelity rows; D-018 superseded. Conditions before the task is briefed: the pack
+  covers the menus a player sees (the 2549 files its ini names but lacks leave some at the original art), and a
+  player without a pack keeps the original art, as the row's default already gives since 2026-10-12.
 - 3D crowd and people models (Erik, 2026-10-20; not scheduled): the track-side spectators and figures the game
   draws as flat sprites, drawn as models instead. Nothing looked at yet. The first task is a survey, not a change:
   how the game draws them (which draws, textures and lists on the race routes; `PURE_TRACE_GE` and a .gerec), what a
