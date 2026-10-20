@@ -759,7 +759,7 @@ unchanged while the row is Original; at Models it recognises a draw by its textu
 quads, and for each quad submits model draws to the inner backend instead of the quad. No vendor change: the Metal
 shell's texture pack host registration asks the wrapper for its inner. (2) A model draw is a `DrawCall` with
 `PrimitiveType::Triangles`, the model's vertices placed by the quad (base at the midpoint of its bottom edge, up
-along its vertical edge, front along the normal the UVs define: u increasing to the right as seen from the front;
+along its vertical edge, front across the quad's plane on the side the camera first saw the quad from, remembered by the quad's place (amended at task 102's review: the UV rule alone, u increasing to the right as seen from the front, gives half the marshals their back, because the game mirrors u on those, and the viewer's side taken each frame turns a figure round as the ship crosses its plane; the first sight is from the race's side for everything by the track);
 scaled so the model's unit height equals the quad's), the quad's world, view and projection, `texture.enabled`
 false, `has_vertex_color` true with the model's colours multiplied by the quad's vertex tint, lighting off (the
 model's shading is baked into its colours at import), and the quad's fog, depth, stencil, viewport, target, cull

@@ -352,6 +352,7 @@ private:
     // The row, once a frame (never per draw): the table read whenever it turns to Models.
     void read_option(bool at_start) {
         const bool on = portablekit::settings::game_option("crowd_models") == 1u;
+        if (on != on_) sides_.clear();  // a fresh first sight after a switch; the map is otherwise a few hundred places
         if (on && !on_) {
             table_ = read_table();
             std::cout << "[pure] crowd models: on (game.crowd_models), drawn by " << inner_name_ << "\n";
@@ -489,7 +490,15 @@ private:
             Vec3 base, up_axis, right_axis, front;
             float height = 0.0f, width = 0.0f;
             if (!place(corners, base, up_axis, right_axis, front, height, width)) continue;
-            if (dot(front, sub(eye, base)) < 0.0f) front = scale(front, -1.0f);  // the viewer's side
+            // The side a quad shows is the one the camera saw it from first, remembered by the quad's place (the
+            // review of task 102, D-025 as amended): the PSP draws a cut-out from both sides and the game mirrors u
+            // on half of the marshals, so neither the UV rule alone nor the viewer's side each frame gives a figure
+            // that both faces the race and stands still; a figure that turned round as the ship passed its plane
+            // would be seen doing it. The first sight is from the race's side for everything by the track.
+            const std::uint64_t place_key = quantise(base);
+            auto side = sides_.find(place_key);
+            if (side == sides_.end()) side = sides_.emplace(place_key, dot(front, sub(eye, base)) < 0.0f).first;
+            if (side->second) front = scale(front, -1.0f);
             // The model's x, y, z in world space: x = up x front (= -right), y = up, z = front.
             const Vec3 x_axis = cross(up_axis, front);
             for (std::uint32_t f = 0; f < figure.figures; ++f) {
@@ -518,6 +527,11 @@ private:
     }
 
     // A quad's placement from its corners (D-025): false when its UVs or shape say nothing.
+    // A quad's place as a map key: its base to a tenth of a unit on each axis (the booths' quads are a unit apart).
+    static std::uint64_t quantise(const Vec3 &p) {
+        const auto q = [](float v) { return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::lround(v * 10.0f)) & 0x1FFFFF); };
+        return q(p[0]) << 42 | q(p[1]) << 21 | q(p[2]);
+    }
     static bool place(const std::array<Corner, 4> &corners, Vec3 &base, Vec3 &up, Vec3 &right, Vec3 &front,
                       float &height, float &width) {
         float u_low = corners[0].u, u_high = u_low, v_low = corners[0].v, v_high = v_low;
@@ -560,6 +574,7 @@ private:
     bool trace_{};
     bool on_{};
     std::unordered_map<std::string, Figure> table_;
+    std::unordered_map<std::uint64_t, bool> sides_;  // a quad's place -> its front turned round (first sight)
     // This frame's lookups: (address, palette address, palette word, format and size) -> figure or null.
     std::map<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>, const Figure *> seen_;
     Counts counts_{};

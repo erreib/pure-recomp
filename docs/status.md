@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, task 101). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey and the marshal as a model, tasks 101 and 102). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
-| Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | the survey done 2026-10-20 (task 101); the design decided the same day (D-025: a substituting `models` GE backend, vertex-coloured `.pmdl` models from Erik's glTF exports, a "Crowds and people" row); task 102, the pit marshal, dispatched with a placeholder figure; Erik models the marshal in Blender 5.0.1 from out/101/person_pitguy_hd.png |
+| Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | task 102 merged 2026-10-20: the `models` GE backend wraps the platform's on every run, the Video tab's "Crowds and people" row (Original by default) draws the six pit marshals as a vertex-coloured model on both renderers, `tools/models_check.sh` headless; models/pitguy.pmdl is a placeholder figure until Erik's Blender model replaces it (`tools/model_import.py`); the crowd follows once a figure set exists |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
@@ -260,8 +260,13 @@ after a change that moves or renames a file, a tool or a patch.
   recognises a draw by its texture's pack key and submits model draws (vertex colours, no texture, the quad's
   fog, depth, stencil and tint) in place of each quad; models are Erik's Blender work exported as glTF with vertex
   colours and converted by the importer task 102 adds to `.pmdl` under models/, shipped in the app's resources; the
-  row is "Crowds and people", Original or Models. Task 102 (dispatched) builds all of it for the pit marshal with
-  a placeholder figure; Erik's marshal model replaces it by name. The crowd (figures per quad from a set) follows. A "record now" key for recordings at a played
+  row is "Crowds and people", Original or Models. Task 102 (merged 2026-10-20) built all of it for the pit
+  marshal: the wrapper changes nothing at Original (the 18 scenes match at tol 0), at Models the six marshals
+  stand on the booths as a placeholder figure, facing the race (the side first seen, remembered by place: the
+  review's rule), on both renderers in the window and headless. Now: Erik models the marshal in Blender (y up,
+  front +z, feet at the origin, a colour attribute, glTF with vertex colours; models/README.md) and
+  `tools/model_import.py` writes models/pitguy.pmdl from it; then the crowd (a figure set, N figures per quad,
+  levels of detail by the triangle budget) and the row's default to Models. A "record now" key for recordings at a played
   moment is a small task when wanted (101, Open questions).
 - Photo mode during races (Erik, 2026-10-20; not scheduled): pause a race (the Esc menu already holds the guest),
   move a free camera around the frozen scene, hide the HUD, and save a capture at a chosen resolution. Nothing

@@ -237,4 +237,24 @@ Open questions:
 8. race_hud with Models scores 0.0148 against its measured 0.0149. Its six marshals are replaced but barely change the picture, likely off screen or hidden in that frame. Not inspected.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge and one change of its own): `tools/models_check.sh`
+headless PASS (tt_hud 6 replaced, 0.0126 against the reference, 203 pixels differ from Original; race_hud 6
+replaced, 0.0148), and the owed window runs, `tools/frame_regress.sh --only tt_hud` with the row at Models through
+the models backend on the Vulkan window (0.0518, PASS) and the Metal window (0.0506, PASS; moved 0.039 from the
+scene's Metal figure, which is the figures in the picture): both captures looked at: three placeholder figures on
+the booth at the left of the straight, upright, feet on the deck behind the railing, orange bodies, grey legs,
+white heads, facing the race, drawn the same on both renderers.
+Spot-read: the wrapper forwards every call and changes nothing at Original (the worker's 18-scene run through it
+matched plain Metal at tol 0); the model draw carries what D-025 lists; the key is hashed once per texture and
+frame; `inner()` mends the Metal shell's host lookup; the row, the tools, the packaging rows and the docs are as
+briefed. The worker's open question 1 was right and its answer was not: facing the viewer each frame turns a
+figure round as the ship crosses its plane. The review replaces it with the side the camera first saw the quad
+from, remembered by the quad's place (a map keyed by the base to a tenth of a unit, cleared when the row
+switches); D-025 is amended to say so. The six marshals face +x under it, as the survey found them.
+Merged: d6137ed into batch/m2; the facing rule and the decision's amendment in the review commit.
+Notes: open for later, none blocking: `ENHANCEMENTS_OFF` in tools/purelib/port.py pins the row only when its
+default becomes Models; the perf line does not count the model draws (the `[models]` trace does); the Windows
+branch of pure_main.cpp's default and bundle_windows.sh's models/ copy are the rig's to prove; the check's differ
+threshold (150 pixels) may need raising for a model that looks like the cut-out; race_hud's six marshals are
+replaced but barely visible in that frame. Erik's marshal model replaces models/pitguy.pmdl by name through
+`tools/model_import.py`.
