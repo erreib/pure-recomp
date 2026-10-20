@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
-| Crowd | 3D crowd and people models in place of the track-side sprites | on the roadmap, not scheduled (Next); nothing looked at yet |
+| Crowd | 3D crowd and people models in place of the track-side sprites | picked 2026-10-20: the survey, task 101 (the crowd's textures, draws and stands extracted from a race frame as an OBJ scene, the Time Trial figure), dispatched |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
@@ -245,7 +245,8 @@ after a change that moves or renames a file, a tool or a patch.
   docs/metal-backend.md and the fidelity rows; D-018 superseded. Conditions before the task is briefed: the pack
   covers the menus a player sees (the 2549 files its ini names but lacks leave some at the original art), and a
   player without a pack keeps the original art, as the row's default already gives since 2026-10-12.
-- 3D crowd and people models (Erik, 2026-10-20; not scheduled): the track-side spectators and figures the game
+- 3D crowd and people models (Erik, 2026-10-20; picked the same day: task 101, the survey, dispatched; the
+  extraction tool it builds, `PureNative --replay FILE.gerec --extract FRAME`, serves the skies too): the track-side spectators and figures the game
   draws as flat sprites, drawn as models instead. Nothing looked at yet. The first task is a survey, not a change:
   how the game draws them (which draws, textures and lists on the race routes; `PURE_TRACE_GE` and a .gerec), what a
   substitution hook in the two renderers would key on (the texture or the draw's signature), and where the models
