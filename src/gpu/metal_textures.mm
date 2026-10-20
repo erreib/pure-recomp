@@ -251,7 +251,8 @@ id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const 
     if (upscale) key = hash_value(key, kUpscaledKey);
     if (const auto found = textures_.find(key); found != textures_.end()) {
         found->second.last_used = ++texture_clock_;
-        return found->second.texture;
+        // With a texture pack open (task 100, metal_texture_pack.mm): its image once it is on the GPU.
+        return pack_ ? pack_texture(memory, state, found->second) : found->second.texture;
     }
     if (!pk::decode_texture(memory, state, pixels_) || pixels_.empty()) {
         not_emulated("texture that cannot be decoded (drawn white), format", static_cast<std::uint32_t>(state.format));
@@ -311,10 +312,13 @@ id<MTLTexture> MetalGeBackend::decoded_texture(const GuestMemory &memory, const 
         bytes += static_cast<std::uint64_t>(level.width) * level.height * 4u;
         ++stats_.decoded_levels;
     }
-    textures_.emplace(key, CachedTexture{texture, ++texture_clock_});
+    CachedTexture &cached = textures_.emplace(key, CachedTexture{texture, ++texture_clock_}).first->second;
     ++stats_.decoded;
     stats_.decoded_bytes += bytes;
-    return texture;
+    // The pack's lookup hashes the whole texture, so it is made here, once per decode, never per draw (task 100).
+    if (!pack_) return texture;
+    find_replacement(memory, state, cached);
+    return pack_texture(memory, state, cached);
 }
 
 // The GE's level rule (task 037; PPSSPP's hardware notes, "Mip level selection"), D in 1/16 levels:

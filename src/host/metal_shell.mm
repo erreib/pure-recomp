@@ -48,7 +48,9 @@
 #include "shell/shell.hpp"
 
 #include "gpu/ge_backend.hpp"
+#include "gpu/texture_pack_host.hpp"
 #include "gpu/vulkan_renderer.hpp"  // its window title, fast-forward interval and Aspect rule, which this shell shares
+#include "hle/hle_common.hpp"
 #include "kernel/kernel.hpp"
 #include "perf/frame_stats.hpp"
 #include "perf/perf_overlay.hpp"
@@ -249,6 +251,8 @@ public:
     // The destructor's (host::Shell has no shutdown: nothing calls one through it).
     void shutdown() {
         @autoreleasepool {
+            if (pack_host_ != nullptr) pk::set_active_texture_pack_host(nullptr);
+            pack_host_ = nullptr;
             wait_idle();
             if (ui_ready_ && ImGui::GetCurrentContext() != nullptr) shutdown_ui();
             ui_ready_ = false;
@@ -382,6 +386,12 @@ public:
                 game = upload(image.pixels, image.width, image.height);
             last_game_ = game;
             ++flips_;
+            // The Metal backend draws texture packs (task 100): from its first picture the menu's Texture pack rows
+            // and the import screen ask it (patch 0034-texture-pack-host); unregistered at shutdown.
+            if (pack_host_ == nullptr && image.api == pk::gpu::ImageApi::Metal) {
+                pack_host_ = dynamic_cast<pk::gpu::TexturePackHost *>(pk::gpu::running_backend());
+                if (pack_host_ != nullptr) pk::set_active_texture_pack_host(pack_host_);
+            }
             const Clock::time_point now = Clock::now();
             // A load running faster than real time shows a flip only when the window has not had one for this long,
             // about 30 times a second, so vsync never holds the load back.
@@ -875,6 +885,7 @@ private:
 
     bool ready_{};
     bool quit_{};
+    pk::gpu::TexturePackHost *pack_host_{};  // the Metal backend, registered at its first picture (task 100)
     SDL_Window *window_{};
     SDL_MetalView view_{};
     CAMetalLayer *layer_{};
