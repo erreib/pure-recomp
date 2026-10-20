@@ -76,3 +76,11 @@ every write until the ratio has eaten the deficit), so task 501 raised the thres
 device present only, and gated it off under `PURE_AUDIO_SNAP=1`. `lates=` now counts every write under that lead.
 Open question 2 (the pair 1% for 4.6 s) stands and was not needed: with the rebuild started while a lead is left,
 the rig's early-race drain never reached zero in five runs. Question 3 (a reader for `lates=`) stands.
+
+## The Mac's probe at the merge (2026-10-20)
+`PURE_TRACE_AUDIO=1 tools/display_rate_check.sh --audio` and `--audio --shell vulkan` on batch/m2 at 5a5753a (tasks
+501 to 503 merged, 32 patches), the screen booked: PASS on both, unchanged from task 097. Each: 0 resyncs in the paced
+race, the load's 0, 1 channel restart (at 193 s, the results screen), 0 seconds under 95% (Vulkan: one at 98%),
+medians 119.4 presents and 119.4 game flips a second. The sink's totals over 126 s: `lates=0 late=0` on both, 10
+resyncs (the menus' channel restarts, counted apart since task 500), `dropped=` 6.16 M frames (49 k a second: the
+open finding of task 097, unchanged). Nothing on the Mac runs late at 119.4 Hz, as before. Logs: out/pull-probe/.

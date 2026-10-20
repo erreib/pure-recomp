@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-19 (task 501, the sink's early arming, merged). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-20 (the Mac's sound probe on both shells after tasks 501 to 503 merged: PASS, unchanged). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -173,8 +173,8 @@ twelve packs copied for `tools/dlc_check.sh`.
 
 ## Branches
 
-`main` = 9aa624a (2026-10-15: task 091's two merges, the rig's 100 Hz probe). `batch/m2` is the integration branch,
-`main` plus the audit's commits of 2026-10-19; every task branches from it (`git switch -c task/NNN-slug batch/m2`).
+`main` = 76350b5 (2026-10-19: the audit's cleanup, the screen batch). `batch/m2` is the integration branch,
+`main` plus the rig's sink tasks 500 to 503; every task branches from it (`git switch -c task/NNN-slug batch/m2`).
 Remotes: `origin`, Erik's private GitLab, and `github`, the public repository (https://github.com/erreib/pure-recomp;
 `v0.1.0` is there). Only Erik pushes.
 
@@ -219,9 +219,8 @@ after a change that moves or renames a file, a tool or a patch.
   game's own track streaming in 30 to 47 ms frames (the kernel does not preempt), one 32 ms first-use render
   frame, and GPU fence waits at 3440x1440. Next, in order: task 504 (a lead switch, Erik's ear at 93 ms, then a
   prewarm of the first-use uploads at the load; briefed in 503), a long Esc menu's resume traced on this sink
-  (the first race's 2.6 s menu snapped twice on resume), the Mac's probe on both shells at the merge (planning
-  session, expected unchanged: `tools/display_rate_check.sh --audio` and `--audio --shell vulkan` now bound the
-  paced race at no resync and print the load's apart).
+  (the first race's 2.6 s menu snapped twice on resume). The Mac's probe on both shells at the merge (2026-10-20):
+  PASS, unchanged, 0 resyncs and 0 seconds under 95% on each, `lates=0` (098, "The Mac's probe at the merge").
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; not scheduled): two tasks when picked, a ZIM decoder (or a conversion to PNG
   at import) for the Vulkan renderer's loader with the pack as the test subject, then a pack loader for the Metal
