@@ -191,10 +191,11 @@ the PSP's pace, and on a 60 Hz display nothing changes. Original keeps the PSP's
 D-022; docs/timing.md, "E8"). Crowds and people (since task 102, D-025): Models draws the figures by the track as 3D
 models where the port has one: the start line's pit marshals, waving (task 103), and the grandstands' crowd, eight
 kinds of spectator standing along each tier, thinned with distance (task 104; `models/`, docs/ge-backend.md "The
-models backend"), on both renderers; Original (the default until the crowd's models exist) draws the PSP's flat cut-outs.
+models backend"), on both renderers, the default since task 105 (the crowd's batches kept across frames and on the
+GPU, so the race holds 60 fps on Metal); Original draws the PSP's flat cut-outs.
 "Restore video defaults" puts all six back to their defaults; `PURE_SIXTY_FPS`, `PURE_SMOOTH_FLASHES`,
 `PURE_SPRITE_UPSCALE`, `PURE_TEXTURE_DETAIL`, `PURE_DISPLAY_RATE` and `PURE_CROWD_MODELS` lock them for a run ("Set
-by PURE_SIXTY_FPS"), as every tool run does for the first five.
+by PURE_SIXTY_FPS"), as every tool run does for all six (`PURE_CROWD_MODELS=0` since task 105).
 
 The System tab holds, in order: the Game section (Resume, Pause the game when the menu opens, Open the data folder,
 Set up game data again…, Quit game), Saves (Import save…, Export save…, Back up saves…, Open the saves folder, Open the
@@ -262,8 +263,8 @@ The game's own options are `game.<key>=<index>`, the index of the row's choice: 
 60 fps, the default) or `0` (Original), `game.smooth_flashes=1` (Flashes: Smooth, the default) or `0` (Original),
 `game.sprite_upscale=1` (Text and sprites: Upscaled) or `0` (Original, the default since 2026-10-12), and
 `game.texture_detail=1` (Texture detail: Enhanced, the default) or `0` (Original), `game.display_rate=1`
-(Display rate: Display, the default) or `0` (Original), and `game.crowd_models=1` (Crowds and people: Models) or `0`
-(Original, the default).
+(Display rate: Display, the default) or `0` (Original), and `game.crowd_models=1` (Crowds and people: Models, the
+default since task 105) or `0` (Original).
 An index out of range is ignored with `[settings] ignoring KEY=VALUE` and reads as the default, and a `game.` key
 this port has no option for is dropped when the file is next written.
 

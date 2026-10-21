@@ -49,7 +49,7 @@ The read-me inside each archive has the details.
   - sharper textures at distance (mipmap detail at the internal resolution);
   - the menu art upscaled (off by default);
   - the start line's pit marshals and the grandstands' crowd as 3D figures instead of flat pictures (Crowds and
-    people: Models; off by default);
+    people: Models, the default);
   - an HD texture pack, if you download one: the menus, fonts and race art drawn from it on both renderers (below).
 - **Controls**: keyboard with two layouts, PlayStation and Xbox gamepads as themselves, and every key rebindable.
 - **Faithful by default.** The reference is the PSP's own output: the port's checks compare its frames with PPSSPP

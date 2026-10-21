@@ -485,9 +485,26 @@ the Metal backend through the wrapper.
 - **Batching.** The figures of one game draw (a set's or the marshal's) are concatenated, vertices and offset
   indices, into as few triangle-list draws as u16 indices allow (65535 vertices, about 210 figures a draw), each with
   the quad's state: the Metal backend expands and uploads a draw's vertices each submit, so a draw per figure would
-  cost more than the triangles. The race frame: 4 crowd draws become 15 model draws with the marshals'. The cost is
-  the inner backend's: it expands the indices (about 1035 a figure) into 48-byte vertices, about 10 of the 13 ms the
-  frame's replacing takes for 1359 figures (the trace prints both).
+  cost more than the triangles. Since task 105 the quads are grouped first, in order, each group's figures at full
+  density within the 65535 (a quad over it alone a group of its own), and a group's figures are batched on their own,
+  so a group's batches depend on its own quads' bands alone. The race frame: 4 crowd draws become 12 batches, 18 model
+  draws with the marshals' 6. Task 104 measured the cost as the inner backend's: it expands the indices (about 1035 a
+  figure) into 48-byte vertices, about 10 of the 13 ms the frame's replacing took for 1359 figures.
+- **Kept batches (task 105).** A game draw of static figures (none of its models skinned: the crowd's) keeps its
+  batches across frames, by its identity: `vertex_address`, `primitive_count`, the texture's and the palette's
+  addresses. The kept entry holds the input it was built from (the figure, the world matrix, the vertices and the
+  indices), and a call serves from it only when its input is equal (a quad's tint is in its vertex colours, so a
+  change of colour rebuilds). Each frame recomputes only the bands, one distance a quad; a group whose bands all held
+  submits its kept batches with the current call's state put in (view, projection, viewport, target, blend, depth,
+  fog, ...), a group with a changed band is rebuilt. A kept batch's `vertex_address` is a synthetic id from
+  `kFirstCachedBatchAddress` (0xF0000000, models_backend.hpp; the game's addresses are below 0x0A000000), the same
+  for the group's batch from frame to frame, and its `index_address` a version, a counter bumped at each rebuild: an
+  inner backend may keep what it derives from a batch's vertices while (id, version) holds (the Metal backend its
+  expanded vertex buffer, docs/metal-backend.md "Kept model batches"). At most 64 batches are kept (the draw seen
+  longest ago goes first); a draw not seen for 60 frames is dropped, and turning the row clears them all. The
+  marshal's skinned figures are built every frame with `vertex_address` 0. `PURE_MODELS_NO_CACHE=1` keeps nothing.
+  The race frame headless: replacing takes 0.26 ms with all 12 crowd batches reused (12.4 ms before), 3.5 to 4 ms in
+  a frame where a group or two is rebuilt.
 - **Skinning (task 103).** A version 2 model (joints, weights, clips; models/README.md) is skinned on the CPU for
   each figure before the placement above, so the model draw stays an ordinary draw (no GE bone matrices, no renderer
   change): the figure's clip (the first in the file, or `clip=NAME` on its models.ini line) at the figure's time, each
@@ -503,13 +520,15 @@ the Metal backend through the wrapper.
   the marshals do not wave in unison. `PURE_MODELS_CLOCK=frames` makes the clock the shown frame / 60 s and
   `PURE_MODELS_SYNC=1` every phase 0: a headless capture of frame N then shows the same pose every run.
 - **Trace.** `PURE_TRACE_MODELS=1`: `[models] frame F: N draws replaced (C by a set) by M model draws, K quads, P
-  figures, V vertices` every 60 frames and for each captured frame (`(captured)`), then, when a figure was skinned,
+  figures, V vertices, B batches reused` (B: the kept batches submitted without a rebuild, task 105) every 60 frames and for each captured frame (`(captured)`), then, when a figure was skinned,
   `; clip NAME t=SECONDS (animated), skinned in N us` (the frame's first animated figure, the frame's skinning time),
   then `; replaced in N us, M of them the inner backend's`. The tt_hud and race_hud frames replace 10 draws (4 by the
   crowd set; 196 quads); only the three marshals at the left of the straight are on screen in tt_hud.
 - **The check.** `tools/models_check.sh` (docs/developing.md): headless on Metal, the row off and on, the counts,
   the picture changed (tt_hud in the marshals' box; race_hud's stands by 2000 pixels, its HUD still found) and within
-  each scene's limit plus 0.02 of its reference (0.10 for race_hud, whose stands are new art); and the wave: tt_hud at 4x at frames
+  each scene's limit plus 0.02 of its reference (0.10 for race_hud, whose stands are new art); the kept batches
+  (task 105: race_hud's frame reuses batches, `PURE_MODELS_NO_CACHE=1` reuses none, the two pictures equal at tol 0);
+  and the wave: tt_hud at 4x at frames
   5890 and 5950 on the frames clock (the clip at 2.15 s and 3.15 s), the marshals' box changed, the deck under their
   feet not.
 - **Models.** `models/` (models/README.md): `models.ini`, the `.pmdl` files `tools/model_import.py` makes from a glTF

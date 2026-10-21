@@ -161,6 +161,31 @@ the encoder when they changed, and the lighting block (world matrix, global ambi
 flags, the four lights, fog end and scale) when a lit, fogged or environment-mapped draw changed it, or the pass is new.
 Lighting and fog are uniform branches in the one vertex function, not pipeline variants.
 
+### Kept model batches (task 105)
+
+A draw whose `vertex_address` is at or above `kFirstCachedBatchAddress` (0xF0000000, src/gpu/models_backend.hpp) is a
+batch of static figures the models backend keeps across frames (docs/ge-backend.md, "The models backend": the id
+stable from frame to frame, `index_address` its version). `expand()` puts a triangle list's vertices in as they are:
+the positions in object space (a model batch's are world space, its world matrix the identity), the uv, the vertex's
+colour (a model draw has vertex colours; the material colour replaces it only for an unlit draw without them), the
+normal. The transform, the lighting and the fog are the uniforms' (`VertexUniforms`, the lighting block); only a
+transformed sprite's corners are made on the CPU with the transform. So nothing per frame is in the expanded
+vertices, and those of the same id and version are the same each frame. For such a draw (a 3D triangle list, not
+through mode, not a clear, not flat) metal_draw.mm keeps `cached_batches_`, by id:
+
+- **A hit** (the id kept at the draw's version) binds the kept buffer and draws its vertex count: no `expand()`, no
+  upload. The state, the uniforms and the pipeline are the draw's own, as for any draw.
+- **A miss** expands as before and writes `vertices_` once into a new shared buffer of its own
+  (`newBufferWithBytes`), not a pool chunk: the frame's completion handler hands buffers back to the `ChunkPool` by
+  their length, and a kept buffer must never be reused for another frame's vertices. The id's older buffer is
+  retired.
+- **Release.** A kept batch not drawn for 120 frames is retired; at most 64 are kept, the least recently drawn going
+  first. A retired buffer is held in `retired_batches_` for `kFramesInFlight` + 1 frames, past the command buffers
+  that may still read it (they retain it too), then released. The sweep runs once a frame, at the frame's first draw.
+
+Draws with any other `vertex_address` are unchanged. The crowd's 12 batches (about 430000 vertices, 20 MB) are then
+uploaded once and bound each frame.
+
 ## Targets
 
 As section 2 of `docs/ge-backend.md`: a target is keyed by (colour address, stride, format), the address taken

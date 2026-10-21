@@ -138,8 +138,9 @@ const GameOption kOptions[] = {
      .label = "Crowds and people",
      .choices = kCrowdModelChoices,
      .description = "The crowd and the figures by the track are flat pictures on the PSP. Models draws them as 3D "
-                    "figures where the port has a model for them: the start line's marshals today. Both renderers.",
-     .default_choice = 0u,
+                    "figures where the port has a model for them: the start line's marshals and the grandstands' crowd. "
+                    "Both renderers.",
+     .default_choice = 1u,
      .tab = MenuTab::Video},
 };
 

@@ -177,6 +177,18 @@ private:
     };
     bool expand(const DrawCall &call, const std::array<float, 16> &transform, MTLPrimitiveType &type,
                 std::size_t &drawn);
+    // Kept model batches (task 105, metal_draw.mm): a draw whose vertex_address is in the models backend's synthetic
+    // range keeps its expanded vertices in a buffer of its own while its version (index_address) holds.
+    struct CachedBatch {
+        std::uint32_t version{};
+        id<MTLBuffer> buffer;
+        std::size_t drawn{};
+        std::uint64_t last_used{};
+    };
+    CachedBatch *find_cached_batch(const DrawCall &call);
+    CachedBatch *keep_batch(const DrawCall &call, std::size_t drawn);
+    void retire_batch(id<MTLBuffer> buffer);
+    void sweep_cached_batches();
     template <typename At, typename Convert>
     void expand_transformed_sprites(const DrawCall &call, const std::array<float, 16> &transform, std::size_t count,
                                     const At &at, const Convert &convert);
@@ -312,6 +324,11 @@ private:
     std::vector<GpuVertex> vertices_;
     std::vector<GpuVertex> sprite_sources_;
     std::size_t sprite_corners_{};  // of a transformed sprite draw: vertices_ holds its sources after them
+    // The kept model batches by their synthetic vertex_address; the buffers of those replaced or dropped, held until
+    // the frames that may still read them are drawn; the frame they were last swept in.
+    std::unordered_map<std::uint32_t, CachedBatch> cached_batches_;
+    std::deque<std::pair<std::uint64_t, id<MTLBuffer>>> retired_batches_;
+    std::uint64_t batches_swept_{~0ull};
     LightingUniforms lighting_{};   // the last lit or fogged draw's, bound at buffer 2
     bool lighting_changed_{};       // since it was last bound
     bool lighting_bound_{};         // in the open encoder
