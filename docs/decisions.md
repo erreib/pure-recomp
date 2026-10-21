@@ -786,3 +786,46 @@ counted in the perf line's enhanced draws. The models' triangle budget is the ar
 triangles, a crowd figure about 300 (205 quads x 10 figures x 300 is 600 k triangles a frame, the Metal backend's
 race frame is about 60 k today, so the crowd needs levels of detail or fewer figures per quad: measured when it
 comes). The fidelity rule stands: Original draws exactly what the PSP draws.
+
+## D-026  2026-10-20  The skies as models: layered sky models drawn in the game's sky cube, with a parallax rule
+
+**Context.** Erik's roadmap entry (status, "3D backgrounds in place of the 2D skies"). The survey on the extracted
+Vineta K race frame (out/101/race, task 101's tool): the sky is a cube of five faces, four sides and a top, no
+bottom, 100 units across (half-size 50), drawn at the end of the opaque pass (draws 635 to 639 of 906) as five
+triangle strips of 81 vertices (9 x 9 grids; one face 163) under the scenery's uniform scale with their own
+translation, the cube's centre, which follows the camera (the eye sits 2 units in x, 1 in z and 19 above the
+centre), so the sky never parallaxes; each face binds one 256x256 CLUT8 texture (the HD pack's are 1024x1024, keys
+on the pack's ini lines 2605 to 2609 for Vineta K, every track has its own five), stored upside down like the
+sprites; the state: depth GREATER with writes (the sun block reads the sky's depth, 23 to 24 of the GE's depth
+range, through the signal after the last face: docs/ge-effects.md), fog off, no blend, alpha test ALWAYS,
+stencil ALWAYS 0x04, cull off, no lighting, white vertex colour, texture modulate. The faces: -z the city
+(towers, palms, a quay, mountains), +z and -x the sea and a mountain under a white sunlit sky, +x the clouds over
+the sea, the top blue sky with yellow-lit clouds. D-025's machinery (the models backend, `.pmdl`, the keys) is
+the base.
+
+**Decision.** (1) A sky is a model set drawn once a frame in place of the five faces: `[sky NAME]` sections in
+models.ini list layers, each a `.pmdl` with a `parallax=F` factor, and the five face keys of a track map to
+`sky=NAME`; when the models backend sees the first face of a frame it submits every layer at the cube's centre
+(the face draw's translation) with the face draw's state (depth GREATER with writes, fog off, stencil 0x04,
+viewport, target, no texture, vertex colours), and drops the five face draws; the layers are drawn in order. (2)
+Scale and depth: a model is authored in a unit cube centred on the origin (the eye at (0.02, 0.38, −0.02) of the
+half-size, the horizon therefore at y = 0.38 as seen from the eye) and drawn at the cube's half-size, 50 units;
+nothing of a layer may come nearer the centre than 1.0 (the faces' distance) so the sky's depth stays where the
+sun block expects it, and nothing farther than 1.72 (the corners). (3) Parallax without depth: the sky cube
+follows the camera, so a layer cannot stand in the world; instead a layer with `parallax=F` is offset by
+−F x (the camera's world position) in x and z, wrapped to the cube's width, so a far layer (F about 0.002: the
+city 1 unit of the cube per 500 of the world) slides against the dome (F 0) as the ship moves, which reads as
+distance. A `spin=S` degrees a second turns a layer about y (slow clouds). (4) Vertex colours, no texture, as the
+figures: the sky's gradients and clouds are geometry with colours (a dome of bands, cloud shells, silhouettes);
+the HD pack keeps replacing the flat faces when the row is Original. (5) The row: the sky joins "Crowds and
+people"? No: its own row, "Skies", Original or Models, so a player can take one without the other; default
+Original until Erik has judged a track. (6) Models are Astra's Blender builds from a prompt this decision's task
+writes (docs/prompts/sky-vineta-k.md), ours by construction. (7) The check: the race and Time Trial scenes with
+the row at Models, the five faces replaced, the sky region differing from Original, the sun block's picture still
+within the suite's limits elsewhere, both renderers.
+
+**Consequences.** A sky is as cheap as its triangles (a few thousand, kept batches as the crowd's since the
+layers are static but for the offsets, which the backend applies as a world translation, not a rebuild). Fog
+stays off in the sky as the game has it. A track without a `sky=` entry keeps its faces. The sun and the lens
+flare are the game's own draws and stay; a sky model keeps the sun's quarter of the top and the +x face clear of
+dense geometry. Textured skies would need the texture plumbing D-025 (2) deferred.

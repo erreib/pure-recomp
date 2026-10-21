@@ -34,7 +34,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
 | Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | tasks 102 to 105 merged 2026-10-20: the `models` GE backend, the "Crowds and people" row (Models by default since 105), the pit marshals as Astra's model waving, the grandstands filled with Astra's eight spectators (about 1360 figures a frame on Vineta K), the stands' batches kept across frames and on the GPU so both renderers hold 60 fps with the crowd (Metal render 5.5 to 8.7 ms at 1920x1088); the tools pin the row off. Next for the look: Erik's art direction; for the engine: instancing when the crowd animates |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
-| Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
+| Skies | 3D backgrounds in place of the tracks' 2D sky images (D-026) | the survey done 2026-10-20 (the sky is a five-face cube of 100 units around the camera, drawn at the end of the opaque pass with depth the sun block reads; Vineta K's faces and the HD pack's exported under out/106/sky); the design decided (D-026: layered vertex-coloured sky models in the cube with a parallax rule, a "Skies" row); task 106 (the engine side with a placeholder sky) dispatched; docs/prompts/sky-vineta-k.md is the prompt for Astra's model |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
 
 ## Works
@@ -301,19 +301,16 @@ after a change that moves or renames a file, a tool or a patch.
   simply absent; the bloom and billboard passes read targets drawn with the old view; the sky). Then the camera's
   controls in the Esc menu's shape, the capture row, and the Vulkan path. A capture is the player's own, never in
   this repository.
-- 3D backgrounds in place of the 2D skies (Erik, 2026-10-20; not scheduled): each track's sky is a cube of flat
-  images the game draws in the opaque world (docs/ge-effects.md: the sky cube's faces end the opaque pass, just
-  before the GE SIGNAL at which the game reads the depth buffer for the sun block, which samples the sky's depth);
-  drawn instead as a model or a layered scene (a dome, clouds with parallax, the horizon's buildings in depth) that
-  moves with the camera. Nothing looked at yet. The first task is a survey on the race routes: the sky cube's draws
-  on each track (the textures, the matrices, what depth they write and what the sun block's read-back needs of it),
-  what a substitution hook keys on (the sky
-  texture's hash, as the texture pack keys do), how the camera's orientation reaches the backend (the view matrix
-  in GE state), and whether the bloom and billboard passes read the sky. Then a scene format of our own for a sky
-  (made for this port, never the game's or another game's bytes; the HD pack's sky image is a pack's, drawn by the
-  loader, not this), one track on Metal with an Esc-menu row and Original one choice away, then the rest and the
-  Vulkan path, each with a check counting substituted sky draws on the race route. Shares the survey and the hook
-  with the crowd models above: the two are one substitution mechanism keyed by texture, so the survey task covers
-  both.
+- 3D backgrounds in place of the 2D skies (Erik, 2026-10-20; picked the same day). The survey, on task 101's
+  extracted frame: each track's sky is a cube of five flat faces (four sides and a top, no bottom), 100 units
+  across, centred 19 units below the eye and following the camera, drawn at the end of the opaque pass with
+  depth written (the sun block reads it), fog off, stencil 0x04; Vineta K's faces are 256x256 (the HD pack's
+  1024x1024: the city toward -z, the sea and a mountain toward +z and -x, clouds over the sea toward +x, a lit
+  cloud mass on top), exported with the cube's OBJ under out/106/. D-026: layered vertex-coloured sky models
+  (a dome, clouds, far horizon, the city, the sea) authored in the unit cube, drawn once a frame at the cube's
+  centre at 50 units with the faces' state, each layer offset by a parallax factor times the camera's world
+  position so the horizon slides against the dome; a "Skies" row, Original by default. Task 106 (dispatched)
+  builds the engine side with a placeholder sky; docs/prompts/sky-vineta-k.md is the prompt for Astra, whose
+  layers replace the placeholder by name. Shares the models backend and the key rule with the crowd.
 - E1, the controls; the VR spike (task 088, on the rig); the candidates named after E7: the frontend at 60 fps and the
   menu-XML spike (new in-game options).
