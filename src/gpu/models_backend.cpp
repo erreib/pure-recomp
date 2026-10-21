@@ -4,8 +4,9 @@
 //   <prefix>_GE_MODELS_INNER=<name>     the backend that draws (default metal on macOS, vulkan elsewhere; pure_main
 //                                       sets vulkan under the Vulkan shell); models itself is refused
 //   <prefix>_CROWD_MODELS=0|1           the Video tab's Crowds and people row (game.crowd_models) for the run
-//   <prefix>_TRACE_MODELS=1             `[models] frame F: N draws replaced by M model draws, K quads` every 60
-//                                       frames and for each captured frame (the line ends in "(captured)")
+//   <prefix>_TRACE_MODELS=1             `[models] frame F: N draws replaced (C by a set) by M model draws, K quads,
+//                                       P figures, V vertices` every 60 frames and for each captured frame (the
+//                                       line then ends in "(captured)")
 //
 // Every call goes to the inner backend unchanged while the row is Original (the default). At Models, a draw is
 // looked at when it is transformed (not through mode, not a clear), textured, a triangle strip or list of decoded
@@ -15,11 +16,16 @@
 // consecutive pair, degenerate joins skipped, or a list's pair), and each quad is replaced by the model's figures:
 //   - the quad's corners in world space (its own world matrix applied); "up" from the corners of its lower v to
 //     those of its higher v, or the reverse, whichever points to world +y, its length the quad's height; "right" from
-//     its lower u to its higher u, made square to up; front = up x right (D-025's rule), turned round when it points
-//     away from the viewer (the eye of the draw's view matrix). Task 102 checked the rule on the pit marshal: it
-//     gives +x for draws 149-151, but the game draws 152-154 with u reversed (the same sprite mirrored, which a cut-out
-//     drawn without culling shows as a front view from either side), so for them it gives -x and the model would
-//     show its back to the race; the viewer's side is what the PSP shows, a front, and +x for all six from the race;
+//     its lower u to its higher u, made square to up; the front the winding normal of the quad's first triangle as
+//     the GE orders it (cross(B - A, C - A) of its corners 0, 1, 2; a strip's odd triangle has its first two
+//     swapped), made square to up, with no turn toward the viewer (task 104, D-025 as amended): measured on the
+//     extracted frames it is +x for all six pit marshals (toward the oncoming race) and toward the road for both
+//     grandstands, whatever the UVs' direction or the mirrored u of draws 152-154. The rules before it (the UV rule
+//     up x right; the viewer's side; the side first seen) gave some marshals their back: the intro camera of a Time
+//     Trial sees the booths from the far side first;
+//   - a set's figures (below) stand on world +y instead, the rise of the quad's v edge their height: some of the
+//     grandstands' quads are parallelograms whose v edges slant along the tier, 3.6 to 7.1 units long for a rise of
+//     2.3 to 2.4, and a figure stood along the slant would lie on the tier;
 //   - the model (models/README.md: y up, front +z, feet at 0, height 1) is turned so its y is up and its z the front
 //     (its x is then up x front), scaled uniformly by the quad's height and stood on the midpoint of the quad's bottom
 //     edge; with figures=N, N of them side by side across the quad's width;
@@ -28,6 +34,15 @@
 //     vertex colours the model's times the quad's tint (its vertex colours' mean, or its material colour), material
 //     colour white and culling off (a Blender mesh's winding is not promised; depth sorts the faces).
 // The quad itself is not drawn. A draw with no quad (a lone triangle) goes through.
+//
+// A crowd (task 104) maps its key to a set of models (`set=NAME spacing=UNITS [near=U far=U] [tint=0|1]`, the
+// [set NAME] section's files): a quad stands max(1, round(width / spacing)) figures, figure f the set's model
+// hash(place, f) % size, turned about up by up to +-12 degrees and scaled by up to +-6% from the same hash. The eye's
+// distance d to the quad's base thins them: every figure under near, f % 2 == the place's hash bit from near to far,
+// f % 4 == its two bits beyond far (a subset of the half, so a figure kept beyond far is kept nearer too). The
+// figures of one game draw, a set's or the marshal's, are concatenated into as few triangle-list draws as u16
+// indices allow (kMostVertices each; the Metal backend uploads a draw's vertices with each submit, so a draw per
+// figure would cost more than the triangles).
 //
 // A version 2 model (task 103: joints, weights, clips) is skinned on the CPU for each figure before the placement:
 // its clip (the first in the file, or models.ini's clip=NAME) sampled at the figure's time, every joint's local
@@ -92,6 +107,10 @@ constexpr std::uint64_t kTraceEvery = 60u;
 constexpr double kLargestStep = 0.1;  // seconds: the most the clips' wall clock moves in one frame
 // The model draws' vertex type: float positions, 8888 colours, u16 indices, nothing else (no weights to skin).
 constexpr std::uint32_t kModelVertexType = (3u << 7) | (7u << 2) | (2u << 11);
+constexpr std::size_t kMostVertices = 65535u;    // a batched model draw's vertices: what u16 indices reach
+constexpr std::uint32_t kMostFigures = 256u;     // on one quad, for a set's spacing
+constexpr float kYawJitter = 12.0f * 3.14159265f / 180.0f;  // a set's figure turns by up to this either way
+constexpr float kHeightJitter = 0.06f;                       // and is up to this much taller or shorter
 
 Vec3 add(const Vec3 &a, const Vec3 &b) { return {a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
 Vec3 sub(const Vec3 &a, const Vec3 &b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
@@ -143,11 +162,24 @@ struct Model {
 };
 
 struct Figure {
-    std::shared_ptr<const Model> model;
-    std::string file;
-    std::uint32_t figures{1u};
+    std::shared_ptr<const Model> model;               // a file's model (null for a set)
+    std::vector<std::shared_ptr<const Model>> set;    // a set's models, in the [set NAME] section's order
+    std::string file;                                 // the file, or set=NAME
+    std::uint32_t figures{1u};                        // a quad's figures (figures=N), when spacing is 0
+    float spacing{};                                  // units a figure takes along the quad (spacing=)
+    bool thin{};                                      // the density rule: a set, or near=/far= given
+    float near_distance{120.0f}, far_distance{300.0f};
+    bool tint{true};                                  // the quad's tint multiplies the colours (tint=1)
     std::size_t clip{0u};  // the clip it plays (models.ini's clip=NAME; the first by default)
 };
+
+// splitmix64: a place's (or a figure's) hash.
+std::uint64_t mix64(std::uint64_t key) {
+    key += 0x9E3779B97F4A7C15ull;
+    key = (key ^ (key >> 30)) * 0xBF58476D1CE4E5B9ull;
+    key = (key ^ (key >> 27)) * 0x94D049BB133111EBull;
+    return key ^ (key >> 31);
+}
 
 Mat4 multiply(const Mat4 &a, const Mat4 &b) {
     Mat4 out{};
@@ -340,7 +372,7 @@ std::string lower(std::string text) {
     return text;
 }
 
-// models.ini's [figures]: key -> figure. Empty, with the reason printed, when there is none.
+// models.ini's [figures] and [set NAME] sections: key -> figure. Empty, with the reason printed, when there is none.
 std::unordered_map<std::string, Figure> read_table() {
     std::unordered_map<std::string, Figure> table;
     const std::filesystem::path directory = find_models_directory();
@@ -352,35 +384,13 @@ std::unordered_map<std::string, Figure> read_table() {
     const std::filesystem::path ini = directory / "models.ini";
     std::ifstream in(ini);
     std::map<std::string, std::shared_ptr<const Model>> models;
-    std::string line, section;
-    int number = 0, problems = 0;
-    while (std::getline(in, line)) {
-        ++number;
-        if (const auto comment = line.find_first_of(";#"); comment != std::string::npos) line.erase(comment);
-        line = trim(line);
-        if (line.empty()) continue;
-        if (line.front() == '[') {
-            section = lower(trim(line.substr(1u, line.find(']') - 1u)));
-            continue;
-        }
-        if (section != "figures") continue;
-        const auto equals = line.find('=');
-        std::istringstream words(equals == std::string::npos ? std::string{} : line.substr(equals + 1u));
-        const std::string key = lower(trim(line.substr(0u, equals)));
-        std::string file, word;
-        words >> file;
-        std::uint32_t figures = 1u;
-        std::string clip;
-        while (words >> word)
-            if (word.rfind("figures=", 0) == 0) figures = static_cast<std::uint32_t>(std::strtoul(word.c_str() + 8, nullptr, 10));
-            else if (word.rfind("clip=", 0) == 0) clip = word.substr(5u);
-        if (key.size() != 24u || key.find_first_not_of("0123456789abcdef") != std::string::npos || file.empty() ||
-            figures == 0u || figures > 64u) {
-            std::cout << "[models] " << ini.string() << ":" << number << ": not `<24 hex digits> = <file>.pmdl "
-                      << "[figures=1..64] [clip=NAME]`; left out\n";
-            ++problems;
-            continue;
-        }
+    int problems = 0;
+    const auto report = [&](int number, const std::string &why) {
+        std::cout << "[models] " << ini.string() << ":" << number << ": " << why << "\n";
+        ++problems;
+    };
+    // A file's model, read once; null (reported once) when it cannot be.
+    const auto load = [&](const std::string &file) {
         auto found = models.find(file);
         if (found == models.end()) {
             auto model = std::make_shared<Model>();
@@ -392,21 +402,127 @@ std::unordered_map<std::string, Figure> read_table() {
             }
             found = models.emplace(file, std::move(model)).first;
         }
-        if (!found->second) continue;
-        std::size_t chosen = 0u;
-        if (!clip.empty()) {
-            const std::vector<Clip> &clips = found->second->clips;
-            const auto named = std::find_if(clips.begin(), clips.end(), [&](const Clip &c) { return c.name == clip; });
-            if (named != clips.end()) {
-                chosen = static_cast<std::size_t>(named - clips.begin());
+        return found->second;
+    };
+    struct Line {
+        int number;
+        std::string key, set, clip;
+        Figure figure;
+    };
+    std::vector<Line> lines;
+    // A set's name -> the line of its section and its files with their lines.
+    std::map<std::string, std::pair<int, std::vector<std::pair<int, std::string>>>> sets;
+    std::string line, section;
+    int number = 0;
+    while (std::getline(in, line)) {
+        ++number;
+        if (const auto comment = line.find_first_of(";#"); comment != std::string::npos) line.erase(comment);
+        line = trim(line);
+        if (line.empty()) continue;
+        if (line.front() == '[') {
+            section = lower(trim(line.substr(1u, line.find(']') - 1u)));
+            if (section.rfind("set ", 0) == 0) {
+                section = "set " + trim(section.substr(4u));
+                sets.emplace(section.substr(4u), std::pair{number, std::vector<std::pair<int, std::string>>{}});
+            }
+            continue;
+        }
+        if (section.rfind("set ", 0) == 0) {
+            sets[section.substr(4u)].second.emplace_back(number, line);
+            continue;
+        }
+        if (section != "figures") continue;
+        const auto equals = line.find('=');
+        std::istringstream words(equals == std::string::npos ? std::string{} : line.substr(equals + 1u));
+        Line entry{number, lower(trim(line.substr(0u, equals))), {}, {}, {}};
+        Figure &figure = entry.figure;
+        figure.figures = 0u;
+        bool figures_given = false, distances = false, bad = false;
+        const auto number_of = [&](const std::string &text) {
+            char *end = nullptr;
+            const float value = std::strtof(text.c_str(), &end);
+            if (end == text.c_str() || *end != '\0' || !std::isfinite(value)) bad = true;
+            return value;
+        };
+        std::string word;
+        while (words >> word) {
+            const auto at = word.find('=');
+            const std::string value = at == std::string::npos ? std::string{} : word.substr(at + 1u);
+            if (word.rfind("figures=", 0) == 0) {
+                figure.figures = static_cast<std::uint32_t>(std::strtoul(value.c_str(), nullptr, 10));
+                figures_given = true;
+            } else if (word.rfind("clip=", 0) == 0) {
+                entry.clip = value;
+            } else if (word.rfind("set=", 0) == 0) {
+                entry.set = lower(value);
+            } else if (word.rfind("spacing=", 0) == 0) {
+                figure.spacing = number_of(value);
+            } else if (word.rfind("near=", 0) == 0) {
+                figure.near_distance = number_of(value), distances = true;
+            } else if (word.rfind("far=", 0) == 0) {
+                figure.far_distance = number_of(value), distances = true;
+            } else if (word.rfind("tint=", 0) == 0) {
+                figure.tint = value != "0";
+            } else if (figure.file.empty() && at == std::string::npos) {
+                figure.file = word;
             } else {
-                std::cout << "[models] " << ini.string() << ":" << number << ": " << file << " has no clip " << clip
-                          << (clips.empty() ? " (it has none: it stands still)" : "; it plays " + clips.front().name)
-                          << "\n";
-                ++problems;
+                bad = true;
             }
         }
-        table[key] = Figure{found->second, file, figures, chosen};
+        figure.thin = !entry.set.empty() || distances;
+        if (entry.key.size() != 24u || entry.key.find_first_not_of("0123456789abcdef") != std::string::npos || bad ||
+            figure.file.empty() == entry.set.empty() ||
+            (figures_given && (figure.figures == 0u || figure.figures > 64u)) || figure.spacing < 0.0f ||
+            figure.near_distance < 0.0f || figure.far_distance < figure.near_distance) {
+            report(number, "not `<24 hex digits> = <file>.pmdl figures=1..64 [clip=NAME]` or `<24 hex digits> = "
+                           "set=NAME spacing=UNITS [near=UNITS far=UNITS] [tint=0|1]`; left out");
+            continue;
+        }
+        if (!figures_given && !(figure.spacing > 0.0f)) {
+            report(number, "neither figures=N nor spacing=UNITS (how many figures a quad stands); left out");
+            continue;
+        }
+        if (!entry.set.empty()) figure.file = "set=" + entry.set;
+        lines.push_back(std::move(entry));
+    }
+    // The sets' models: a set with no files, or a file that does not read, is reported (the rest of the set serves).
+    std::map<std::string, std::vector<std::shared_ptr<const Model>>> set_models;
+    for (const auto &[name, at] : sets) {
+        std::vector<std::shared_ptr<const Model>> &chosen = set_models[name];
+        if (at.second.empty()) report(at.first, "[set " + name + "] lists no files");
+        for (const auto &[line_number, file] : at.second) {
+            if (auto model = load(file)) chosen.push_back(std::move(model));
+            else report(line_number, "[set " + name + "]'s " + file + " is left out of the set");
+        }
+    }
+    for (Line &entry : lines) {
+        Figure &figure = entry.figure;
+        if (!entry.set.empty()) {
+            const auto found = set_models.find(entry.set);
+            if (found == set_models.end() || found->second.empty()) {
+                report(entry.number, found == set_models.end() ? "no [set " + entry.set + "] section; left out"
+                                                               : "[set " + entry.set + "] has no model; left out");
+                continue;
+            }
+            figure.set = found->second;
+            table[entry.key] = std::move(figure);
+            continue;
+        }
+        figure.model = load(figure.file);
+        if (!figure.model) continue;
+        if (!entry.clip.empty()) {
+            const std::vector<Clip> &clips = figure.model->clips;
+            const auto named =
+                std::find_if(clips.begin(), clips.end(), [&](const Clip &c) { return c.name == entry.clip; });
+            if (named != clips.end()) {
+                figure.clip = static_cast<std::size_t>(named - clips.begin());
+            } else {
+                report(entry.number, figure.file + " has no clip " + entry.clip +
+                                         (clips.empty() ? " (it has none: it stands still)"
+                                                        : "; it plays " + clips.front().name));
+            }
+        }
+        table[entry.key] = std::move(figure);
     }
     std::cout << "[models] " << ini.string() << ": " << table.size() << " keys, " << models.size() << " model"
               << (models.size() == 1u ? "" : "s");
@@ -423,7 +539,10 @@ std::unordered_map<std::string, Figure> read_table() {
         }
         separator = "; ";
     }
-    std::cout << (*separator == ';' ? ")" : "") << (problems != 0 ? ", with problems above" : "") << "\n";
+    std::cout << (*separator == ';' ? ")" : "");
+    for (const auto &[name, chosen] : set_models)
+        std::cout << ", set " << name << " of " << chosen.size() << " model" << (chosen.size() == 1u ? "" : "s");
+    std::cout << (problems != 0 ? ", with problems above" : "") << "\n";
     return table;
 }
 
@@ -544,10 +663,12 @@ public:
 
 private:
     struct Counts {
-        std::uint64_t replaced{}, model_draws{}, quads{};
+        std::uint64_t replaced{}, set_replaced{}, model_draws{}, quads{}, figures{}, vertices{};
         const Clip *clip{};      // the first animated figure's clip and time
         double clip_time{};
         double skin_seconds{};  // the frame's skinning
+        double replace_seconds{};  // the frame's replace() calls, the inner backend's submits of their draws included
+        double submit_seconds{};   // those submits
     };
 
     // The clips' clock, once a frame: wall time, each step capped at kLargestStep, or the shown frame / 60.
@@ -566,19 +687,14 @@ private:
     // A figure's phase, 0 to 1, from its place (splitmix64 of the key): 0 for all with MODELS_SYNC.
     double phase_of(std::uint64_t key) const {
         if (sync_) return 0.0;
-        key += 0x9E3779B97F4A7C15ull;
-        key = (key ^ (key >> 30)) * 0xBF58476D1CE4E5B9ull;
-        key = (key ^ (key >> 27)) * 0x94D049BB133111EBull;
-        key ^= key >> 31;
-        return static_cast<double>(key >> 11) * 0x1.0p-53;
+        return static_cast<double>(mix64(key) >> 11) * 0x1.0p-53;
     }
 
     // The model's positions skinned for this figure (into skinned_), or its rest positions when it is static.
-    const std::vector<Vec3> &positions_of(const Figure &figure, std::uint64_t place) {
-        const Model &model = *figure.model;
+    const std::vector<Vec3> &positions_of(const Model &model, std::size_t clip_number, std::uint64_t place) {
         if (model.joints.empty() || model.clips.empty()) return model.positions;
         const auto start = std::chrono::steady_clock::now();
-        const Clip &clip = model.clips[std::min(figure.clip, model.clips.size() - 1u)];
+        const Clip &clip = model.clips[std::min(clip_number, model.clips.size() - 1u)];
         const double duration = static_cast<double>(clip.duration);
         const float t = static_cast<float>(std::fmod(clock_seconds_ + phase_of(place) * duration, duration));
         pose(model, clip, t, world_, skin_);
@@ -601,7 +717,6 @@ private:
     // The row, once a frame (never per draw): the table read whenever it turns to Models.
     void read_option(bool at_start) {
         const bool on = portablekit::settings::game_option("crowd_models") == 1u;
-        if (on != on_) sides_.clear();  // a fresh first sight after a switch; the map is otherwise a few hundred places
         if (on && !on_) {
             table_ = read_table();
             std::cout << "[pure] crowd models: on (game.crowd_models), drawn by " << inner_name_ << "\n";
@@ -612,11 +727,15 @@ private:
     }
 
     void report(const char *what) const {
-        std::cout << "[models] frame " << shown_frame_ << ": " << shown_.replaced << " draws replaced by "
-                  << shown_.model_draws << " model draws, " << shown_.quads << " quads" << what;
+        std::cout << "[models] frame " << shown_frame_ << ": " << shown_.replaced << " draws replaced ("
+                  << shown_.set_replaced << " by a set) by " << shown_.model_draws << " model draws, " << shown_.quads
+                  << " quads, " << shown_.figures << " figures, " << shown_.vertices << " vertices" << what;
         if (shown_.clip != nullptr)
             std::cout << "; clip " << shown_.clip->name << " t=" << shown_.clip_time << " (animated), skinned in "
                       << static_cast<long>(shown_.skin_seconds * 1e6) << " us";
+        if (shown_.replaced != 0u)
+            std::cout << "; replaced in " << static_cast<long>(shown_.replace_seconds * 1e6) << " us, "
+                      << static_cast<long>(shown_.submit_seconds * 1e6) << " of them the inner backend's";
         std::cout << "\n";
     }
 
@@ -672,7 +791,9 @@ private:
                 const std::uint32_t a = vertex_at(call, n), b = vertex_at(call, n + 1u), c = vertex_at(call, n + 2u),
                                     d = vertex_at(call, n + 3u);
                 if (!degenerate(call, a, b, c) && !degenerate(call, b, c, d)) {
-                    quads.push_back({a, b, c, d});
+                    // Corners 0 to 2 are the first triangle as the GE winds it: an odd one of a strip is (n+1, n, n+2).
+                    if (n % 2u == 0u) quads.push_back({a, b, c, d});
+                    else quads.push_back({b, a, c, d});
                     n += 2u;
                 } else {
                     n += 1u;
@@ -697,11 +818,12 @@ private:
         return quads;
     }
 
-    // Draws the figures for each of the draw's quads; false (and nothing drawn) when it has none.
+    // Draws the figures for each of the draw's quads, batched; false (and nothing drawn) when no quad is placed.
     bool replace(const DrawCall &call, const Figure &figure, const GuestMemory &memory) {
+        const auto started = std::chrono::steady_clock::now();
         const std::vector<std::array<std::uint32_t, 4>> quads = quads_of(call);
         if (quads.empty()) return false;
-        const Model &model = *figure.model;
+        const bool is_set = !figure.set.empty();
         // Everything the quad is drawn with (view, projection, viewport, target, blend, depth, stencil, alpha test,
         // fog, masks); then what a model draw changes.
         DrawCall draw = call;
@@ -717,18 +839,30 @@ private:
         draw.vertex_type = kModelVertexType;
         draw.vertex_address = 0u;
         draw.index_address = 0u;
-        draw.primitive_count = static_cast<std::uint32_t>(model.indices.size() / 3u);
         draw.material_color = 0xFFFFFFFFu;
         draw.lighting_enabled = false;
         draw.has_vertex_color = true;
         draw.world = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
-        draw.indices = model.indices;
+        draw.indices.clear();
         draw.vertices.clear();
         // The viewer: the eye of the view matrix (world to eye, column-major), -R^T t.
         const std::array<float, 16> &v = call.view;
         const Vec3 eye{-(v[0] * v[12] + v[1] * v[13] + v[2] * v[14]), -(v[4] * v[12] + v[5] * v[13] + v[6] * v[14]),
                        -(v[8] * v[12] + v[9] * v[13] + v[10] * v[14])};
-        std::uint64_t drawn = 0u;
+        std::uint64_t drawn = 0u, placed = 0u;
+        // The batch so far as one triangle list (the figures' vertices and their indices offset).
+        const auto flush = [&] {
+            if (draw.indices.empty()) return;
+            draw.primitive_count = static_cast<std::uint32_t>(draw.indices.size() / 3u);
+            counts_.vertices += draw.vertices.size();
+            const auto submitted = std::chrono::steady_clock::now();
+            inner_->submit(draw, memory);
+            counts_.submit_seconds +=
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - submitted).count();
+            ++drawn;
+            draw.indices.clear();
+            draw.vertices.clear();
+        };
         for (const auto &quad : quads) {
             std::array<Corner, 4> corners{};
             std::array<std::uint32_t, 4> sum{};
@@ -740,54 +874,84 @@ private:
             }
             std::uint32_t tint = 0u;
             for (std::uint32_t c = 0; c < 4u; ++c) tint |= ((sum[c] + 2u) / 4u) << (8u * c);
+            if (!figure.tint) tint = 0xFFFFFFFFu;
             Vec3 base, up_axis, right_axis, front;
             float height = 0.0f, width = 0.0f;
-            if (!place(corners, base, up_axis, right_axis, front, height, width)) continue;
-            // The side a quad shows is the one the camera saw it from first, remembered by the quad's place (the
-            // review of task 102, D-025 as amended): the PSP draws a cut-out from both sides and the game mirrors u
-            // on half of the marshals, so neither the UV rule alone nor the viewer's side each frame gives a figure
-            // that both faces the race and stands still; a figure that turned round as the ship passed its plane
-            // would be seen doing it. The first sight is from the race's side for everything by the track.
+            if (!place(corners, is_set, base, up_axis, right_axis, front, height, width)) continue;
             const std::uint64_t place_key = quantise(base);
-            auto side = sides_.find(place_key);
-            if (side == sides_.end()) side = sides_.emplace(place_key, dot(front, sub(eye, base)) < 0.0f).first;
-            if (side->second) front = scale(front, -1.0f);
             // The model's x, y, z in world space: x = up x front (= -right), y = up, z = front.
             const Vec3 x_axis = cross(up_axis, front);
-            for (std::uint32_t f = 0; f < figure.figures; ++f) {
-                const float across = (static_cast<float>(f) + 0.5f) / static_cast<float>(figure.figures) - 0.5f;
+            // How many stand on the quad, and which of them the distance keeps: all under near, every second from
+            // near to far, every fourth beyond (f % 4 == the place's two bits, a subset of f % 2 == its low bit).
+            const std::uint32_t count =
+                figure.spacing > 0.0f
+                    ? std::clamp(static_cast<std::uint32_t>(std::lround(width / figure.spacing)), 1u, kMostFigures)
+                    : figure.figures;
+            std::uint32_t every = 1u;
+            if (figure.thin) {
+                const float d = length(sub(eye, base));
+                every = d < figure.near_distance ? 1u : d < figure.far_distance ? 2u : 4u;
+            }
+            const std::uint64_t place_hash = mix64(place_key);
+            const std::uint32_t pick = static_cast<std::uint32_t>(place_hash & 3u) % every;
+            ++placed;
+            for (std::uint32_t f = 0; f < count; ++f) {
+                if (f % every != pick) continue;
+                const float across = (static_cast<float>(f) + 0.5f) / static_cast<float>(count) - 0.5f;
                 const Vec3 foot = add(base, scale(right_axis, across * width));
-                const std::vector<Vec3> &positions = positions_of(figure, place_key * 64u + f);
-                draw.vertices.resize(positions.size());
+                Vec3 fx = x_axis, fz = front;
+                float size = height;
+                const Model *model = figure.model.get();
+                if (is_set) {
+                    // The figure's model, turn and height from the hash of its place and number.
+                    const std::uint64_t h = mix64(place_hash + f);
+                    model = figure.set[static_cast<std::size_t>(h % figure.set.size())].get();
+                    const auto unit = [&](int shift) {
+                        return static_cast<float>((h >> shift) & 0xFFFFu) / 65535.0f * 2.0f - 1.0f;
+                    };
+                    const float yaw = unit(16) * kYawJitter, c = std::cos(yaw), s = std::sin(yaw);
+                    fz = add(scale(front, c), scale(x_axis, s));
+                    fx = sub(scale(x_axis, c), scale(front, s));
+                    size *= 1.0f + unit(32) * kHeightJitter;
+                }
+                const std::vector<Vec3> &positions = positions_of(*model, figure.clip, place_key * 64u + f);
+                if (draw.vertices.size() + positions.size() > kMostVertices) flush();
+                const std::size_t first = draw.vertices.size();
+                draw.vertices.resize(first + positions.size());
                 for (std::size_t i = 0; i < positions.size(); ++i) {
                     const Vec3 &p = positions[i];
-                    const Vec3 at = add(foot, add(scale(x_axis, p[0] * height),
-                                                  add(scale(up_axis, p[1] * height), scale(front, p[2] * height))));
-                    gpu::Vertex &out = draw.vertices[i];
+                    const Vec3 at =
+                        add(foot, add(scale(fx, p[0] * size), add(scale(up_axis, p[1] * size), scale(fz, p[2] * size))));
+                    gpu::Vertex &out = draw.vertices[first + i];
                     out.position = {at[0], at[1], at[2], 1.0f};
                     out.normal = {0.0f, 0.0f, 0.0f};
                     out.texcoord = {0.0f, 0.0f};
-                    out.color = modulate(model.colors[i], tint);
+                    out.color = modulate(model->colors[i], tint);
                 }
-                inner_->submit(draw, memory);
-                ++drawn;
+                for (const std::uint16_t index : model->indices)
+                    draw.indices.push_back(static_cast<std::uint16_t>(first + index));
+                ++counts_.figures;
             }
             ++counts_.quads;
         }
-        if (drawn == 0u) return false;
+        flush();
+        counts_.replace_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        if (placed == 0u) return false;
         ++counts_.replaced;
+        if (is_set) ++counts_.set_replaced;
         counts_.model_draws += drawn;
         return true;
     }
 
-    // A quad's placement from its corners (D-025): false when its UVs or shape say nothing.
-    // A quad's place as a map key: its base to a tenth of a unit on each axis (the booths' quads are a unit apart).
+    // A quad's place for the hashes: its base to a tenth of a unit on each axis (the booths' quads are a unit apart).
     static std::uint64_t quantise(const Vec3 &p) {
         const auto q = [](float v) { return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::lround(v * 10.0f)) & 0x1FFFFF); };
         return q(p[0]) << 42 | q(p[1]) << 21 | q(p[2]);
     }
-    static bool place(const std::array<Corner, 4> &corners, Vec3 &base, Vec3 &up, Vec3 &right, Vec3 &front,
-                      float &height, float &width) {
+    // A quad's placement from its corners (D-025): false when its UVs or shape say nothing. `upright` (a set's):
+    // up is world +y and the height the v edge's rise.
+    static bool place(const std::array<Corner, 4> &corners, bool upright, Vec3 &base, Vec3 &up, Vec3 &right,
+                      Vec3 &front, float &height, float &width) {
         float u_low = corners[0].u, u_high = u_low, v_low = corners[0].v, v_high = v_low;
         for (const Corner &c : corners) {
             u_low = std::min(u_low, c.u), u_high = std::max(u_high, c.u);
@@ -809,15 +973,20 @@ private:
         Vec3 along_v = sub(v_hi, v_lo);
         Vec3 bottom = v_lo;
         if (along_v[1] < 0.0f) along_v = scale(along_v, -1.0f), bottom = v_hi;
-        height = length(along_v);
+        height = upright ? along_v[1] : length(along_v);
         if (height <= 1e-6f) return false;
-        up = scale(along_v, 1.0f / height);
+        up = upright ? Vec3{0.0f, 1.0f, 0.0f} : scale(along_v, 1.0f / height);
         Vec3 along_u = sub(u_hi, u_lo);
         along_u = sub(along_u, scale(up, dot(along_u, up)));
         width = length(along_u);
         if (width <= 1e-6f) return false;
         right = scale(along_u, 1.0f / width);
-        front = cross(up, right);
+        // The front: the first triangle's winding normal, square to up.
+        front = cross(sub(corners[1].world, corners[0].world), sub(corners[2].world, corners[0].world));
+        front = sub(front, scale(up, dot(front, up)));
+        const float facing = length(front);
+        if (facing <= 1e-9f) return false;
+        front = scale(front, 1.0f / facing);
         base = bottom;
         return true;
     }
@@ -828,7 +997,6 @@ private:
     bool trace_{};
     bool on_{};
     std::unordered_map<std::string, Figure> table_;
-    std::unordered_map<std::uint64_t, bool> sides_;  // a quad's place -> its front turned round (first sight)
     // This frame's lookups: (address, palette address, palette word, format and size) -> figure or null.
     std::map<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>, const Figure *> seen_;
     Counts counts_{};

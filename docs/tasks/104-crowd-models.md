@@ -117,7 +117,121 @@ Headless; the one Metal window run of the race route for the cost measurement is
   track): report which stand and the sign, and apply the opposite sign for sets only if that fixes both stands.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: BLOCKED on the brief's second escalation condition. The race does not hold 60 fps in the Metal window at the default scale with the crowd on, even at near 80 and far 200 with a quarter density beyond far. It runs at 39 to 56 fps for about 12 seconds while the stands are in view (numbers below). Everything else is done and committed, and Verify passes.
+
+Changed:
+- models/crowd/01_graphite_tee.pmdl to 08_race_fan.pmdl (new): Astra's eight figures. Each was imported from out/crowd-starter/*.glb with `tools/model_import.py`. They have 297 to 315 vertices and 337 to 349 triangles, are version 1, and are 6790 to 7126 bytes. Each file came out byte-identical to the starter's .pmdl.
+- models/models.ini:
+  - the set syntax in the header;
+  - the nine `crowd.zim` lines, each with its track and its line in the pack's ini: 01 Vineta K 2739, 02 Modesto Heights 2932, Blue Ridge 3224, 05 Sinucit 3342, 06 Citta Nuova 3506, Sol 2 3696, 22 Ubermall 4630, Staten Park 4738, Sebenco Peak 4814;
+  - each line reads `set=crowd spacing=0.85 near=80 far=200`;
+  - `[set crowd]` lists the eight files.
+- models/README.md: the set syntax, and the crowd starter paragraph updated.
+- src/gpu/models_backend.cpp:
+  - **Reader.** It reads in two passes: first the `[figures]` lines and the `[set NAME]` sections, then it resolves them. A line takes `set=`, `spacing=`, `near=`, `far=` and `tint=0|1` (default 1). The reader reports a set with no files, a file that does not read (the rest of the set still serves), a key naming a missing or empty set, and a line with neither `figures=` nor `spacing=` (left out; before, such a line defaulted to figures=1).
+  - **Figures.** A set quad stands `max(1, round(width / spacing))` figures, at most 256. Figure f's hash is `h = splitmix64(splitmix64(quantise(base)) + f)`. The model is `h % 8`, the yaw jitter ±12° comes from bits 16 to 31 and the height jitter ±6% from bits 32 to 47.
+  - **Density.** The eye's distance d to the base decides: every figure under near, then `f % 2 == pick`, then `f % 4 == pick`, where pick is the place hash's low two bits mod every.
+  - **Batching.** A game draw's figures (a set's or the marshal's) are appended into triangle lists with offset u16 indices, flushed before 65535 vertices. `primitive_count` is set per batch.
+  - **Trace.** The line is now `[models] frame F: N draws replaced (C by a set) by M model draws, K quads, P figures, V vertices`. It then has the clip part, then `; replaced in N us, M of them the inner backend's`.
+  - **Front.** The coordinator's change: the front is now the winding normal of the quad's first triangle, `cross(B - A, C - A)` of corners 0, 1, 2. It is made square to up, with no sign taken from the eye. `sides_` and its clearing are gone, and `quantise` is kept for the hashes. To give "as the GE orders them", `quads_of` stores a strip quad that starts on an odd triangle as (n+1, n, n+2, n+3).
+  - **Upright set figures.** A set's figures stand on world +y with the v edge's rise as their height. The marshal keeps the old up rule.
+- tools/models_check.sh:
+  - run 0 also takes race_hud;
+  - the line regex and printout carry the new fields;
+  - both frames want 10 replaced, 4 by a set;
+  - tt_hud's 150-pixel rule is counted in `MARSHAL_BOX = (108, 120, 56, 32)`, because the Time Trial frame has crowd quads too (4 draws, 1582 figures);
+  - new row: race_hud 1 against 0 must differ by at least 2000 pixels at tol 24, and the HUD's two labels must be found with `tools/hud_check.py`'s `yellow()`;
+  - race_hud's reference rule is now limit + 0.10 (`CROWD_SLACK`). It measures 0.0613 against a limit of 0.10, so it would pass even the old +0.02.
+- Docs:
+  - docs/ge-backend.md section 9: sets, density, batching and its cost, the winding rule and why the earlier rules failed, upright set figures, the trace and the check;
+  - docs/developing.md: the check's row, `PURE_CROWD_MODELS` and `PURE_TRACE_MODELS`;
+  - docs/controls.md: the row's help;
+  - README.md: the bullet and the Esc-menu text.
+
+What the 4x capture shows (out/104/cost/w80_x4/shots/race_hud.png, final code, looked at whole and in crops):
+- **Stands.** Both stands are full of small, varied figures on every tier:
+  - the right stand is dense under the canopy;
+  - the left stand has rows between the arches above the "Danger" boards.
+- **Facing.** Both stands face the road: faces and folded arms show from the front on both.
+- **Placement.** Nothing floats or is sunk, and all figures are upright.
+- **Quads that stood wrong before the upright fix.** My first capture (out/104/cost/n80_x4) had giant figures lying across the right stand's lower tiers and leaning near its top. They came from parallelogram quads, whose v edge slants 3.6 to 7.1 units along the tier with up.y between 0.31 and 0.65, for a rise of 2.3 to 2.4. These are the set draws (in frame order) and quad indices within each draw, at frame 6014:
+  - draw 0: quads 5, 6, 26, 28, 37, 40, 50, 55;
+  - draw 1: quads 4, 7, 17;
+  - draw 2: quads 3, 33, 34, 35, 36, 62;
+  - draw 3: quad 15.
+  Under the upright rule they stand on their tier.
+- **Marshals.** In race_hud they are too small to read. In models_check run 2's 4x tt_hud shot (out/104/check/2/shots/wave_a.png, crop out/104/marsh.png), all three marshals on the left booth face the camera (+x toward the race). Their visors show, the right arm is raised and their feet are behind the railing on the deck. So the winding rule faces the marshals and both stands the right way, and no flip was needed.
+
+Cost (race_hud, frame 6016, headless Metal, `PURE_PERF=log`; the race's perf lines are quoted):
+
+| run | scale | figures | vertices | frame | render |
+| --- | --- | --- | --- | --- | --- |
+| Original | 1x | - | - | race not reached in the perf lines; 0.3 to 1.6 ms elsewhere | - |
+| Original | 4x | - | - | 3.8 ms (262 fps uncapped) | 2.9 ms |
+| Models, near 120 / far 300 | 1x | 1574 | 498148 | 22.2 to 23.5 ms (42 to 45 fps) | 21 to 22 ms |
+| Models, near 120 / far 300 | 4x | 1574 | 498148 | 24.8 to 28.6 ms | 23 to 27 ms |
+| Models, near 80 / far 200 (chosen) | 1x | 1359 | 431905 | 19.6 to 23.2 ms | 18.2 to 21.8 ms |
+| Models, near 80 / far 200 (chosen) | 4x | 1359 | 431905 | 19.8 to 21.5 ms | 17.9 to 20.0 ms |
+
+- The cost is CPU, the same at 1x and 4x. The trace splits it: replace() takes about 12.4 ms, of which about 9.7 ms is the Metal backend's submit. That backend expands each figure's ~1035 indices into 48-byte GpuVertex entries and uploads them, about 66 MB a frame at 1359 figures. Our placement is about 2.7 ms.
+- The headless race already missed 60 at 120/300, so I lowered the thresholds to the brief's 80/200 before the window run. Thinning removes only about 14%, because most of the stands are within 80 units of the start line.
+
+The Metal window run (once; Apple M4 Pro, default internal scale 4 = 1920x1088, FIFO 120 Hz; route main_menu+single_race to frame 7500; out/104/window):
+
+| crowd (near 80 / far 200) | frames | fps | render | figures | vertices | replace (Metal's share) |
+| --- | --- | --- | --- | --- | --- | --- |
+| on | 5760 to 6480 (grid, countdown, first seconds down the straight; about 12 perf lines) | 38.7 to 55.7 | 14.9 to 22.7 ms | 1359 to 1961 | 431905 to 617939 | 12.3 to 17.8 ms (9.7 to 14.6) |
+| on | 6540 onward (one stand left in view, 258 figures, 3 ms replace) | 60 | 6.6 to 7.3 ms | 258 | - | 3 ms |
+| off | the whole race | 60 | 4.0 to 5.6 ms | - | - | - |
+
+- **The miss:** up to 35% under 60 fps for about 12 seconds of the start.
+- **Why:** the Metal backend's de-indexing and upload of about 1.4 to 2 million vertices a frame. The triangles are not the cost.
+- **What would fit:** about 900 figures or fewer on the straight. That needs halving again, by thresholds below the brief's (for example near 40, far 100), a wider spacing (for example 1.2), or an indexed upload in metal_draw.mm (Must not touch). A level-of-detail model is excluded by the brief. I did not go further than the brief's rule.
+
+Verify output (last 20 lines):
+```
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 22s)
+verify 104: PASS
+```
+The models check in the same run:
+```
+tt_hud      1 frame 5890: 10 replaced (4 by a set), 15 model draws, 196 quads, 1582 figures, 500750 vertices  0.0121    0.14   32 PASS
+race_hud    1 frame 6016: 10 replaced (4 by a set), 15 model draws, 196 quads, 1359 figures, 431905 vertices  0.0613    0.20   32 PASS
+tt_hud 1 against 0: 171 pixels differ at tol 24 in the marshals' box (108, 120, 56, 32) (at least 150): PASS
+race_hud 1 against 0: 7157 pixels differ at tol 24 (at least 2000), the HUD's labels current 125, lap 43 yellow pixels (each at least 1): PASS
+tt_hud wave (Wave_On t=2.15 and Wave_On t=3.15): 312 pixels differ in the marshals' box (112, 124, 48, 22) (at least 40), 0 in the deck (112, 146, 48, 6) (at most 0): PASS
+models_check: PASS
+```
+- `docs_check: 39 files, 0 findings: PASS`.
+- `tools/release_check.sh`: binaries PASS (12 files: the known three and the nine models/*.pmdl, which the pattern covers). Only `home` FAILs, on the same six patches/ findings as tasks 102 and 103.
+
+Open questions:
+1. The 60 fps miss above is the escalation. To decide: lower thresholds, a wider spacing, or a Metal-side indexed upload (a task that may touch metal_draw.mm).
+2. Window checks this change needs, not run:
+   - the crowd through the Vulkan renderer (batched lists of up to 65535 vertices with `vertex_address` 0);
+   - the Vulkan shell's frame interpolation with batches whose vertex counts change with the density.
+3. `quads_of` swaps the first two corners of a strip quad that starts on an odd triangle (the GE's winding). If your measurement took corners 0, 1, 2 without that swap, the two agree only where no quad starts on an odd triangle. The capture shows both stands and all marshals facing correctly under the code as committed.
+4. Four tracks are named without a number in models.ini (Blue Ridge, Sol 2, Staten Park, Sebenco Peak), because I found no numbering for them in the repo.
+5. A `[figures]` line with neither `figures=` nor `spacing=` is now reported and left out. Before, it silently meant figures=1. All committed lines have one.
+6. race_hud at Models now scores 0.0613 against the reference (Original 0.0148). frame_regress's race_hud row is unchanged because the suite runs at Original.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

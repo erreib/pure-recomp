@@ -2,8 +2,9 @@
 # The models check (task 102, D-025's check for the Crowds and people row): headless on the Metal backend through the
 # models backend (PURE_GE_BACKEND=models, PURE_GE_MODELS_INNER=metal, PURE_INTERNAL_SCALE=1, PURE_TRACE_MODELS=1; no
 # window), the frame regression suite's scenes (tools/frame_regress.sh --only) run twice:
-#   0  tt_hud with PURE_CROWD_MODELS=0 (Original: every draw goes through);
-#   1  tt_hud and race_hud with PURE_CROWD_MODELS=1 (Models: the pit marshals' six quads drawn as models/pitguy.pmdl);
+#   0  tt_hud and race_hud with PURE_CROWD_MODELS=0 (Original: every draw goes through);
+#   1  tt_hud and race_hud with PURE_CROWD_MODELS=1 (Models: the pit marshals' six quads drawn as models/pitguy.pmdl,
+#      and since task 104 the grandstands' four crowd draws as the figure set crowd, in both frames);
 #   2  (task 103) tt_hud's route on its own (tools/run_boot.py --script --shots) with two shots a second apart, frames
 #      5890 and 5950, Models on at PURE_INTERNAL_SCALE=4, PURE_MODELS_CLOCK=frames and PURE_MODELS_SYNC=1 (the
 #      clip at 2.15 s and 3.15 s: the arm raised, then lowered).
@@ -14,13 +15,18 @@
 #   --wait  how long the runs wait for another game to end before they start (tools/frame_regress.sh --wait; default
 #           600, 0 gives up at once)
 # PASS when:
-#   - tt_hud's 1 capture differs from its 0 capture in at least MIN_PIXELS (150) pixels at tol DIFF_TOL (24): the
-#     figures are there (at 1x a marshal is about 18 pixels tall; the placeholder's three on screen move 213, all in
-#     x 115-155, y 127-145, the booths at the left of the straight);
-#   - the 0 run's `[models] frame F: ... (captured)` line for tt_hud says 0 draws replaced, and the 1 run's says 6
-#     for each scene (the six booths' quads are in both frames);
-#   - each 1 capture is within its scene's limit plus SLACK (0.02) of its PPSSPP reference at the scene's tol, both
-#     read from tools/frame_regress.sh's table;
+#   - tt_hud's 1 capture differs from its 0 capture in at least MIN_PIXELS (150) pixels at tol DIFF_TOL (24) inside
+#     MARSHAL_BOX: the marshals are there (at 1x a marshal is about 18 pixels tall; the placeholder's three on screen
+#     moved 213, all in x 115-155, y 127-145, the booths at the left of the straight; the box keeps the crowd's
+#     figures, which the Time Trial frame shows too, out of the count);
+#   - race_hud's 1 capture differs from its 0 capture in at least MIN_CROWD (2000) pixels at tol 24 (the stands
+#     fill) and shows the HUD (tools/hud_check.py's two yellow labels);
+#   - the 0 runs' `[models] frame F: ... (captured)` lines say 0 draws replaced, and the 1 run's say WANT (10) for
+#     each scene, WANT_SETS (4) of them by a set (the six booths' quads and the four crowd draws are in both frames);
+#     the line's figures and vertices are printed;
+#   - each 1 capture is within its scene's limit plus its slack of its PPSSPP reference at the scene's tol, both read
+#     from tools/frame_regress.sh's table: SLACK (0.02) for tt_hud, CROWD_SLACK (0.10) for race_hud, whose stands
+#     are new art over a fifth of the picture that the reference does not have;
 #   - run 2's two shots differ in at least MIN_WAVE (40) pixels at tol 24 inside WAVE_BOX (the left booth's marshals)
 #     and in at most MAX_DECK (0) inside DECK_BOX (the deck under their feet): the arms move, the feet stay planted.
 # The 1 run's `[texpack]` line is quoted: the Metal backend under the wrapper still looks for its texture pack.
@@ -67,7 +73,7 @@ capture() {
     exit 1
   fi
 }
-capture 0 0 tt_hud
+capture 0 0 tt_hud,race_hud
 capture 1 1 tt_hud,race_hud
 
 # Run 2 (task 103): tt_hud's route (frame_regress.sh's table: main_menu.txt+time_trial.txt, its shot steps dropped)
@@ -96,12 +102,17 @@ capture_wave
 python3 - "$OUT" "$((SECONDS - START))" <<'EOF'
 import glob, os, re, sys
 sys.path.insert(0, "tools")
+import hud_check  # noqa: E402  (tools/hud_check.py: the HUD's labels)
 import imgdiff  # noqa: E402  (tools/imgdiff.py)
+import png  # noqa: E402  (tools/png.py)
 
 out, seconds = sys.argv[1], sys.argv[2]
 DIFF_TOL, MIN_PIXELS = 24, 150       # the 1 capture against the 0 one: the figures' pixels (213 with the placeholder)
+MARSHAL_BOX = (108, 120, 56, 32)     # x 108-163, y 120-151: the left booth's marshals at 1x, where MIN_PIXELS counts
+MIN_CROWD = 2000                     # race_hud 1 against 0: the stands' figures (task 104)
 SLACK = 0.02                         # over the scene's own limit: the figures are not in the PPSSPP reference
-WANT = 6                             # the pit marshal's quads in both frames (task 101)
+CROWD_SLACK = {"race_hud": 0.10}     # the stands fill a fifth of race_hud's picture (task 104)
+WANT, WANT_SETS = 10, 4              # the six marshals' quads and the four crowd draws, in both frames (task 101)
 # Run 2's boxes, (x, y, w, h) on the 480x272 screen: the left booth's marshals and the deck under their feet, found
 # once from a 4x headless capture of tt_hud (task 103, out/103/x4; Models off, the same two frames differ in 11 and 0
 # pixels there, the scene's own change): MIN_WAVE pixels at least must differ in the first, at the capture's 4x pixels,
@@ -109,7 +120,8 @@ WANT = 6                             # the pit marshal's quads in both frames (t
 WAVE_BOX = (112, 124, 48, 22)     # x 112-159, y 124-145: the three marshals of the left booth, arms to feet
 DECK_BOX = (112, 146, 48, 6)      # y 146-151: the booth's deck under their feet
 MIN_WAVE, MAX_DECK = 40, 0
-LINE = re.compile(r"^\[models\] frame (\d+): (\d+) draws replaced by (\d+) model draws, (\d+) quads \(captured\)")
+LINE = re.compile(r"^\[models\] frame (\d+): (\d+) draws replaced \((\d+) by a set\) by (\d+) model draws, "
+                  r"(\d+) quads, (\d+) figures, (\d+) vertices \(captured\)")
 lines = []
 
 
@@ -135,7 +147,8 @@ def log_of(run, route):
 
 
 def captured(run, route):
-    """The run's `[models] ... (captured)` lines for the route: (frame, replaced, model draws, quads) each."""
+    """The run's `[models] ... (captured)` lines for the route: (frame, replaced, by a set, model draws, quads,
+    figures, vertices) each."""
     try:
         with open(log_of(run, route), encoding="utf-8", errors="replace") as f:
             return [tuple(int(x) for x in m.groups()) for m in map(LINE.match, f) if m]
@@ -154,25 +167,25 @@ def first_line(run, route, prefix):
 table = scene_table()
 failed = []
 note(f"models check: tt_hud and race_hud headless on Metal through the models backend, PURE_CROWD_MODELS 0 and 1, "
-     f"and the wave at 4x ({seconds} s)")
-note(f"{'scene':<9} {'run':>3} {'models line':<46} {'vs ref':>7} {'allowed':>7} {'tol':>4} result")
-for run, scenes in (("0", ["tt_hud"]), ("1", ["tt_hud", "race_hud"])):
+     f"the crowd, and the wave at 4x ({seconds} s)")
+note(f"{'scene':<9} {'run':>3} {'models line':<84} {'vs ref':>7} {'allowed':>7} {'tol':>4} result")
+for run, scenes in (("0", ["tt_hud", "race_hud"]), ("1", ["tt_hud", "race_hud"])):
     for scene in scenes:
         route, frame, ref, tol, limit = table[scene]
         cap = os.path.join(out, run, "shots", scene + ".png")
         why = []
         got = captured(run, route)
-        want = 0 if run == "0" else WANT
+        want, want_sets = (0, 0) if run == "0" else (WANT, WANT_SETS)
         if not got:
             text = "none"
             why.append("no `[models] ... (captured)` line")
         else:
-            f, n, m, k = got[0]
-            text = f"frame {f}: {n} replaced, {m} model draws, {k} quads"
-            if n != want:
-                why.append(f"{n} draws replaced, not {want}")
+            f, n, sets, m, k, figures, vertices = got[0]
+            text = f"frame {f}: {n} replaced ({sets} by a set), {m} model draws, {k} quads, {figures} figures, {vertices} vertices"
+            if n != want or sets != want_sets:
+                why.append(f"{n} draws replaced, {sets} by a set, not {want} and {want_sets}")
         fraction = "-"
-        allowed = limit + SLACK
+        allowed = limit + CROWD_SLACK.get(scene, SLACK)
         if not os.path.isfile(cap):
             why.append("no capture")
         elif run == "1":
@@ -180,7 +193,7 @@ for run, scenes in (("0", ["tt_hud"]), ("1", ["tt_hud", "race_hud"])):
             r = imgdiff.compare_files(cap, ref, tol, allowed, diff)
             fraction = f"{r['fraction']:.4f}"
             if r["result"] != "PASS":
-                why.append(f"over the limit {limit} + {SLACK}, diff {diff}")
+                why.append(f"over the limit {limit} + {allowed - limit:.2f}, diff {diff}")
             else:
                 os.remove(diff)
         else:
@@ -188,20 +201,36 @@ for run, scenes in (("0", ["tt_hud"]), ("1", ["tt_hud", "race_hud"])):
         result = "PASS" if not why else "FAIL (" + "; ".join(why) + ")"
         if why:
             failed.append(f"{scene} {run}")
-        note(f"{scene:<9} {run:>3} {text:<46} {fraction:>7} {f'{allowed:.2f}' if run == '1' else '-':>7} {tol:>4} {result}")
+        note(f"{scene:<9} {run:>3} {text:<84} {fraction:>7} {f'{allowed:.2f}' if run == '1' else '-':>7} {tol:>4} {result}")
 
-# The figures are there: the 1 capture of tt_hud against the 0 one.
+# The figures are there: the 1 capture of tt_hud against the 0 one in the marshals' box.
 a, b = os.path.join(out, "1", "shots", "tt_hud.png"), os.path.join(out, "0", "shots", "tt_hud.png")
 if os.path.isfile(a) and os.path.isfile(b):
-    r = imgdiff.compare_files(a, b, DIFF_TOL, 1.0)
+    r = imgdiff.compare_files(a, b, DIFF_TOL, 1.0, region=MARSHAL_BOX)
     ok = r["differing"] >= MIN_PIXELS
-    note(f"tt_hud 1 against 0: {r['differing']} pixels differ at tol {DIFF_TOL} (at least {MIN_PIXELS}): "
-         f"{'PASS' if ok else 'FAIL'}")
+    note(f"tt_hud 1 against 0: {r['differing']} pixels differ at tol {DIFF_TOL} in the marshals' box {MARSHAL_BOX} "
+         f"(at least {MIN_PIXELS}): {'PASS' if ok else 'FAIL'}")
     if not ok:
         failed.append("tt_hud 1 against 0")
 else:
     note("tt_hud 1 against 0: a capture is missing: FAIL")
     failed.append("tt_hud 1 against 0")
+# The stands fill (task 104): race_hud 1 against 0 over the whole picture, and the HUD still drawn over them.
+a, b = os.path.join(out, "1", "shots", "race_hud.png"), os.path.join(out, "0", "shots", "race_hud.png")
+bmp = os.path.join(out, "1", "shots", "race_hud.bmp")
+if os.path.isfile(a) and os.path.isfile(b) and os.path.isfile(bmp):
+    r = imgdiff.compare_files(a, b, DIFF_TOL, 1.0)
+    shot = png.read_bmp(bmp)
+    labels = {name: hud_check.yellow(shot, region) for name, region in hud_check.REGIONS.items()}
+    ok = r["differing"] >= MIN_CROWD and all(labels.values())
+    note(f"race_hud 1 against 0: {r['differing']} pixels differ at tol {DIFF_TOL} (at least {MIN_CROWD}), the HUD's "
+         f"labels {', '.join(f'{k} {v}' for k, v in labels.items())} yellow pixels (each at least 1): "
+         f"{'PASS' if ok else 'FAIL'}")
+    if not ok:
+        failed.append("race_hud 1 against 0")
+else:
+    note("race_hud 1 against 0: a capture is missing: FAIL")
+    failed.append("race_hud 1 against 0")
 # The wave (run 2): the arm moves between the two frames inside the marshals' box, the deck below their feet does not.
 wa, wb = os.path.join(out, "2", "shots", "wave_a.png"), os.path.join(out, "2", "shots", "wave_b.png")
 times = []
