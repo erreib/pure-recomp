@@ -533,6 +533,23 @@ the Metal backend through the wrapper.
   and the wave: tt_hud at 4x at frames
   5890 and 5950 on the frames clock (the clip at 2.15 s and 3.15 s), the marshals' box changed, the deck under their
   feet not.
+- **Skies (task 106, D-026).** The Video tab's Skies row (`game.sky_models`, `PURE_SKY_MODELS`; Original by
+  default), read once a frame with the crowd's; either row at Models reads the table. A sky face's key maps to
+  `sky=NAME`, a `[sky NAME]` section's layers (`<file>.pmdl [parallax=F] [spin=S]`, drawn in order). The first face
+  of a frame draws every layer, each one kept batch (its own synthetic id and version, built once, counted against
+  the 64 kept batches) of the model's vertices at 50 units a unit, the world matrix a translation to the cube's
+  centre (the face draw's world translation) plus the parallax offset, then a turn about y of S degrees a second;
+  the face draw's state otherwise (depth GREATER with writes, stencil ALWAYS 0x04, fog off, viewport, target), no
+  texture, no lighting, vertex colours, culling off. All five faces are dropped; a frame without them (the menus)
+  draws no sky. **The parallax**: the sky cube follows the camera, so a layer is moved by −F x the eye's world x and
+  z, each wrapped to the cube's width (100 units): a far layer (F 0.002) slides against the dome (F 0) and no batch
+  is rebuilt for it. **The depth rule**: a layer stays on the cube's surface or up to 0.05 inside it, within its
+  corners, so the depth the sun block reads (docs/ge-effects.md) is where the faces put it; a layer over the dome
+  must be a little inside it, since GREATER hides what is level with it. The game's sun glow (draws 640-657 of the
+  race frame, additive, depth GREATER without writes) still adds over the sky. The trace line gains `; sky NAME L
+  layers (F faces replaced), the eye at (X, Y, Z) of the cube`: the race frame's eye is at (0.04, 0.38, 0.02), Time
+  Trial's at (0.07, 0.11, 0.02), so a model's horizon is not at the same height in every mode. The check: run 4 of
+  `tools/models_check.sh`.
 - **Models.** `models/` (models/README.md): `models.ini`, the `.pmdl` files `tools/model_import.py` makes from a glTF
   with vertex colours (the light baked in, the height normalised), shipped in the app's `Contents/Resources/models`
   and beside the Windows executable; a checkout finds them three levels above the executable.

@@ -7,11 +7,13 @@
 #      and since task 104 the grandstands' four crowd draws as the figure set crowd, in both frames);
 #   3  (task 105) race_hud with PURE_CROWD_MODELS=1 and PURE_MODELS_NO_CACHE=1 (every batch built and uploaded each
 #      frame);
+#   4  (task 106) tt_hud and race_hud with PURE_CROWD_MODELS=1 and PURE_SKY_MODELS=1 (the Skies row: Vineta K's
+#      five sky faces drawn as the layers of models.ini's [sky vineta_k]);
 #   2  (task 103) tt_hud's route on its own (tools/run_boot.py --script --shots) with two shots a second apart, frames
 #      5890 and 5950, Models on at PURE_INTERNAL_SCALE=4, PURE_MODELS_CLOCK=frames and PURE_MODELS_SYNC=1 (the
 #      clip at 2.15 s and 3.15 s: the arm raised, then lowered).
 #   tools/models_check.sh [--out DIR] [--wait SECONDS]
-#   --out   default out/models_check: DIR/0, DIR/1 and DIR/3 hold each run's captures and logs (tools/frame_regress.sh --out),
+#   --out   default out/models_check: DIR/0, DIR/1, DIR/3 and DIR/4 hold each run's captures and logs (tools/frame_regress.sh --out),
 #           DIR/2 run 2's (shots/wave_a.png and wave_b.png, tt_hud.log),
 #           DIR/<scene>.diff.png the differing pixels of a scene over its allowance, DIR/summary.txt the table
 #   --wait  how long the runs wait for another game to end before they start (tools/frame_regress.sh --wait; default
@@ -34,7 +36,11 @@
 #     race_hud capture equals run 3's at tol 0 (the cached picture is the uncached one); the share of run 1's race
 #     lines with reuse is printed;
 #   - run 2's two shots differ in at least MIN_WAVE (40) pixels at tol 24 inside WAVE_BOX (the left booth's marshals)
-#     and in at most MAX_DECK (0) inside DECK_BOX (the deck under their feet): the arms move, the feet stay planted.
+#     and in at most MAX_DECK (0) inside DECK_BOX (the deck under their feet): the arms move, the feet stay planted;
+#   - (task 106) the sky: run 4's captured lines say `sky vineta_k L layers (5 faces replaced)` with L the section's
+#     layers (2) for both scenes, each capture differs from run 1's in at least MIN_SKY pixels at tol 24 inside
+#     SKY_BOX (the sky above the horizon), race_hud's HUD is found, and both are within the scene's limit plus 0.10
+#     of their PPSSPP reference (the sky is new art over the top of the picture).
 # The 1 run's `[texpack]` line is quoted: the Metal backend under the wrapper still looks for its texture pack.
 # About a minute. Prints PASS or FAIL last; exit 0 only on PASS.
 set -u
@@ -60,7 +66,7 @@ done
 need_game
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-rm -rf "$OUT/0" "$OUT/1" "$OUT/2" "$OUT/3"
+rm -rf "$OUT/0" "$OUT/1" "$OUT/2" "$OUT/3" "$OUT/4"
 rm -f "$OUT"/*.diff.png "$OUT/summary.txt" "$OUT"/frame_regress.*.stdout
 START=$SECONDS
 
@@ -84,6 +90,7 @@ capture() {
 capture 0 0 tt_hud,race_hud
 capture 1 1 tt_hud,race_hud
 capture 3 1 race_hud --env PURE_MODELS_NO_CACHE=1
+capture 4 1 tt_hud,race_hud --env PURE_SKY_MODELS=1
 
 # Run 2 (task 103): tt_hud's route (frame_regress.sh's table: main_menu.txt+time_trial.txt, its shot steps dropped)
 # with two shots a second apart, wave_a at the scene's frame and wave_b WAVE_GAP flips later, Models on, the clips on
@@ -129,6 +136,12 @@ WANT, WANT_SETS = 10, 4              # the six marshals' quads and the four crow
 WAVE_BOX = (112, 124, 48, 22)     # x 112-159, y 124-145: the three marshals of the left booth, arms to feet
 DECK_BOX = (112, 146, 48, 6)      # y 146-151: the booth's deck under their feet
 MIN_WAVE, MAX_DECK = 40, 0
+# The sky (task 106): the region above the horizon both scenes show between their buildings and stands, found once
+# from 4x headless captures with the placeholder sky (out/106/x4; at 1x the Original's clouds against the dome's
+# gradient), and the layers models.ini's [sky vineta_k] lists.
+SKY_BOX = (150, 0, 85, 60)        # x 150-234, y 0-59 on the 480x272 screen
+MIN_SKY, SKY_LAYERS, SKY_SLACK = 2000, 2, 0.10  # 3597 (race_hud) and 4602 (tt_hud) measured
+SKY = re.compile(r"; sky (\S+) (\d+) layers \((\d+) faces replaced\)")
 LINE = re.compile(r"^\[models\] frame (\d+): (\d+) draws replaced \((\d+) by a set\) by (\d+) model draws, "
                   r"(\d+) quads, (\d+) figures, (\d+) vertices, (\d+) batches reused( \(captured\))?")
 lines = []
@@ -285,6 +298,50 @@ if os.path.isfile(wa) and os.path.isfile(wb):
 else:
     note("tt_hud wave: a capture is missing (run 2): FAIL")
     failed.append("tt_hud wave")
+# The sky (run 4): the faces replaced by the layers, the sky region changed against run 1, the HUD still drawn.
+for scene in ("tt_hud", "race_hud"):
+    route, frame, ref, tol, limit = table[scene]
+    a, b = os.path.join(out, "4", "shots", scene + ".png"), os.path.join(out, "1", "shots", scene + ".png")
+    why = []
+    sky_line = None
+    try:
+        with open(log_of("4", route), encoding="utf-8", errors="replace") as f:
+            sky_line = next((m for m in (SKY.search(ln) for ln in f if "(captured)" in ln) if m), None)
+    except OSError:
+        pass
+    if sky_line is None:
+        why.append("no `sky NAME L layers` in the captured line")
+    elif int(sky_line.group(2)) != SKY_LAYERS or int(sky_line.group(3)) != 5:
+        why.append(f"{sky_line.group(2)} layers for {sky_line.group(3)} faces, not {SKY_LAYERS} for 5")
+    differing, fraction = 0, "-"
+    if os.path.isfile(a) and os.path.isfile(b):
+        differing = imgdiff.compare_files(a, b, DIFF_TOL, 1.0, region=SKY_BOX)["differing"]
+        if differing < MIN_SKY:
+            why.append(f"{differing} pixels differ in the sky's box, not {MIN_SKY}")
+        diff = os.path.join(out, scene + ".sky.diff.png")
+        r = imgdiff.compare_files(a, ref, tol, limit + SKY_SLACK, diff)
+        fraction = f"{r['fraction']:.4f}"
+        if r["result"] != "PASS":
+            why.append(f"over the limit {limit} + {SKY_SLACK:.2f}, diff {diff}")
+        else:
+            os.remove(diff)
+    else:
+        why.append("a capture is missing (runs 1 and 4)")
+    if scene == "race_hud":
+        bmp = os.path.join(out, "4", "shots", "race_hud.bmp")
+        if os.path.isfile(bmp):
+            shot = png.read_bmp(bmp)
+            if not all(hud_check.yellow(shot, region) for region in hud_check.REGIONS.values()):
+                why.append("the HUD's labels are not found")
+        else:
+            why.append("no race_hud.bmp")
+    text = sky_line.group(0).lstrip("; ") if sky_line else "no sky line"
+    note(f"{scene} sky (run 4): {text}, {differing} pixels differ from run 1 at tol {DIFF_TOL} in {SKY_BOX} (at least "
+         f"{MIN_SKY}), {fraction} vs ref (allowed {limit + SKY_SLACK:.2f}): {'PASS' if not why else 'FAIL (' + '; '.join(why) + ')'}")
+    if why:
+        failed.append(f"{scene} sky")
+sky_on = first_line("4", table["tt_hud"][0], "[pure] skies:")
+note(f"run 4: {sky_on or 'no [pure] skies line'}")
 on = first_line("1", table["tt_hud"][0], "[pure] crowd models:")
 off = first_line("0", table["tt_hud"][0], "[pure] crowd models:")
 pack = first_line("1", table["tt_hud"][0], "[texpack]")

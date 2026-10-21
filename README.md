@@ -88,7 +88,7 @@ back. The game pauses while it is open, unless you tell the System tab otherwise
   enhancements: **30 fps modes** (60 fps, or the PSP's 30), **Flashes** (smoothed, or the original), **Text and
   sprites** (original, or upscaled), **Texture detail** (enhanced, or the original), **Display rate** (the races at
   your display's refresh, or the PSP's 60), **Crowds and people** (the original flat figures, or models: the pit
-  marshals and the crowd).
+  marshals and the crowd), **Skies** (the original flat sky, or a 3D sky where the port has one: Vineta K).
 - **Audio.** Volume, mute, the output device.
 - **Controls.** The connected gamepad, the confirm button (Cross as the bottom button, or the right one), dead
   zones, every binding for the keyboard, mouse and pad, and the classic keyboard-only layout.

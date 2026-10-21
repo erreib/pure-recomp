@@ -2,6 +2,7 @@
 """A glTF model to the models backend's .pmdl (task 102, D-025; skinned and animated: task 103).
 
     python3 tools/model_import.py IN.gltf|IN.glb OUT.pmdl [--light X,Y,Z] [--height H] [--colour RRGGBB] [--static]
+                                  [--as-is] [--no-light]
 
 Reads the first mesh of IN (a .gltf with its buffers beside it or in data: URIs, or one .glb): every triangle
 primitive (mode 4) of it, placed by the first node that uses the mesh (its TRS or matrix and its parents'). Each
@@ -28,6 +29,10 @@ rest positions (the bind pose is the rest pose when it is about 0) and the clip'
 Prints the counts and the bounds. Exit 2 when the mesh has no COLOR_0 (a flat grey is not wanted silently:
 --colour RRGGBB gives such a mesh one sRGB colour, lit as above), when it has no triangles, or when it has more than
 65535 vertices. The export convention (models/README.md): y up, the front toward +z, the feet at the origin.
+A sky layer (task 106, D-026) is imported with --as-is --no-light: --as-is keeps the file's coordinates (no
+normalisation, no recentring: a sky is authored in the unit cube the backend scales to 50 units about the sky
+cube's centre; --height is then ignored) and --no-light writes the colours as the file has them (the author's
+gradients, no key light baked). Each switch works alone too.
 Standard library only. The winding is not promised (a Blender mesh may mix it): the backend draws the models
 without culling.
 """
@@ -434,6 +439,9 @@ def main():
     parser.add_argument("--height", type=float, default=1.0, help="the height to normalise to (default 1)")
     parser.add_argument("--colour", help="RRGGBB (sRGB) for a mesh without COLOR_0")
     parser.add_argument("--static", action="store_true", help="version 1 (the rest pose) even from a skinned mesh")
+    parser.add_argument("--as-is", action="store_true",
+                        help="keep the file's coordinates: no normalisation, no recentring (a sky layer)")
+    parser.add_argument("--no-light", action="store_true", help="no key light baked: the colours as the file has them")
     opts = parser.parse_args()
     light = parse_vector(opts.light)
     flat = None
@@ -511,13 +519,16 @@ def main():
     # Normalise: the feet at y 0, the height opts.height, x and z centred on the feet's bounding box.
     low = min(p[1] for p in positions)
     high = max(p[1] for p in positions)
-    if high - low <= 0:
+    if high - low <= 0 and not opts.as_is:
         fail(f"{opts.input}: the mesh is flat in y (no height)")
-    scale = opts.height / (high - low)
-    band = low + FEET_BAND * (high - low)
-    feet = [p for p in positions if p[1] <= band]
-    cx = (min(p[0] for p in feet) + max(p[0] for p in feet)) / 2
-    cz = (min(p[2] for p in feet) + max(p[2] for p in feet)) / 2
+    if opts.as_is:  # the file's coordinates (a sky layer): the identity
+        scale, low, cx, cz = 1.0, 0.0, 0.0, 0.0
+    else:
+        scale = opts.height / (high - low)
+        band = low + FEET_BAND * (high - low)
+        feet = [p for p in positions if p[1] <= band]
+        cx = (min(p[0] for p in feet) + max(p[0] for p in feet)) / 2
+        cz = (min(p[2] for p in feet) + max(p[2] for p in feet)) / 2
     placed = [((p[0] - cx) * scale, (p[1] - low) * scale, (p[2] - cz) * scale) for p in positions]
 
     extra, notes = (skin_block(doc, buffers, skin_node, m, scale, (-cx * scale, -low * scale, -cz * scale),
@@ -525,7 +536,7 @@ def main():
 
     words = []
     for colour, n in zip(colours, normals):
-        lit = FLOOR + SPAN * max(0.0, sum(n[k] * light[k] for k in range(3)))
+        lit = 1.0 if opts.no_light else FLOOR + SPAN * max(0.0, sum(n[k] * light[k] for k in range(3)))
         r, g, b = (min(255, max(0, round(c * lit * 255))) for c in colour)
         words.append(0xFF000000 | (b << 16) | (g << 8) | r)
 
@@ -543,7 +554,8 @@ def main():
     hi = [max(p[k] for p in placed) for k in range(3)]
     print(f"model_import: {opts.output}: {len(placed)} vertices, {len(indices)} indices ({len(indices) // 3} "
           f"triangles), {len(out)} bytes; bounds x {lo[0]:.3f}..{hi[0]:.3f} y {lo[1]:.3f}..{hi[1]:.3f} "
-          f"z {lo[2]:.3f}..{hi[2]:.3f}; scale {scale:.4g}, light {light[0]:.2f},{light[1]:.2f},{light[2]:.2f}"
+          f"z {lo[2]:.3f}..{hi[2]:.3f}; " + ("as is" if opts.as_is else f"scale {scale:.4g}") + ", "
+          + ("no light" if opts.no_light else f"light {light[0]:.2f},{light[1]:.2f},{light[2]:.2f}")
           + (f"; {skipped} primitive(s) not triangles, left out" if skipped else "")
           + ("; colour " + opts.colour if flat is not None and "COLOR_0" not in str(meshes[0]) else "")
           + ("; version 2" if skinned else "; version 1" + (" (--static: the skin left out)" if skin_node else "")))

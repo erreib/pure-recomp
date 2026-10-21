@@ -188,7 +188,9 @@ frames a second, and Time Trial, Free Play and Zone 120 with the 30 fps modes ro
 race runs a fraction under the display's rate (0.5%: 119.4 on a 120 Hz display, since task 091) so that a frame
 that misses the display's refresh can be won back and the sound stays continuous; the help says so. The menus keep
 the PSP's pace, and on a 60 Hz display nothing changes. Original keeps the PSP's 59.94 Hz everywhere (E8,
-D-022; docs/timing.md, "E8"). Crowds and people (since task 102, D-025): Models draws the figures by the track as 3D
+D-022; docs/timing.md, "E8"). Skies (since task 106, D-026; Original by default): Models draws a 3D sky of
+vertex-coloured layers in place of the five flat sky pictures where the port has one (Vineta K today, a placeholder
+until Astra's model), the far layers sliding against the dome as the ship moves; both renderers. Crowds and people (since task 102, D-025): Models draws the figures by the track as 3D
 models where the port has one: the start line's pit marshals, waving (task 103), and the grandstands' crowd, eight
 kinds of spectator standing along each tier, thinned with distance (task 104; `models/`, docs/ge-backend.md "The
 models backend"), on both renderers, the default since task 105 (the crowd's batches kept across frames and on the
@@ -264,7 +266,7 @@ The game's own options are `game.<key>=<index>`, the index of the row's choice: 
 `game.sprite_upscale=1` (Text and sprites: Upscaled) or `0` (Original, the default since 2026-10-12), and
 `game.texture_detail=1` (Texture detail: Enhanced, the default) or `0` (Original), `game.display_rate=1`
 (Display rate: Display, the default) or `0` (Original), and `game.crowd_models=1` (Crowds and people: Models, the
-default since task 105) or `0` (Original).
+default since task 105) or `0` (Original), and `game.sky_models=1` (Skies: Models) or `0` (Original, the default).
 An index out of range is ignored with `[settings] ignoring KEY=VALUE` and reads as the default, and a `game.` key
 this port has no option for is dropped when the file is next written.
 
