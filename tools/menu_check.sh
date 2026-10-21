@@ -30,7 +30,8 @@
 # where it does nothing until a texture pack exists) and Texture detail (task 075; game.texture_detail, locked by the
 # run's PURE_TEXTURE_DETAIL=0; shown under the Vulkan shell too, which draws the PSP's levels until its own task) and
 # Display rate (task 089; game.display_rate, locked by the run's PURE_DISPLAY_RATE=0, both shells) and Crowds and
-# people (task 102; game.crowd_models, Original by default, both shells),
+# people (task 102; game.crowd_models, Models by default since task 105, locked by the run's PURE_CROWD_MODELS=0,
+# both shells),
 # all tools/purelib/port.py's pin (the game's row is not called
 # Frame rate: under the Vulkan shell that is the renderer's frame-rate cap). Both: the System tab's Download packs
 # section after the save rows (task 078, patch 0021-content-packs): the count row, its value in parentheses ("N of 12

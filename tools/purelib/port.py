@@ -49,7 +49,7 @@ STEADY_CLOCK = "PURE_NO_BUSY_CLOCK"
 # task 089, D-022: a window run on a display above 60 Hz would otherwise tick the game's vblank at its refresh). Named
 # ORIGINAL_PACING before task 073, when the two it held were both the PSP's pacing.
 ENHANCEMENTS_OFF = ("PURE_SIXTY_FPS", "PURE_SMOOTH_FLASHES", "PURE_SPRITE_UPSCALE", "PURE_TEXTURE_DETAIL",
-                    "PURE_DISPLAY_RATE")
+                    "PURE_DISPLAY_RATE", "PURE_CROWD_MODELS")
 REFUSED = "another PureNative is running"               # the guard's words (refuse, wait_game)
 WAITED = 0.0                                            # seconds this process has spent in wait_until
 
@@ -113,11 +113,13 @@ def steady_clock(env):
 
 
 def original_pacing(env):
-    """The enhancements off: PURE_SIXTY_FPS=0, PURE_SMOOTH_FLASHES=0, PURE_SPRITE_UPSCALE=0, PURE_TEXTURE_DETAIL=0 and
-    PURE_DISPLAY_RATE=0, each unless env names it (ENHANCEMENTS_OFF). Time Trial, Free Play and Zone keep the PSP's two
+    """The enhancements off: PURE_SIXTY_FPS=0, PURE_SMOOTH_FLASHES=0, PURE_SPRITE_UPSCALE=0, PURE_TEXTURE_DETAIL=0,
+    PURE_DISPLAY_RATE=0 and PURE_CROWD_MODELS=0, each unless env names it (ENHANCEMENTS_OFF). Time Trial, Free Play and Zone keep the PSP's two
     vblanks a frame (task 072, D-017), so do the full-screen flashes (task 070, D-016), the Metal backend draws the
     menus' and the HUD's bitmaps as the PSP's texels (task 073, D-018) and its mipmapped textures at the PSP's levels
-    (task 075, D-019), and the vblank ticks at the PSP's 59.94 Hz whatever the display (task 089, D-022), so every
+    (task 075, D-019), the vblank ticks at the PSP's 59.94 Hz whatever the display (task 089, D-022), and the figures
+    by the track are the PSP's flat ones (task 105: Crowds and people is Models by default; tools/models_check.sh names
+    it), so every
     tool's run measures the game as the PSP paces and draws it and the suites' scenes, the HUD check and the sweep stay
     where they were measured. The name is the first two's. Every tool run calls it, through silence() and
     steady_clock() (run_boot, campaign_sweep and what goes through them); tools/framerate_check.sh,
