@@ -8,7 +8,8 @@ sky's space (models/README.md, "Skies"): the unit cube centred on the origin, y 
 the horizon at y 0.38. Import each with `tools/model_import.py IN OUT.pmdl --as-is --no-light`.
   - dome: the cube's five faces (four sides and the top, no bottom), 9 x 9 vertices a face like the game's sky
     faces, at distance 1.0 (the faces' own: D-026's depth rule). A vertical gradient: a grey-blue haze below the
-    horizon, white from y 0.3 to 0.5, light blue at the sides' top edge, deep blue at the top's centre.
+    horizon, white from y 0.3 to 0.5, sky blue from 0.6, deeper to the sides' top edge and the top's centre (the
+    sides' rows at the gradient's stops).
   - horizon_city: a ring of 12 boxes of varied height along the -z face's horizon band, their bases at y 0.30 (just
     under the horizon, so the ground meets them), their tops 0.45 to 0.75, two shades (the faces toward the eye a
     slate blue, the sides and tops a lighter one). Their backs lie on the -z face and their fronts 0.04 inward of it
@@ -26,8 +27,14 @@ import sys
 
 HAZE_LOW = (168, 184, 204)   # sRGB: the bottom of the sides, under the ground
 WHITE = (250, 250, 246)      # the horizon band, y 0.3 to 0.5
-EDGE_BLUE = (150, 190, 236)  # the sides' top edge (y 1)
-TOP_BLUE = (52, 104, 196)    # the top's centre
+SKY_BLUE = (90, 140, 215)    # the sides at y 0.6 (the race camera, pitched down, sees the sides to about 0.55, and
+                             # the game's sun glow adds 40 or so over the sky: the blue starts just above the band)
+HIGH_BLUE = (60, 110, 200)   # the sides at y 0.8
+EDGE_BLUE = (45, 95, 190)    # the sides' top edge (y 1)
+TOP_BLUE = (30, 70, 170)     # the top's centre
+# A side's nine rows of vertices: the horizon band's edges and the horizon itself among them, so the gradient's
+# stops are vertices (a uniform 9 x 9 grid would put rows at 0.25 and 0.5 only).
+SIDE_ROWS = (-1.0, -0.4, 0.0, 0.3, 0.38, 0.5, 0.6, 0.8, 1.0)
 CITY_FRONT = (74, 90, 120)   # the boxes' faces toward the eye
 CITY_SIDE = (138, 154, 184)  # their sides and tops
 RELIEF = 0.04                # the boxes' fronts this far inward of the -z face
@@ -53,8 +60,12 @@ def gradient(h):
         return colour(mix(HAZE_LOW, WHITE, (h + 1.0) / 1.3))
     if h <= 0.5:
         return colour(WHITE)
+    if h <= 0.6:
+        return colour(mix(WHITE, SKY_BLUE, (h - 0.5) / 0.1))
+    if h <= 0.8:
+        return colour(mix(SKY_BLUE, HIGH_BLUE, (h - 0.6) / 0.2))
     if h <= 1.0:
-        return colour(mix(WHITE, EDGE_BLUE, (h - 0.5) / 0.5))
+        return colour(mix(HIGH_BLUE, EDGE_BLUE, (h - 0.8) / 0.2))
     return colour(mix(EDGE_BLUE, TOP_BLUE, h - 1.0))
 
 
@@ -72,7 +83,8 @@ def dome():
         top = centre[1] == 1
         for j in range(n):
             for i in range(n):
-                s, t = -1.0 + 2.0 * i / (n - 1), -1.0 + 2.0 * j / (n - 1)
+                s = -1.0 + 2.0 * i / (n - 1)
+                t = -1.0 + 2.0 * j / (n - 1) if top else SIDE_ROWS[j]
                 p = tuple(centre[k] + a[k] * s + b[k] * t for k in range(3))
                 positions.append(p)
                 colours.append(gradient(2.0 - max(abs(p[0]), abs(p[2])) if top else p[1]))

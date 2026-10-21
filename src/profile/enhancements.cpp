@@ -142,6 +142,13 @@ const GameOption kOptions[] = {
                     "Both renderers.",
      .default_choice = 1u,
      .tab = MenuTab::Video},
+    {.key = "sky_models",
+     .label = "Skies",
+     .choices = kCrowdModelChoices,
+     .description = "The sky is five flat pictures on the PSP. Models draws a 3D sky where the port has one: Vineta K "
+                    "today. Both renderers.",
+     .default_choice = 0u,
+     .tab = MenuTab::Video},
 };
 
 constexpr std::uint32_t kNidSceGeDrawSync = 0xB287BD61u;

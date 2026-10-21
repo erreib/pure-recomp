@@ -4,6 +4,7 @@
 //   <prefix>_GE_MODELS_INNER=<name>     the backend that draws (default metal on macOS, vulkan elsewhere; pure_main
 //                                       sets vulkan under the Vulkan shell); models itself is refused
 //   <prefix>_CROWD_MODELS=0|1           the Video tab's Crowds and people row (game.crowd_models) for the run
+//   <prefix>_SKY_MODELS=0|1             the Video tab's Skies row (game.sky_models) for the run (task 106)
 //   <prefix>_TRACE_MODELS=1             `[models] frame F: N draws replaced (C by a set) by M model draws, K quads,
 //                                       P figures, V vertices, B batches reused` every 60 frames and for each captured frame (the
 //                                       line then ends in "(captured)")
@@ -67,6 +68,21 @@
 // The trace line then ends in `; clip NAME t=SECONDS (animated), skinned in N us` (the first animated figure of the
 // frame, the frame's skinning time).
 //
+// A sky (task 106, D-026): the faces of the game's sky cube map their keys to `sky=NAME`, a [sky NAME] section's layers
+// (`<file>.pmdl [parallax=F] [spin=S]`, in the order they are drawn). With the Skies row at Models, the first face of
+// a frame mapped to a sky draws its layers in its place, and the other faces of the frame are dropped:
+//   - each layer one triangle list, its vertices the model's at 50 units a unit (the cube's half-size; the model is
+//     authored in the unit cube, models/README.md, "Skies"), its world matrix a translation to the cube's centre (the
+//     face draw's world translation) plus the parallax offset -F x the eye's world x and z (the face draw's view),
+//     each wrapped to the cube's width, 100 units, then turned about y by S degrees a second on the clips' clock;
+//   - the face draw's state otherwise (view, projection, viewport, target, depth GREATER with writes, stencil, alpha
+//     test, fog off, masks: the sun block reads the sky's depth, docs/ge-effects.md), no texture, no lighting, the
+//     model's vertex colours, culling off;
+//   - the layers' batches kept as the crowd's (one each, a synthetic id and a version, built once from the model, so
+//     the offset and the turn never rebuild them); they count against kMostCachedBatches.
+// A frame with no face (the menus) draws no sky. The trace line then gains `; sky NAME L layers (F faces replaced), the
+// eye at (X, Y, Z) of the cube` (the eye in the sky's space, where a model's horizon is).
+//
 // The table is read at start when the row is at Models and again each time the row is set to Models, so a model
 // imported again shows at the next switch. models/ is found in the app's Resources (Contents/Resources/models),
 // beside the executable (the Windows folder), three levels above it (build/<preset>/bin in a checkout) or under the
@@ -123,6 +139,8 @@ constexpr std::size_t kMostCachedBatches = 64u;  // kept batches in all (task 10
 constexpr std::uint64_t kDropAfterFrames = 60u;  // a kept draw not seen for this many frames is dropped
 constexpr float kYawJitter = 12.0f * 3.14159265f / 180.0f;  // a set's figure turns by up to this either way
 constexpr float kHeightJitter = 0.06f;                       // and is up to this much taller or shorter
+constexpr float kSkyHalfSize = 50.0f;  // the sky cube's half-size in world units: a sky model's unit (task 106)
+constexpr float kSkyWidth = 100.0f;    // its width: what a layer's parallax offset wraps to
 
 Vec3 add(const Vec3 &a, const Vec3 &b) { return {a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
 Vec3 sub(const Vec3 &a, const Vec3 &b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
@@ -183,6 +201,18 @@ struct Figure {
     float near_distance{120.0f}, far_distance{300.0f};
     bool tint{true};                                  // the quad's tint multiplies the colours (tint=1)
     std::size_t clip{0u};  // the clip it plays (models.ini's clip=NAME; the first by default)
+    std::shared_ptr<const struct Sky> sky;  // a sky face's sky (sky=NAME, task 106): the rest is unused
+};
+
+// A sky's layer (task 106): a static model in the unit cube, its parallax factor and its turn in degrees a second.
+struct SkyLayer {
+    std::shared_ptr<const Model> model;
+    std::string file;
+    float parallax{}, spin{};
+};
+struct Sky {
+    std::string name;
+    std::vector<SkyLayer> layers;  // in the [sky NAME] section's order, the order they are drawn
 };
 
 // splitmix64: a place's (or a figure's) hash.
@@ -418,12 +448,13 @@ std::unordered_map<std::string, Figure> read_table() {
     };
     struct Line {
         int number;
-        std::string key, set, clip;
+        std::string key, set, clip, sky;
         Figure figure;
     };
     std::vector<Line> lines;
     // A set's name -> the line of its section and its files with their lines.
     std::map<std::string, std::pair<int, std::vector<std::pair<int, std::string>>>> sets;
+    std::map<std::string, std::pair<int, std::vector<std::pair<int, std::string>>>> skies;  // [sky NAME], as sets
     std::string line, section;
     int number = 0;
     while (std::getline(in, line)) {
@@ -436,6 +467,9 @@ std::unordered_map<std::string, Figure> read_table() {
             if (section.rfind("set ", 0) == 0) {
                 section = "set " + trim(section.substr(4u));
                 sets.emplace(section.substr(4u), std::pair{number, std::vector<std::pair<int, std::string>>{}});
+            } else if (section.rfind("sky ", 0) == 0) {
+                section = "sky " + trim(section.substr(4u));
+                skies.emplace(section.substr(4u), std::pair{number, std::vector<std::pair<int, std::string>>{}});
             }
             continue;
         }
@@ -443,10 +477,14 @@ std::unordered_map<std::string, Figure> read_table() {
             sets[section.substr(4u)].second.emplace_back(number, line);
             continue;
         }
+        if (section.rfind("sky ", 0) == 0) {
+            skies[section.substr(4u)].second.emplace_back(number, line);
+            continue;
+        }
         if (section != "figures") continue;
         const auto equals = line.find('=');
         std::istringstream words(equals == std::string::npos ? std::string{} : line.substr(equals + 1u));
-        Line entry{number, lower(trim(line.substr(0u, equals))), {}, {}, {}};
+        Line entry{number, lower(trim(line.substr(0u, equals))), {}, {}, {}, {}};
         Figure &figure = entry.figure;
         figure.figures = 0u;
         bool figures_given = false, distances = false, bad = false;
@@ -467,6 +505,8 @@ std::unordered_map<std::string, Figure> read_table() {
                 entry.clip = value;
             } else if (word.rfind("set=", 0) == 0) {
                 entry.set = lower(value);
+            } else if (word.rfind("sky=", 0) == 0) {
+                entry.sky = lower(value);
             } else if (word.rfind("spacing=", 0) == 0) {
                 figure.spacing = number_of(value);
             } else if (word.rfind("near=", 0) == 0) {
@@ -483,11 +523,16 @@ std::unordered_map<std::string, Figure> read_table() {
         }
         figure.thin = !entry.set.empty() || distances;
         if (entry.key.size() != 24u || entry.key.find_first_not_of("0123456789abcdef") != std::string::npos || bad ||
-            figure.file.empty() == entry.set.empty() ||
+            int{!figure.file.empty()} + int{!entry.set.empty()} + int{!entry.sky.empty()} != 1 ||
             (figures_given && (figure.figures == 0u || figure.figures > 64u)) || figure.spacing < 0.0f ||
             figure.near_distance < 0.0f || figure.far_distance < figure.near_distance) {
             report(number, "not `<24 hex digits> = <file>.pmdl figures=1..64 [clip=NAME]` or `<24 hex digits> = "
-                           "set=NAME spacing=UNITS [near=UNITS far=UNITS] [tint=0|1]`; left out");
+                           "set=NAME spacing=UNITS [near=UNITS far=UNITS] [tint=0|1]` or `<24 hex digits> = sky=NAME`; "
+                           "left out");
+            continue;
+        }
+        if (!entry.sky.empty()) {
+            lines.push_back(std::move(entry));
             continue;
         }
         if (!figures_given && !(figure.spacing > 0.0f)) {
@@ -507,8 +552,55 @@ std::unordered_map<std::string, Figure> read_table() {
             else report(line_number, "[set " + name + "]'s " + file + " is left out of the set");
         }
     }
+    // The skies' layers: `<file>.pmdl [parallax=F] [spin=S]`; a line that does not read is reported and left out.
+    std::map<std::string, std::shared_ptr<const Sky>> sky_of;
+    for (const auto &[name, at] : skies) {
+        auto sky = std::make_shared<Sky>();
+        sky->name = name;
+        if (at.second.empty()) report(at.first, "[sky " + name + "] lists no layers");
+        for (const auto &[line_number, text] : at.second) {
+            std::istringstream words(text);
+            SkyLayer layer;
+            bool bad = false;
+            std::string word;
+            while (words >> word) {
+                const auto at_equals = word.find('=');
+                const std::string value = at_equals == std::string::npos ? std::string{} : word.substr(at_equals + 1u);
+                char *end = nullptr;
+                const float parsed = std::strtof(value.c_str(), &end);
+                const bool numeric = !value.empty() && *end == '\0' && std::isfinite(parsed);
+                if (word.rfind("parallax=", 0) == 0 && numeric) layer.parallax = parsed;
+                else if (word.rfind("spin=", 0) == 0 && numeric) layer.spin = parsed;
+                else if (layer.file.empty() && at_equals == std::string::npos) layer.file = word;
+                else bad = true;
+            }
+            if (bad || layer.file.empty()) {
+                report(line_number, "not `<file>.pmdl [parallax=F] [spin=DEGREES]`; left out of [sky " + name + "]");
+                continue;
+            }
+            layer.model = load(layer.file);
+            if (!layer.model) {
+                report(line_number, "[sky " + name + "]'s " + layer.file + " is left out of the sky");
+                continue;
+            }
+            sky->layers.push_back(std::move(layer));
+        }
+        sky_of.emplace(name, std::move(sky));
+    }
     for (Line &entry : lines) {
         Figure &figure = entry.figure;
+        if (!entry.sky.empty()) {
+            const auto found = sky_of.find(entry.sky);
+            if (found == sky_of.end() || found->second->layers.empty()) {
+                report(entry.number, found == sky_of.end() ? "no [sky " + entry.sky + "] section; left out"
+                                                           : "[sky " + entry.sky + "] has no layer; left out");
+                continue;
+            }
+            figure.sky = found->second;
+            figure.file = "sky=" + entry.sky;
+            table[entry.key] = std::move(figure);
+            continue;
+        }
         if (!entry.set.empty()) {
             const auto found = set_models.find(entry.set);
             if (found == set_models.end() || found->second.empty()) {
@@ -554,6 +646,8 @@ std::unordered_map<std::string, Figure> read_table() {
     std::cout << (*separator == ';' ? ")" : "");
     for (const auto &[name, chosen] : set_models)
         std::cout << ", set " << name << " of " << chosen.size() << " model" << (chosen.size() == 1u ? "" : "s");
+    for (const auto &[name, sky] : sky_of)
+        std::cout << ", sky " << name << " of " << sky->layers.size() << " layer" << (sky->layers.size() == 1u ? "" : "s");
     std::cout << (problems != 0 ? ", with problems above" : "") << "\n";
     return table;
 }
@@ -625,6 +719,7 @@ public:
     void begin_frame() override {
         read_option(false);
         seen_.clear();
+        sky_drawn_ = false;
         ++frame_;
         std::erase_if(kept_, [&](const auto &entry) { return frame_ - entry.second.last_seen > kDropAfterFrames; });
         advance_clock();
@@ -641,7 +736,12 @@ public:
             return;
         }
         const Figure *figure = lookup(call, memory);
-        if (figure == nullptr || !replace(call, *figure, memory)) inner_->submit(call, memory);
+        if (figure != nullptr && figure->sky != nullptr) {
+            if (sky_on_) draw_sky(call, *figure->sky, memory);  // the face itself is never drawn
+            else inner_->submit(call, memory);
+            return;
+        }
+        if (figure == nullptr || !crowd_on_ || !replace(call, *figure, memory)) inner_->submit(call, memory);
     }
 
     void block_transfer(const gpu::BlockTransfer &transfer, GuestMemory &memory) override {
@@ -666,6 +766,7 @@ public:
         shown_ = counts_;
         shown_frame_ = inner_->frames_presented();
         counts_ = {};
+        sky_drawn_ = false;
         if (trace_ && shown_frame_ % kTraceEvery == 0u) report("");
         return image;
     }
@@ -689,6 +790,9 @@ private:
         double skin_seconds{};  // the frame's skinning
         double replace_seconds{};  // the frame's replace() calls, the inner backend's submits of their draws included
         double submit_seconds{};   // those submits
+        std::uint64_t sky_faces{}, sky_layers{};  // the sky's faces dropped and its layers drawn (task 106)
+        std::string sky;                          // the sky drawn
+        Vec3 sky_eye{};                           // the eye in the sky's space: (eye - centre) / the half-size
     };
 
     // A quad's placement, what its figures are built from (place() and the hashes), and the band (every: 1, 2 or 4)
@@ -771,17 +875,80 @@ private:
         return skinned_;
     }
 
-    // The row, once a frame (never per draw): the table read whenever it turns to Models.
+    // The rows, once a frame (never per draw): the table read whenever one of them turns to Models.
     void read_option(bool at_start) {
-        const bool on = portablekit::settings::game_option("crowd_models") == 1u;
-        if (on && !on_) {
+        const bool crowd = portablekit::settings::game_option("crowd_models") == 1u;
+        const bool sky = portablekit::settings::game_option("sky_models") == 1u;
+        if ((crowd && !crowd_on_) || (sky && !sky_on_)) {
+            seen_.clear();
+            sky_batches_.clear();
+            kept_.clear();
             table_ = read_table();
-            std::cout << "[pure] crowd models: on (game.crowd_models), drawn by " << inner_name_ << "\n";
-        } else if (at_start && !on) {
-            std::cout << "[pure] crowd models: off\n";
         }
-        if (on != on_) kept_.clear();
-        on_ = on;
+        if (crowd && !crowd_on_) std::cout << "[pure] crowd models: on (game.crowd_models), drawn by " << inner_name_ << "\n";
+        else if (at_start && !crowd) std::cout << "[pure] crowd models: off\n";
+        if (sky && !sky_on_) std::cout << "[pure] skies: on (game.sky_models), drawn by " << inner_name_ << "\n";
+        else if (at_start && !sky) std::cout << "[pure] skies: off\n";
+        if (crowd != crowd_on_) kept_.clear();
+        if (sky != sky_on_) sky_batches_.clear();
+        crowd_on_ = crowd;
+        sky_on_ = sky;
+        on_ = crowd || sky;
+    }
+
+    // A sky face (task 106): the frame's first draws the sky's layers in its place; every face is dropped.
+    void draw_sky(const DrawCall &call, const Sky &sky, const GuestMemory &memory) {
+        ++counts_.sky_faces;
+        if (sky_drawn_) return;
+        sky_drawn_ = true;
+        const auto started = std::chrono::steady_clock::now();
+        const DrawCall model_draw = model_draw_of(call);
+        const Vec3 centre{call.world[12], call.world[13], call.world[14]};
+        const Vec3 eye = eye_of(call.view);
+        const auto wrapped = [](float offset) { return offset - kSkyWidth * std::floor(offset / kSkyWidth + 0.5f); };
+        for (const SkyLayer &layer : sky.layers) {
+            auto found = sky_batches_.find(&layer);
+            if (found == sky_batches_.end()) {
+                DrawCall batch = model_draw;
+                const Model &model = *layer.model;
+                batch.vertices.resize(model.positions.size());
+                for (std::size_t i = 0; i < model.positions.size(); ++i) {
+                    const Vec3 at = scale(model.positions[i], kSkyHalfSize);
+                    gpu::Vertex &out = batch.vertices[i];
+                    out.position = {at[0], at[1], at[2], 1.0f};
+                    out.normal = {0.0f, 0.0f, 0.0f};
+                    out.texcoord = {0.0f, 0.0f};
+                    out.color = model.colors[i];
+                }
+                batch.indices = model.indices;
+                batch.primitive_count = static_cast<std::uint32_t>(batch.indices.size() / 3u);
+                if (!no_cache_) {
+                    batch.vertex_address = next_batch_id();
+                    batch.index_address = next_version_;
+                    next_version_ = next_version_ == 0xFFFFFFFFu ? 1u : next_version_ + 1u;
+                }
+                found = sky_batches_.emplace(&layer, std::move(batch)).first;
+            } else {
+                ++counts_.reused;
+            }
+            DrawCall &batch = found->second;
+            refresh(batch, model_draw);
+            // T(centre + offset) x R_y(spin): the layer's vertices are the model's at the half-size, about its origin.
+            const float turn = static_cast<float>(std::fmod(clock_seconds_ * layer.spin, 360.0) * 3.14159265358979 / 180.0);
+            const float c = std::cos(turn), s = std::sin(turn);
+            batch.world = {c, 0.0f, -s, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, s, 0.0f, c, 0.0f,
+                           centre[0] + wrapped(-layer.parallax * eye[0]), centre[1],
+                           centre[2] + wrapped(-layer.parallax * eye[2]), 1.0f};
+            const auto submitted = std::chrono::steady_clock::now();
+            inner_->submit(batch, memory);
+            counts_.submit_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - submitted).count();
+            counts_.vertices += batch.vertices.size();
+            ++counts_.sky_layers;
+            ++counts_.model_draws;
+        }
+        counts_.sky = sky.name;
+        counts_.sky_eye = scale(sub(eye, centre), 1.0f / kSkyHalfSize);
+        counts_.replace_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     }
 
     void report(const char *what) const {
@@ -792,6 +959,10 @@ private:
         if (shown_.clip != nullptr)
             std::cout << "; clip " << shown_.clip->name << " t=" << shown_.clip_time << " (animated), skinned in "
                       << static_cast<long>(shown_.skin_seconds * 1e6) << " us";
+        if (shown_.sky_faces != 0u)
+            std::cout << "; sky " << shown_.sky << " " << shown_.sky_layers << " layers (" << shown_.sky_faces
+                      << " faces replaced), the eye at (" << shown_.sky_eye[0] << ", " << shown_.sky_eye[1] << ", "
+                      << shown_.sky_eye[2] << ") of the cube";
         if (shown_.replaced != 0u)
             std::cout << "; replaced in " << static_cast<long>(shown_.replace_seconds * 1e6) << " us, "
                       << static_cast<long>(shown_.submit_seconds * 1e6) << " of them the inner backend's";
@@ -1082,9 +1253,9 @@ private:
     // Room for `wanted` more kept batches (kMostCachedBatches in all), the draws seen longest ago dropped for it (not
     // this frame's); false when there is none.
     bool make_room(std::size_t wanted) {
-        if (wanted > kMostCachedBatches) return false;
+        if (wanted + sky_batches_.size() > kMostCachedBatches) return false;
         for (;;) {
-            std::size_t total = 0u;
+            std::size_t total = sky_batches_.size();  // the sky's layers' kept batches (task 106) count too
             auto oldest = kept_.end();
             for (auto it = kept_.begin(); it != kept_.end(); ++it) {
                 total += it->second.batches();
@@ -1220,7 +1391,12 @@ private:
     std::string inner_name_;
     bool initialized_{};
     bool trace_{};
-    bool on_{};
+    bool on_{};        // either row at Models: the table is looked in
+    bool crowd_on_{};  // the Crowds and people row (game.crowd_models)
+    bool sky_on_{};    // the Skies row (game.sky_models, task 106)
+    bool sky_drawn_{};  // this frame's sky drawn (its first face seen)
+    // The sky layers' kept batches (task 106), by layer: built once from the model, refreshed with each frame's state.
+    std::map<const SkyLayer *, DrawCall> sky_batches_;
     std::unordered_map<std::string, Figure> table_;
     // This frame's lookups: (address, palette address, palette word, format and size) -> figure or null.
     std::map<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>, const Figure *> seen_;
