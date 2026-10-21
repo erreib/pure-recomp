@@ -480,8 +480,10 @@ the Metal backend through the wrapper.
   their colours by the quad's tint, as for the marshal (one stand is white, the other 0xFFB7B0A8).
 - **Density.** The eye's distance d to the quad's base: every figure under `near`, those with f % 2 equal to the
   place's hash bit from `near` to `far`, those with f % 4 equal to its two bits beyond `far` (a subset of the half,
-  so a figure kept far off is kept nearer too and none swaps at a boundary). The nine crowd lines take near 80 and
-  far 200: at 120 and 300 the race frame drew 1574 figures and took 22 ms to render headless.
+  so a figure kept far off is kept nearer too and none swaps at a boundary). The nine crowd lines take near 600 and
+  far 1200 since Erik asked for the full draw distance (every figure drawn: 1969 on the start straight, no band
+  ever crossed); task 104 had measured 80 and 200 (1359 figures) and 120 and 300 (1574, 22 ms headless) before
+  task 105's kept batches made the count cheap.
 - **Batching.** The figures of one game draw (a set's or the marshal's) are concatenated, vertices and offset
   indices, into as few triangle-list draws as u16 indices allow (65535 vertices, about 210 figures a draw), each with
   the quad's state: the Metal backend expands and uploads a draw's vertices each submit, so a draw per figure would

@@ -283,7 +283,10 @@ after a change that moves or renames a file, a tool or a patch.
   quad's distance band changes) and the Metal backend keeps the expanded vertex buffer of such a batch and binds
   it again; a race frame with the crowd costs 0.25 to 0.4 ms in the models backend when every batch is reused,
   and the Metal window holds 60 fps from the grid (render 5.5 to 8.7 ms at 1920x1088 against task 104's 15 to
-  23); the Vulkan window too. The row's default is Models; `ENHANCEMENTS_OFF` pins it off for the tools. Owed to
+  23); the Vulkan window too. The row's default is Models; `ENHANCEMENTS_OFF` pins it off for the tools. Erik's eye
+  (2026-10-20): close to the setup he had in mind; he asked for the full draw distance, so the density bands are
+  near 600, far 1200 (every figure drawn, 1969 on the start straight, 620 k vertices, no band ever changes so no
+  batch ever rebuilds): the Metal window still holds 60 fps at the grid (render 5.2 to 6.2 ms at 1920x1088). Owed to
   Erik's eye: a race on Metal with the crowd, and the Vulkan shell's frame interpolation with the batches' stable
   ids. Later: the figures animated (instancing, a model layer of the backend's own with GPU skinning: the
   long-term path when the crowd moves), the figure that follows the player's ship, the art.
