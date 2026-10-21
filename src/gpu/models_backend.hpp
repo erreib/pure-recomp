@@ -12,6 +12,13 @@
 
 namespace pure::models {
 
+// The first synthetic vertex_address (task 105): a kept batch of static figures is submitted with an id from here up,
+// stable from frame to frame, and in index_address a version that changes when the batch is rebuilt, so the inner
+// backend may keep what it derived from the batch's vertices (the Metal backend its expanded vertex buffer). The
+// game's own addresses are below 0x0A000000; a draw with vertex_address 0 (the marshal's skinned figures) is new
+// each frame.
+constexpr std::uint32_t kFirstCachedBatchAddress = 0xF0000000u;
+
 // A backend that draws through another one.
 class WrappingBackend : public portablekit::gpu::GeBackend {
 public:

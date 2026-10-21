@@ -5,7 +5,7 @@
 //                                       sets vulkan under the Vulkan shell); models itself is refused
 //   <prefix>_CROWD_MODELS=0|1           the Video tab's Crowds and people row (game.crowd_models) for the run
 //   <prefix>_TRACE_MODELS=1             `[models] frame F: N draws replaced (C by a set) by M model draws, K quads,
-//                                       P figures, V vertices` every 60 frames and for each captured frame (the
+//                                       P figures, V vertices, B batches reused` every 60 frames and for each captured frame (the
 //                                       line then ends in "(captured)")
 //
 // Every call goes to the inner backend unchanged while the row is Original (the default). At Models, a draw is
@@ -42,7 +42,17 @@
 // f % 4 == its two bits beyond far (a subset of the half, so a figure kept beyond far is kept nearer too). The
 // figures of one game draw, a set's or the marshal's, are concatenated into as few triangle-list draws as u16
 // indices allow (kMostVertices each; the Metal backend uploads a draw's vertices with each submit, so a draw per
-// figure would cost more than the triangles).
+// figure would cost more than the triangles), in groups of consecutive quads whose figures at full density fit one.
+//
+// The batches of static figures are kept across frames (task 105): by the game draw's identity (its vertex_address,
+// primitive_count, texture and palette address), checked against the input they were built from (the figure, the
+// world matrix, the vertices and indices). Each frame recomputes only the quads' bands (one distance each); a group
+// whose bands did not change submits its kept batches, the current call's state (view, projection, viewport, target,
+// fog, ...) put in, with vertex_address a stable synthetic id (kFirstCachedBatchAddress up, models_backend.hpp) and
+// index_address a version bumped when the group is rebuilt. At most kMostCachedBatches batches are kept; a draw not
+// seen for kDropAfterFrames frames is dropped. A skinned figure's batches (the marshal's) are built every frame with
+// vertex_address 0. The quad's tint is in the vertices' colours, so a change of the quad's colours rebuilds.
+//   <prefix>_MODELS_NO_CACHE=1          nothing kept: every batch built each frame with vertex_address 0 (read once)
 //
 // A version 2 model (task 103: joints, weights, clips) is skinned on the CPU for each figure before the placement:
 // its clip (the first in the file, or models.ini's clip=NAME) sampled at the figure's time, every joint's local
@@ -109,6 +119,8 @@ constexpr double kLargestStep = 0.1;  // seconds: the most the clips' wall clock
 constexpr std::uint32_t kModelVertexType = (3u << 7) | (7u << 2) | (2u << 11);
 constexpr std::size_t kMostVertices = 65535u;    // a batched model draw's vertices: what u16 indices reach
 constexpr std::uint32_t kMostFigures = 256u;     // on one quad, for a set's spacing
+constexpr std::size_t kMostCachedBatches = 64u;  // kept batches in all (task 105)
+constexpr std::uint64_t kDropAfterFrames = 60u;  // a kept draw not seen for this many frames is dropped
 constexpr float kYawJitter = 12.0f * 3.14159265f / 180.0f;  // a set's figure turns by up to this either way
 constexpr float kHeightJitter = 0.06f;                       // and is up to this much taller or shorter
 
@@ -591,6 +603,11 @@ public:
         const char *sync = portablekit::env("MODELS_SYNC");
         clock_frames_ = clock != nullptr && std::strcmp(clock, "frames") == 0;
         sync_ = sync != nullptr && *sync != '\0' && std::strcmp(sync, "0") != 0;
+        const char *no_cache = portablekit::env("MODELS_NO_CACHE");
+        no_cache_ = no_cache != nullptr && *no_cache != '\0' && std::strcmp(no_cache, "0") != 0;
+        if (no_cache_)
+            std::cout << "[models] " << portablekit::env_name("MODELS_NO_CACHE")
+                      << "=1: every batch built each frame and drawn with vertex_address 0\n";
         if (clock_frames_)
             std::cout << "[models] " << portablekit::env_name("MODELS_CLOCK")
                       << "=frames: the clips run on the shown frame / 60 s, not wall time\n";
@@ -608,6 +625,8 @@ public:
     void begin_frame() override {
         read_option(false);
         seen_.clear();
+        ++frame_;
+        std::erase_if(kept_, [&](const auto &entry) { return frame_ - entry.second.last_seen > kDropAfterFrames; });
         advance_clock();
         inner_->begin_frame();
     }
@@ -664,12 +683,50 @@ public:
 private:
     struct Counts {
         std::uint64_t replaced{}, set_replaced{}, model_draws{}, quads{}, figures{}, vertices{};
+        std::uint64_t reused{};  // batches submitted as kept (task 105)
         const Clip *clip{};      // the first animated figure's clip and time
         double clip_time{};
         double skin_seconds{};  // the frame's skinning
         double replace_seconds{};  // the frame's replace() calls, the inner backend's submits of their draws included
         double submit_seconds{};   // those submits
     };
+
+    // A quad's placement, what its figures are built from (place() and the hashes), and the band (every: 1, 2 or 4)
+    // its figures were last built at.
+    struct Placed {
+        Vec3 base{}, up{}, right{}, front{}, x_axis{};
+        float height{}, width{};
+        std::uint32_t tint{}, count{}, every{1u};
+        std::uint64_t place_key{}, place_hash{};
+    };
+    // Consecutive quads whose figures at full density fit one batch (segments_of): what a band change rebuilds.
+    struct Segment {
+        std::size_t first{}, last{};
+        std::vector<DrawCall> batches;   // the triangle lists, their vertices and indices built
+        std::vector<std::uint32_t> ids;  // each batch's synthetic vertex_address, kept across rebuilds
+        std::uint64_t figures{}, vertices{};
+    };
+    // A game draw's kept batches (task 105): the input they were built from, which the next call must match for them
+    // to serve it, its placed quads and its segments.
+    struct Kept {
+        const Figure *figure{};
+        gpu::PrimitiveType primitive{};
+        bool has_vertex_color{};
+        std::uint32_t material_color{};
+        std::array<float, 16> world{};
+        std::vector<gpu::Vertex> vertices;
+        std::vector<std::uint16_t> indices;
+        std::vector<Placed> quads;
+        std::vector<Segment> segments;
+        std::uint64_t last_seen{};
+        [[nodiscard]] std::size_t batches() const {
+            std::size_t n = 0u;
+            for (const Segment &segment : segments) n += segment.batches.size();
+            return n;
+        }
+    };
+    // What recognises a game draw from frame to frame: its vertex address, primitive count, texture and palette.
+    using Identity = std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>;
 
     // The clips' clock, once a frame: wall time, each step capped at kLargestStep, or the shown frame / 60.
     void advance_clock() {
@@ -723,13 +780,15 @@ private:
         } else if (at_start && !on) {
             std::cout << "[pure] crowd models: off\n";
         }
+        if (on != on_) kept_.clear();
         on_ = on;
     }
 
     void report(const char *what) const {
         std::cout << "[models] frame " << shown_frame_ << ": " << shown_.replaced << " draws replaced ("
                   << shown_.set_replaced << " by a set) by " << shown_.model_draws << " model draws, " << shown_.quads
-                  << " quads, " << shown_.figures << " figures, " << shown_.vertices << " vertices" << what;
+                  << " quads, " << shown_.figures << " figures, " << shown_.vertices << " vertices, " << shown_.reused
+                  << " batches reused" << what;
         if (shown_.clip != nullptr)
             std::cout << "; clip " << shown_.clip->name << " t=" << shown_.clip_time << " (animated), skinned in "
                       << static_cast<long>(shown_.skin_seconds * 1e6) << " us";
@@ -818,14 +877,17 @@ private:
         return quads;
     }
 
-    // Draws the figures for each of the draw's quads, batched; false (and nothing drawn) when no quad is placed.
-    bool replace(const DrawCall &call, const Figure &figure, const GuestMemory &memory) {
-        const auto started = std::chrono::steady_clock::now();
-        const std::vector<std::array<std::uint32_t, 4>> quads = quads_of(call);
-        if (quads.empty()) return false;
-        const bool is_set = !figure.set.empty();
-        // Everything the quad is drawn with (view, projection, viewport, target, blend, depth, stencil, alpha test,
-        // fog, masks); then what a model draw changes.
+    static bool animated(const Model &model) { return !model.joints.empty() && !model.clips.empty(); }
+    // Whether any of the figure's models is skinned (the marshal's): its batches are built every frame.
+    static bool animated(const Figure &figure) {
+        if (figure.model != nullptr && animated(*figure.model)) return true;
+        return std::any_of(figure.set.begin(), figure.set.end(),
+                           [](const std::shared_ptr<const Model> &m) { return m != nullptr && animated(*m); });
+    }
+
+    // Everything the quad is drawn with (view, projection, viewport, target, blend, depth, stencil, alpha test, fog,
+    // masks); then what a model draw changes.
+    static DrawCall model_draw_of(const DrawCall &call) {
         DrawCall draw = call;
         draw.raw_vertices = nullptr;
         draw.raw_count = 0u;
@@ -845,24 +907,27 @@ private:
         draw.world = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
         draw.indices.clear();
         draw.vertices.clear();
-        // The viewer: the eye of the view matrix (world to eye, column-major), -R^T t.
-        const std::array<float, 16> &v = call.view;
-        const Vec3 eye{-(v[0] * v[12] + v[1] * v[13] + v[2] * v[14]), -(v[4] * v[12] + v[5] * v[13] + v[6] * v[14]),
-                       -(v[8] * v[12] + v[9] * v[13] + v[10] * v[14])};
-        std::uint64_t drawn = 0u, placed = 0u;
-        // The batch so far as one triangle list (the figures' vertices and their indices offset).
-        const auto flush = [&] {
-            if (draw.indices.empty()) return;
-            draw.primitive_count = static_cast<std::uint32_t>(draw.indices.size() / 3u);
-            counts_.vertices += draw.vertices.size();
-            const auto submitted = std::chrono::steady_clock::now();
-            inner_->submit(draw, memory);
-            counts_.submit_seconds +=
-                std::chrono::duration<double>(std::chrono::steady_clock::now() - submitted).count();
-            ++drawn;
-            draw.indices.clear();
-            draw.vertices.clear();
-        };
+        return draw;
+    }
+
+    // The viewer: the eye of the view matrix (world to eye, column-major), -R^T t.
+    static Vec3 eye_of(const std::array<float, 16> &v) {
+        return {-(v[0] * v[12] + v[1] * v[13] + v[2] * v[14]), -(v[4] * v[12] + v[5] * v[13] + v[6] * v[14]),
+                -(v[8] * v[12] + v[9] * v[13] + v[10] * v[14])};
+    }
+
+    // Which of a quad's figures the distance keeps, as `every`: all under near, every second from near to far, every
+    // fourth beyond (f % every == the place's pick; f % 4 == its two bits is a subset of f % 2 == its low bit).
+    static std::uint32_t band_of(const Figure &figure, const Placed &quad, const Vec3 &eye) {
+        if (!figure.thin) return 1u;
+        const float d = length(sub(eye, quad.base));
+        return d < figure.near_distance ? 1u : d < figure.far_distance ? 2u : 4u;
+    }
+
+    // The draw's quads placed, those place() refuses left out; each one's band left 0 for the first band pass.
+    static void place_quads(const DrawCall &call, const Figure &figure,
+                            const std::vector<std::array<std::uint32_t, 4>> &quads, std::vector<Placed> &out) {
+        const bool is_set = !figure.set.empty();
         for (const auto &quad : quads) {
             std::array<Corner, 4> corners{};
             std::array<std::uint32_t, 4> sum{};
@@ -872,73 +937,233 @@ private:
                 const std::uint32_t color = call.has_vertex_color ? vertex.color : call.material_color;
                 for (std::uint32_t c = 0; c < 4u; ++c) sum[c] += (color >> (8u * c)) & 0xFFu;
             }
-            std::uint32_t tint = 0u;
-            for (std::uint32_t c = 0; c < 4u; ++c) tint |= ((sum[c] + 2u) / 4u) << (8u * c);
-            if (!figure.tint) tint = 0xFFFFFFFFu;
-            Vec3 base, up_axis, right_axis, front;
-            float height = 0.0f, width = 0.0f;
-            if (!place(corners, is_set, base, up_axis, right_axis, front, height, width)) continue;
-            const std::uint64_t place_key = quantise(base);
+            Placed placed;
+            for (std::uint32_t c = 0; c < 4u; ++c) placed.tint |= ((sum[c] + 2u) / 4u) << (8u * c);
+            if (!figure.tint) placed.tint = 0xFFFFFFFFu;
+            if (!place(corners, is_set, placed.base, placed.up, placed.right, placed.front, placed.height, placed.width))
+                continue;
+            placed.place_key = quantise(placed.base);
             // The model's x, y, z in world space: x = up x front (= -right), y = up, z = front.
-            const Vec3 x_axis = cross(up_axis, front);
-            // How many stand on the quad, and which of them the distance keeps: all under near, every second from
-            // near to far, every fourth beyond (f % 4 == the place's two bits, a subset of f % 2 == its low bit).
-            const std::uint32_t count =
-                figure.spacing > 0.0f
-                    ? std::clamp(static_cast<std::uint32_t>(std::lround(width / figure.spacing)), 1u, kMostFigures)
-                    : figure.figures;
-            std::uint32_t every = 1u;
-            if (figure.thin) {
-                const float d = length(sub(eye, base));
-                every = d < figure.near_distance ? 1u : d < figure.far_distance ? 2u : 4u;
+            placed.x_axis = cross(placed.up, placed.front);
+            placed.count = figure.spacing > 0.0f
+                               ? std::clamp(static_cast<std::uint32_t>(std::lround(placed.width / figure.spacing)), 1u,
+                                            kMostFigures)
+                               : figure.figures;
+            placed.place_hash = mix64(placed.place_key);
+            placed.every = 0u;
+            out.push_back(placed);
+        }
+    }
+
+    // The quads grouped in order, each group's figures at full density within kMostVertices (a quad over it alone is
+    // a group of its own): a group's batches depend on its own quads' bands alone.
+    static std::vector<Segment> segments_of(const Figure &figure, const std::vector<Placed> &quads) {
+        std::size_t most = figure.model != nullptr ? figure.model->positions.size() : 0u;
+        for (const auto &model : figure.set)
+            if (model != nullptr) most = std::max(most, model->positions.size());
+        std::vector<Segment> segments;
+        std::size_t worst = 0u;
+        for (std::size_t q = 0; q < quads.size(); ++q) {
+            const std::size_t wanted = static_cast<std::size_t>(quads[q].count) * most;
+            if (!segments.empty() && worst + wanted <= kMostVertices) {
+                segments.back().last = q + 1u;
+                worst += wanted;
+            } else {
+                Segment segment;
+                segment.first = q;
+                segment.last = q + 1u;
+                segments.push_back(std::move(segment));
+                worst = wanted;
             }
-            const std::uint64_t place_hash = mix64(place_key);
-            const std::uint32_t pick = static_cast<std::uint32_t>(place_hash & 3u) % every;
-            ++placed;
-            for (std::uint32_t f = 0; f < count; ++f) {
-                if (f % every != pick) continue;
-                const float across = (static_cast<float>(f) + 0.5f) / static_cast<float>(count) - 0.5f;
-                const Vec3 foot = add(base, scale(right_axis, across * width));
-                Vec3 fx = x_axis, fz = front;
-                float size = height;
+        }
+        return segments;
+    }
+
+    std::uint32_t next_batch_id() {
+        const std::uint32_t id = next_id_;
+        next_id_ = next_id_ == 0xFFFFFFFFu ? kFirstCachedBatchAddress : next_id_ + 1u;
+        return id;
+    }
+
+    // The segment's figures at their quads' bands into triangle lists (the figures' vertices and their indices
+    // offset), a list flushed before kMostVertices. `keep`: each list carries its synthetic id and a new version.
+    void build(const Figure &figure, const std::vector<Placed> &quads, Segment &segment, const DrawCall &model_draw,
+               bool keep) {
+        const bool is_set = !figure.set.empty();
+        segment.batches.clear();
+        segment.figures = 0u;
+        segment.vertices = 0u;
+        DrawCall draw = model_draw;
+        const auto flush = [&] {
+            if (draw.indices.empty()) return;
+            draw.primitive_count = static_cast<std::uint32_t>(draw.indices.size() / 3u);
+            if (keep) {
+                const std::size_t n = segment.batches.size();
+                if (n == segment.ids.size()) segment.ids.push_back(next_batch_id());
+                draw.vertex_address = segment.ids[n];
+                draw.index_address = next_version_;
+                next_version_ = next_version_ == 0xFFFFFFFFu ? 1u : next_version_ + 1u;
+            }
+            segment.vertices += draw.vertices.size();
+            segment.batches.push_back(std::move(draw));
+            draw = model_draw;
+        };
+        for (std::size_t q = segment.first; q < segment.last; ++q) {
+            const Placed &quad = quads[q];
+            const std::uint32_t pick = static_cast<std::uint32_t>(quad.place_hash & 3u) % quad.every;
+            for (std::uint32_t f = 0; f < quad.count; ++f) {
+                if (f % quad.every != pick) continue;
+                const float across = (static_cast<float>(f) + 0.5f) / static_cast<float>(quad.count) - 0.5f;
+                const Vec3 foot = add(quad.base, scale(quad.right, across * quad.width));
+                Vec3 fx = quad.x_axis, fz = quad.front;
+                float size = quad.height;
                 const Model *model = figure.model.get();
                 if (is_set) {
                     // The figure's model, turn and height from the hash of its place and number.
-                    const std::uint64_t h = mix64(place_hash + f);
+                    const std::uint64_t h = mix64(quad.place_hash + f);
                     model = figure.set[static_cast<std::size_t>(h % figure.set.size())].get();
                     const auto unit = [&](int shift) {
                         return static_cast<float>((h >> shift) & 0xFFFFu) / 65535.0f * 2.0f - 1.0f;
                     };
                     const float yaw = unit(16) * kYawJitter, c = std::cos(yaw), s = std::sin(yaw);
-                    fz = add(scale(front, c), scale(x_axis, s));
-                    fx = sub(scale(x_axis, c), scale(front, s));
+                    fz = add(scale(quad.front, c), scale(quad.x_axis, s));
+                    fx = sub(scale(quad.x_axis, c), scale(quad.front, s));
                     size *= 1.0f + unit(32) * kHeightJitter;
                 }
-                const std::vector<Vec3> &positions = positions_of(*model, figure.clip, place_key * 64u + f);
+                const std::vector<Vec3> &positions = positions_of(*model, figure.clip, quad.place_key * 64u + f);
                 if (draw.vertices.size() + positions.size() > kMostVertices) flush();
                 const std::size_t first = draw.vertices.size();
                 draw.vertices.resize(first + positions.size());
                 for (std::size_t i = 0; i < positions.size(); ++i) {
                     const Vec3 &p = positions[i];
-                    const Vec3 at =
-                        add(foot, add(scale(fx, p[0] * size), add(scale(up_axis, p[1] * size), scale(fz, p[2] * size))));
+                    const Vec3 at = add(foot, add(scale(fx, p[0] * size),
+                                                  add(scale(quad.up, p[1] * size), scale(fz, p[2] * size))));
                     gpu::Vertex &out = draw.vertices[first + i];
                     out.position = {at[0], at[1], at[2], 1.0f};
                     out.normal = {0.0f, 0.0f, 0.0f};
                     out.texcoord = {0.0f, 0.0f};
-                    out.color = modulate(model->colors[i], tint);
+                    out.color = modulate(model->colors[i], quad.tint);
                 }
                 for (const std::uint16_t index : model->indices)
                     draw.indices.push_back(static_cast<std::uint16_t>(first + index));
-                ++counts_.figures;
+                ++segment.figures;
             }
-            ++counts_.quads;
         }
         flush();
+    }
+
+    // A kept batch for this frame: the current call's state (view, projection, viewport, target, fog, ...) with its
+    // own vertices, indices, id, version and count.
+    static void refresh(DrawCall &batch, const DrawCall &model_draw) {
+        std::vector<gpu::Vertex> vertices = std::move(batch.vertices);
+        std::vector<std::uint16_t> indices = std::move(batch.indices);
+        const std::uint32_t id = batch.vertex_address, version = batch.index_address, count = batch.primitive_count;
+        batch = model_draw;
+        batch.vertices = std::move(vertices);
+        batch.indices = std::move(indices);
+        batch.vertex_address = id;
+        batch.index_address = version;
+        batch.primitive_count = count;
+    }
+
+    // Whether the call is the one the kept batches were built from: the same figure, world matrix and vertices.
+    static bool same_input(const Kept &kept, const DrawCall &call, const Figure &figure) {
+        if (kept.figure != &figure || kept.primitive != call.primitive || kept.has_vertex_color != call.has_vertex_color ||
+            kept.material_color != call.material_color || kept.world != call.world || kept.indices != call.indices ||
+            kept.vertices.size() != call.vertices.size())
+            return false;
+        for (std::size_t i = 0; i < call.vertices.size(); ++i) {
+            const gpu::Vertex &a = kept.vertices[i], &b = call.vertices[i];
+            if (a.position != b.position || a.texcoord != b.texcoord || a.color != b.color) return false;
+        }
+        return true;
+    }
+
+    // Room for `wanted` more kept batches (kMostCachedBatches in all), the draws seen longest ago dropped for it (not
+    // this frame's); false when there is none.
+    bool make_room(std::size_t wanted) {
+        if (wanted > kMostCachedBatches) return false;
+        for (;;) {
+            std::size_t total = 0u;
+            auto oldest = kept_.end();
+            for (auto it = kept_.begin(); it != kept_.end(); ++it) {
+                total += it->second.batches();
+                if (it->second.last_seen < frame_ &&
+                    (oldest == kept_.end() || it->second.last_seen < oldest->second.last_seen))
+                    oldest = it;
+            }
+            if (total + wanted <= kMostCachedBatches) return true;
+            if (oldest == kept_.end()) return false;
+            kept_.erase(oldest);
+        }
+    }
+
+    // Draws the figures for each of the draw's quads, batched; false (and nothing drawn) when no quad is placed. A
+    // draw of static figures keeps its batches (task 105): the next frame's call with the same identity and input
+    // only has its bands recomputed, the segments whose bands changed rebuilt and the others submitted as kept.
+    bool replace(const DrawCall &call, const Figure &figure, const GuestMemory &memory) {
+        const auto started = std::chrono::steady_clock::now();
+        const Identity identity{call.vertex_address, call.primitive_count, call.texture.address,
+                                call.texture.clut_address};
+        bool keep = !no_cache_ && !animated(figure);
+        Kept *kept = nullptr;
+        if (keep) {
+            if (const auto found = kept_.find(identity); found != kept_.end()) {
+                if (same_input(found->second, call, figure)) kept = &found->second;
+                else if (found->second.last_seen == frame_) keep = false;  // drawn again this frame with other input
+                else kept_.erase(found);
+            }
+        }
+        Kept fresh;
+        if (kept == nullptr) {
+            const std::vector<std::array<std::uint32_t, 4>> quads = quads_of(call);
+            if (quads.empty()) return false;
+            place_quads(call, figure, quads, fresh.quads);
+            fresh.segments = segments_of(figure, fresh.quads);
+            if (keep && !make_room(fresh.segments.size())) keep = false;
+        }
+        Kept &k = kept != nullptr ? *kept : fresh;
+        if (k.quads.empty()) {
+            counts_.replace_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+            return false;
+        }
+        const DrawCall model_draw = model_draw_of(call);
+        const Vec3 eye = eye_of(call.view);
+        std::uint64_t drawn = 0u;
+        for (Segment &segment : k.segments) {
+            bool changed = false;
+            for (std::size_t q = segment.first; q < segment.last; ++q) {
+                const std::uint32_t every = band_of(figure, k.quads[q], eye);
+                if (every != k.quads[q].every) k.quads[q].every = every, changed = true;
+            }
+            if (changed) build(figure, k.quads, segment, model_draw, keep);
+            else counts_.reused += segment.batches.size();
+            for (DrawCall &batch : segment.batches) {
+                if (!changed) refresh(batch, model_draw);
+                const auto submitted = std::chrono::steady_clock::now();
+                inner_->submit(batch, memory);
+                counts_.submit_seconds +=
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - submitted).count();
+            }
+            drawn += segment.batches.size();
+            counts_.figures += segment.figures;
+            counts_.vertices += segment.vertices;
+        }
+        counts_.quads += k.quads.size();
+        k.last_seen = frame_;
+        if (kept == nullptr && keep) {
+            fresh.figure = &figure;
+            fresh.primitive = call.primitive;
+            fresh.has_vertex_color = call.has_vertex_color;
+            fresh.material_color = call.material_color;
+            fresh.world = call.world;
+            fresh.vertices = call.vertices;
+            fresh.indices = call.indices;
+            kept_.insert_or_assign(identity, std::move(fresh));
+        }
         counts_.replace_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-        if (placed == 0u) return false;
         ++counts_.replaced;
-        if (is_set) ++counts_.set_replaced;
+        if (!figure.set.empty()) ++counts_.set_replaced;
         counts_.model_draws += drawn;
         return true;
     }
@@ -1010,6 +1235,13 @@ private:
     std::chrono::steady_clock::time_point last_tick_{};
     std::vector<Mat4> world_, skin_;
     std::vector<Vec3> skinned_;
+    // The kept batches (task 105) by the game draw's identity, the frames they are aged by, the next synthetic id and
+    // version, and MODELS_NO_CACHE.
+    std::map<Identity, Kept> kept_;
+    std::uint64_t frame_{};
+    std::uint32_t next_id_{kFirstCachedBatchAddress};
+    std::uint32_t next_version_{1u};
+    bool no_cache_{};
 };
 
 std::unique_ptr<GeBackend> make_models_backend() {
