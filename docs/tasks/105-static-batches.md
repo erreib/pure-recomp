@@ -208,4 +208,19 @@ Open questions:
 4. **The 64-batch cap** counts a fresh draw's groups before it is built. A draw whose single quad overflows 65535 vertices makes more batches than groups, so the cap can be exceeded by a few batches in that case. No such quad exists in the game's crowd (at most 1961 figures over 196 quads).
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge): `tools/models_check.sh` PASS with the kept-batches
+row (race_hud 12 of 18 batches reused, the cached and uncached captures equal at tol 0), and the owed window run of
+race_hud with the crowd through the Vulkan renderer with the stable ids: PASS (0.0860, the stands in the picture),
+60 fps, 12 batches reused. The worker's Metal window run read: 60 fps from the grid onward with the crowd, render
+5.5 to 8.7 ms against task 104's 15 to 23, the one second over 8 ms a rebuild of five groups as the bands swept
+the stands, the 53 fps second the game's own pacing switch at the race start.
+Spot-read: the answer to the open fact is right (the Metal backend's `expand` copies an ordinary 3D draw's vertices
+as they are and the uniforms carry the transform, the lighting and the fog, so a kept buffer holds no per-frame
+state); the cache key includes the inputs a batch was built from, groups rebuild on their own, the Metal side's
+buffers are never pool chunks and are held for the frames in flight; the tools pin the row off. The replay tool
+makes its lanes with `make_backend(name)` directly, so it bypasses the wrapper and the new default (open question
+3 answered: nothing to pin).
+Merged: 88b9036 into batch/m2; the row's default is Models.
+Notes: the Vulkan shell's frame interpolation with the stable ids is still unlooked-at (Erik's eye: the Frame
+rate row on the Vulkan shell at a race start). The one 8.7 ms second is the next thing to spread (rebuild at most
+one or two groups a frame) if it ever shows. Instancing stays the long-term path when the crowd animates.
