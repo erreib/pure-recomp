@@ -197,3 +197,11 @@ a race and 0.11 in Time Trial (the prompt now says so). docs/prompts/sky-vineta-
 Merged: 1c964e7 into batch/m2; the row stays Original by default.
 Notes: the placeholder's boxes stand on −z, out of both check cameras' view; proven by the trace and a spin
 diagnostic. The sun block's depth read with geometry under the sun is unmeasured until a model covers it.
+Follow-up (2026-10-21): the eye height was wrong. Astra's preview tool inverted the recorded view matrix outright
+and found the eye at the sky cube's centre; the game's view is a shear (its pitch is in row 2 only), so the models
+backend's −Rᵀt put it 19 units high in a race and 5 in Time Trial. eye_of now inverts the 3x3; D-026, the prompt
+and models/README.md say the horizon is at y = 0. Astra's five layers (built for 0.38) are installed and drew on
+both check scenes (5 faces replaced by 5 layers, 3597 and 4475 pixels changed in the sky box); the check counts the
+section's layers instead of expecting 2. One of three check runs failed its kept-batches rule with the uncached
+capture one level off across the whole screen (42144 pixels at tol 0, max delta 212, invisible); the next two runs
+gave 0, so it is a timing flake of the slow uncached run, not the eye. The horizon's re-authoring is Astra's next step.

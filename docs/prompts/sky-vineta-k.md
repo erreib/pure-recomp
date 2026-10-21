@@ -26,10 +26,11 @@ The mood: late afternoon, a low sun toward −X, warm yellow clouds on blue, a w
 
 **The space you model in.** A unit cube centred on the origin: the faces at ±1 on X and Z, the top at Y = +1, the
 floor at Y = −1 (there is no bottom face; the ground is the game's own geometry below the horizon). The camera
-sits at (0.02, 0.38, −0.02) in a race and lower, about (0.07, 0.11, 0.02), in Time Trial: the horizon as seen
-from the camera is therefore around Y = 0.38 across the sides in a race and Y = 0.11 in Time Trial, not at 0.
-Author the horizon band for 0.38 and keep the haze and the sea tolerant down to 0.1, so the lower camera still
-sees sky above and sea below. +Y is up. The engine scales the cube to 50 game units and draws it around the camera every frame.
+sits at the origin, the cube's centre, in every camera mode (an earlier version of this prompt said 0.38 above it
+in a race and 0.11 in Time Trial; that was an error in the engine's reading of the game's sheared view matrix,
+found 2026-10-21): the horizon as seen from the camera is at Y = 0 on all four sides. Author the horizon band at
+Y = 0, the sky above it and the sea below it. +Y is up. The engine scales the cube to 50 game units and draws it
+around the camera every frame.
 
 **Depth rule, important.** The dome layer sits exactly on the cube's five faces (every vertex at |X| = 1 or
 |Z| = 1 or Y = 1). Every other layer sits a little inside the dome, between 0.02 and 0.10 nearer the origin than
@@ -48,8 +49,8 @@ just inside it.
 3. `horizon_far`: the mountains (behind the city on −Z and the ridge on +Z's left), as silhouettes with two or
    three shades, standing on the horizon band of the shell. About 600 triangles.
 4. `horizon_city`: the city on −Z: eight to fifteen towers of varied height and width, boxy, with a lit face toward
-   −X and a shaded face, a quay line, palm trees as simple fans; the towers' bases at the horizon (Y 0.38), the
-   tallest up to Y 0.75. 1500 to 2500 triangles. Keep the −X face's upper half and the top's −X quarter free of
+   −X and a shaded face, a quay line, palm trees as simple fans; the towers' bases at the horizon (Y 0), the
+   tallest up to Y 0.40. 1500 to 2500 triangles. Keep the −X face's upper half and the top's −X quarter free of
    geometry: the sun sits on the −X face and the game draws its glow and flare there, additively, so the sky
    behind it must stay a mid tone (a warm orange to blue, not white haze: the glow adds 16 to 72 per channel and
    vanishes against anything paler than about 215).
@@ -62,8 +63,8 @@ Total about 5000 triangles. The engine moves layers 3 and 4 slightly against lay
 repository's tools folder beside `model_pitguy.py` and `model_crowd.py`, run headless:
 `Blender --background --python-exit-code 1 --python <the script> -- out/sky-vineta-k`. It writes
 the editable .blend, one GLB per layer (`dome.glb`, `clouds_high.glb`, `horizon_far.glb`, `horizon_city.glb`,
-`sea.glb`), a manifest JSON with triangle counts and bounds, and three preview renders from the camera's point
-(0.02, 0.38, −0.02) looking −Z, +Z and up. Blender axes: build with Blender's Z up and −Y as the game's +Z (the
+`sea.glb`), a manifest JSON with triangle counts and bounds, and three preview renders from the camera's point,
+the origin, looking −Z, +Z and up. Blender axes: build with Blender's Z up and −Y as the game's +Z (the
 glTF exporter's Y-up conversion then gives the game Y up and +Z as described). Vertex colours in a Color
 Attribute, no materials with textures. Validate in the script: every vertex satisfies the depth rule above, each
 layer's triangle count is within its budget, and the exported GLB reimports with the same bounds.
@@ -71,3 +72,19 @@ layer's triangle count is within its budget, and the exported GLB reimports with
 Keep the style readable from the inside at the size it is drawn (the sky fills the view; a tower is about 50
 pixels tall on screen): bold shapes, few colours, no fine detail. Report what you built, the counts, and anything
 you had to decide.
+
+## Revision for a sky already built (2026-10-21)
+
+Your `tools/model_sky_vineta_k.py` delivery imported cleanly and draws in the game, with the five faces replaced
+and the depth rule holding. One correction, and it is ours: your `preview_sky_in_level.py` was right that the
+recorded camera sits at the sky cube's centre. The game's view matrix is a shear, not a rotation, and the engine
+read it as a rotation; that is what produced the "0.38 in a race, 0.11 in Time Trial" eye in the first prompt. The
+engine is fixed, and the rule is now simply: **the eye is the origin and the horizon is at Y = 0** in every camera
+mode.
+
+Please revise the script so the horizon sits at Y = 0: the sea's top edge, the quay, the towers' bases and the
+foot of the ridges all at 0 (the towers up to about Y 0.40, the ridges to about 0.55, the clouds between 0.45 and
+the top), the haze band of the dome centred on 0, and the previews rendered from the origin. Keep everything else
+as it is: the layers, their names, the draw order, the depth placement (your dome at 1.045 with the relief layers
+between 1.001 and 1.032 drew correctly), the palette, the free −X upper half. Rebuild to the same folder; the
+import lines are unchanged.

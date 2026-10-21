@@ -793,8 +793,10 @@ comes). The fidelity rule stands: Original draws exactly what the PSP draws.
 Vineta K race frame (out/101/race, task 101's tool): the sky is a cube of five faces, four sides and a top, no
 bottom, 100 units across (half-size 50), drawn at the end of the opaque pass (draws 635 to 639 of 906) as five
 triangle strips of 81 vertices (9 x 9 grids; one face 163) under the scenery's uniform scale with their own
-translation, the cube's centre, which follows the camera (the eye sits 2 units in x, 1 in z and 19 above the
-centre), so the sky never parallaxes; each face binds one 256x256 CLUT8 texture (the HD pack's are 1024x1024, keys
+translation, the cube's centre, which follows the camera (the eye is the centre: the game's view matrix is a
+shear, not a rotation, and the engine's −Rᵀt reading first put the eye 19 units above the centre in a race and 5
+in Time Trial; the true inverse, which the models backend uses since 2026-10-21, puts it at the centre, where
+Astra's preview tool found it), so the sky never parallaxes; each face binds one 256x256 CLUT8 texture (the HD pack's are 1024x1024, keys
 on the pack's ini lines 2605 to 2609 for Vineta K, every track has its own five), stored upside down like the
 sprites; the state: depth GREATER with writes (the sun block reads the sky's depth, 23 to 24 of the GE's depth
 range, through the signal after the last face: docs/ge-effects.md), fog off, no blend, alpha test ALWAYS,
@@ -808,8 +810,9 @@ models.ini list layers, each a `.pmdl` with a `parallax=F` factor, and the five 
 `sky=NAME`; when the models backend sees the first face of a frame it submits every layer at the cube's centre
 (the face draw's translation) with the face draw's state (depth GREATER with writes, fog off, stencil 0x04,
 viewport, target, no texture, vertex colours), and drops the five face draws; the layers are drawn in order. (2)
-Scale and depth: a model is authored in a unit cube centred on the origin (the eye at (0.02, 0.38, −0.02) of the
-half-size, the horizon therefore at y = 0.38 as seen from the eye) and drawn at the cube's half-size, 50 units;
+Scale and depth: a model is authored in a unit cube centred on the origin (the eye at the origin, the horizon
+therefore at y = 0 as seen from the eye; amended 2026-10-21 from 0.38, the shear artefact above) and drawn at the
+cube's half-size, 50 units;
 the dome sits on the faces (1.0) and every other layer 0.02 to 0.10 inside it (task 106 found the depth test
 hides a layer level with the dome), nothing nearer than 0.9 so the sky's depth stays where the sun block expects
 it, and nothing farther than 1.72 (the corners). (3) Parallax without depth: the sky cube

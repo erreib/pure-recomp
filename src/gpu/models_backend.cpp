@@ -1081,10 +1081,26 @@ private:
         return draw;
     }
 
-    // The viewer: the eye of the view matrix (world to eye, column-major), -R^T t.
+    // The viewer: the eye of the view matrix (world to eye, column-major), -M^-1 t with M its upper 3x3 inverted
+    // outright. The game's view is not a rotation: its camera pitch is a shear (row 2 carries 0.097 of y while
+    // row 1 has no z), so -R^T t put the eye 19 units above the sky cube's centre in a race and 5 above in Time
+    // Trial, where the true inverse puts it at the centre (Astra's preview tool found it, 2026-10-21).
     static Vec3 eye_of(const std::array<float, 16> &v) {
-        return {-(v[0] * v[12] + v[1] * v[13] + v[2] * v[14]), -(v[4] * v[12] + v[5] * v[13] + v[6] * v[14]),
-                -(v[8] * v[12] + v[9] * v[13] + v[10] * v[14])};
+        const float m[3][3] = {{v[0], v[4], v[8]}, {v[1], v[5], v[9]}, {v[2], v[6], v[10]}};  // m[row][column]
+        const float c00 = m[1][1] * m[2][2] - m[1][2] * m[2][1], c01 = m[1][2] * m[2][0] - m[1][0] * m[2][2],
+                    c02 = m[1][0] * m[2][1] - m[1][1] * m[2][0];
+        const float det = m[0][0] * c00 + m[0][1] * c01 + m[0][2] * c02;
+        if (std::fabs(det) < 1e-12f)
+            return {-(v[0] * v[12] + v[1] * v[13] + v[2] * v[14]), -(v[4] * v[12] + v[5] * v[13] + v[6] * v[14]),
+                    -(v[8] * v[12] + v[9] * v[13] + v[10] * v[14])};
+        const float inv[3][3] = {
+            {c00 / det, (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det, (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det},
+            {c01 / det, (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / det, (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / det},
+            {c02 / det, (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / det, (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / det}};
+        const float t[3] = {v[12], v[13], v[14]};
+        Vec3 eye{};
+        for (int r = 0; r < 3; ++r) eye[r] = -(inv[r][0] * t[0] + inv[r][1] * t[1] + inv[r][2] * t[2]);
+        return eye;
     }
 
     // Which of a quad's figures the distance keeps, as `every`: all under near, every second from near to far, every

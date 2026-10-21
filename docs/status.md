@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, the marshal as a model and its wave, the crowd on the stands at 60 fps, tasks 101 to 105; the skies' engine side, task 106). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-21 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, the marshal as a model and its wave, the crowd on the stands at 60 fps, tasks 101 to 105; the skies' engine side, task 106). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -34,7 +34,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
 | Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | tasks 102 to 105 merged 2026-10-20: the `models` GE backend, the "Crowds and people" row (Models by default since 105), the pit marshals as Astra's model waving, the grandstands filled with Astra's eight spectators (about 1360 figures a frame on Vineta K), the stands' batches kept across frames and on the GPU so both renderers hold 60 fps with the crowd (Metal render 5.5 to 8.7 ms at 1920x1088); the tools pin the row off. Next for the look: Erik's art direction; for the engine: instancing when the crowd animates |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
-| Skies | 3D backgrounds in place of the tracks' 2D sky images (D-026) | task 106 merged 2026-10-20: the "Skies" row (Original by default) draws a layered vertex-coloured sky at the cube's centre with the faces' depth and a parallax offset per layer, proven with a placeholder on both renderers; docs/prompts/sky-vineta-k.md is the prompt for Astra's Vineta K sky, whose layers replace the placeholder by name |
+| Skies | 3D backgrounds in place of the tracks' 2D sky images (D-026) | task 106 merged 2026-10-20: the "Skies" row (Original by default) draws a layered vertex-coloured sky at the cube's centre with the faces' depth and a parallax offset per layer, proven with a placeholder on both renderers; Astra's five-layer Vineta K sky installed 2026-10-21 (models/sky/vineta_k/), its horizon 19 units too high because the prompt's eye height was a shear artefact of the engine's view-matrix reading (fixed in the models backend the same day; D-026 and the prompt corrected, a revision for Astra at the prompt's end) |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
 
 ## Works
@@ -312,8 +312,14 @@ after a change that moves or renames a file, a tool or a patch.
   position so the horizon slides against the dome; a "Skies" row, Original by default. Task 106 (merged 2026-10-20)
   built the engine side with a placeholder sky (a gradient shell and a ring of boxes) on both renderers, and
   found four things the prompt now says: a layer must sit 0.02 to 0.10 inside the dome or the depth test hides it,
-  the sun is on the −x face, the game's additive sun glow needs a mid-tone sky behind it, and the eye is at 0.38
-  of the cube in a race but 0.11 in Time Trial. docs/prompts/sky-vineta-k.md is the prompt for Astra, whose
-  layers replace the placeholder by name (`tools/model_import.py --as-is --no-light`). Shares the models backend and the key rule with the crowd.
+  the sun is on the −x face, the game's additive sun glow needs a mid-tone sky behind it, and (wrongly) that the
+  eye is at 0.38 of the cube in a race but 0.11 in Time Trial. Astra's sky (tools/model_sky_vineta_k.py, five
+  layers, 4101 triangles) was imported 2026-10-21 and drew on both check scenes; Astra's preview tool
+  (tools/preview_sky_in_level.py, which composes an extracted frame with the authored sky in Blender) found the
+  eye at the cube's centre: the game's view matrix is a shear, and the engine's −Rᵀt reading was off by the
+  pitch. The models backend now inverts the view outright, D-026 and the prompt say the horizon is at y = 0, and
+  the prompt's end carries the revision for Astra's script (the horizon from 0.38 to 0). Astra also delivered a
+  mountains study (tools/model_vineta_mountains.py, 83k triangles at world scale, an art-direction prototype, not
+  a sky layer). Shares the models backend and the key rule with the crowd.
 - E1, the controls; the VR spike (task 088, on the rig); the candidates named after E7: the frontend at 60 fps and the
   menu-XML spike (new in-game options).

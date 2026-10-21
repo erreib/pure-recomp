@@ -38,7 +38,7 @@
 #   - run 2's two shots differ in at least MIN_WAVE (40) pixels at tol 24 inside WAVE_BOX (the left booth's marshals)
 #     and in at most MAX_DECK (0) inside DECK_BOX (the deck under their feet): the arms move, the feet stay planted;
 #   - (task 106) the sky: run 4's captured lines say `sky vineta_k L layers (5 faces replaced)` with L the section's
-#     layers (2) for both scenes, each capture differs from run 1's in at least MIN_SKY pixels at tol 24 inside
+#     layers (counted from models.ini's [sky vineta_k]) for both scenes, each capture differs from run 1's in at least MIN_SKY pixels at tol 24 inside
 #     SKY_BOX (the sky above the horizon), race_hud's HUD is found, and both are within the scene's limit plus 0.10
 #     of their PPSSPP reference (the sky is new art over the top of the picture).
 # The 1 run's `[texpack]` line is quoted: the Metal backend under the wrapper still looks for its texture pack.
@@ -140,7 +140,16 @@ MIN_WAVE, MAX_DECK = 40, 0
 # from 4x headless captures with the placeholder sky (out/106/x4; at 1x the Original's clouds against the dome's
 # gradient), and the layers models.ini's [sky vineta_k] lists.
 SKY_BOX = (150, 0, 85, 60)        # x 150-234, y 0-59 on the 480x272 screen
-MIN_SKY, SKY_LAYERS, SKY_SLACK = 2000, 2, 0.10  # 3597 (race_hud) and 4602 (tt_hud) measured
+MIN_SKY, SKY_SLACK = 2000, 0.10  # 3597 (race_hud) and 4602 (tt_hud) measured with the placeholder's two layers
+# The layers models.ini's [sky vineta_k] lists: the lines of the section that name a .pmdl.
+SKY_LAYERS, in_sky = 0, False
+with open("models/models.ini", encoding="utf-8") as f:
+    for ln in f:
+        ln = ln.split(";")[0].split("#")[0].strip()
+        if ln.startswith("["):
+            in_sky = ln.lower() == "[sky vineta_k]"
+        elif in_sky and ".pmdl" in ln:
+            SKY_LAYERS += 1
 SKY = re.compile(r"; sky (\S+) (\d+) layers \((\d+) faces replaced\)")
 LINE = re.compile(r"^\[models\] frame (\d+): (\d+) draws replaced \((\d+) by a set\) by (\d+) model draws, "
                   r"(\d+) quads, (\d+) figures, (\d+) vertices, (\d+) batches reused( \(captured\))?")
