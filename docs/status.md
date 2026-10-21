@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, the marshal as a model and its wave, tasks 101 to 103). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-20 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, the marshal as a model and its wave, the crowd on the stands, tasks 101 to 104). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -32,7 +32,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
 | HD pack | NR74W's HD texture pack (D-024) | tasks 099 and 100 merged 2026-10-20: the pack draws on both renderers (the race route: 127 images, 594 to 599 MB on the GPU; the menus: 11), zstd 1.5.7 a pinned source download, `tools/sprite_pack.sh --pack DIR [--shell metal]` the check; Erik's eye on the import screen under Metal and on the menus against E7's upscale owed |
-| Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | tasks 102 and 103 merged 2026-10-20: the `models` GE backend, the "Crowds and people" row (Original by default), the pit marshal as Astra's 1986-triangle model waving (a `.pmdl` version 2 with 20 joints and the Wave_On clip, skinned on the CPU, both renderers); eight crowd figures built (tools/model_crowd.py); task 104, the crowd on the stands (a figure set per quad, batched, thinned with distance), dispatched 2026-10-20 |
+| Crowd | 3D crowd and people models in place of the track-side sprites (D-025) | tasks 102 to 104 merged 2026-10-20: the `models` GE backend, the "Crowds and people" row (Original by default), the pit marshals as Astra's model waving, the grandstands filled with Astra's eight spectators (about 1360 figures a frame on Vineta K, hashed by place, thinned with distance, batched); the Vulkan shell holds 60 fps with the crowd, the Metal backend does not (its per-frame de-indexed upload: task 105, the static batches cached); the row's default flips to Models after it |
 | Photo mode | a paused race seen from a free camera, captured at any resolution | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Skies | 3D backgrounds in place of the tracks' 2D sky images | on the roadmap, not scheduled (Next); nothing looked at yet |
 | Cleanup | the audit of 2026-10-19 | tasks 092 to 095 merged 2026-10-19, their doc lines applied (docs/history/audit-2026-10-19.md); the screen batch (task 097) ran on the Mac 2026-10-19, every row PASS; the rig's batch (task 500) the same day, every row PASS |
@@ -271,15 +271,17 @@ after a change that moves or renames a file, a tool or a patch.
   CPU (about 70 to 130 us a frame for six) on wall time with a phase per figure (`PURE_MODELS_CLOCK=frames` and
   `PURE_MODELS_SYNC=1` for captures); the marshals wave on both renderers, the check sees the arm move and the
   feet stay. Astra's tools/model_crowd.py built eight casual spectators (337 to 349 triangles each,
-  out/crowd-starter). Task 104 (dispatched 2026-10-20), the crowd: models.ini's crowd keys mapped to the figure set, N figures per quad
-  along its width, picked by a hash of the place, the triangle budget measured (205 quads x figures x 340), a
-  level of detail or fewer figures if it costs frames, the models check on the race route, then the row's default
-  to Models. Erik's eye (2026-10-20): the placement and the wave at real pace look as expected, the groundwork is right;
-  the art is for later. Then the crowd (a figure set, N figures per quad,
-  levels of detail by the triangle budget) and the row's default to Models. Later, Erik's
-  2026-10-20 notes: the figures animated (a pose cycle in the model file, played on the frame count), and a
-  figure that turns to follow the player's ship (the facing rule stays static until then: the side first seen). A "record now" key for recordings at a played
-  moment is a small task when wanted (101, Open questions).
+  out/crowd-starter). Task 104 (merged 2026-10-20), the crowd: a set syntax in models.ini maps the nine crowd keys to Astra's eight
+  spectators (models/crowd/), figures along each quad at a spacing of 0.85 units picked by a hash of the place
+  with a yaw and height jitter, every figure within 80 units of the eye, every second to 200, every fourth beyond,
+  batched into draws of up to 65535 vertices; a quad's front is its winding normal (the marshals face the race,
+  both stands the road, in the captures); the check's crowd row PASSes. On Vineta K's race start that is about
+  1360 figures and 430 k vertices a frame: the Vulkan shell holds 60 fps (render 7 ms at 960x544), the Metal
+  window drops to 39 to 56 fps for the 12 seconds the stands are in view, because the Metal backend de-indexes and
+  uploads every draw's vertices each frame (about 66 MB a frame). Task 105 (next): the models backend keeps its
+  static batches across frames with a stable id and a version, and the Metal backend caches the expanded vertex
+  buffer of such a batch, so a frame with the crowd costs the marshals' skinning and a few bound buffers; then
+  the row's default to Models. Owed to the Vulkan shell: its frame interpolation with batches whose counts change.
 - Photo mode during races (Erik, 2026-10-20; not scheduled): pause a race (the Esc menu already holds the guest),
   move a free camera around the frozen scene, hide the HUD, and save a capture at a chosen resolution. Nothing
   looked at yet. The shape it would take in this port: the game's frame is a GE display list the backends already

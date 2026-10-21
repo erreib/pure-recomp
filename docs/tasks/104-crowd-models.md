@@ -234,4 +234,21 @@ Open questions:
 6. race_hud at Models now scores 0.0613 against the reference (Original 0.0148). frame_regress's race_hud row is unchanged because the suite runs at Original.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge): `tools/models_check.sh` PASS (race_hud 10 draws
+replaced, 4 by a set, 1359 figures, 431905 vertices, 7157 pixels differ from Original, the HUD found; the marshal
+rows as before), and the owed window run of race_hud with the crowd through the Vulkan renderer: PASS at 0.0860
+(the stands in the picture), and the Vulkan shell holds 60 fps with it at 960x544 (`[perf]` render 6.9 to 7.2 ms,
+frame 16.7 ms; the replace step 5.0 ms of which the inner's submit 2.2 ms). The worker's 4x Metal capture looked
+at: both grandstands full of small varied spectators on every tier, facing the road, nothing floating; the
+marshals facing the race in the Time Trial crop.
+Spot-read: the set reader's two passes, the hash-driven pick and jitter, the density bands with the pick bit, the
+u16-bounded batching and the winding-normal front are as asked; the upright rule for set figures (world +y, the
+v edge's rise as the height) was the right answer to the parallelogram quads it found. The BLOCKED status is the
+brief's own escalation, taken correctly: the Metal backend de-indexes and uploads every draw's vertices each
+frame (about 66 MB a frame at 1359 figures), so the race start runs at 39 to 56 fps in the Metal window at the
+default scale for about 12 seconds; the triangles are not the cost, and the Vulkan renderer, which keeps indices,
+holds 60. The fix is the Metal backend's and the batches' statics, task 105.
+Merged: f8b403e into batch/m2, the row's default left at Original.
+Notes: the quad-corner order note (open question 3) is consistent with my measurement on the extracted frames
+(both gave +x for the marshals and toward the road for the stands). The Vulkan shell's frame interpolation with
+changing batches is still unverified. Four tracks' numbers in models.ini are unknown to the repo; fine.
