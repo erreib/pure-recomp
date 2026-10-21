@@ -119,7 +119,69 @@ each shell), Erik's screen booked.
   wrap at the cube's width kept.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: DONE (the engine side is proven. The 4x look has two caveats, under "What the captures showed" and "Open questions": the −z boxes are out of view of both check cameras, and the game's sun glow is drawn but cannot be told apart in the pale placeholder sky.)
+
+Changed:
+- tools/model_import.py: `--as-is` (keeps the file's coordinates: no normalisation, no recentring) and `--no-light` (no key light baked); the docstring says a sky layer uses both.
+- tools/model_sky_placeholder.py (new). It writes `dome.gltf`: the five faces, each 9 x 9 vertices. Each side's rows sit at the gradient's stops (−1, −0.4, 0, 0.3, 0.38, 0.5, 0.6, 0.8, 1), from a haze below the horizon, through white at y 0.3 to 0.5 and sky blue at 0.6, to deep blue at the top's centre. A uniform grid would have put rows only at 0.25 and 0.5. It also writes `horizon_city.gltf`: 12 boxes of varied height on the −z horizon, bases at y 0.30, tops at 0.45 to 0.75, slate fronts and lighter sides and tops. Every vertex is checked against the depth rule.
+- models/sky/vineta_k/dome.pmdl (640 triangles) and horizon_city.pmdl (96 triangles), imported with `--as-is --no-light`.
+- models/models.ini: the five face keys `sky=vineta_k`, `[sky vineta_k]` (`sky/vineta_k/dome.pmdl parallax=0`, `sky/vineta_k/horizon_city.pmdl parallax=0.002`), and the header's syntax. models/README.md: a new "Skies" section covering the space, the depth rule, the layers and the parallax.
+- src/gpu/models_backend.cpp:
+  - The `[sky NAME]` reader reads layers in order with `parallax=F` and `spin=S`; a key's value can now be `sky=NAME`; the summary gains `sky NAME of L layers`.
+  - `crowd_models` and `sky_models` are read once a frame. Either one turning to Models re-reads the table, and the kept batches and lookups are cleared with it.
+  - `draw_sky`: the first face of a frame submits each layer as one kept batch. The vertices are the model's times 50. The world matrix is a translation to the face's world translation plus the wrapped offset −F x eye.xz, then a turn of S deg/s about y. The state is the face draw's (copied through `model_draw_of`: texture off, vertex colours, no lighting, culling off). All five faces are dropped.
+  - The sky's batches count against kMostCachedBatches.
+  - The trace gains `; sky NAME L layers (F faces replaced), the eye at (X, Y, Z) of the cube`, and `[pure] skies: on (game.sky_models), drawn by NAME` / `[pure] skies: off` are printed.
+- src/profile/enhancements.cpp: the `sky_models` row, "Skies", Original or Models, default 0, Video tab, with the brief's help text. tools/purelib/port.py: `PURE_SKY_MODELS` is in ENHANCEMENTS_OFF.
+- tools/models_check.sh: run 4, both scenes with `PURE_SKY_MODELS=1` and the crowd on. It requires `sky vineta_k 2 layers (5 faces replaced)`, at least 2000 pixels changed against run 1 at tol 24 in SKY_BOX (150, 0, 85, 60) (3597 and 4602 measured), race_hud's HUD found, and both captures within their limit plus 0.10. tools/menu_check.sh: the "Skies" row on both shells.
+- docs/ge-backend.md (the models section's Skies entry: the draw, the parallax, the depth rule, the glow, the trace), docs/controls.md, README.md, docs/developing.md (`PURE_SKY_MODELS`, the importer's switches, the placeholder tool's row, the check's sky row).
+- tools/release_check.sh is unchanged. Its fnmatch pattern `models/*.pmdl` already matches models/sky/vineta_k/*.pmdl (binaries PASS, 14 files).
+
+Verify output (last 20 lines; the full Verify line exited 0; models_check's sky rows were `tt_hud sky (run 4): sky vineta_k 2 layers (5 faces replaced), 4602 pixels differ ... 0.1545 vs ref (allowed 0.22): PASS`, `race_hud sky (run 4): ... 3597 pixels differ ... 0.1194 vs ref (allowed 0.20): PASS`, `models_check: PASS`):
+```
+lang          690    0.0002   0.07   24    0.0002 +0.0000  PASS
+title        1750    0.0002   0.05   24    0.0002 +0.0000  PASS
+profile      2100    0.0000   0.07   24    0.0000 +0.0000  PASS
+main_menu    4700    0.0106   0.05   24    0.0106 +0.0000  PASS
+race_hud     6016    0.0148   0.10   32    0.0149 -0.0001  PASS
+single_player   4765    0.0000   0.05   24    0.0000 +0.0000  PASS
+class_select   4990    0.0000   0.07   24    0.0000 +0.0000  PASS
+league_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+track_select   5390    0.0000   0.06   24    0.0000 +0.0000  PASS
+team_select   5600    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+tt_hud       5890    0.0112   0.12   32    0.0112 +0.0000  PASS
+fp_track_select   5375    0.0000   0.06   24    0.0000 +0.0000  PASS
+fp_hud       5890    0.0116   0.11   32    0.0116 +0.0000  PASS
+tournament_select   5185    0.0000   0.08   24    0.0000 +0.0000  PASS
+zone_track_select   4975    0.0000   0.05   24    0.0000 +0.0000  PASS
+zone_hud     5260    0.0122   0.09   32    0.0121 +0.0001  PASS
+zone_change   5679    0.0369   0.10   32    0.0353 +0.0016  PASS
+
+frame regression: PASS, 18/18 scenes pass, shell headless, backend metal (0m 20s)
+```
+Other checks: `tools/docs_check.py` PASS (40 files, 0 findings). `tools/menu_check.sh --shell metal` PASS and `--shell vulkan` PASS (window runs). `tools/release_check.sh` is as before: the binaries row passes, and the only failing row is `home`, with six findings in patches/0029-windows-file-url.patch and patches/README.md that this task did not touch.
+
+What the captures showed:
+- **4x headless race_hud, sky on (out/106/x4/shots/race_hud.png), against Original (out/106/x4off):**
+  - The yellow-lit clouds and lilac tints of the Original's −x face are gone. In their place is the dome's gradient: white haze from the horizon up, and light blue only in the top rows ((201, 218, 247) at the top edge).
+  - The race camera faces −x and is pitched down 5.6° with a ±15° vertical view, so it sees the sides only up to y about 0.55, mostly the white band. The game's additive sun glow (draws 640-657, depth GREATER with no writes) adds about 16 to 72 a channel over the sky, so anything paler than about 215 turns white. That is why I moved the blue down to y 0.6.
+  - No black or missing sky anywhere; the HUD, the stands and the track are as before.
+  - The 12 boxes are on −z and are not in view in race_hud or tt_hud.
+  - A one-off diagnostic with `spin=0.8976` (90° at frame 6016 on the frames clock, out/106/spin; models.ini restored afterwards) turned them to −x. They drew in front of the dome with the right depth order, slate fronts and lighter sides, washed to white toward their bases by the sun glow.
+  - The glow itself is drawn. A one-off all-red dome showed it on top (red with +16 to +72), strongest at the upper left. In the placeholder's pale sky, though, it reads as part of the white haze rather than as a distinct flare.
+- **4x tt_hud:** the same white-to-light-blue sky ((195, 213, 243) at the top). The trace puts Time Trial's eye at (0.07, 0.11, 0.02) of the cube, not 0.38, so its horizon is lower in the sky's space.
+- **Window runs, both rows at Models** (`--env PURE_GE_BACKEND=models`; frame_regress's own `--backend` alone bypasses the wrapper):
+  - Metal shell race_hud (out/106/win_metal): 5 faces replaced by 2 layers; 0.1628 against the reference. That is within limit + 0.10 (0.20), though frame_regress's plain 0.10 marks it FAIL, as it does for the crowd.
+  - Vulkan shell race_hud (out/106/win_vulkan, inner vulkan): 5 faces replaced by 2 layers; 0.1439 (within 0.20).
+  - I looked at both: the same pale gradient sky behind the track as headless, the crowd and the HUD drawn, no black or missing sky, and the glow merged into the white as above.
+
+Open questions:
+- **The depth rule.** D-026's strict "nothing nearer than 1.0" cannot hold for a layer over a unit-cube dome: depth GREATER hides anything level with the dome, so such a layer would be invisible. The placeholder's boxes stand 0.04 inside the −z face, under the prompt's 0.05 allowance for clouds. The check's captures stay within limits. I did not measure the sun block's depth reads with a layer covering the sun; the −x face where the sun sits has no layer geometry.
+- **Box placement.** The brief puts the boxes on −z, but both check cameras look −x, so the second layer is proven only by the trace and the spin diagnostic. If the placeholder should show boxes in the check scenes, a few would have to stand on −x, away from the sun's direction (screen upper left, about z +0.3, y 0.5 to 0.6).
+- **The sun flare.** It is still drawn, but it only reads as a flare against a sky darker than about 215 a channel. Astra's sky should keep the −x horizon's sky saturated enough for the glow to show. The prompt says the sun is toward −X, but it also asks to keep +X clear, which looks swapped. In the race frame the sun is on the −x face.
+- **The eye's height.** It is 0.38 of the cube in the race and 0.11 in Time Trial. A model whose horizon is authored at 0.38 will sit high in Time Trial. Worth telling Astra, or offsetting a layer's y per mode later.
+- **Window frame_regress.** The window frame_regress lines carry no `(captured)` models line. The 60-frame trace lines show the sky, so this is only a capture-trace gap under the window shells.
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
