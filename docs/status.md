@@ -278,7 +278,7 @@ after a change that moves or renames a file, a tool or a patch.
   both stands the road, in the captures); the check's crowd row PASSes. On Vineta K's race start that is about
   1360 figures and 430 k vertices a frame: the Vulkan shell holds 60 fps (render 7 ms at 960x544), the Metal
   window drops to 39 to 56 fps for the 12 seconds the stands are in view, because the Metal backend de-indexes and
-  uploads every draw's vertices each frame (about 66 MB a frame). Task 105 (next): the models backend keeps its
+  uploads every draw's vertices each frame (about 66 MB a frame). Task 105 (briefed, dispatched 2026-10-20): the models backend keeps its
   static batches across frames with a stable id and a version, and the Metal backend caches the expanded vertex
   buffer of such a batch, so a frame with the crowd costs the marshals' skinning and a few bound buffers; then
   the row's default to Models. Owed to the Vulkan shell: its frame interpolation with batches whose counts change.
