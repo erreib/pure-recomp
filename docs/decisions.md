@@ -810,8 +810,9 @@ models.ini list layers, each a `.pmdl` with a `parallax=F` factor, and the five 
 viewport, target, no texture, vertex colours), and drops the five face draws; the layers are drawn in order. (2)
 Scale and depth: a model is authored in a unit cube centred on the origin (the eye at (0.02, 0.38, −0.02) of the
 half-size, the horizon therefore at y = 0.38 as seen from the eye) and drawn at the cube's half-size, 50 units;
-nothing of a layer may come nearer the centre than 1.0 (the faces' distance) so the sky's depth stays where the
-sun block expects it, and nothing farther than 1.72 (the corners). (3) Parallax without depth: the sky cube
+the dome sits on the faces (1.0) and every other layer 0.02 to 0.10 inside it (task 106 found the depth test
+hides a layer level with the dome), nothing nearer than 0.9 so the sky's depth stays where the sun block expects
+it, and nothing farther than 1.72 (the corners). (3) Parallax without depth: the sky cube
 follows the camera, so a layer cannot stand in the world; instead a layer with `parallax=F` is offset by
 −F x (the camera's world position) in x and z, wrapped to the cube's width, so a far layer (F about 0.002: the
 city 1 unit of the cube per 500 of the world) slides against the dome (F 0) as the ship moves, which reads as

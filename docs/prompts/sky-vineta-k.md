@@ -26,19 +26,22 @@ The mood: late afternoon, a low sun toward −X, warm yellow clouds on blue, a w
 
 **The space you model in.** A unit cube centred on the origin: the faces at ±1 on X and Z, the top at Y = +1, the
 floor at Y = −1 (there is no bottom face; the ground is the game's own geometry below the horizon). The camera
-sits at (0.02, 0.38, −0.02): the horizon as seen from the camera is therefore at Y = 0.38 across the sides, not at
-0. +Y is up. The engine scales the cube to 50 game units and draws it around the camera every frame.
+sits at (0.02, 0.38, −0.02) in a race and lower, about (0.07, 0.11, 0.02), in Time Trial: the horizon as seen
+from the camera is therefore around Y = 0.38 across the sides in a race and Y = 0.11 in Time Trial, not at 0.
+Author the horizon band for 0.38 and keep the haze and the sea tolerant down to 0.1, so the lower camera still
+sees sky above and sea below. +Y is up. The engine scales the cube to 50 game units and draws it around the camera every frame.
 
-**Depth rule, important.** Nothing may come nearer the origin than the faces (distance 1.0 along an axis, that is,
-keep every vertex at |X| ≥ 1 or |Z| ≥ 1 or Y ≥ 1, the way the five faces are) and nothing beyond the cube's corners
-(distance 1.73 from the origin). The game reads the sky's depth for its sun effect, so the sky must sit where the
-faces were. Practically: build everything on or just outside the cube's surface, like a shell, with relief no
-deeper than 0.1 inward of the corners.
+**Depth rule, important.** The dome layer sits exactly on the cube's five faces (every vertex at |X| = 1 or
+|Z| = 1 or Y = 1). Every other layer sits a little inside the dome, between 0.02 and 0.10 nearer the origin than
+the face it belongs to (the engine's depth test hides anything level with the dome, and the game reads the sky's
+depth for its sun effect, so nothing may come nearer than 0.9 of a face). Nothing beyond the cube's corners
+(distance 1.73 from the origin). Practically: a shell, with the clouds, the mountains and the city as thin relief
+just inside it.
 
 **Layers.** Deliver separate meshes, each its own glTF, drawn back to front by the engine:
-1. `dome`: the sky itself, a shell of the cube's five faces (or a hemisphere clipped to the cube) with a vertical
-   colour gradient: white haze at the horizon band (Y 0.3 to 0.5), warm to blue upward, the top blue. About 500
-   triangles. The engine draws it first.
+1. `dome`: the sky itself, a shell of the cube's five faces (9 x 9 vertices a face, rows placed at the gradient's
+   stops) with a vertical colour gradient: a pale haze at the horizon band (Y 0.3 to 0.5) that stays a mid tone
+   toward −X where the sun is, warm to blue upward, the top blue. About 600 triangles. The engine draws it first.
 2. `clouds_high`: the top's cloud mass and a few scattered clouds as flat or slightly puffed shapes lying on the
    shell just inside the dome's surface (relief toward the origin by up to 0.05), yellow-lit on their sun side
    (−X), lilac shadows. 400 to 800 triangles.
@@ -46,8 +49,10 @@ deeper than 0.1 inward of the corners.
    three shades, standing on the horizon band of the shell. About 600 triangles.
 4. `horizon_city`: the city on −Z: eight to fifteen towers of varied height and width, boxy, with a lit face toward
    −X and a shaded face, a quay line, palm trees as simple fans; the towers' bases at the horizon (Y 0.38), the
-   tallest up to Y 0.75. 1500 to 2500 triangles. Keep the +X face and the top's −X quarter free of tall geometry:
-   the sun and its flare are drawn by the game there.
+   tallest up to Y 0.75. 1500 to 2500 triangles. Keep the −X face's upper half and the top's −X quarter free of
+   geometry: the sun sits on the −X face and the game draws its glow and flare there, additively, so the sky
+   behind it must stay a mid tone (a warm orange to blue, not white haze: the glow adds 16 to 72 per channel and
+   vanishes against anything paler than about 215).
 5. `sea` (optional): a flat band just below the horizon on +Z, −X and +X with a blue-to-silver gradient toward
    the sun. About 100 triangles.
 Total about 5000 triangles. The engine moves layers 3 and 4 slightly against layer 1 as the ship travels

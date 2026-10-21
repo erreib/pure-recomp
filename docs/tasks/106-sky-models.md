@@ -184,4 +184,16 @@ Open questions:
 - **Window frame_regress.** The window frame_regress lines carry no `(captured)` models line. The 60-frame trace lines show the sky, so this is only a capture-trace gap under the window shells.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun (the planning session, 2026-10-20, after the merge): `tools/models_check.sh` PASS with the sky row on
+both scenes (5 faces replaced by 2 layers, 3597 and 4602 pixels changed in the sky box, within limit + 0.10); the
+worker's 4x race_hud capture looked at: a pale gradient sky behind the track in place of the clouds, the crowd and
+the HUD as before, nothing black or missing. The worker's window runs on both shells reported the same.
+Spot-read: the `[sky NAME]` reader, the first-face trigger with the five faces dropped, the layers as kept batches
+with the state copied from the face draw, the parallax offset and the spin as a world translation and turn, the
+row and the pin are as briefed. The open questions are findings that change the prompt: a layer level with the
+dome is hidden by the depth test (so the layers sit 0.02 to 0.10 inside; D-026 (2) amended), the sun is on the −x
+face (the prompt had +x), the additive glow needs a mid-tone sky behind it, and the eye sits at 0.38 of the cube in
+a race and 0.11 in Time Trial (the prompt now says so). docs/prompts/sky-vineta-k.md carries all four.
+Merged: 1c964e7 into batch/m2; the row stays Original by default.
+Notes: the placeholder's boxes stand on −z, out of both check cameras' view; proven by the trace and a spin
+diagnostic. The sun block's depth read with geometry under the sun is unmeasured until a model covers it.
