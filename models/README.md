@@ -26,13 +26,14 @@ it three levels above the executable.
 
 A sky (task 106, D-026) replaces a track's five sky faces when the Video tab's **Skies** row is at Models. The five
 face keys map to it in `[figures]` (`<key> = sky=vineta_k`); its `[sky vineta_k]` section lists the layers, one a
-line, drawn in that order: `sky/vineta_k/dome.pmdl parallax=0`, `sky/vineta_k/horizon_city.pmdl parallax=0.002`
-(`spin=S` turns a layer about y at S degrees a second). A track without `sky=` keys keeps its faces.
+line, drawn in that order: `sky/vineta_k/dome.pmdl parallax=0`, `sky/vineta_k/clouds_high.pmdl parallax=0.001
+spin=0.2`, ... (`spin=S` turns a layer about y at S degrees a second). A track without `sky=` keys keeps its faces.
 
 - **The space.** A unit cube centred on the origin, y up: the sides at ±1 on x and z, the top at y = +1, no bottom
-  (the game's ground is below the horizon). The game's eye sits at (0.02, 0.38, −0.02) of it, so the horizon seen
-  from the eye is at y = 0.38 on the sides. The backend draws a layer at 50 units a unit (the cube's half-size) about
-  the sky cube's centre, which follows the camera.
+  (the game's ground is below the horizon). The game's eye is the cube's centre, the origin, so the horizon seen
+  from the eye is at y = 0 on the sides (not 0.38: that figure, in the first prompt and D-026, came from reading the
+  game's sheared view matrix as a rotation; corrected 2026-10-21). The backend draws a layer at 50 units a unit
+  (the cube's half-size) about the sky cube's centre, which follows the camera.
 - **The depth rule.** The game reads the sky's depth around the sun (docs/ge-effects.md, the sun block): keep every
   vertex on the cube's surface or just inside it (D-026: nothing nearer than the faces, 1.0; the prompt's relief: a
   layer over the dome comes up to 0.05 inward, since the faces' depth test, GREATER, hides what is level with the
@@ -45,9 +46,11 @@ line, drawn in that order: `sky/vineta_k/dome.pmdl parallax=0`, `sky/vineta_k/ho
   `parallax=F` is moved by −F x the eye's world x and z instead, wrapped to the cube's width (100 units): a far
   layer (F 0.002, the city) slides against the dome (F 0) as the ship moves. The backend applies it as the layer's
   world translation, so its kept batch is never rebuilt for it.
-- `sky/vineta_k/` holds the **placeholder** sky `tools/model_sky_placeholder.py OUT_DIR` builds (a 640-triangle
-  dome of the cube's five faces with a gradient from white at the horizon band, y 0.3 to 0.5, to blue at the top;
-  a row of 12 slate boxes on the −z horizon), until Astra's layers (docs/prompts/sky-vineta-k.md) replace it by name.
+- `sky/vineta_k/` holds **Astra's Vineta K sky** (`tools/model_sky_vineta_k.py out/sky-vineta-k`, 2026-10-21; five
+  layers, 4101 triangles: the dome at 1.045, the high clouds, the far ridges, the city on −z, the sea), imported
+  as above. Its first version has the horizon at y = 0.38, where the prompt then put the eye, so in the game it
+  sits 19 units above the horizon; the prompt's revision asks for it at y = 0. The placeholder it replaced is
+  `tools/model_sky_placeholder.py OUT_DIR` (a gradient dome and 12 slate boxes on −z).
 
 ## Making a model (Blender)
 
