@@ -3,6 +3,7 @@
 // the texture and its mapping mode, the pipeline key, the viewport, scissor and depth clamp, and the state set on
 // the encoder when it changed; PURE_METAL_LOG's line per draw.
 #include "metal_backend.hpp"
+#include "models_backend.hpp"
 #include "ge_names.hpp"
 
 #include <algorithm>
@@ -41,6 +42,17 @@ bool flat(const DrawCall &call) {
     const bool orthographic = call.projection[3] == 0.0f && call.projection[7] == 0.0f && call.projection[11] == 0.0f;
     return call.through || (orthographic && !call.lighting_enabled);
 }
+
+// A kept model batch (task 105; models_backend.hpp): a 3D triangle list whose vertex_address is a synthetic id, its
+// version in index_address. expand() puts a triangle list's vertices in as they are (object space, the colour the
+// vertex's: a model draw has vertex colours), and the transform, the lighting and the fog are the uniforms', so the
+// expanded vertices of the same id and version are the same from frame to frame.
+bool keepable(const DrawCall &call) {
+    return call.vertex_address >= pure::models::kFirstCachedBatchAddress && call.primitive == PrimitiveType::Triangles &&
+           !call.through && !call.clear_mode && !flat(call);
+}
+constexpr std::size_t kMostCachedBatches = 64u;  // kept batches at most; the least recently drawn one goes first
+constexpr std::uint64_t kBatchUnusedFrames = 120u;  // a kept batch not drawn for this many frames is released
 
 // A 2D draw at least this wide, in the guest's 480 pixels, covers the screen (a fade, a backdrop): under Fill it
 // spreads with the 3D view rather than keeping the interface's proportions (the Vulkan renderer's kScreenWideDraw).
@@ -364,11 +376,22 @@ void MetalGeBackend::set_texture_map(const DrawCall &call, VertexUniforms &verte
 void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     // Transformed draws reach the backend decoded (gpu_decode() is false).
     if (call.vertices.empty()) return;
+    if (batches_swept_ != frames_) sweep_cached_batches();
     const std::array<float, 16> view_world = multiply(call.view, call.world);
     const std::array<float, 16> transform = multiply(call.projection, view_world);
     MTLPrimitiveType type{};
     std::size_t drawn = 0u;
-    if (!expand(call, transform, type, drawn)) return;
+    // A kept model batch whose buffer holds its version is bound as it is: no expansion, no upload (task 105).
+    const bool keep = keepable(call);
+    CachedBatch *cached = keep ? find_cached_batch(call) : nullptr;
+    if (cached != nullptr) {
+        vertices_.clear();
+        sprite_corners_ = 0u;
+        type = MTLPrimitiveTypeTriangle;
+        drawn = cached->drawn;
+    } else if (!expand(call, transform, type, drawn)) {
+        return;
+    }
 
     // The scissor, both ends included; an empty one draws nothing.
     const ViewportScissor scissor = scissor_of(call);
@@ -568,9 +591,18 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     target.last_drawn_frame = frames_;
     target.draw_serial = ++draw_counter_;
 
-    const std::size_t bytes = vertices_.size() * sizeof(GpuVertex);
-    const auto [buffer, offset] = allocate(bytes);
-    std::memcpy(static_cast<std::uint8_t *>(buffer.contents) + offset, vertices_.data(), bytes);
+    if (cached == nullptr && keep) cached = keep_batch(call, drawn);
+    id<MTLBuffer> buffer = nil;
+    NSUInteger offset = 0u;
+    if (cached != nullptr) {
+        buffer = cached->buffer;
+    } else {
+        const std::size_t bytes = vertices_.size() * sizeof(GpuVertex);
+        const auto [chunk, at] = allocate(bytes);
+        std::memcpy(static_cast<std::uint8_t *>(chunk.contents) + at, vertices_.data(), bytes);
+        buffer = chunk;
+        offset = at;
+    }
 
     bind_state(call, key, pipeline, depth, stencil_reference, viewport, clamp_depth, scaled_scissor, cull,
                blend_color);
@@ -580,6 +612,67 @@ void MetalGeBackend::draw(const DrawCall &call, const GuestMemory &memory) {
     if (switches_.log_draws) log_draw(call, target, source, source_x, source_y, scissor, fitted);
     ++stats_.draws;
     ++frame_draws_;
+}
+
+// The kept batch for the draw's id when it holds the draw's version, marked used this frame; null otherwise.
+MetalGeBackend::CachedBatch *MetalGeBackend::find_cached_batch(const DrawCall &call) {
+    const auto found = cached_batches_.find(call.vertex_address);
+    if (found == cached_batches_.end() || found->second.version != call.index_address) return nullptr;
+    found->second.last_used = frames_;
+    return &found->second;
+}
+
+// vertices_, just expanded, into a shared buffer of their own written once (not a pool chunk: the frame's completion
+// handler hands chunks back by their length) kept for the draw's id and version; the id's older buffer retired.
+MetalGeBackend::CachedBatch *MetalGeBackend::keep_batch(const DrawCall &call, std::size_t drawn) {
+    const std::size_t bytes = vertices_.size() * sizeof(GpuVertex);
+    if (bytes == 0u) return nullptr;
+    auto found = cached_batches_.find(call.vertex_address);
+    if (found == cached_batches_.end()) {
+        if (cached_batches_.size() >= kMostCachedBatches) {
+            const auto oldest = std::min_element(cached_batches_.begin(), cached_batches_.end(),
+                                                 [](const auto &a, const auto &b) {
+                                                     return a.second.last_used < b.second.last_used;
+                                                 });
+            retire_batch(oldest->second.buffer);
+            cached_batches_.erase(oldest);
+        }
+        found = cached_batches_.emplace(call.vertex_address, CachedBatch{}).first;
+    } else {
+        retire_batch(found->second.buffer);
+    }
+    id<MTLBuffer> buffer = [device_ newBufferWithBytes:vertices_.data() length:bytes
+                                               options:MTLResourceStorageModeShared];
+    if (buffer == nil) {
+        cached_batches_.erase(found);
+        return nullptr;
+    }
+    found->second.version = call.index_address;
+    found->second.buffer = buffer;
+    found->second.drawn = drawn;
+    found->second.last_used = frames_;
+    return &found->second;
+}
+
+// A kept buffer no longer drawn from: held until the frames in flight that may read it are done.
+void MetalGeBackend::retire_batch(id<MTLBuffer> buffer) {
+    if (buffer != nil) retired_batches_.emplace_back(frames_, buffer);
+}
+
+// Once a frame: the kept batches not drawn for kBatchUnusedFrames retired, and the retired buffers older than the
+// frames in flight (kFramesInFlight, and the frame being recorded) released.
+void MetalGeBackend::sweep_cached_batches() {
+    batches_swept_ = frames_;
+    for (auto it = cached_batches_.begin(); it != cached_batches_.end();) {
+        if (frames_ - it->second.last_used > kBatchUnusedFrames) {
+            retire_batch(it->second.buffer);
+            it = cached_batches_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    while (!retired_batches_.empty() && frames_ - retired_batches_.front().first > kFramesInFlight + 1u)
+        retired_batches_.pop_front();
 }
 
 // The pipeline key's blend, write masks, alpha and colour tests, depth test and stencil, with the fragment uniforms,
