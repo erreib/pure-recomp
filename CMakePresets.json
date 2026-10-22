@@ -48,7 +48,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "PORTABLEKIT_RELEASE": "ON",
-        "PORTABLEKIT_FFMPEG": "bundled"
+        "PORTABLEKIT_FFMPEG": "bundled",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0"
       }
     },
     {

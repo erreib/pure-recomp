@@ -32,7 +32,9 @@ B=build/$PRESET
 configure() { cmake --preset $PRESET "$@"; }
 release() {
   local R=$RELEASE_DIR archive=$RELEASE_ARCHIVE
-  if [ ! -f $R/build.ninja ]; then
+  # Configured afresh when the presets changed since: CMake's own regeneration does not read CMakePresets.json, so a
+  # changed cache variable (the macOS deployment target, for one) would not reach a build directory configured before.
+  if [ ! -f $R/build.ninja ] || [ CMakePresets.json -nt $R/CMakeCache.txt ]; then
     # The FFmpeg archive the developer build already downloaded (cmake/FFmpeg.cmake checks its SHA-256 either way).
     if [ -f $B/$archive ] && [ ! -f $R/$archive ]; then mkdir -p "$(dirname $R/$archive)"; cp $B/$archive $R/$archive; fi
     cmake --preset $RELEASE_PRESET

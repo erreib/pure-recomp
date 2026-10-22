@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-21 (0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, the marshal as a model and its wave, the crowd on the stands at 60 fps, tasks 101 to 105; the skies' engine side, task 106). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
+Last updated: 2026-10-22 (the macOS 13 and 14 launch crash fixed in the release build; 0.2.0 released; the HD texture pack on both renderers, tasks 099 and 100; the crowd survey, the marshal as a model and its wave, the crowd on the stands at 60 fps, tasks 101 to 105; the skies' engine side, task 106). M1 to M9 done, the Windows bring-up done, the enhancements E2 to E8 and the US
 download packs merged, 0.1.0 released for macOS and Windows on 2026-10-13, 0.2.0 (E8, the sound at 100 Hz) released 2026-10-20. Now: the cleanup the audit of 2026-10-19
 asked for. How each arc got here, session by session: [docs/history/sessions.md](history/sessions.md) (the state
 before this cut: ["The state before the docs diet"](history/sessions.md#the-state-before-the-docs-diet-2026-10-19-task-092)).
@@ -169,6 +169,10 @@ The tools:
 The app:
 - Info.plist says "MIT License" and the setup screen names the PlayStation 3 release; the bundle is marked for macOS
   13.0 but has run on macOS 15 only ([029](tasks/029-app-bundle.md)).
+- 0.1.0 and 0.2.0 abort at launch on macOS 13 and 14 (a tester's macOS 14.6, 2026-10-22): the release was compiled for
+  macOS 15 and only marked 13, so the Metal backend's `@available` fallback was compiled out. Since 2026-10-22 the
+  release preset compiles for 13.0 and `tools/bundle.sh` refuses a build compiled newer (docs/release.md); a launch
+  below macOS 15 is owed before the next release.
 
 By hand on the rig (Erik; docs/windows.md): the Explorer icon and Properties (task 071), the folder buttons (patch
 0029-windows-file-url), the Flashes race with the overlay, Texture detail by eye, a race at the Display rate, the

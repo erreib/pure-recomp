@@ -8,7 +8,8 @@
 # which fetches the pinned SDL3, Vulkan loader, MoltenVK, CJK font and FFmpeg source (each checked by SHA-256), builds
 # SDL3 and the loader for macOS 13 once (out/release-macos/deps), assembles the app in out/release-macos/stage, links
 # every library inside it, marks the binaries for macOS 13 once their system imports are found in the macOS 13 SDK,
-# signs everything ad hoc and checks the app for game data and paths of this machine. Before the packer runs,
+# signs everything ad hoc and checks the app for game data and paths of this machine. Before that the build's
+# executable and FFmpeg must be compiled for that macOS, not only marked for it (macos_target, below). Before the packer runs,
 # config/metal_pipelines.txt is copied into build/release/bin/app_resources, whose contents packaging/release.env's
 # RELEASE_RESOURCES ships in Contents/Resources (task 042: the Metal backend's pre-warm list, which it looks for there
 # first), so the app is signed with the list inside, and so, when the build has PURE_MODELS ON (D-027: OFF in the
@@ -103,6 +104,32 @@ release_version() {
   fi
 }
 
+# Every Mach-O the release build made (the executable, the bundled FFmpeg) must be compiled for the packer's macOS
+# (MACOS_DEPLOYMENT_TARGET in vendor/portablekit/packaging/sources.sh, 13.0), not only marked for it. The packer marks
+# a newer binary down after checking its C symbols, but a binary compiled for macOS 15 has every
+# `@available(macOS 15.0, *)` decided at compile time, its fallback gone, and Objective-C messages are not symbols:
+# 0.1.0 and 0.2.0 aborted at launch on macOS 14 that way (-[MTLCompileOptions setMathMode:], macOS 15 only, in the
+# Metal backend's initialize). The arm64-release preset sets CMAKE_OSX_DEPLOYMENT_TARGET to the same version.
+macos_target() {
+  local target f minos bad=0
+  target=$(sed -n 's/^MACOS_DEPLOYMENT_TARGET=\([0-9.]*\).*/\1/p' vendor/portablekit/packaging/sources.sh)
+  [ -n "$target" ] || { echo "bundle: no MACOS_DEPLOYMENT_TARGET in vendor/portablekit/packaging/sources.sh"; return 1; }
+  for f in $BUILD/bin/PureNative $BUILD/bin/lib/*.dylib; do
+    [ -f "$f" ] || continue
+    minos=$(otool -l "$f" | awk '$1 == "minos" { print $2; exit }')
+    if [ "$(printf '%s\n%s\n' "$minos" "$target" | sort -V | tail -1)" != "$target" ]; then
+      echo "bundle: $f is compiled for macOS $minos, newer than the release's $target"
+      bad=1
+    fi
+  done
+  if [ $bad -ne 0 ]; then
+    echo "bundle: build the release for macOS $target (CMakePresets.json's arm64-release sets CMAKE_OSX_DEPLOYMENT_TARGET;"
+    echo "        tools/build.sh release configures afresh when the presets are newer than the build's cache)"
+    return 1
+  fi
+  echo "== $BUILD/bin: compiled for macOS $target"
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 pack() {
   local packer_args=(--no-dmg) newer version
@@ -129,6 +156,7 @@ pack() {
       echo "== $BUILD/bin/PureNative is up to date"
     fi
   fi
+  macos_target || exit 1
   # The Metal backend's pre-warm list (task 042): packaging/release.env's RELEASE_RESOURCES ships the contents of
   # $BUILD/bin/$RESOURCES in Contents/Resources, where the backend looks for metal_pipelines.txt first; the packer
   # signs the app after copying them, so the list is sealed with it.

@@ -19,9 +19,17 @@ tools/bundle.sh --check out/029   # the checks below, with a scratch data direct
 The release build is its own build directory, `build/release`, configured by the `arm64-release` preset in
 `CMakePresets.json`: the developer preset (`/usr/bin/clang`, ccache, arm64) with `CMAKE_BUILD_TYPE=Release`,
 `PORTABLEKIT_RELEASE=ON` (the executable names no path of the checkout and has no fallback to its `game/`) and
-`PORTABLEKIT_FFMPEG=bundled` (FFmpeg 7.1.5, LGPL only, built once per build directory into `build/release/bin/lib`).
-The corpus compiles again in Release: 8 minutes on the M4 Pro the first time (2026-10-06), seconds after a change in
-`src/` only. The developer build in `build/arm64` is not touched.
+`PORTABLEKIT_FFMPEG=bundled` (FFmpeg 7.1.5, LGPL only, built once per build directory into `build/release/bin/lib`)
+and `CMAKE_OSX_DEPLOYMENT_TARGET=13.0`, the packer's `MACOS_DEPLOYMENT_TARGET`: the executable and FFmpeg are compiled
+for the oldest macOS the app claims, so an `@available(macOS 15.0, *)` is a check at run time and the compiler warns
+about a newer API used without one. Without it (through 0.2.0) clang compiled for this Mac's macOS 15, decided every
+such check at compile time and dropped its fallback, and the packer only marked the binaries down to 13 afterwards:
+both releases aborted at launch on macOS 13 and 14 (a tester's macOS 14.6, 2026-10-22: `-[MTLCompileOptions
+setMathMode:]`, macOS 15 only, in the Metal backend's `initialize`). `tools/bundle.sh` refuses to pack a build whose
+executable or FFmpeg is compiled for a newer macOS than the packer's, and `tools/build.sh release` configures the build
+directory afresh when `CMakePresets.json` is newer than its cache. The corpus compiles again in Release: 8 minutes on
+the M4 Pro the first time (2026-10-06), seconds after a change in `src/` only. The developer build in `build/arm64` is
+not touched: it compiles for this Mac's macOS, so its `@available` checks are decided at compile time.
 
 `tools/bundle.sh` then copies `config/metal_pipelines.txt` into `build/release/bin/app_resources` (task 042: the
 packer ships the contents of that folder in `Contents/Resources`, because `packaging/release.env` sets
@@ -207,8 +215,10 @@ PACKS` checks a set on a scratch stick (docs/developing.md).
 
 - The app is signed ad hoc and not notarized: on another Mac Gatekeeper asks the player to allow it once (Privacy &
   Security, "Open Anyway", or `xattr -dr com.apple.quarantine`), as `Read Me.txt` says.
-- The packer marks the binaries for macOS 13 after checking only the C, C++ and CoreFoundation symbols they import;
-  the Metal shell and backend have only been run on macOS 15 (this Mac).
+- The packer marks the binaries it did not build for macOS 13 after checking only the C, C++ and CoreFoundation symbols
+  they import, so an Objective-C message newer than macOS 13 is caught only by the compiler's availability warnings in
+  the release build (compiled for 13 since 2026-10-22). The Metal shell and backend have only been run on macOS 15
+  (this Mac): a launch on macOS 13 or 14 is owed (a tester, or a virtual machine of that macOS on this Mac).
 - `Info.plist`'s copyright line comes from the framework's template and says "MIT License"; the licences in the bundle
   and `THIRD_PARTY_NOTICES.md` give the actual terms (GPL-2.0-or-later for the combination).
 - The setup's welcome screen says the disc image "the PlayStation 3 release carries it", a sentence the framework
