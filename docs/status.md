@@ -224,6 +224,11 @@ after a change that moves or renames a file, a tool or a patch.
   prewarm of the first-use uploads at the load; briefed in 503), a long Esc menu's resume traced on this sink
   (the first race's 2.6 s menu snapped twice on resume). The Mac's probe on both shells at the merge (2026-10-20):
   PASS, unchanged, 0 resyncs and 0 seconds under 95% on each, `lates=0` (098, "The Mac's probe at the merge").
+- Weak machines (GitHub issue 1, 2026-10-22: an i7-6600U with HD 520 runs slow with choppy sound): the plan is
+  [505](tasks/505-render-thread.md), the renderer's CPU work off the guest thread, measured first. On the rig at
+  60 Hz the guest thread spends 9.7 ms a frame (game and shell 5.2, GE parse and decode 2.5, the backend 2.2);
+  the game syncs its one list at the end of the frame, so the safe overlap is the backend's 2.2 ms, plus whatever
+  stage 1's profile finds in the parse. The reporter is asked for the overlay's figures, then a test build.
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; picked 2026-10-20, D-024): tasks 099 and 100 merged 2026-10-20. The
   build downloads zstd 1.5.7 once (cmake/Zstd.cmake, the SHA-256 pinned) and compiles its decoder; patch
