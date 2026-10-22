@@ -106,3 +106,20 @@ the findings say it should stay.
 ## Stage 1: Escalate
 The census shows the guest reading GE results that are not in the list above (a readback path the queue would
 have to drain on and does not know of); or the profile puts most of parse in code under `include/psprecomp/`.
+
+## A weak CPU on the rig (2026-10-22, Erik's run)
+The race with the CPU pinned to two logical cores (`start /affinity 3`) and the power plan's maximum processor state
+at 60% (turbo off, about 2.2 GHz), the RTX 3080 drawing, Display rate Original, `PURE_PERF=log PURE_TRACE_STALLS=1`
+(`out/weak/run.log`). Erik: "pretty close to normal performance". Medians of 53 race seconds:
+
+| | fps | speed | guest | render | wait | seconds under 95% |
+|---|---|---|---|---|---|---|
+| capped | 58.4 | 97% | 7.9 ms | 8.4 ms | 0.8 ms | 17 of 53 (88 to 94%) |
+| uncapped (above) | 59.9 | 100% | 5.2 ms | 4.5 ms | 7.0 ms | |
+
+A CPU at about half the rig's speed with two cores runs the race at 88 to 100%: just short of a frame, not ten
+times short. So issue 1's sub-10 fps is not the CPU's cost; the suspect is the Intel GPU or its driver path, which
+this run does not test (the rig's UHD 630 is off in the BIOS, and the renderer always picks a discrete GPU). Next
+for the issue: the other PortableKit ports on the reporter's laptop, his stall log, and the rig's integrated GPU
+enabled with a switch to choose it. The render thread stays worth doing for the machines this run imitates, where
+3 to 4 ms a frame is the difference between 90% and 100%, but it is not issue 1's fix.
