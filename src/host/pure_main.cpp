@@ -13,6 +13,8 @@
 // (src/gpu/models_backend.cpp). The backend it wraps is PURE_GE_MODELS_INNER, set here when unset to what
 // PURE_GE_BACKEND would have been: metal, or vulkan under the Vulkan shell, and vulkan elsewhere. A tool that names a
 // backend (PURE_GE_BACKEND=metal, vulkan, null or record) runs without the wrapper.
+// In a release build (PURE_MODELS 0, D-027) the backend left unset is the one the wrapper would wrap, metal or vulkan,
+// as before task 102: the models features are not in a release.
 #include "../tools/ge_replay.hpp"
 
 #include <cstdlib>
@@ -29,6 +31,10 @@ void set_default(const char *name, const char *value) {
 }
 } // namespace
 
+#ifndef PURE_MODELS
+#define PURE_MODELS 1  // CMakeLists.txt defines it for this file: 0 in a release build (D-027)
+#endif
+
 int portablekit_main(int argc, char **argv);
 
 int main(int argc, char **argv) {
@@ -38,10 +44,15 @@ int main(int argc, char **argv) {
     const char *shell = std::getenv("PURE_SHELL");
     const bool vulkan_shell =
         std::getenv("PURE_NO_RENDER") == nullptr && (*shell == '\0' || std::string_view(shell) == "vulkan");
-    set_default("PURE_GE_MODELS_INNER", vulkan_shell ? "vulkan" : "metal");
+    const char *platform = vulkan_shell ? "vulkan" : "metal";
 #else
-    set_default("PURE_GE_MODELS_INNER", "vulkan");
+    const char *platform = "vulkan";
 #endif
+#if PURE_MODELS
+    set_default("PURE_GE_MODELS_INNER", platform);
     set_default("PURE_GE_BACKEND", "models");
+#else
+    set_default("PURE_GE_BACKEND", platform);
+#endif
     return portablekit_main(argc, argv);
 }

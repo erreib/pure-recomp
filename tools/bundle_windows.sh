@@ -15,8 +15,9 @@
 #   BUILDINFO.txt        the version, the commit, the toolchain and the pins
 #   licenses/            FFmpeg-LICENSE.txt and FFmpeg-SOURCE.txt (the build's), PortableKit's, SDL3's, Dear ImGui's,
 #                        tiny-AES-c's, xxHash's and Zstandard's licences, and packaging/THIRD_PARTY_NOTICES.md
-#   models/              models/models.ini and models/*.pmdl, the models backend's figures (task 102), which it looks
-#                        for beside the executable
+#   models/              models/models.ini and every .pmdl under models/, the models backend's figures (task 102),
+#                        which it looks for beside the executable; only when the build has PURE_MODELS ON (D-027:
+#                        OFF in the release preset, so a release folder has no models/)
 # The version is CMakeLists.txt's project version and the commit, 0.1.0-<hash>[-dirty]; at a release, HEAD exactly at
 # the tag v<project version> with no uncommitted change, the version alone, 0.1.0 (task 087). A v-tag at HEAD that is
 # not v<project version> stops the pack. BUILDINFO.txt names the commit either way (docs/release.md, "Publishing").
@@ -73,7 +74,12 @@ EXE="$FOLDER/$NAME.exe"
 DLLS="SDL3.dll avcodec-61.dll avutil-59.dll swresample-5.dll"
 LICENSES="FFmpeg-LICENSE.txt FFmpeg-SOURCE.txt PortableKit-LICENSE.txt SDL3-LICENSE.txt DearImGui-LICENSE.txt
 tiny-AES-c-UNLICENSE.txt xxHash-LICENSE.txt Zstandard-LICENSE.txt THIRD_PARTY_NOTICES.md"
-MODELS=$(cd models && ls models.ini *.pmdl | tr '\n' ' ')   # the models backend's figures (task 102), in models/
+# The models backend's figures (task 102) the folder ships under models/, by their paths there: none unless the build
+# has the models features (PURE_MODELS, D-027), which the release preset leaves off. Read after the build.
+models_files() {
+  grep -q '^PURE_MODELS:BOOL=ON' "$BUILD/CMakeCache.txt" 2>/dev/null || return 0
+  (cd models && { echo models.ini; find . -name '*.pmdl' | sed 's#^\./##'; } | LC_ALL=C sort)
+}
 DOCS="README.txt licenses/THIRD_PARTY_NOTICES.md"   # our own texts for the player (the content check lists their hits)
 # Where the source lives (task 087): README.txt names it. The GitHub account in it is the user's name, which the
 # machine check looks for, so the check reads DOCS without this address.
@@ -88,7 +94,7 @@ expected_files() {   # the folder's files, sorted
   { printf '%s\n' "$NAME.exe" LICENSE.txt README.txt BUILDINFO.txt
     for f in $DLLS; do printf '%s\n' "$f"; done
     for f in $LICENSES; do printf 'licenses/%s\n' "$f"; done
-    for f in $MODELS; do printf 'models/%s\n' "$f"; done; } | LC_ALL=C sort
+    for f in $(models_files); do printf 'models/%s\n' "$f"; done; } | LC_ALL=C sort
 }
 
 # The version the artifacts are named after (task 087; the same function is in tools/bundle.sh): the project
@@ -163,8 +169,10 @@ stage() {
   [ -n "$zstd_license" ] || { echo "bundle_windows: no Zstandard licence under $BUILD/_deps/zstd (cmake/Zstd.cmake)"; exit 1; }
   cp "$zstd_license" "$FOLDER/licenses/Zstandard-LICENSE.txt"
   cp packaging/THIRD_PARTY_NOTICES.md "$FOLDER/licenses/"
-  mkdir -p "$FOLDER/models"
-  for f in $MODELS; do cp "models/$f" "$FOLDER/models/" || exit 1; done
+  for f in $(models_files); do
+    mkdir -p "$FOLDER/models/$(dirname "$f")"
+    cp "models/$f" "$FOLDER/models/$f" || exit 1
+  done
   {
     printf '%s %s for Windows x64\r\n' "$NAME" "$v"
     printf 'Built from: pure-recomp %s\r\n' "$(git rev-parse HEAD)"

@@ -833,3 +833,25 @@ layers are static but for the offsets, which the backend applies as a world tran
 stays off in the sky as the game has it. A track without a `sky=` entry keeps its faces. The sun and the lens
 flare are the game's own draws and stay; a sky model keeps the sun's quarter of the top and the +x face clear of
 dense geometry. Textured skies would need the texture plumbing D-025 (2) deferred.
+
+## D-027  2026-10-21  The models features stay out of a release until measured below the test machines
+
+**Context.** The crowd (D-025, Models by default since task 105) and the skies (D-026) were measured on one machine,
+the Mac's M4 Pro: 1969 figures and 620 k vertices a frame on Vineta K's start, 5 to 6 ms of render at 1920x1088,
+a 21 ms rebuild when the batches are made afresh, the kept batches' limits sized on that one track. The rig has
+not built them, and both machines are upper tier. The public response to 0.1.0 reported major frame-rate problems
+(Erik, 2026-10-21), so a release must not add a cost nobody has measured on a player's machine.
+
+**Decision.** A CMake switch, `PURE_MODELS`, ON in a developer build and OFF in the release presets
+(PORTABLEKIT_RELEASE). Off: the Video tab has neither the Crowds and people row nor the Skies row, the backend
+left unset is the platform's (metal, or vulkan under the Vulkan shell and on Windows) with no models wrapper, as in
+0.2.0, and the bundles ship no models/ folder. The models backend is still compiled, so `PURE_GE_BACKEND=models`
+names it by hand. Only src/host/pure_main.cpp and src/profile/enhancements.cpp read the switch, so flipping it
+recompiles those two files. A developer build is unchanged.
+
+**Consequences.** The next release draws exactly what 0.2.0 drew, plus whatever else it carries. The features
+return to a release when they are measured on hardware below the Mac's and the rig's (a base M1 or a laptop with
+integrated graphics) with a density setting or a default of Original, by a later amendment here. A release built
+with `-DPURE_MODELS=ON` ships the models, every .pmdl under models/ with its folder (the bundles copied only the
+top level before, which would have left the crowd and the sky out).
+

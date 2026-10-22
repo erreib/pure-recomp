@@ -11,7 +11,8 @@
 # signs everything ad hoc and checks the app for game data and paths of this machine. Before the packer runs,
 # config/metal_pipelines.txt is copied into build/release/bin/app_resources, whose contents packaging/release.env's
 # RELEASE_RESOURCES ships in Contents/Resources (task 042: the Metal backend's pre-warm list, which it looks for there
-# first), so the app is signed with the list inside, and so are models/models.ini and models/*.pmdl, in
+# first), so the app is signed with the list inside, and so, when the build has PURE_MODELS ON (D-027: OFF in the
+# release preset, so a release ships none), are models/models.ini and every .pmdl under models/, in
 # Contents/Resources/models (task 102: the models backend's figures).
 #   --zip   also the zip archive, in out/release-macos/dist with the FFmpeg source archive and SHA256SUMS
 #   --dist   the disk image and the zip archive, in out/release-macos/dist
@@ -135,11 +136,19 @@ pack() {
   mkdir -p "$BUILD/bin/$RESOURCES"
   cp "config/$LIST" "$BUILD/bin/$RESOURCES/" || exit 1
   echo "== $BUILD/bin/$RESOURCES/$LIST for Contents/Resources: $(list_counts "config/$LIST")"
-  # The models backend's figures (task 102, D-025): models/models.ini and the .pmdl files, which the backend looks for
-  # in Contents/Resources/models first (src/gpu/models_backend.cpp); not models/README.md, the developer's.
-  mkdir -p "$BUILD/bin/$RESOURCES/models"
-  cp models/models.ini models/*.pmdl "$BUILD/bin/$RESOURCES/models/" || exit 1
-  echo "== $BUILD/bin/$RESOURCES/models for Contents/Resources/models: $(cd models && ls models.ini *.pmdl | paste -sd' ' -)"
+  # The models backend's figures (task 102, D-025): models/models.ini and every .pmdl under models/ with its folder,
+  # which the backend looks for in Contents/Resources/models first (src/gpu/models_backend.cpp); not models/README.md,
+  # the developer's. Only when the build has the models features (PURE_MODELS, D-027): the release preset has them off.
+  if grep -q '^PURE_MODELS:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
+    local f
+    for f in $(cd models && { echo models.ini; find . -name '*.pmdl' | sed 's#^\./##'; } | LC_ALL=C sort); do
+      mkdir -p "$BUILD/bin/$RESOURCES/models/$(dirname "$f")"
+      cp "models/$f" "$BUILD/bin/$RESOURCES/models/$f" || exit 1
+    done
+    echo "== $BUILD/bin/$RESOURCES/models for Contents/Resources/models: $(cd "$BUILD/bin/$RESOURCES/models" && find . -type f | wc -l | tr -d ' ') files"
+  else
+    echo "== no models in Contents/Resources: $BUILD has PURE_MODELS off (D-027)"
+  fi
   # Zstandard's licence (task 099, D-024: the decoder is compiled from the pinned source cmake/Zstd.cmake downloads
   # into $BUILD/_deps/zstd): shipped as licenses/Zstandard-LICENSE.txt beside the others the packer collects.
   local zstd_license

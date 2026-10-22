@@ -33,6 +33,26 @@ portablekit_add_game(PureNative
             src/gpu/models_backend.cpp
             ${platform_sources})
 
+# The models features (D-027): the Video tab's Crowds and people and Skies rows (D-025, D-026) and the models backend as
+# the default backend. ON in a developer build, OFF in a release build (PORTABLEKIT_RELEASE), so a release runs on the
+# platform's backend alone with neither row, as 0.2.0 did, until the features are measured on hardware below the
+# Mac's and the rig's. The models backend is compiled either way (PURE_GE_BACKEND=models names it by hand). Only the
+# two files that read the switch get its definition, so flipping it recompiles them and nothing else.
+if(PORTABLEKIT_RELEASE)
+    set(pure_models_default OFF)
+else()
+    set(pure_models_default ON)
+endif()
+option(PURE_MODELS "The Crowds and people and Skies rows, and the models backend as the default (D-027)" ${pure_models_default})
+if(PURE_MODELS)
+    set(pure_models_value 1)
+else()
+    set(pure_models_value 0)
+endif()
+set_property(SOURCE src/host/pure_main.cpp src/profile/enhancements.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    PURE_MODELS=${pure_models_value})
+message(STATUS "PURE_MODELS: ${PURE_MODELS} (the crowd and sky rows and the models backend as the default, D-027)")
+
 # Zstandard's decoder for the ZIM images of HD texture packs (D-024, task 099): the framework compiles
 # host/gpu/texture_pack.cpp into PureNative itself, so linking the library here gives it zstd.h and the symbols.
 include(cmake/Zstd.cmake)

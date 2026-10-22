@@ -86,7 +86,12 @@ const char *const kDisplayRateChoices[] = {"Original", "Display"};
 // backend since task 102, wrapping the platform's) draw each quad of a texture models/models.ini names as a 3D model
 // of ours instead: the marshal today. The backend reads the option itself, once a frame, so there is no hook here.
 // Original until the crowd's models exist (D-025, point 4).
+#ifndef PURE_MODELS
+#define PURE_MODELS 1  // CMakeLists.txt defines it for this file: 0 in a release build (D-027)
+#endif
+#if PURE_MODELS
 const char *const kCrowdModelChoices[] = {"Original", "Models"};
+#endif
 
 const GameOption kOptions[] = {
     {.key = "sixty_fps",
@@ -134,6 +139,7 @@ const GameOption kOptions[] = {
                     "measures time).",
      .default_choice = 1u,
      .tab = MenuTab::Video},
+#if PURE_MODELS  // D-027: the models features' rows, left out of a release build
     {.key = "crowd_models",
      .label = "Crowds and people",
      .choices = kCrowdModelChoices,
@@ -149,6 +155,7 @@ const GameOption kOptions[] = {
                     "today. Both renderers.",
      .default_choice = 0u,
      .tab = MenuTab::Video},
+#endif
 };
 
 constexpr std::uint32_t kNidSceGeDrawSync = 0xB287BD61u;
