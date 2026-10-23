@@ -95,7 +95,7 @@ NEW = re.compile(r"\[pure\] shield frame (\d+) ship (\d+) obj (0x[0-9A-F]+) new 
 LIVE = re.compile(r"\[pure\] shield frame (\d+) ship (\d+) obj (0x[0-9A-F]+) t=[\d.]+ clock=([\d.]+)")
 END = re.compile(r"\[pure\] shield frame (\d+) ship (\d+) obj (0x[0-9A-F]+) end (\w+) life=([\d.]+) "
                  r"rise=([\d.-]+) fade=([\d.-]+) steps=(\d+)")
-OUTCOME = re.compile(r"^\| single_race \| vineta_k \| (\w+) \|")
+OUTCOME = re.compile(r"^\| single_race \| vineta_k \| ([^|]+?) \|")
 
 
 def num(s):
