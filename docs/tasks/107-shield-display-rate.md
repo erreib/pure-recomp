@@ -170,5 +170,19 @@ Status: PARTIAL (in progress: the diagnosis below; the trace built, the sighting
   is never deleted: it shows for the rest of the race (until the ship raises another shield, which kills it). It is a
   frame-sized step in one function the override can wrap (no escalation condition).
 
+### The sighting test (Original, 2026-10-23)
+One headless Vineta K drive-route race, `PURE_TRACE_SHIELD=1 tools/campaign_sweep.py single_race vineta_k --out
+out/107/sight0` (PASS, 3 laps, 194.0 s, 41 contacts; 3:22 wall). **8 Shield effects**, all AI ships (ship 6 four
+times, ship 1 twice, ships 4 and 7 once), at race time 13.6, 57.7, 86.4, 98.4, 99.2, 100.3, 128.4 and 131.2 s (the
+virtual time of each `new` line less the race start's, t=201.16 s at flip 6253). Every one built up and ended by its
+own delete test: life (its clock) 5.22 to 5.42 s, the end called at about 4.99 s of it; the rise to 90% of the target's
+alpha 0.37 to 0.47 s and the fade from the dying flag to the delete 0.23 to 0.43 s. The constructor's colour alpha is
+0.000 and its target's 1.000; a contact puts the alpha at 1.000 and the scale at 1.100 (ship 7 at flip 12304). Enough
+for the check's median rule: the check (below) runs this route in both lanes.
+Found on the way: at Original the port's frames step on 1625 of 2571 traced frames (n=1) and not on 946 (n=0: the
+15.683 ms frames of the port's 1 ms clock, docs/timing.md "The game's clock in a race"), so the port's Original eases
+at about 38 steps a second where the PSP's 16.68 ms frames give about 60: its rise and fade take 15 steps (0.25 s at
+60 a second) but 0.37 to 0.47 s here. Not this task's (Original must stay the generated code).
+
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

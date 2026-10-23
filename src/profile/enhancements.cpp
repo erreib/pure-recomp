@@ -1,5 +1,6 @@
 // The enhancements (enhancements.hpp says what is here and why it is apart from the profile).
 #include "enhancements.hpp"
+#include "shield_step.hpp"
 
 #include "kernel/kernel.hpp"
 #include "settings/settings.hpp"
@@ -282,6 +283,7 @@ void wrap_draw_sync(HleRegistrar &hle) {
     hle.bind("sceGe_user", kNidSceGeDrawSync, [](Runtime &rt, AllegrexContext &ctx) {
         auto &m = rt.memory();
         display_rate(&m);
+        shield_step::frame(rt);  // task 107: the shield effect's override, once the race runs faster than the PSP
         if (settings::game_option("sixty_fps") == 1u) sixty_fps(m);
         if (settings::game_option("smooth_flashes") == 1u) smooth_flashes(m);
         original(rt, ctx);
