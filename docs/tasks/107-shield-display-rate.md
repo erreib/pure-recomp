@@ -39,9 +39,51 @@ a dt-sized step would also fit. Find out which; do not assume it.
   against seven opponents, who use shields.
 - Game data and frames never enter the repository: keep shots under `out/107/`.
 
+## Diagnosis (the planning session, 2026-10-23; Ghidra, `out/107/shield_methods.c` and `census.c`)
+The suspect holds. `FUN_08946054` is the Shield's constructor: it makes the two shells (`vr_shield_cockpit.vex` at
++0x160, `vr_shield.vex` at +0x164), sets the vtable at +0x3c to `DAT_08ac2acc`, a current colour at +0x118..+0x124
+and a target at +0x108..+0x114 (both from `.bss` the game fills at start: read them live), an ease of 0.15 at +0x128,
+a scale of 0.7 at +0x130 easing to 1.0 (+0x12c) at 0.2 (+0x134), the dying flag +0xc4 and a clock +0x15c at 0. The
+vtable's own methods are `FUN_08946834` (the destructor) and **`FUN_08946918`, the update, `(float dt in $f12,
+Shield *this in $a0)`**:
+```
+n = (int)(dt / 0.016666668);                       // whole 60 Hz frames in this frame's dt, truncated
+for (i = 0; i < n; i++) colour += 0.15 * (target - colour);         // +0x118..+0x124 toward +0x108..+0x114
+for (i = 0; i < n; i++) scale  += 0.2  * (1.0 - scale);             // +0x130, only when n >= 1
+pulse = sin(clock * 15); alpha = colour.a * (pulse * 0.25 + 0.75);  // then the shells' colour and matrix
+clock += dt;                                                        // +0x15c, by the real dt
+if (dying && colour.a <= 0.1) { delete this; return 0; } return 1;
+```
+On the port's clock a frame's dt moves in 1 ms steps (docs/timing.md, "The game's clock in a race"): 15.683, 16.683
+or 17.683 ms at 59.94 Hz, so n is 1 on most frames (0 on the short ones, as the PSP's own 16.68 ms gives 1); at
+119.40 Hz 7.4 to 9.4 ms, so **n is 0 on every frame** and neither the colour nor the scale ever moves. The shell
+never builds up after a pickup, and once something sets its colour outright (the contact, most likely: confirm with
+the trace) the fade to the dying test's 0.1 never runs, so the object is never deleted and shows for the rest of the
+race. The same holds at any Display rate above about 62 Hz (the rig's 100 Hz included), and Original keeps it.
+The clock at +0x15c takes the real dt, so an override that feeds the body a rounded-up dt must put +0x15c back
+afterwards, and must not touch the object after a 0 return (deleted). The other way the brief allows, running the
+body only once a whole 60 Hz frame of dt has gathered with the gathered dt, keeps the clock exact and returns 1 on
+the frames it skips; the shells' pulse then moves at 60 Hz. Pick by what the trace shows.
+
+**Census, first pass** (every function of the generated corpus that builds 1/60 (`0x3C888889`) and cuts a division
+by it to an integer within 60 lines; then each decompiled: all ten have the shield's shape, `for (i = 0; i < (int)(dt
+/ 0.016666668); i++)` easing a value, so all stall at the Display rate). Placed by their neighbours in
+config/function_labels.csv, not by their own names:
+| function | loops | neighbours |
+|---|---|---|
+| `FUN_08858ad0` | 2 | before Disruptor.cpp |
+| `FUN_0885a010`, `FUN_0885a5bc`, `FUN_0885aad4`, `FUN_0885ae9c` | 1 each | DisruptorFx.cpp |
+| `FUN_0886b274`, `FUN_0886bc6c` | 1 each | EngineFlare_Importer.cpp (the ships' engine flares) |
+| `FUN_089379f8` | 4 | after FxLensflare.cpp, before FxWeather.cpp |
+| `FUN_08945850`, `FUN_08945a80` | 1 each | between PsysDef.cpp and Shield.cpp |
+| `FUN_08946918` | 2 | Shield.cpp (this task) |
+Not covered: a step by `dt * 60` (no hit for 60.0 cut to an integer), a step by the vblank count, a frame counter
+compared for equality, and anything the 60-line window misses. Deliverable 1's census starts from this table: confirm
+what each drives, and widen the search where it is cheap.
+
 ## Deliverable
-1. **The diagnosis** (in Result): the function(s) that step the shield effect, what they step it with, and why it
-   stalls at 119.40 Hz and not at 59.94, with addresses and the decompiled lines. Then a census: other functions
+1. **The diagnosis** (in Result): confirm the Diagnosis above with the trace (the colour, the scale and the dying
+   flag frame by frame at both rates, and what the contact writes), or correct it. Then a census: other functions
    that convert dt to whole frames, or step by the vblank count, in the same way (grep the decompile of the
    functions dt reaches through `FUN_08893284`'s callees as far as is cheap; list them with what they drive, and
    say which you looked at and which you did not). Do not fix those here; they are the next brief's.
