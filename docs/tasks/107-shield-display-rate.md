@@ -136,7 +136,39 @@ the turn limit resumes from the branch.
 - The fix changes anything at Original, or any race figure `tools/display_rate_check.sh --race` bounds.
 
 ## Result
-(worker fills) Status: | Changed: | Verify output (last 20 lines): | Open questions:
+Status: PARTIAL (in progress: the diagnosis below; the trace built, the sighting test, the fix and the check to come)
+
+### Diagnosis (confirmed in the decompile, 2026-10-23; out/107/ on the Mac)
+- **The stepping code** is `FUN_08946918`, the Shield's update, as the planning session read it. It is slot +0x24 of
+  the vtable `DAT_08ac2acc` (the word at 0x08ac2af0 is 0x08946918), which the object walker `FUN_08893284(dt, obj)`
+  calls once a frame (`(**(vtable + 0x24))(dt, obj + *(short *)(vtable + 0x20))`; a 0 return skips the object's
+  children and its +0x2c method, and the object is marked dead, flags `| 10`). The decompiled lines:
+  ```
+  if (0 < (int)(param_1 / 0.016666668)) { do { colour(+0x118..+0x124) += *(+0x128) * (target(+0x108..) - colour);
+      iVar4++; } while (iVar4 < (int)(param_1 / 0.016666668)); }
+  if ((int)(param_1 / 0.016666668) >= 1) { do { scale(+0x130) += (*(+0x12c) - scale) * *(+0x134); ... } }
+  fVar8 = sin(*(float *)(this + 0x15c) * 15.0);  alpha = colour.a * (fVar8 * 0.25 + 0.75);  ... shells ...
+  *(float *)(this + 0x15c) = clock + param_1;
+  if (*(char *)(this + 0xc4) != 0 && colour.a <= 0.1) { flags = flags & ~4 | 10; FUN_08893940(this); return 0; }
+  return 1;
+  ```
+  `dt` (f12) feeds only the step count and the clock.
+- **Who sets the state** (the planning session's "the contact, most likely" confirmed):
+  - `LinkObj_h__0892425c(ship)` raises the shield: it kills the ship's earlier Shield at `ship + 0x9fc` (flags
+    `| 10`), constructs a new one with `FUN_08946054(obj, ship)` (owner at +0xc0), stores it at `ship + 0x9fc` and plays
+    `~SHIELD`. It is the constructor's only caller (0x08924344).
+  - `FUN_08947030(shield)`, the contact: sets the colour outright to the flash colour from `.bss` `DAT_08b73fb8..fc4`
+    and the scale to 1.1 (0x3f8ccccd). Called from the ship's update `FUN_08926ae4` (0x08927500) and `FUN_0892935c`
+    (0x08929750), each with `ship + 0x9fc`.
+  - `FUN_08947080(shield)`, the end: target colour 0 (all four), target scale (+0x12c) 1.2, dying flag +0xc4 = 1.
+    Called from `FUN_089243ec(ship)` (the shield's end; it also stops the `~SHIELD` sound).
+  - The constructor's colour is `DAT_08b73fc8..fd4` and its target `DAT_08b73fa8..fb4` (read live by the trace).
+  - The destructor `FUN_08946834` puts the base vtable 0x08ac4838 back; nothing but the update reads +0x15c.
+- **The cause**: at 119.40 Hz a frame's dt is 7.4 to 9.4 ms, so `n = (int)(dt / 0.016666668)` is 0 on every frame:
+  the colour never eases from the constructor's towards the target (no build-up), a contact's flash colour stays as
+  set, and after the end the colour never eases to the target 0, so `colour.a <= 0.1` never holds and the dying effect
+  is never deleted: it shows for the rest of the race (until the ship raises another shield, which kills it). It is a
+  frame-sized step in one function the override can wrap (no escalation condition).
 
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:

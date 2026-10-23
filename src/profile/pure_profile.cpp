@@ -6,6 +6,7 @@
 #include "profile.hpp"
 #include "aspect.hpp"
 #include "enhancements.hpp"
+#include "shield_step.hpp"
 #include "test_hooks.hpp"
 
 #include "hle/hle_common.hpp"
@@ -105,6 +106,7 @@ void wrap_flip_counter(HleRegistrar &hle) {
         apply_paced_from(frames);
         if (log_every != 0u && frames % log_every == 0u) std::cout << "[pure] frame " << frames << "\n";
         test_hooks::flip(rt, frames);
+        shield_step::flip(rt, frames);  // PURE_TRACE_SHIELD (task 107)
         original(rt, ctx);
         if (exit_at != 0u && frames >= exit_at) {
             std::cout << "[pure] exit at frame " << frames << "\n";
