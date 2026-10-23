@@ -136,7 +136,68 @@ the turn limit resumes from the branch.
 - The fix changes anything at Original, or any race figure `tools/display_rate_check.sh --race` bounds.
 
 ## Result
-Status: PARTIAL (in progress: the diagnosis below; the trace built, the sighting test, the fix and the check to come)
+Status: DONE
+
+Changed: src/profile/shield_step.cpp and .hpp (new: the trace and the override), src/profile/enhancements.cpp (the
+install call in E8's GE-sync hook), src/profile/pure_profile.cpp (the trace's flip call), CMakeLists.txt (the source),
+tools/shield_check.sh (new), docs/timing.md ("The shield effect (task 107)" under E8), docs/developing.md
+(`PURE_SHIELD_STEP`, `PURE_TRACE_SHIELD`), docs/verification.md (two rows), docs/status.md (the E8 row, the issue 2
+bullet), this file.
+
+Acceptance:
+- [x] The stepping code and the cause, with the decompiled lines: "Diagnosis" below.
+- [x] At 120 headless the trace shows every effect building up after its pickup and ending (rise 0.250 s, deleted
+  after 5.226 s), as at Original.
+- [x] At Original nothing is registered (no `[pure] shield step` line in shield_check's lane 0 nor in
+  display_rate_check's PSP lane), `tools/frame_regress.sh` headless PASS 18/18, `tools/display_rate_check.sh --race`
+  PASS with the PSP lane's figures task 091's to the digit (59.95 flips a second, game clock 1.0001, the start
+  39.3/77.5/121.1/168.2 km/h, the first pad from 2.152 s at 1266.83 m); its 120 lane, with the override in, PASS
+  (119.42, 1.0010, 38.9/77.2/120.6, 14.3 contacts a lap, the pad -0.050 s and -2.53 m as in task 091).
+- [x] `PURE_SHIELD_STEP=0` at 120 brings the stuck effect back (out/107/off120, below).
+- [x] The census, with what was and was not looked at: below and in docs/timing.md.
+
+Verify output (last 20 lines of `tools/verify_task.sh 107`):
+```
+  ship 4 from flip 15681 (t=358.469): deleted, life 5.323, rise 0.451, fade 0.334, steps 234
+  ship 5 from flip 16768 (t=376.854): deleted, life 5.405, rise 0.368, fade 0.416, steps 212
+lane 1 (120 Hz): the sweep PASS (no damage), 197 s; 13 effects (13 deleted); life of the deleted: median 5.226 s (5.224 to 5.227); rise median 0.251 (0.009 to 0.252); fade median 0.226 (0.225 to 0.234)
+  ship 6 from flip 8416 (t=214.690): deleted, life 5.227, rise 0.251, fade 0.227, steps 313
+  ship 1 from flip 8491 (t=215.317): deleted, life 5.225, rise 0.251, fade 0.226, steps 313
+  ship 0 from flip 10062 (t=228.474): deleted, life 5.226, rise 0.250, fade 0.234, steps 313
+  ship 2 from flip 11276 (t=238.642): deleted, life 5.226, rise 0.251, fade 0.226, steps 313
+  ship 7 from flip 11672 (t=241.959): deleted, life 5.226, rise 0.009, fade 0.227, steps 313
+  ship 3 from flip 13920 (t=261.137): deleted, life 5.226, rise 0.251, fade 0.226, steps 313
+  ship 3 from flip 15631 (t=275.717): deleted, life 5.226, rise 0.250, fade 0.226, steps 313
+  ship 5 from flip 15771 (t=276.890): deleted, life 5.226, rise 0.250, fade 0.234, steps 313
+  ship 3 from flip 16849 (t=285.918): deleted, life 5.227, rise 0.252, fade 0.227, steps 313
+  ship 1 from flip 17069 (t=287.762): deleted, life 5.225, rise 0.251, fade 0.225, steps 313
+  ship 4 from flip 17517 (t=291.512): deleted, life 5.226, rise 0.251, fade 0.226, steps 313
+  ship 7 from flip 18292 (t=298.004): deleted, life 5.224, rise 0.183, fade 0.225, steps 313
+  ship 3 from flip 25991 (t=363.982): deleted, life 5.227, rise 0.252, fade 0.227, steps 313
+  [pure] shield step: FUN_08946918 overridden, the shield effect eases in 60 Hz steps of the time while the race runs faster than the PSP's 59.94 Hz (now 119.40 Hz; PURE_SHIELD_STEP=0 keeps the generated code)
+shield_check: PASS (lanes 0 and 1: 5 and 13 effects, median life 5.373 and 5.226 s, rise 0.434 and 0.251 s, fade 0.385 and 0.226 s)
+docs_check: 40 files, 0 findings: PASS
+verify 107: PASS
+```
+(Ship 7's rises of 0.009 and 0.183 s are contacts during the build-up: the flash sets the alpha to 1 outright.)
+
+Window checks this change wants (not run: Erik's screen was not booked): a Single Race at Display on the 120 Hz
+display, Metal, with Smooth flashes on (Erik's repro settings), watching an opponent's shield and the player's after a
+pickup and a wall contact: the shell builds up, flashes at the contact and fades about 5 s after the pickup; the same
+on Vulkan; and the row switched to Original in the Esc menu mid-race with a shield showing (the override then passes
+the real dt; untested even headless). The rig's 100 Hz display takes the same look.
+
+Open questions:
+- Original's own easing on the port is slower than the PSP's: the port's 15.683 ms frames (a third of them at
+  59.94 Hz, the 1 ms clock) take no step, so Original's rise and fade are 0.37 to 0.47 s against the PSP's 0.25 s
+  (15 steps of 16.68 ms). Display now eases at the PSP's 60 steps a second, so the two rows differ by that much. A
+  fix at Original would be the 1 ms clock's (Open calls, "a finer virtual-time answer"), not this task's.
+- The ten other functions of the census stall the same way at Display (DisruptorFx's effects, the engine flares, the
+  `~UNDERWATER` and `~WIND` emitters, `FUN_089379f8`); what each looks like on screen at 120 is not checked. The
+  override here is specific to the Shield (its clock at +0x15c); a shared helper for the others would need each
+  one's own dt uses read first.
+- The `stepping` map is keyed by object address and pruned only when over 256 entries (a deleted effect's entry is
+  stale until its address is reused, then reset by the clock test); harmless in a race, noted.
 
 ### Diagnosis (confirmed in the decompile, 2026-10-23; out/107/ on the Mac)
 - **The stepping code** is `FUN_08946918`, the Shield's update, as the planning session read it. It is slot +0x24 of
