@@ -332,7 +332,9 @@ first contact it showed for the rest of the race, on every ship; Original behave
   5.42 s (the end called at about 4.99 s of it). At 120 with the fix 16: rise 0.250 to 0.268 s, fade 0.226 to
   0.243 s, life 5.225 to 5.244 s, all deleted on time. At 120 with `PURE_SHIELD_STEP=0` 9: the 5 with no contact never
   built up (invisible, deleted on time at alpha 0), the 4 with one lived 11.3, 11.4, 37.7 and 55.2 s.
-  `tools/shield_check.sh` runs both lanes (docs/verification.md).
+  `tools/shield_check.sh` runs both lanes (docs/verification.md), with `--no-damage`: PASS on 2026-10-23, 5 effects
+  at Original (life 5.340 to 5.439 s, median 5.371; rise and fade medians 0.384 s) and 10 at 120 (life 5.225 to
+  5.227 s; rise 0.250 to 0.252 s, fade 0.226 to 0.235 s), 190 and 193 s of wall time.
 - **The census** (functions of the corpus that build a frame-sized constant, 1/60, 1/30, 60.0 or 30.0, and convert a
   float to an integer within 60 lines; out/107/census.py on the Mac, over config/function_map.csv). Ten more have the
   shield's shape, `for (i = 0; i < (int)(dt / 0.016666668); i++)` easing a value, so they stall at Display too; not

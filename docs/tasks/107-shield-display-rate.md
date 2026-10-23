@@ -184,5 +184,50 @@ Found on the way: at Original the port's frames step on 1625 of 2571 traced fram
 at about 38 steps a second where the PSP's 16.68 ms frames give about 60: its rise and fade take 15 steps (0.25 s at
 60 a second) but 0.37 to 0.47 s here. Not this task's (Original must stay the generated code).
 
+### The trace at both rates, and the switch (2026-10-23)
+- The trace: `PURE_TRACE_SHIELD=1` (src/profile/shield_step.cpp, called from the profile's flip counter) scans user
+  RAM for the be::Ship objects (vtable 0x08AC259C) and, once a flip, prints every ship's live Shield (the ship's
+  +0x9fc, vtable 0x08AC2ACC, owner +0xc0 the ship, not dead): `[pure] shield frame N ship K obj 0x... t= clock= n=
+  steps= a= target= scale= dying=`, a `new` line and an `end deleted|replaced|killed|gone life= rise= fade= steps=`
+  line. It reads guest memory only (no registration), so a traced Original run has an untraced one's dispatches.
+- Original (out/107/sight0): frame by frame the alpha climbs 0, 0.150, 0.278, 0.386 ... on the n=1 frames and holds on
+  the n=0 ones (0.913 at clock 0.367 s); the scale 0.700, 0.760, 0.808 ...; at the end call (clock 4.987) the target
+  goes to 0.000 and dying to 1, and the alpha falls 0.850, 0.722 ... 0.103, then the effect is deleted (clock 5.389).
+- 120 with the fix (out/107/fix120, the player destroyed at 181 s without `--no-damage`): 16 effects, every one built
+  up (rise 0.250 to 0.268 s) and was deleted (fade 0.226 to 0.243 s, life 5.225 to 5.244 s), 313 or 314 steps each
+  (60 a second).
+- 120 with `PURE_SHIELD_STEP=0` (out/107/off120; `[pure] shield step: off (PURE_SHIELD_STEP=0), ...`): 9 effects. The
+  5 with no contact took 0 steps, never built up (`rise=-`) and were deleted on time (alpha 0 at the end: invisible,
+  the issue's "does not show"). The 4 with a contact were stuck at alpha 1.000 and scale 1.100 (the flash, set
+  outright) and lived 11.3, 11.4, 37.7 and 55.2 s, the issue's "never stops". They ended only through a full-screen
+  flash's two-vblank frames (16.75 ms, n = 1; the tools run Flashes at Original): three of them at one flip (12727)
+  after 14 such steps. With Smooth flashes, the default, nothing ends them.
+
+### The fix and the check
+- `src/profile/shield_step.cpp`: `FUN_08946918` overridden by the aspect pattern (the generated body found through
+  `Registrations`, registered once from E8's hook in the GE sync at the first frame whose vblank period is under the
+  PSP's 16683 us, never at Original). Each call carries its real dt per effect, takes the whole 60 Hz frames as the
+  call's steps n, and hands the body a dt that gives n; the body's clock at +0x15c is put back to the generated code's
+  value (the last call's clock plus its real dt, bit for bit) at the effect's next call, before its body runs. Not after
+  `original()` returns: the generated body returns to the caller (the override) when a call inside it cannot chain,
+  with the rest of the body still to run from the outer loop, and after a 0 return the object is dead and is not
+  touched. At the PSP's period (the row back to Original in a race) the override hands the real dt.
+- `tools/shield_check.sh` (docs/verification.md): both lanes of the drive route with `--no-damage`. PASS: 5 effects at
+  Original (life median 5.371 s), 10 at 120 (life 5.225 to 5.227 s, rise 0.250 to 0.252 s, fade 0.226 to 0.235 s).
+  The judge FAILs the `PURE_SHIELD_STEP=0` lane above (5 never built up; the medians of rise 2.290 and fade 0.000 s
+  out of bounds; with a 0 lane of `deleted` effects its 4 long lives too).
+
+### The census
+In docs/timing.md, "The shield effect (task 107)". The planning session's ten are confirmed with the shield's shape
+(`for (i = 0; i < (int)(dt / 0.016666668); i++)`): `FUN_08858ad0` (two models, a delete test), `FUN_0885a010`,
+`FUN_0885a5bc`, `FUN_0885aad4` (DisruptorFx effects: a model's colour, a delete test), `FUN_0885ae9c` (a list of
+parts), `FUN_0886b274` and `FUN_0886bc6c` (the engine flares), `FUN_089379f8` (four values), `FUN_08945850` and
+`FUN_08945a80` (the `~UNDERWATER` and `~WIND` sound emitters' level). Widened (out/107/census.py over the whole corpus
+and config/function_map.csv: 1/60, 1/30, 60.0 and 30.0 built in a register and a float-to-integer conversion within 60
+lines): three more hits, none a step (`FUN_0881dd18` and `FUN_0887d9e8` minutes of a time's text, `FUN_0886e4f8` a
+16-frame cycle from the backend's clock times 30). `sceDisplayGetVcount`: the end-of-frame routine, `FUN_08865f7c`
+and the loading screen only. Not looked at: a constant from memory or built more than 24 lines before its use, a frame
+counter compared for equality, what the 60-line window misses, and what each of the ten looks like at 120 on screen.
+
 ## Review
 (Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
