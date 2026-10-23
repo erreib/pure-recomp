@@ -180,10 +180,12 @@ twelve packs copied for `tools/dlc_check.sh`.
 
 ## Branches
 
-`main` = 76350b5 (2026-10-19: the audit's cleanup, the screen batch). `batch/m2` is the integration branch,
-`main` plus the rig's sink tasks 500 to 503; every task branches from it (`git switch -c task/NNN-slug batch/m2`).
-Remotes: `origin`, Erik's private GitLab, and `github`, the public repository (https://github.com/erreib/pure-recomp;
-`v0.1.0` is there). Only Erik pushes.
+`main` = `batch/m2` at the commit that wrote this line (fast-forwarded 2026-10-23: the HD texture pack, the crowd and
+the skies as models and Astra's Vineta K sky, D-027 keeping them out of a release, the release compiled for macOS 13,
+task 107's shield fix for GitHub issue 2, task 505's plan for issue 1; the one before, c9b4ee1 on 2026-10-20).
+`batch/m2` is the integration branch; every task branches from it (`git switch -c task/NNN-slug batch/m2`). Remotes:
+`origin`, Erik's private GitLab, and `github`, the public repository (https://github.com/erreib/pure-recomp; `v0.1.0`
+and `v0.2.0` are there). Only Erik pushes.
 
 ## The gate
 
