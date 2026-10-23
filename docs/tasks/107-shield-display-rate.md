@@ -291,4 +291,18 @@ and the loading screen only. Not looked at: a constant from memory or built more
 counter compared for equality, what the 60-line window misses, and what each of the ten looks like at 120 on screen.
 
 ## Review
-(Fable fills) Verify rerun: | Spot-read: | Merged: | Notes:
+Verify rerun on batch/m2 after the merge (2026-10-23, `tools/verify_task.sh 107`): PASS. Lane 0 (59.94 Hz) 6 effects,
+all deleted, life median 5.356 s, rise 0.425, fade 0.367; lane 1 (120 Hz) 9 effects, all deleted, life 5.226 s (5.225
+to 5.244), rise 0.251, fade 0.226; docs_check PASS.
+Spot-read: src/profile/shield_step.cpp's override (the carry per effect, the dt handed so that the body's own
+`(int)(dt / 0.016666668)` is the carry's whole frames, the clock at +0x15c put back to the generated code's value at
+the effect's next entry rather than after `original()`, since the body can leave through the outer loop mid-way, and
+nothing touched after a deleting return), its install from E8's GE-sync hook only once the vblank period is under the
+PSP's, and the trace's read-only scan; the hook sits after `display_rate()` sets the period, so the first fast frame
+installs it. The pass-through at the PSP's period (the row put back to Original mid-race) is in the code and untested.
+Merged: 427cc4b (2026-10-23).
+Notes: the window checks in Result are owed to Erik's eye (a Single Race at Display on Metal and on Vulkan, an
+opponent's shield and the player's after a pickup and a contact, and the row switched mid-race). Two findings for later
+briefs: the port's Original eases slower than the PSP (the 1 ms clock's 15.683 ms frames take no step; Open calls), and
+the census's ten other functions stall the same way at Display (DisruptorFx, the engine flares, the underwater and wind
+emitters, FUN_089379f8), each needing its own dt uses read before a shared fix.
