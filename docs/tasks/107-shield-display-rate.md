@@ -1,6 +1,6 @@
-# 106: The shield effect at the display's rate (GitHub issue 2)
+# 107: The shield effect at the display's rate (GitHub issue 2)
 
-Milestone: E8 (D-022) | Branch: task/106-shield-display-rate from batch/m2 | Status: OPEN
+Milestone: E8 (D-022) | Branch: task/107-shield-display-rate from batch/m2 | Status: OPEN
 
 ## Goal
 GitHub issue 2 (2026-10-22, RussDCA, an M4 Pro Mac mini at 120 fps), "Infinite shield (visuals only)": in a race,
@@ -37,7 +37,7 @@ a dt-sized step would also fit. Find out which; do not assume it.
 - `PURE_DISPLAY_RATE=1 PURE_DISPLAY_HZ=N` runs the race at N Hz headless (docs/developing.md); `tools/run_boot.py
   --shell headless --shots DIR` writes frames headless. The Vineta K drive route (config/pad_scripts/drive/) races
   against seven opponents, who use shields.
-- Game data and frames never enter the repository: keep shots under `out/106/`.
+- Game data and frames never enter the repository: keep shots under `out/107/`.
 
 ## Deliverable
 1. **The diagnosis** (in Result): the function(s) that step the shield effect, what they step it with, and why it
@@ -58,7 +58,7 @@ a dt-sized step would also fit. Find out which; do not assume it.
    `PURE_TRACE_SHIELD=1`; PASS when every shield effect seen in the 120 lane builds up and ends, and its life in
    seconds is within 10% of the Original lane's median (or of the decompile's constant, if the routes do not line
    up). docs/verification.md row.
-5. docs/timing.md: a subsection "The shield effect (task 106)" under E8 with the diagnosis, the fix and the
+5. docs/timing.md: a subsection "The shield effect (task 107)" under E8 with the diagnosis, the fix and the
    census; docs/status.md: the E8 row and the Next bullet for issue 2.
 
 ## Acceptance criteria
@@ -75,7 +75,7 @@ a dt-sized step would also fit. Find out which; do not assume it.
 ## May touch
 - src/profile/ (a new shield_step.cpp/.hpp, enhancements.cpp's install call, CMake's source list for it)
 - tools/shield_check.sh, docs/timing.md, docs/developing.md, docs/verification.md, docs/status.md,
-  docs/tasks/106-shield-display-rate.md, out/106/ (never committed)
+  docs/tasks/107-shield-display-rate.md, out/107/ (never committed)
 
 ## Must not touch
 `vendor/`, `vendor/portablekit/include/psprecomp/`, `generated/`, the code generator, the kernel scheduler,

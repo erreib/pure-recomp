@@ -235,9 +235,10 @@ after a change that moves or renames a file, a tool or a patch.
   stage 1's profile finds in the parse. The reporter is asked for the overlay's figures, then a test build.
 - The shield effect at Display (GitHub issue 2, 2026-10-22): after a pickup the shell does not show, and after a
   wall contact it shows for the rest of the race, on every ship; Erik reproduced it on the Mac (2026-10-23) and it
-  follows the Display rate row (Original behaves). Briefed as [106](tasks/106-shield-display-rate.md): the
-  diagnosis in Shield.cpp, an override that steps the effect by time, and a census of other frame-sized steps.
-  Workaround for players meanwhile: Display rate Original.
+  follows the Display rate row (Original behaves). Briefed as [107](tasks/107-shield-display-rate.md) (written as
+  106 in df58584; renumbered at the merge, 106 being the skies): the diagnosis in Shield.cpp, an override that
+  steps the effect by time, and a census of other frame-sized steps. Workaround for players meanwhile: Display rate
+  Original.
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; picked 2026-10-20, D-024): tasks 099 and 100 merged 2026-10-20. The
   build downloads zstd 1.5.7 once (cmake/Zstd.cmake, the SHA-256 pinned) and compiles its decoder; patch
