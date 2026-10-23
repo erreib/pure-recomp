@@ -28,7 +28,7 @@ portablekit_add_game(PureNative
     PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     HOST_MAIN_NAME portablekit_main
     SOURCES src/profile/pure_profile.cpp src/profile/enhancements.cpp src/profile/test_hooks.cpp
-            src/profile/aspect.cpp src/hle/audio_capture.cpp
+            src/profile/aspect.cpp src/profile/shield_step.cpp src/hle/audio_capture.cpp
             src/host/pure_main.cpp src/tools/ge_replay.cpp src/tools/ge_extract.cpp src/tools/record_backend.cpp
             src/gpu/models_backend.cpp
             ${platform_sources})

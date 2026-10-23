@@ -27,7 +27,7 @@ before this cut: ["The state before the docs diet"](history/sessions.md#the-stat
 | E5 | texture detail (D-019) | done 2026-10-12, both renderers (tasks 075, 076) |
 | E6 | a steady frame rate through the flashes (D-016) | done 2026-10-11 (task 070) |
 | E7 | the frontend's resolution (D-018) | done 2026-10-11 (tasks 073, 074); Original by default since 2026-10-12; to be retired once the HD pack's menus draw on both renderers (Erik, 2026-10-20; Next) |
-| E8 | the display rate (D-022) | done 2026-10-15 (tasks 089, 091-display-rate-margin); the rig's 100 Hz sound probe PASSes since 2026-10-19 (task 500), the sink's early-race shape fixed the same day (task 501); Erik's ear on a played race owed |
+| E8 | the display rate (D-022) | done 2026-10-15 (tasks 089, 091-display-rate-margin); the rig's 100 Hz sound probe PASSes since 2026-10-19 (task 500), the sink's early-race shape fixed the same day (task 501); the shield effect stepped by time at it (task 107, GitHub issue 2), ten more frame-sized steps found; Erik's ear on a played race owed |
 | DLC | the US download packs (D-005) | done 2026-10-12 (tasks 077-download-packs, 078-download-packs-menu) |
 | R1 | the first public release | done 2026-10-13: v0.1.0 at f31c1be (task 087); 0.2.0 released 2026-10-20: v0.2.0 at 13ac398 (E8, the sink's late rule, patch 0029-windows-file-url; both archives and the sums on the page) |
 | VR | the stereo spike (D-021) | briefed, undispatched (task 088) |
@@ -237,8 +237,12 @@ after a change that moves or renames a file, a tool or a patch.
   wall contact it shows for the rest of the race, on every ship; Erik reproduced it on the Mac (2026-10-23) and it
   follows the Display rate row (Original behaves). Briefed as [107](tasks/107-shield-display-rate.md) (written as
   106 in df58584; renumbered at the merge, 106 being the skies): the diagnosis in Shield.cpp, an override that
-  steps the effect by time, and a census of other frame-sized steps. Workaround for players meanwhile: Display rate
-  Original.
+  steps the effect by time, and a census of other frame-sized steps. Task 107 (2026-10-23): the update
+  `FUN_08946918` eases in whole 60 Hz frames of dt (`(int)(dt / 0.016666668)`, 0 at 119.40 Hz); an override in
+  `src/profile/shield_step.cpp` steps it by the time while the race runs faster than the PSP's (`PURE_SHIELD_STEP=0`
+  the generated code; nothing registered at Original), `tools/shield_check.sh` PASS (docs/timing.md, "The shield
+  effect (task 107)"). Owed: Erik's eye on a race at Display in the window. Ten more functions have the same step
+  (DisruptorFx, the engine flares, two sound emitters, one after FxLensflare: the census there), the next brief's.
 - Menu refinements: Erik's to name.
 - The HD texture pack (Erik, 2026-10-14; picked 2026-10-20, D-024): tasks 099 and 100 merged 2026-10-20. The
   build downloads zstd 1.5.7 once (cmake/Zstd.cmake, the SHA-256 pinned) and compiles its decoder; patch
